@@ -94,6 +94,9 @@ function WorkflowDesignerContent() {
   const selectedNode = selectedNodeId ? nodes.find((node) => node.id === selectedNodeId) ?? null : null;
   const selectedGraphNode = selectedNode?.data.graphNode ?? null;
   const selectedOutgoingEdges = selectedNodeId ? edges.filter((edge) => edge.source === selectedNodeId) : [];
+  const connectableTargets = selectedNodeId
+    ? nodes.filter((node) => node.id !== selectedNodeId && !selectedOutgoingEdges.some((edge) => edge.target === node.id))
+    : [];
 
   const validateMutation = useMutation({
     mutationFn: () => api.validateGraph(graph, selectedDataset?.preview[0] ?? { question: '什么是 AegisQA?', reference: 'AegisQA' }),
@@ -214,6 +217,20 @@ function WorkflowDesignerContent() {
     setEdges((current) => current.filter((edge) => edge.id !== edgeIdValue));
     setSelectedEdgeId(null);
     setConsoleText(`已删除连线：${edgeIdValue}`);
+  }
+
+  function connectSelectedNodeTo(targetNodeId: string) {
+    if (!selectedNodeId) return;
+    const id = edgeId(selectedNodeId, targetNodeId);
+    rememberGraph();
+    setEdges((current) => {
+      if (current.some((edge) => (edge.id || edgeId(edge.source, edge.target)) === id)) {
+        return current;
+      }
+      return addEdge({ id, source: selectedNodeId, target: targetNodeId, markerEnd: { type: MarkerType.ArrowClosed } }, current);
+    });
+    setSelectedEdgeId(null);
+    setConsoleText(`已新增连线：${id}`);
   }
 
   function updateSelectedNode(patch: Partial<WorkflowGraphNode>) {
@@ -483,6 +500,19 @@ function WorkflowDesignerContent() {
                   </Space>
                 ) : (
                   <Typography.Text type="secondary">当前节点暂无下游连线。</Typography.Text>
+                )}
+                <Divider />
+                <Typography.Text strong>可连接目标</Typography.Text>
+                {connectableTargets.length ? (
+                  <Space direction="vertical" className="drawer-stack">
+                    {connectableTargets.map((node) => (
+                      <Button key={node.id} icon={<PlusOutlined />} onClick={() => connectSelectedNodeTo(node.id)}>
+                        连接到 {node.id}
+                      </Button>
+                    ))}
+                  </Space>
+                ) : (
+                  <Typography.Text type="secondary">没有更多可连接目标。</Typography.Text>
                 )}
               </Space>
             ) : (

@@ -198,6 +198,16 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/已删除连线：answer-judge_a/)).toBeInTheDocument();
   });
 
+  it('Workflow Inspector 支持选择下游节点并新增连线', async () => {
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    fireEvent.click(await screen.findByRole('button', { name: /删除连线 answer -> judge_a/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /连接到 judge_a/ }));
+
+    expect(await screen.findByText(/已新增连线：answer-judge_a/)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /删除连线 answer -> judge_a/ })).toBeInTheDocument();
+  });
+
   it('执行中心默认展示任务列表并可以创建任务', async () => {
     await renderWorkbench('/runs');
 

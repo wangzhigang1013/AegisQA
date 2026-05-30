@@ -26,6 +26,8 @@ test('Workflow 画布可以新增、删除、校验并发布流程', async ({ pa
 
   await page.getByRole('button', { name: /删除连线 answer -> judge_a/ }).click();
   await expect(page.getByText(/已删除连线：answer-judge_a/)).toBeVisible();
+  await page.getByRole('button', { name: /连接到 judge_a/ }).click();
+  await expect(page.getByText(/已新增连线：answer-judge_a/)).toBeVisible();
 
   await page.getByRole('button', { name: /新增 Join/ }).click();
   await expect(page.locator('input[value="Join"]').first()).toBeVisible();
