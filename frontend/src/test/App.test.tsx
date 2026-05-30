@@ -190,6 +190,14 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/已重做/)).toBeInTheDocument();
   });
 
+  it('Workflow Inspector 支持查看并删除选中节点的下游连线', async () => {
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    fireEvent.click(await screen.findByRole('button', { name: /删除连线 answer -> judge_a/ }));
+
+    expect(await screen.findByText(/已删除连线：answer-judge_a/)).toBeInTheDocument();
+  });
+
   it('执行中心默认展示任务列表并可以创建任务', async () => {
     await renderWorkbench('/runs');
 

@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 2（Workflow 画布精细化）前两批已完成，继续推进画布拖拽、连线与 Inspector 深化。
+产品严谨化阶段 2（Workflow 画布精细化）继续推进中；本批已补齐 Inspector 下游连线删除入口，下一步继续做创建连线、键盘删除、保存草稿回放与发布前校验深化。
 
 ## 当前已完成
 
@@ -19,15 +19,17 @@
 - 已完成 P0 稳定性第一批：数据集上传空文件/坏 JSONL/空 CSV 拒绝；Skill zip 非法路径拒绝；插件合约测试超时返回结构化 code；Task completed/running/canceled 状态禁止非法动作；前端任务动作按钮按状态禁用；API client 保留后端 code/details/trace_id。
 - Workflow 画布图模型已从页面抽离为 `frontend/src/pages/workflowDesigner/graphModel.ts`，新增独立单元测试；Playwright 已新增画布 E2E，覆盖进入画布、新增 Join、删除选中、校验、发布。
 - Workflow 画布已新增撤销/重做历史栈，节点新增、删除、自动布局、Inspector 编辑、连线会进入历史；组件测试和 Playwright 已覆盖新增 Join 后撤销/重做。
+- Workflow Inspector 已支持查看选中节点的下游连线，并可单条删除连线；组件测试和 Playwright 已覆盖 `answer -> judge_a` 删除路径。
 
 ## 最近验证
 
 - `python -m pytest -q`：30 passed。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v6`，Run `run-9311b164dd1f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：3 个测试文件、17 个测试通过。
+- `cd frontend && npm test`：3 个测试文件、18 个测试通过。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：2 个 Playwright E2E 测试通过，覆盖任务主链路与 Workflow 画布新增/删除/校验/发布。
+- `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：1 个 Playwright E2E 测试通过，覆盖 Workflow 画布删除下游连线、新增 Join、撤销/重做、删除节点、校验、发布。
 - `http://127.0.0.1:8000/health`：FastAPI 页面健康检查通过。
 - `http://127.0.0.1:5173`：React 前端可访问。
 - 无头 Chrome 页面验证：`/`、`/skills`、`/workflows`、`/workflows/designer/draft-test`、`/runs`、`/reports` 均能打开并展示关键入口。
@@ -36,7 +38,7 @@
 
 ## 当前问题
 
-- Workflow 画布的拖拽、连线、删除、保存草稿已经具备第一批闭环；正式 E2E 已验证画布入口与发布后的任务主链路，但仍需把精确拖拽、连线、删除、保存草稿、试运行、发布都纳入浏览器自动化。
+- Workflow 画布的新增、删除节点、删除下游连线、撤销/重做、校验、发布已进入 Playwright；仍需把真实拖拽创建连线、键盘删除、保存草稿回放、试运行和更严格发布前校验纳入浏览器自动化。
 - Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；后续需要继续增强任务成本预算、CI Gate、baseline 对比和权限检查。
 - Skill 插件包已采用受控子进程执行，后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
 - Experiment 快照、CI Gate、Annotation Queue、Trace Tree 已有后端最小闭环；仍需做成完整独立页面、加入成本预算和 baseline 可视化对比。
@@ -45,11 +47,38 @@
 
 ## 下一阶段目标
 
-- 扩展 Playwright E2E：把 Workflow 画布的拖拽、连线、删除、保存草稿、试运行、发布全部纳入浏览器自动化。
+- 扩展 Playwright E2E：把 Workflow 画布的拖拽创建连线、键盘删除、保存草稿回放、试运行、发布前阻断校验全部纳入浏览器自动化。
 - 把 Experiment、Prompt/Skill 版本注册、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 从最小 API 能力继续扩展为完整页面与端到端操作流。
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 Workflow 画布连线删除入口
+
+- 改动摘要：为 Workflow Inspector 增加“下游连线”管理区，选中节点后可以看到从该节点流出的所有边，并单条删除；删除会进入撤销/重做历史并在 Console 展示明确反馈。同步补充组件测试与 Playwright E2E，覆盖默认流程中 `answer -> judge_a` 的删除路径。
+- 变更文件：
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/e2e/workflow-designer.spec.ts`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx`
+  - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`
+  - `cd frontend && npm run e2e`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run build`
+- 测试结果：
+  - App 交互测试：15 passed。
+  - 前端全量：3 个测试文件、18 passed。
+  - Workflow 画布 E2E：1 passed。
+  - Playwright 全量 E2E：2 passed。
+  - Typecheck：通过。
+  - Build：通过。
+- 下一步：继续阶段 2，补创建连线的浏览器自动化、节点工具栏/键盘删除、保存草稿回放、试运行结果回填和更严格发布前校验。
 
 ### 2026-05-31 Workflow 画布图模型与 E2E 第一批
 

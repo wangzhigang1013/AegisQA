@@ -99,11 +99,13 @@
 ### Task 2.2：画布节点与连线操作补齐
 
 - [ ] 新增 Playwright 失败测试：拖拽/点击添加 Source、Skill、Join、Output。
-- [ ] 新增 Playwright 失败测试：创建连线、删除连线、删除节点。
+- [ ] 新增 Playwright 失败测试：创建连线。
+- [x] 新增 Playwright 失败测试：删除连线、删除节点。
 - [x] 新增 Playwright E2E 第一批：进入画布、点击新增 Join、删除选中、校验、发布。
 - [x] 实现撤销/重做栈，覆盖节点新增、删除、Inspector 编辑、自动布局、连线。
+- [x] 实现 Inspector 下游连线管理区，支持查看并删除选中节点流出的连线。
 - [ ] 实现节点工具栏和键盘删除。
-- [ ] 运行 `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`。
+- [x] 运行 `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`。
 
 ### Task 2.3：Inspector 字段映射与发布前校验
 

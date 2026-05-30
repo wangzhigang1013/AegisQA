@@ -34,6 +34,7 @@ import { demoSkills, demoWorkflowGraph } from '../data/demo';
 import type { DatasetVersion, GraphValidationResult, SkillManifest, WorkflowGraph, WorkflowGraphNode } from '../types';
 import {
   buildWorkflowGraph,
+  edgeId,
   formatNodeLabel,
   graphNodeToFlowNode,
   graphToEdges,
@@ -92,6 +93,7 @@ function WorkflowDesignerContent() {
   const graph = useMemo(() => buildWorkflowGraph(workflowName, nodes, edges), [workflowName, nodes, edges]);
   const selectedNode = selectedNodeId ? nodes.find((node) => node.id === selectedNodeId) ?? null : null;
   const selectedGraphNode = selectedNode?.data.graphNode ?? null;
+  const selectedOutgoingEdges = selectedNodeId ? edges.filter((edge) => edge.source === selectedNodeId) : [];
 
   const validateMutation = useMutation({
     mutationFn: () => api.validateGraph(graph, selectedDataset?.preview[0] ?? { question: '什么是 AegisQA?', reference: 'AegisQA' }),
@@ -205,6 +207,13 @@ function WorkflowDesignerContent() {
       return;
     }
     setConsoleText('请先在画布中选择节点或连线，再执行删除。');
+  }
+
+  function deleteEdgeById(edgeIdValue: string) {
+    rememberGraph();
+    setEdges((current) => current.filter((edge) => edge.id !== edgeIdValue));
+    setSelectedEdgeId(null);
+    setConsoleText(`已删除连线：${edgeIdValue}`);
   }
 
   function updateSelectedNode(patch: Partial<WorkflowGraphNode>) {
@@ -459,6 +468,22 @@ function WorkflowDesignerContent() {
                     />
                   </Form.Item>
                 </Form>
+                <Divider />
+                <Typography.Text strong>下游连线</Typography.Text>
+                {selectedOutgoingEdges.length ? (
+                  <Space direction="vertical" className="drawer-stack">
+                    {selectedOutgoingEdges.map((edge) => {
+                      const id = edge.id || edgeId(edge.source, edge.target);
+                      return (
+                        <Button key={id} danger icon={<DeleteOutlined />} onClick={() => deleteEdgeById(id)}>
+                          删除连线 {edge.source} -&gt; {edge.target}
+                        </Button>
+                      );
+                    })}
+                  </Space>
+                ) : (
+                  <Typography.Text type="secondary">当前节点暂无下游连线。</Typography.Text>
+                )}
               </Space>
             ) : (
               <Alert type="info" showIcon message={selectedEdgeId ? `当前选中连线：${selectedEdgeId}` : '请选择节点后编辑配置。'} />
