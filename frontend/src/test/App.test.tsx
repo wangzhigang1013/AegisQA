@@ -68,6 +68,44 @@ const demoBadcase = {
   updated_at: '2026-05-31T00:00:00Z',
 };
 
+const demoTraceFlow = {
+  task: demoTask,
+  dataset: { dataset_id: 'dataset-demo', name: '问答回归集', version: 1, version_id: 'dataset-demo:v1' },
+  workflow: { workflow_id: 'wf-demo', name: 'RAG 回归评测', version_id: 'wf-demo:v1', snapshot_hash: 'abcdef1234567890' },
+  attempt: { run_id: 'run-demo', status: 'completed', current_attempt: 1, started_at: null, finished_at: null },
+  queue_message_shape: ['item_id'],
+  data_edges: [{ source: 'dataset.row', target: 'answer.input' }],
+  items: [
+    {
+      item_id: 'item-demo',
+      row_id: '1',
+      row_index: 0,
+      repeat_index: 0,
+      status: 'succeeded',
+      row: { question: '什么是 Trace?', reference: 'AegisQA' },
+      context: { answer: '模型回答' },
+      metrics: { tokens: 12 },
+      error: null,
+      steps: [
+        {
+          step_id: 'answer',
+          skill_ref: 'llm.call@0.1.0',
+          status: 'succeeded',
+          input: { prompt: '什么是 Trace?' },
+          resolved_config: { model: 'trace-model' },
+          parameter_trace: { model: { source: 'workflow_config', value_preview: 'trace-model', redacted: false } },
+          output: { answer: '模型回答' },
+          metrics: { tokens: 12 },
+          latency_ms: 1,
+          cache_hit: false,
+          error: null,
+        },
+      ],
+      badcase: { is_badcase: false },
+    },
+  ],
+};
+
 const demoExperiments = [
   {
     experiment_id: 'exp-main',
@@ -233,6 +271,9 @@ describe('AegisQA 前端工作台', () => {
           badcases: [demoBadcase],
           export_links: { html: '/runs/run-demo/report/export?file_format=html', csv: '/runs/run-demo/report/export?file_format=csv', json: '/runs/run-demo/report/export?file_format=json' },
         });
+      }
+      if (url.endsWith('/tasks/task-demo/trace-flow')) {
+        return jsonResponse(demoTraceFlow);
       }
       if (url.endsWith('/runs') || url.endsWith('/datasets') || url.endsWith('/judge-profiles') || url.endsWith('/judge-audits')) {
         return jsonResponse([]);
@@ -410,6 +451,18 @@ describe('AegisQA 前端工作台', () => {
 
     expect(await screen.findByText('创建任务')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '确认创建任务' })).toBeDisabled();
+  });
+
+  it('Trace Flow 页面展示样本数据、参数来源和队列消息形状', async () => {
+    await renderWorkbench('/tasks/task-demo/trace');
+
+    expect(await screen.findByText('Trace Flow')).toBeInTheDocument();
+    expect(screen.getByText('问答回归集')).toBeInTheDocument();
+    expect(screen.getByText('item_id')).toBeInTheDocument();
+    expect(screen.getByText('item-demo')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Steps' }));
+    fireEvent.click(await screen.findByRole('tab', { name: '参数' }));
+    expect(screen.getByText(/workflow_config/)).toBeInTheDocument();
   });
 
   it('任务列表执行按钮会刷新任务状态', async () => {

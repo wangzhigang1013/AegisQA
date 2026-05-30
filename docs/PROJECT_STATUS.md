@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“评测数据流与产品体验升级”正在执行中。阶段 1（Skill 参数解析与冻结）已完成：后端新增统一参数解析器，Runner 已记录参数快照和来源追踪，并新增 Workflow 参数预览 API；下一步进入阶段 2：Trace 数据流模型与独立页面。
+新一轮“评测数据流与产品体验升级”正在执行中。阶段 1（Skill 参数解析与冻结）和阶段 2（Trace 数据流模型与独立页面）已完成：后端已提供 Task Trace Flow API，前端已新增独立 Trace Flow 页面，并在任务详情、报告页和 Playwright 主链路中接入；下一步进入阶段 3：UI 信息架构与任务驾驶舱优化。
 
 ## 当前已完成
 
@@ -44,15 +44,16 @@
 - FastAPI API 路由已按业务域拆分到 `aegisqa/api/routes/`，`aegisqa/api/app.py` 保留应用装配、错误处理、共享模型和辅助函数，降低后续维护成本。
 - JSON Store 已增加 `FileLock`、JSON 原子写入和 JSONL 读写锁保护，并新增并发写入测试；README 已说明该存储仅适合本地 demo，不承担生产数据库职责。
 - Skill 参数处理已从各节点散落配置升级为统一解析：`schema_default < workflow_config < task_override < runtime_expression < secret_ref`，Run Step 会保存脱敏后的 `config_snapshot` 和字段级 `parameter_trace`。
+- Trace Flow 已从 Trace Tree 中独立出来，支持按 Task 查看 Dataset Row、Skill Input、参数来源、Output、Metrics、Badcase 和队列消息形状，帮助解释评测过程中的数据流转。
 
 ## 最近验证
 
-- `python -m pytest -q`：47 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest -q`：48 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v7`，Run `run-5a86aceede3f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：4 个测试文件、30 个测试通过。
+- `cd frontend && npm test`：4 个测试文件、31 个测试通过。
 - `cd frontend && npm run build`：通过。
-- `cd frontend && npm run e2e`：8 个 Playwright E2E 测试通过，覆盖任务主链路、CI Gate 创建与阻断评估、Annotation Queue 领取/审核/回流 Golden，以及 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
+- `cd frontend && npm run e2e`：8 个 Playwright E2E 测试通过，覆盖任务主链路、任务报告进入 Trace Flow、参数来源查看、CI Gate 创建与阻断评估、Annotation Queue 领取/审核/回流 Golden，以及 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Playwright E2E 测试通过，覆盖 Workflow 画布新增节点、聚合策略、删除下游连线、新增 Join、撤销/重做、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `http://127.0.0.1:8000/health`：FastAPI 页面健康检查通过。
 - `http://127.0.0.1:5173`：React 前端可访问。
@@ -74,6 +75,45 @@
 - 后续建议优先进入 Trace Tree 独立页面、CI Gate 历史记录、Annotation Queue 批量审核、多 Judge 一致性视图、红队安全扫描和真实 MySQL/Redis/Celery Repository/Worker 接入。
 
 ## 最近改动
+
+### 2026-05-31 Trace Flow 数据流独立页面
+
+- 改动摘要：完成评测数据流升级计划阶段 2。新增 Task Trace Flow API，把 Task、Dataset、Workflow、Attempt、队列消息形状、样本 row、Skill 输入、解析后参数、参数来源、输出、指标和 Badcase 状态整理成可解释的数据流；前端新增 `/tasks/:task_id/trace` 独立页面，并从任务详情和报告页提供入口；Playwright 主链路已覆盖“报告 -> Trace Flow -> 查看参数来源”。
+- 变更文件：
+  - `aegisqa/reports/trace_flow.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_trace_flow_api.py`
+  - `frontend/src/pages/TraceFlowPage.tsx`
+  - `frontend/src/App.tsx`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/types.ts`
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/styles.css`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/e2e/task-flow.spec.ts`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-evaluation-flow-productization.md`
+- 验证命令：
+  - `python -m pytest tests/test_trace_flow_api.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Flow"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Trace Flow 后端定向测试：1 passed。
+  - Trace Flow 前端定向测试：1 passed。
+  - Typecheck：通过。
+  - Task Flow Playwright 定向测试：1 passed。
+  - 后端全量：48 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：4 个测试文件、31 passed。
+  - Build：通过。
+  - Playwright 全量 E2E：8 passed。
+- 下一步：进入阶段 3，优化首页工作台与任务详情驾驶舱，让任务详情承载样本、Trace、Badcase、Attempts 和参数快照。
 
 ### 2026-05-31 Skill 参数解析与冻结
 

@@ -137,6 +137,16 @@ async function verifyReportAndCorrectBadcase(page: Page, taskName: string) {
 
   await page.getByRole('button', { name: /^加入 Golden$/ }).first().click();
   await expect(page.getByText(/Badcase 已加入 Golden 候选/)).toBeVisible();
+
+  await page.getByRole('link', { name: /查看 Trace Flow/ }).click();
+  await expect(page.getByRole('heading', { name: 'Trace Flow' })).toBeVisible();
+  await expect(page.getByText('队列消息')).toBeVisible();
+  await expect(page.getByText('item_id')).toBeVisible();
+  await expect(page.getByText(/plugin_answer/).first()).toBeVisible();
+  await expect(page.getByText(/llm\.judge@0\.1\.0/).first()).toBeVisible();
+  await page.getByRole('tab', { name: 'Steps' }).click();
+  await page.getByRole('tab', { name: '参数' }).first().click();
+  await expect(page.getByText(/parameter_trace|workflow_config|schema_default/)).toBeVisible();
 }
 
 async function selectModalOption(page: Page, selectIndex: number, searchText: string) {

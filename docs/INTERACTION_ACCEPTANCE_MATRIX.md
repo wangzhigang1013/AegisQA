@@ -9,8 +9,8 @@
 
 ## 最近一次交互验证
 
-- `npm test`：30 个前端交互/API client/图模型/任务创建向导/Run Attempts/Experiment/CI Gate/Annotation Queue 测试通过。
-- `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
+- `npm test`：31 个前端交互/API client/图模型/任务创建向导/Run Attempts/Trace Flow/Experiment/CI Gate/Annotation Queue 测试通过。
+- `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - 最终验收确认：本轮 API 路由拆分和 JSON Store 文件锁不新增可见按钮，现有按钮矩阵仍覆盖全部用户可见主动作。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Headless Chrome CDP：概览页额外验证真实 Dashboard 指标，以及 Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 产品化入口。
@@ -47,6 +47,7 @@
 | 执行中心 | 创建任务 | 可用，独立向导选择 Dataset Version 和 Workflow Version；未选择时禁用创建；支持分片大小、并发、repeat、最大重试、重试退避、成本预算并保存到任务快照 | `POST /tasks`、`GET /workflows`、`GET /datasets` | `TaskCreateWizard` 单测覆盖必选校验和参数提交；后端测试覆盖 `execution_config` 落库；Playwright E2E 覆盖真实创建 |
 | 执行中心 | 执行/暂停/恢复/取消/重试 | 可用，动作绑定任务并刷新列表；completed/running/canceled 等非法状态会被后端拒绝，前端按钮按状态禁用并显示原因 | `POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed` | `npm test` 覆盖执行状态刷新和完成态禁用；Playwright E2E 覆盖真实执行；P0 后端测试覆盖状态机 |
 | 执行中心 | 任务详情/Run Attempts/Trace Tree | 可用，按选中 Task 展示基础信息、当前 Attempt、历史 attempts、执行参数和 Trace Tree；已完成任务可新建 Attempt 且不覆盖旧报告 | `GET /tasks`、`POST /tasks/{task_id}/attempts`、`GET /tasks/{task_id}/trace-tree` | 后端测试覆盖历史报告保留；前端测试覆盖 Run Attempts 展示 |
+| Trace Flow | 样本级数据流 | 可用，从任务详情和报告页进入；展示 Dataset、Workflow、Attempt、队列消息形状、样本列表、Step Timeline、Row、Context、Metrics、Input、参数来源、Output、Error 和 Badcase 状态 | `GET /tasks/{task_id}/trace-flow` | `tests/test_trace_flow_api.py`、`npm test` 和 Playwright 主链路覆盖 |
 | 报告中心 | 任务报告详情 | 可用，围绕选中任务展示任务摘要、版本快照、指标、Step 分布、Judge 分数分布、Badcase 和导出入口 | `GET /tasks/{task_id}/report` | 后端测试覆盖结构化字段；`npm test` 覆盖报告中心展示 |
 | 报告中心 | 导出 HTML/CSV/JSON | 可用，围绕选中任务导出底层 Run 报告 | `GET /tasks/{task_id}/report`、`GET /runs/{run_id}/report/export` | 后端测试校验 HTML/CSV/JSON 内容；`npm test` 覆盖导出成功反馈 |
 | 报告中心 | Badcase 状态流转 | 可用；支持单条加入 Golden、忽略、重开、加入 Annotation Queue，以及批量加入 Golden；聚合报告中的 Badcase 若尚未持久化，会先创建 Badcase 再纠错入 Golden | `POST /badcases`、`POST /badcases/{badcase_id}/correct`、`POST /badcases/{badcase_id}/reopen`、`POST /badcases/bulk-correct`、`POST /annotation-queue/seed-from-run` | Playwright E2E 覆盖真实 Golden 纠错链路；`npm test` 覆盖报告页按钮和忽略反馈；后端服务测试覆盖状态流转 |
@@ -68,5 +69,5 @@
 
 - Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；后续需要进一步拆分组件，并补更复杂字段映射 UI。
 - Task 创建向导已加入必选校验、并发/重试/repeat 和成本预算，任务详情已展示 Run Attempts；后续需要继续接入 CI Gate、实验 baseline 对比和权限检查。
-- 报告中心、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、Experiment baseline 对比、质量门禁阻断评估和人工审核回流；后续需要把 Trace Tree API 继续做成独立可操作视图，并增强批量审核。
+- 报告中心、Trace Flow、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、样本级数据流、Experiment baseline 对比、质量门禁阻断评估和人工审核回流；后续需要增强批量审核和更复杂的跨任务 Score Analytics。
 - Judge 审计需要增加多 Judge 一致性和红队安全扫描视图。

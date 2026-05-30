@@ -26,6 +26,7 @@ import { OverviewPage } from './pages/OverviewPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { RunsPage } from './pages/RunsPage';
 import { SkillsPage } from './pages/SkillsPage';
+import { TraceFlowPage } from './pages/TraceFlowPage';
 import { WorkflowDesignerPage } from './pages/WorkflowDesignerPage';
 import { WorkflowMarketPage } from './pages/WorkflowMarketPage';
 
@@ -96,6 +97,7 @@ export function AppShell() {
                 <Route path="/workflows" element={<WorkflowMarketPage />} />
                 <Route path="/workflows/designer/:draftId" element={<WorkflowDesignerPage />} />
                 <Route path="/runs" element={<RunsPage />} />
+                <Route path="/tasks/:taskId/trace" element={<TraceFlowPage />} />
                 <Route path="/reports" element={<ReportsPage />} />
                 <Route path="/experiments" element={<ExperimentsPage />} />
                 <Route path="/ci-gates" element={<CIGatesPage />} />

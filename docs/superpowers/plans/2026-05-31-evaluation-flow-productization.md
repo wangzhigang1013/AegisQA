@@ -92,18 +92,18 @@
 
 ### Task 2.1：Trace Flow API
 
-- [ ] 新增测试：`GET /tasks/{task_id}/trace-flow` 返回 dataset、workflow、attempt、items、steps、data_edges。
-- [ ] 新增测试：单条 item trace 包含 row、input、resolved_config、output、metrics、error、badcase 状态。
-- [ ] 实现 `build_task_trace_flow(task, run)`。
-- [ ] 在 Task 路由挂载 `GET /tasks/{task_id}/trace-flow`。
+- [x] 新增测试：`GET /tasks/{task_id}/trace-flow` 返回 dataset、workflow、attempt、items、steps、data_edges。
+- [x] 新增测试：单条 item trace 包含 row、input、resolved_config、output、metrics、error、badcase 状态。
+- [x] 实现 `build_task_trace_flow(task, run)`。
+- [x] 在 Task 路由挂载 `GET /tasks/{task_id}/trace-flow`。
 
 ### Task 2.2：Trace 独立页面
 
-- [ ] 前端测试：导航进入 `/tasks/:task_id/trace` 后展示样本列表和 Step 流转。
-- [ ] 新增 `TraceFlowPage`，左侧样本列表，中间 Step Timeline，右侧数据详情。
-- [ ] 数据详情分 Tab：Row、Input、参数、Output、Metrics、Error。
-- [ ] Task 详情和报告页增加“查看 Trace”入口。
-- [ ] Playwright 覆盖任务执行后进入 Trace 页并查看参数来源。
+- [x] 前端测试：导航进入 `/tasks/:task_id/trace` 后展示样本列表和 Step 流转。
+- [x] 新增 `TraceFlowPage`，左侧样本列表，中间 Step Timeline，右侧数据详情。
+- [x] 数据详情分 Tab：Row、Input、参数、Output、Metrics、Error。
+- [x] Task 详情和报告页增加“查看 Trace”入口。
+- [x] Playwright 覆盖任务执行后进入 Trace 页并查看参数来源。
 
 ## 阶段 3：UI 信息架构与任务驾驶舱
 

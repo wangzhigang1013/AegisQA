@@ -1,0 +1,145 @@
+import { ApartmentOutlined, BranchesOutlined, DatabaseOutlined } from '@ant-design/icons';
+import { useQuery } from '@tanstack/react-query';
+import { Alert, Card, Col, Descriptions, Empty, List, Row, Space, Tabs, Tag, Timeline, Typography } from 'antd';
+import { useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
+
+import { api } from '../api/client';
+import { PageHeader } from '../components/PageHeader';
+
+export function TraceFlowPage() {
+  const { taskId } = useParams();
+  const traceQuery = useQuery({
+    queryKey: ['task-trace-flow', taskId],
+    queryFn: () => api.taskTraceFlow(taskId ?? ''),
+    enabled: Boolean(taskId),
+  });
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const traceFlow = traceQuery.data;
+  const selectedItem = useMemo(() => {
+    if (!traceFlow?.items.length) return null;
+    return traceFlow.items.find((item) => item.item_id === selectedItemId) ?? traceFlow.items[0];
+  }, [selectedItemId, traceFlow?.items]);
+
+  return (
+    <section className="page-stack">
+      <PageHeader
+        eyebrow="样本级数据流"
+        title="Trace Flow"
+        description="查看一条样本如何从 Dataset Row 进入 Skill 输入、解析参数、产生输出与指标，并最终形成 Badcase。"
+      />
+
+      {traceQuery.isError ? <Alert type="error" showIcon message="Trace Flow 加载失败" /> : null}
+
+      {traceFlow ? (
+        <>
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={8}>
+              <Card className="flat-card" title="数据集">
+                <Descriptions size="small" column={1}>
+                  <Descriptions.Item label="名称">{traceFlow.dataset.name}</Descriptions.Item>
+                  <Descriptions.Item label="版本">{traceFlow.dataset.version_id}</Descriptions.Item>
+                  <Descriptions.Item label="队列消息">{traceFlow.queue_message_shape.join(', ')}</Descriptions.Item>
+                </Descriptions>
+              </Card>
+            </Col>
+            <Col xs={24} lg={8}>
+              <Card className="flat-card" title="Workflow">
+                <Descriptions size="small" column={1}>
+                  <Descriptions.Item label="名称">{traceFlow.workflow.name}</Descriptions.Item>
+                  <Descriptions.Item label="版本">{traceFlow.workflow.version_id}</Descriptions.Item>
+                  <Descriptions.Item label="Hash">{traceFlow.workflow.snapshot_hash.slice(0, 12)}</Descriptions.Item>
+                </Descriptions>
+              </Card>
+            </Col>
+            <Col xs={24} lg={8}>
+              <Card className="flat-card" title="执行批次">
+                <Descriptions size="small" column={1}>
+                  <Descriptions.Item label="Run">{traceFlow.attempt.run_id}</Descriptions.Item>
+                  <Descriptions.Item label="状态"><Tag>{traceFlow.attempt.status}</Tag></Descriptions.Item>
+                  <Descriptions.Item label="Attempt">{traceFlow.attempt.current_attempt}</Descriptions.Item>
+                </Descriptions>
+              </Card>
+            </Col>
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={7}>
+              <Card className="flat-card" title="样本列表">
+                <List
+                  loading={traceQuery.isLoading}
+                  dataSource={traceFlow.items}
+                  renderItem={(item) => (
+                    <List.Item className={item.item_id === selectedItem?.item_id ? 'selected-list-row' : ''} onClick={() => setSelectedItemId(item.item_id)}>
+                      <List.Item.Meta
+                        title={<Space><span>{item.item_id}</span><Tag color={item.badcase.is_badcase ? 'red' : 'green'}>{item.status}</Tag></Space>}
+                        description={`row=${item.row_id} / repeat=${item.repeat_index}`}
+                      />
+                    </List.Item>
+                  )}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} lg={17}>
+              {selectedItem ? (
+                <Card className="flat-card" title={`样本数据流：${selectedItem.item_id}`}>
+                  <Timeline
+                    items={[
+                      { dot: <DatabaseOutlined />, color: 'blue', children: `Dataset Row -> ${Object.keys(selectedItem.row).join(', ') || '空 row'}` },
+                      ...selectedItem.steps.map((step) => ({
+                        dot: <BranchesOutlined />,
+                        color: step.status === 'succeeded' ? 'green' : 'red',
+                        children: `${step.step_id} / ${step.skill_ref} / ${Math.round(step.latency_ms)}ms`,
+                      })),
+                      { dot: <ApartmentOutlined />, color: selectedItem.badcase.is_badcase ? 'red' : 'green', children: selectedItem.badcase.is_badcase ? `Badcase：${selectedItem.badcase.reason}` : '未形成 Badcase' },
+                    ]}
+                  />
+                  <Tabs
+                    items={[
+                      { key: 'row', label: 'Row', children: <JsonBlock value={selectedItem.row} /> },
+                      { key: 'context', label: 'Context', children: <JsonBlock value={selectedItem.context} /> },
+                      { key: 'metrics', label: 'Metrics', children: <JsonBlock value={selectedItem.metrics} /> },
+                      {
+                        key: 'steps',
+                        label: 'Steps',
+                        children: (
+                          <Space direction="vertical" className="full-width-control">
+                            {selectedItem.steps.map((step) => (
+                              <Card size="small" key={step.step_id} title={`${step.step_id} / ${step.skill_ref}`}>
+                                <Tabs
+                                  size="small"
+                                  items={[
+                                    { key: 'input', label: 'Input', children: <JsonBlock value={step.input} /> },
+                                    { key: 'params', label: '参数', children: <JsonBlock value={{ resolved_config: step.resolved_config, parameter_trace: step.parameter_trace }} /> },
+                                    { key: 'output', label: 'Output', children: <JsonBlock value={step.output} /> },
+                                    { key: 'error', label: 'Error', children: <JsonBlock value={step.error ?? {}} /> },
+                                  ]}
+                                />
+                              </Card>
+                            ))}
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                </Card>
+              ) : (
+                <Empty description="暂无样本 Trace。请先执行任务。" />
+              )}
+            </Col>
+          </Row>
+        </>
+      ) : (
+        <Empty description="正在等待 Trace Flow 数据。" />
+      )}
+    </section>
+  );
+}
+
+function JsonBlock({ value }: { value: unknown }) {
+  return (
+    <Typography.Text>
+      <pre className="json-block">{JSON.stringify(value, null, 2)}</pre>
+    </Typography.Text>
+  );
+}

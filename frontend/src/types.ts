@@ -403,6 +403,62 @@ export type TraceTree = {
   }[];
 };
 
+export type TaskTraceFlow = {
+  task: TaskRecord;
+  dataset: {
+    dataset_id: string;
+    name: string;
+    version: number;
+    version_id: string;
+  };
+  workflow: {
+    workflow_id: string;
+    name: string;
+    version_id: string;
+    snapshot_hash: string;
+  };
+  attempt: {
+    run_id: string;
+    status: string;
+    current_attempt: number;
+    started_at?: string | null;
+    finished_at?: string | null;
+  };
+  queue_message_shape: string[];
+  data_edges: { source: string; target: string }[];
+  items: {
+    item_id: string;
+    row_id: string;
+    row_index: number;
+    repeat_index: number;
+    status: string;
+    row: Record<string, unknown>;
+    context: Record<string, unknown>;
+    metrics: Record<string, unknown>;
+    error?: Record<string, unknown> | null;
+    steps: {
+      step_id: string;
+      skill_ref: string;
+      status: string;
+      input: Record<string, unknown>;
+      resolved_config: Record<string, unknown>;
+      parameter_trace: Record<string, { source: string; value_preview: unknown; redacted: boolean; expression_path?: string; secret_ref?: string }>;
+      output: Record<string, unknown>;
+      metrics: Record<string, unknown>;
+      latency_ms: number;
+      cache_hit: boolean;
+      error?: Record<string, unknown> | null;
+    }[];
+    badcase: {
+      is_badcase: boolean;
+      reason?: string;
+      score?: number;
+      label?: string;
+      payload?: Record<string, unknown>;
+    };
+  }[];
+};
+
 export type WorkflowParameterPreview = {
   workflow_name: string;
   nodes: {

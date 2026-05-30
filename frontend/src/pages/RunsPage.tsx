@@ -195,6 +195,7 @@ function TaskDetailDrawer({
             <TaskActionButton task={task} action="cancel" loading={loading} onClick={onAction} icon={<StopOutlined />} label="取消" danger />
             <TaskActionButton task={task} action="retry" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="重试失败项" />
             <TaskActionButton task={task} action="attempt" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="新建 Attempt" />
+            <Button href={`/tasks/${task.task_id}/trace`}>查看 Trace Flow</Button>
           </Space>
           <Descriptions bordered column={1} size="small">
             <Descriptions.Item label="数据源">{task.dataset_name} v{task.dataset_version}</Descriptions.Item>

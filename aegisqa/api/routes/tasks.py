@@ -26,6 +26,7 @@ from aegisqa.api.app import (
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.engine.runner import RunRecord, RunRequest
 from aegisqa.reports.aggregator import aggregate_run_report
+from aegisqa.reports.trace_flow import build_task_trace_flow
 
 
 def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -164,6 +165,11 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
     def get_task_trace_tree(task_id: str) -> dict[str, Any]:
         task = _get_record(ctx.store, "tasks", task_id)
         return _build_trace_tree(ctx.runner.get_run(task["run_id"]))
+
+    @app.get("/tasks/{task_id}/trace-flow")
+    def get_task_trace_flow(task_id: str) -> dict[str, Any]:
+        task = _get_record(ctx.store, "tasks", task_id)
+        return build_task_trace_flow(task, ctx.runner.get_run(task["run_id"]))
 
     @app.post("/runs", response_model=RunRecord)
     def create_run(request: RunCreateRequest) -> RunRecord:

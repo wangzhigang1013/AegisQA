@@ -216,6 +216,22 @@ pre {
   min-width: 120px;
 }
 
+.selected-list-row {
+  background: #eff6ff;
+}
+
+.json-block {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f8fafc;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .skill-card .ant-card-body {
   min-height: 152px;
 }
