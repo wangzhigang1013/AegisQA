@@ -240,18 +240,18 @@
 
 ### Task 8.1：降级 legacy 和不可操作状态
 
-- [ ] README 主启动路径不再强调 Streamlit，只保留 legacy 段落。
-- [ ] 治理页不可操作生产适配状态移到文档链接。
-- [ ] 文档明确 Run 是底层 Attempt，不是用户主对象。
+- [x] README 主启动路径不再强调 Streamlit，只保留 legacy 段落。
+- [x] 治理页不可操作生产适配状态移到文档链接。
+- [x] 文档明确 Run 是底层 Attempt，不是用户主对象。
 
 ### Task 8.2：最终验收
 
-- [ ] `python -m pytest -q`
-- [ ] `python -m aegisqa.examples.run_mvp_demo`
-- [ ] `cd frontend && npm run typecheck`
-- [ ] `cd frontend && npm test`
-- [ ] `cd frontend && npm run build`
-- [ ] `cd frontend && npm run e2e`
-- [ ] 更新 `docs/PROJECT_STATUS.md`
-- [ ] 更新 `docs/PRD_ACCEPTANCE_MATRIX.md`
-- [ ] 更新 `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- [x] `python -m pytest -q`
+- [x] `python -m aegisqa.examples.run_mvp_demo`
+- [x] `cd frontend && npm run typecheck`
+- [x] `cd frontend && npm test`
+- [x] `cd frontend && npm run build`
+- [x] `cd frontend && npm run e2e`
+- [x] 更新 `docs/PROJECT_STATUS.md`
+- [x] 更新 `docs/PRD_ACCEPTANCE_MATRIX.md`
+- [x] 更新 `docs/INTERACTION_ACCEPTANCE_MATRIX.md`

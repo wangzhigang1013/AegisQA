@@ -1,6 +1,6 @@
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Descriptions, Input, Modal, Space, Table, Tag, Timeline, Tooltip } from 'antd';
+import { Alert, Button, Card, Input, Modal, Space, Table, Tag, Timeline, Tooltip, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 
 import { api } from '../api/client';
@@ -47,19 +47,21 @@ export function GovernancePage() {
       <PageHeader
         eyebrow="平台治理"
         title="治理与审计"
-        description="管理 RBAC、Skill 生命周期、审计日志，以及 MySQL / Redis / Celery 等生产适配状态。"
+        description="管理 RBAC、Skill 生命周期和审计日志。生产适配说明保留在部署文档中，不作为当前页面的可操作状态。"
         primaryAction={<Button type="primary" icon={<SafetyCertificateOutlined />} onClick={() => setMatrixOpen(true)}>查看权限矩阵</Button>}
       />
 
       {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
 
-      <Card className="flat-card" title="生产适配状态">
-        <Descriptions bordered column={{ xs: 1, md: 2, xl: 4 }}>
-          <Descriptions.Item label="MySQL">schema 已准备</Descriptions.Item>
-          <Descriptions.Item label="Redis">缓存与队列占位</Descriptions.Item>
-          <Descriptions.Item label="Celery">Worker 入口已准备</Descriptions.Item>
-          <Descriptions.Item label="Secret 脱敏">启用</Descriptions.Item>
-        </Descriptions>
+      <Card className="flat-card" title="生产适配边界已移至文档">
+        <Space direction="vertical" size={8}>
+          <Typography.Text>
+            MySQL / Redis / Celery 是部署边界，不是当前前端页面里的可操作开关。请以 <Typography.Text code>README.md</Typography.Text> 和 <Typography.Text code>docs/PRD_ACCEPTANCE_MATRIX.md</Typography.Text> 为准。
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            当前页面只保留治理动作：权限矩阵、Skill 生命周期和审计日志。
+          </Typography.Text>
+        </Space>
       </Card>
 
       <Card

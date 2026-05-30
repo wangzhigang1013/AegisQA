@@ -9,9 +9,9 @@
 
 ## 最近一次交互验证
 
-- `npm test`：35 个前端交互/API client/图模型/任务创建向导/首页任务工作台/任务详情驾驶舱/Trace Flow/Workflow 字段映射/参数预览/报告分层分析/Experiment/CI Gate/Annotation Queue 测试通过。
+- `npm test`：35 个前端交互/API client/图模型/任务创建向导/首页任务工作台/任务详情驾驶舱/Trace Flow/Workflow 字段映射/参数预览/报告分层分析/Experiment/CI Gate/Annotation Queue/治理边界测试通过。
 - `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
-- 最终验收确认：本轮 API 路由拆分和 JSON Store 文件锁不新增可见按钮，现有按钮矩阵仍覆盖全部用户可见主动作。
+- 最终验收确认：生产适配状态已从治理页可见状态清单降级为文档边界提示，现有按钮矩阵仍覆盖全部用户可见主动作。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Headless Chrome CDP：概览页额外验证真实 Dashboard 指标，以及 Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 产品化入口。
 - 验证过程中发现 8000 端口曾运行旧 FastAPI 进程，导致 `/workflow-drafts` 返回 404；重启后端后，Workflow 保存草稿复测为“草稿已保存”。
@@ -72,6 +72,7 @@
 | 治理与审计 | Skill 审批详情 | 可用，打开审批抽屉，展示 Manifest、输入/输出 Schema、测试日志；未通过合约测试时审批启用禁用并说明原因 | `GET /skills`、`GET /skills/packages`、`POST /skills/{skill_id}/approve` | `npm test` 覆盖审批抽屉和禁用原因 |
 | 治理与审计 | Skill 启用/禁用/废弃 | 可用，调用治理 API 并刷新列表；插件未通过合约测试时前端禁用启用动作 | `POST /skills/{skill_id}/approve|disable|deprecate` | Playwright E2E 覆盖启用新上传 Skill；前端 mutation 与后端 API 覆盖 |
 | 治理与审计 | 审计日志 | 可用，展示后端审计事件 | `GET /audit-events` | 类型检查覆盖 |
+| 治理与审计 | 生产适配边界 | 可用，页面只提示生产适配说明已移至 `README.md` 和 `docs/PRD_ACCEPTANCE_MATRIX.md`，不再展示像开关一样的 MySQL/Redis/Celery 状态 | 文档 | `npm test` 覆盖治理页提示和移除状态清单 |
 
 ## 当前仍需增强
 

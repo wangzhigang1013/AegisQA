@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“评测数据流与产品体验升级”正在执行中。阶段 1（Skill 参数解析与冻结）、阶段 2（Trace 数据流模型与独立页面）、阶段 3（UI 信息架构与任务驾驶舱）、阶段 4（Workflow 字段映射与参数预览升级）、阶段 5（报告分层分析与闭环动作）、阶段 6（Annotation / Golden 批量闭环）和阶段 7（Experiment 与 CI Gate 历史）已完成：后端已提供 Task Trace Flow API，前端已新增独立 Trace Flow 页面，首页已改为任务工作台，任务详情已升级为概览、样本、Trace、Badcase、Attempts、参数页签，Workflow Inspector 已支持字段路径表格映射与参数预览，任务报告已支持按业务字段分层分析和下一步建议，Annotation Queue 已支持批量审核并沉淀 Golden / Assertion 候选资产，CI Gate 已保存评估历史，Experiment 已支持 Dataset/Workflow 过滤与 A/B 对比；下一步进入阶段 8：生产化边界与移除整理。
+新一轮“评测数据流与产品体验升级”已完成。阶段 1（Skill 参数解析与冻结）、阶段 2（Trace 数据流模型与独立页面）、阶段 3（UI 信息架构与任务驾驶舱）、阶段 4（Workflow 字段映射与参数预览升级）、阶段 5（报告分层分析与闭环动作）、阶段 6（Annotation / Golden 批量闭环）、阶段 7（Experiment 与 CI Gate 历史）和阶段 8（生产化边界与移除整理）均已完成：后端已提供 Task Trace Flow API，前端已新增独立 Trace Flow 页面，首页已改为任务工作台，任务详情已升级为概览、样本、Trace、Badcase、Attempts、参数页签，Workflow Inspector 已支持字段路径表格映射与参数预览，任务报告已支持按业务字段分层分析和下一步建议，Annotation Queue 已支持批量审核并沉淀 Golden / Assertion 候选资产，CI Gate 已保存评估历史，Experiment 已支持 Dataset/Workflow 过滤与 A/B 对比，README 与治理页已明确主入口、legacy Streamlit、生产边界和 Run Attempt 语义。
 
 ## 当前已完成
 
@@ -54,11 +54,13 @@
 - Annotation Queue 已新增批量审核接口和前端多选审核弹窗，支持一次性设置人工标签、说明和 Golden 回流；审核记录会保留 reviewer、reviewed_at、source_task_id，并同步生成 Golden 候选和 Assertion 候选资产。
 - CI Gate 已新增评估历史记录，`POST /ci-gates/evaluate` 会保存 evaluation record，`GET /ci-gates/evaluations` 支持按 config、task、run 过滤；CI Gate 页面展示历史趋势、阻断次数、通过次数和具体阻断原因。
 - Experiment 快照已补齐 Dataset/Workflow 元数据、延迟指标和失败分布；Experiment 页面支持 Dataset/Workflow 过滤，并新增 A/B 对比面板展示通过率、Badcase、P95 耗时、成本和失败分布差异。
+- README 已把主启动路径明确为 FastAPI + React，并将 Streamlit 保留为 legacy demo；文档明确 Task 是用户主对象，Run 是底层执行 Attempt。
+- 治理页已移除容易误导的 MySQL/Redis/Celery 状态清单，改为指向 README 和 PRD 验收矩阵的生产适配边界提示。
 
 ## 最近验证
 
 - `python -m pytest -q`：52 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
-- `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v7`，Run `run-5a86aceede3f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
+- `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v8`，Run `run-b347762ba048` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、35 个测试通过。
 - `cd frontend && npm run build`：通过。
@@ -73,7 +75,7 @@
 ## 当前问题
 
 - Workflow 画布的 Source/Skill/Join/Output/Aggregator 新增、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行、校验和发布已进入 Playwright；后续需要继续拆分 Palette/Inspector 组件，降低单文件维护成本。
-- Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；阶段 3.2 已补 Run Attempt，后续需要继续接入 CI Gate、baseline 对比和权限检查。
+- Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；Run Attempt、CI Gate、Experiment baseline/A-B 对比和任务报告均已接入基础闭环。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
 - Experiment 快照、CI Gate 和 Annotation Queue 已有独立产品页；Trace Tree 仍需做成完整独立页面，并继续补更细的成本预算和 baseline 可视化趋势图。
 - 报告、Badcase、Judge 审计已经接入基础数据与动作，人工审阅队列已有后端最小闭环；仍需补齐多 Judge 一致性视图、红队安全扫描和跨任务 Score Analytics。
@@ -81,9 +83,36 @@
 
 ## 下一阶段目标
 
-- 后续建议优先进入生产化边界整理、Trace Tree 独立页面、多 Judge 一致性视图、红队安全扫描和真实 MySQL/Redis/Celery Repository/Worker 接入。
+- 后续建议优先进入 Trace Tree 独立页面、多 Judge 一致性视图、红队安全扫描、更细的成本预算/趋势图，以及真实 MySQL/Redis/Celery Repository/Worker 接入。
 
 ## 最近改动
+
+### 2026-05-31 生产化边界整理与最终验收
+
+- 改动摘要：完成评测数据流升级计划阶段 8。README 主启动路径明确为 FastAPI + React，Streamlit 只保留为 legacy demo；新增“任务与执行批次”说明，明确 Task 是用户主对象、Run 是底层 Attempt；治理页移除 MySQL/Redis/Celery 状态清单，改为生产适配边界文档提示；PRD 验收矩阵和交互验收矩阵同步更新最新覆盖范围；重新跑完整后端、Demo、前端、构建和 E2E 验收。
+- 变更文件：
+  - `README.md`
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-evaluation-flow-productization.md`
+- 验证命令：
+  - `python -m pytest -q`
+  - `python -m aegisqa.examples.run_mvp_demo`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端全量：52 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - Demo：Dataset `rag_qa_1000:v8`，Run `run-b347762ba048` completed，1000 条样本完成，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条。
+  - Typecheck：通过。
+  - 前端全量：4 个测试文件、35 passed。
+  - Build：通过。
+  - Playwright 全量 E2E：8 passed。
+- 下一步：本轮计划已完成；后续可继续做 Trace Tree 独立页面、多 Judge 一致性、红队安全扫描、成本预算趋势图和真实生产 Repository/Worker。
 
 ### 2026-05-31 Experiment 与 CI Gate 历史
 

@@ -942,6 +942,9 @@ describe('AegisQA 前端工作台', () => {
   it('治理页面权限矩阵按钮打开矩阵弹窗', async () => {
     await renderWorkbench('/governance');
 
+    expect(screen.getByText('生产适配边界已移至文档')).toBeInTheDocument();
+    expect(screen.queryByText('schema 已准备')).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('button', { name: /查看权限矩阵/ }));
 
     expect(await screen.findByText('RBAC 权限矩阵')).toBeInTheDocument();

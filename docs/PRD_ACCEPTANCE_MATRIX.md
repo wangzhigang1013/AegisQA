@@ -17,11 +17,11 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 最近一次验证结果：
 
-- 单元/API/扩展测试：`44 passed`。
-- 端到端 Demo：最新 Dataset `rag_qa_1000:v7`、Run `run-5a86aceede3f`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
-- 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 30 个交互/API client/图模型/任务创建向导/Run Attempts/Experiment/CI Gate/Annotation Queue 测试，Playwright 覆盖 8 条 E2E。
+- 单元/API/扩展测试：`52 passed`。
+- 端到端 Demo：最新 Dataset `rag_qa_1000:v8`、Run `run-b347762ba048`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
+- 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 35 个交互/API client/图模型/任务创建向导/Run Attempts/Experiment/CI Gate/Annotation Queue/治理边界测试，Playwright 覆盖 8 条 E2E。
 - 浏览器交互：Headless Chrome CDP 验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
-- Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden；同时覆盖 CI Gate 创建配置和阻断评估、Annotation Queue 领取/审核/回流 Golden，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行回填、校验、发布。
+- Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden；同时覆盖 CI Gate 创建配置和阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核和候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行回填、校验、发布。
 - 产品化增强：Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 已有后端 API 测试；首页已展示真实 Dashboard 和产品化增强入口。
 
 ## P0 功能覆盖
@@ -44,7 +44,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-DS-04 | Source Skill 机制 | 已实现基础 | `source.csv@0.1.0`、`source.jsonl@0.1.0` manifest，`POST /datasets/source-materialize` |
 | FR-DS-05 | Golden Dataset 与人工标签 | 已实现基础 | `golden`、`label_field`、Judge demo |
 | FR-DS-06 | rows 按需读取 | 已实现 | `iter_rows` / `iter_row_chunks`，队列消息仅 `item_id` |
-| FR-EX-01 | 分片创建 Run Items 与轻量队列 | 已实现 | `WorkflowRunner.create_run`，1000 样本测试；Task API 将 Dataset/Workflow/Run 绑定为一次业务任务 |
+| FR-EX-01 | 分片创建 Run Items 与轻量队列 | 已实现 | `WorkflowRunner.create_run`，1000 样本测试；Task API 将 Dataset/Workflow/Run 绑定为一次业务任务；产品语义中 Task 是用户主对象，Run 是底层执行 Attempt |
 | FR-EX-02 | 并发控制与外部 API 限速 | 已实现基础 | `InMemoryRateLimiter` 记录等待与限速次数；Redis/Celery 适配待生产化 |
 | FR-EX-03 | 失败重试 | 已实现基础 | `retry_failed_items` |
 | FR-EX-04 | 断点续跑 | 已实现基础 | 成功 item 不覆盖，失败 item 可重跑 |
@@ -77,7 +77,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-EX-06 | 取消、暂停、恢复 | 已实现基础 | `cancel_run/pause_run/resume_run`，`POST /runs/{run_id}/execute|pause|resume|cancel|retry-failed`，React 执行中心已接入；Task 层已增加 completed/running/canceled 状态机保护 |
 | FR-EX-07 | sample_repeat_times | 已实现基础 | Run Item repeat_index 与测试 |
 | FR-EX-08 | Step 级 Evaluation Cache | 已实现基础 | cache_key 与 cache_hit 记录 |
-| FR-RP-05 | 跨 Run 趋势图 | 已实现基础 | `compare_reports` 输出趋势差值；Streamlit 可展示指标，复杂图表仍可增强 |
+| FR-RP-05 | 跨 Run 趋势图 | 已实现基础 | `compare_reports` 输出趋势差值；React Experiment 页面提供 A/B 对比入口，复杂跨任务趋势图仍可增强 |
 | FR-RP-06 | 多次运行聚合视图 | 已实现基础 | `aggregate_repeat_items` 输出多数投票、通过概率、方差、不稳定样本 |
 | FR-RP-07 | 报告导出 | 已实现基础 | `export_report_csv`、`export_report_html`，`GET /runs/{run_id}/report/export?file_format=json|csv|html` |
 | FR-ME-04 | 裁判偏差分析 | 已实现基础 | `JudgeProfileService.bias_analysis` |
@@ -93,17 +93,18 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | 对标能力 | 当前状态 | 证据 |
 |---|---|---|
 | Task 一等模型 | 已实现基础 | `GET/POST /tasks`、`POST /tasks/{task_id}/attempts`、`POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed`、`GET /tasks/{task_id}/report`、`GET /tasks/{task_id}/trace-tree`；Task 创建保存 `execution_config`，包含并发、repeat、重试和成本预算；Run Attempts 保留旧 Run 报告快照；前端执行中心默认展示任务列表并使用独立创建向导；Playwright E2E 覆盖创建和执行任务 |
-| Experiment 快照与 baseline 对比 | 已实现基础页面 | `POST /experiments/from-run`，`GET /experiments`，保存 Workflow/Dataset/Skill/Prompt/Runtime 快照与 baseline diff；React `/experiments` 页面展示实验快照列表、baseline 选择、通过率变化、失败样本变化、成本变化，并支持从 Run 生成实验快照 |
+| Experiment 快照与 baseline 对比 | 已实现基础页面 | `POST /experiments/from-run`，`GET /experiments?dataset_id=&workflow_id=`，保存 Workflow/Dataset/Skill/Prompt/Runtime 快照与 baseline diff；React `/experiments` 页面展示实验快照列表、Dataset/Workflow 过滤、baseline 选择、A/B 对比面板、通过率、Badcase、P95 耗时、成本和失败分布变化，并支持从 Run 生成实验快照 |
 | Prompt / Skill 版本注册 | 已实现基础 | Run snapshot 与 Experiment snapshot 记录 `skill_versions`、`prompt_skill_versions`、模型参数 |
 | Assertion DSL | 已实现最小 API | `POST /assertions/evaluate` 支持 contains、regex、json_schema、similarity、latency、cost、safety 的基础断言 |
-| CI Gate | 已实现基础页面 | `GET/POST /ci-gates` 支持质量门禁配置保存和列表；`POST /ci-gates/evaluate` 支持按配置和指标阈值 blocking 发布，也支持直接对 Task/Run 抽取指标评估；React `/ci-gates` 页面支持创建门禁配置、选择 Task/Run 执行评估，并展示阻断原因、实际值和阈值；Playwright 覆盖真实创建和阻断评估 |
-| Annotation Queue | 已实现基础页面 | `POST /annotation-queue/seed-from-run`、`GET /annotation-queue`、分派、review；队列记录回填来源 Task，支持状态/负责人/来源任务筛选；React `/annotation-queue` 页面支持领取、分派、审核和回流 Golden Dataset；Playwright 覆盖真实领取、审核和回流 |
+| CI Gate | 已实现基础页面 | `GET/POST /ci-gates` 支持质量门禁配置保存和列表；`POST /ci-gates/evaluate` 支持按配置和指标阈值 blocking 发布，也支持直接对 Task/Run 抽取指标评估，并保存 `gateeval-*` 历史；`GET /ci-gates/evaluations` 支持按 config、task、run 过滤；React `/ci-gates` 页面支持创建门禁配置、选择 Task/Run 执行评估，并展示阻断原因、实际值、阈值、历史趋势和评估历史；Playwright 覆盖真实创建和阻断评估 |
+| Annotation Queue | 已实现基础页面 | `POST /annotation-queue/seed-from-run`、`GET /annotation-queue`、分派、review、`POST /annotation-queue/bulk-review`、`GET /annotation-candidates`；队列记录回填来源 Task，支持状态/负责人/来源任务筛选；React `/annotation-queue` 页面支持领取、分派、审核、批量审核、回流 Golden Dataset 和候选资产摘要；Playwright 覆盖真实领取、审核、批量审核和回流 |
 | Trace Tree | 已实现最小 API | `GET /runs/{run_id}/trace-tree` 与 `GET /tasks/{task_id}/trace-tree` 展示 Run Item -> Skill Step 输入、输出、耗时、错误、缓存命中 |
 | 产品化入口 | 已实现基础 | React 首页读取真实 Dashboard；Workflow 先进入市场，执行与报告围绕 Task 组织 |
 
 ## 生产化边界说明
 
 - 本地默认运行仍使用 JSON 文件仓储和单进程 Runner，便于面试演示和无外部依赖验证；JSON Store 已增加锁文件与原子写入，降低本地多线程/多进程测试时的文件损坏风险，但不提供事务、索引、权限隔离、分布式一致性或高可用能力。
+- 产品主线以 Task 为中心；Run 是底层执行 Attempt，用于承载 Run Item、Step Trace、队列消息和报告快照。前端执行中心、报告中心、Annotation 和 CI Gate 都应优先通过 Task 入口组织用户流程。
 - Skill 插件包执行默认走受控子进程，不在主 FastAPI 进程中直接 import 用户代码；当前已具备审批门禁、5 秒默认超时、stdout 输出上限、日志截断和本地路径脱敏，生产环境仍需补进程级 CPU/内存限额、依赖隔离和签名校验。
 - 生产适配资产已提供：`docker-compose.yml`、`infra/mysql/schema.sql`、`infra/celery/README.md`、`aegisqa/workers/celery_app.py`、`aegisqa/infrastructure/manifest.py`。
 - MySQL/Redis/Celery 生产服务需要在目标环境中安装依赖并启动容器后接入真实 Repository/Worker；当前测试验证了 schema、消息契约和 Worker 入口，而不是启动外部服务。
