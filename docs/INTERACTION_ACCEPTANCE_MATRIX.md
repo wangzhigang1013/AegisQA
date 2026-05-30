@@ -28,7 +28,7 @@
 | Skill 市场 | 查看详情 | 可用，打开抽屉 | `GET /skills` | `npm test` 覆盖详情入口 |
 | Skill 市场 | 搜索 Skill | 可用，支持按 Skill 名称、ID、标签过滤，避免历史数据过多时找不到新插件 | `GET /skills` | Playwright E2E 覆盖按新上传 Skill ID 搜索 |
 | Skill 市场 | 上传 Skill 插件包 | 可用，打开上传向导；zip 上传后进入待审批；非法路径、缺 manifest、缺 handler 会返回业务错误码 | `POST /skills/packages/upload`、`GET /skills/packages` | `npm test` 覆盖上传入口；Playwright E2E 覆盖真实 zip 上传；后端测试覆盖成功、缺 manifest/handler、非法路径 |
-| Skill 市场 | 运行合约测试 | 可用，调用后端并展示通过/失败；插件默认 5 秒超时，超时返回 `SKILL_CONTRACT_TIMEOUT` | `POST /skills/{skill_id}/contract-test` | `npm test` 与 Playwright E2E 覆盖合约测试结果；P0 测试覆盖超时；full E2E 覆盖并发场景 |
+| Skill 市场 | 运行合约测试 | 可用，调用后端并展示通过/失败；插件默认 5 秒超时，超时返回 `SKILL_CONTRACT_TIMEOUT`；stdout 超过安全上限返回 `SKILL_PACKAGE_OUTPUT_TOO_LARGE`；运行时 stdout/stderr 会截断并脱敏本地路径 | `POST /skills/{skill_id}/contract-test` | `npm test` 与 Playwright E2E 覆盖合约测试结果；P0 测试覆盖超时；`test_skill_package_security.py` 覆盖输出上限、日志截断和路径脱敏；full E2E 覆盖并发场景 |
 | Skill 市场 | 审批状态展示 | 可用，列表展示待审批、合约已通过/未通过、审批人、审批时间 | `GET /skills`、`GET /skills/packages` | `npm test` 覆盖插件包审批状态、合约状态和审批信息 |
 | Workflow 市场 | 新建 Workflow | 可用，创建草稿并进入画布 | `POST /workflow-drafts` | `npm test` 覆盖新建入口 |
 | Workflow 市场 | 查看草稿/已发布版本/模板 | 可用，列表化展示流程资产 | `GET /workflow-drafts`、`GET /workflows`、`GET /workflow-templates` | `npm test` 覆盖市场页 |

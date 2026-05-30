@@ -40,9 +40,75 @@ def test_skill_package_records_contract_and_approval_metadata(tmp_path) -> None:
     assert after_approval["approval_note"] == "测试审批通过"
 
 
-def _plugin_zip() -> str:
+def test_skill_package_rejects_oversized_return_payload(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    handler = "def run(inputs, config):\n    return {'output': {'echo': 'x' * 120000}, 'metrics': {}}\n"
+    client.post(
+        "/skills/packages/upload",
+        json={"filename": "oversized.zip", "content_base64": _plugin_zip(skill_id="plugin.oversized@0.1.0", handler=handler)},
+    )
+
+    contract = client.post("/skills/plugin.oversized@0.1.0/contract-test").json()
+
+    assert contract["ok"] is False
+    assert contract["code"] == "SKILL_PACKAGE_OUTPUT_TOO_LARGE"
+    assert contract["details"]["actual_output_bytes"] > contract["details"]["max_output_bytes"]
+
+
+def test_skill_package_truncates_long_process_streams(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    handler = """
+import sys
+
+def run(inputs, config):
+    print("O" * 10000)
+    print("E" * 10000, file=sys.stderr)
+    raise RuntimeError("boom")
+"""
+    client.post(
+        "/skills/packages/upload",
+        json={"filename": "streams.zip", "content_base64": _plugin_zip(skill_id="plugin.streams@0.1.0", handler=handler)},
+    )
+
+    contract = client.post("/skills/plugin.streams@0.1.0/contract-test").json()
+
+    assert contract["ok"] is False
+    assert contract["code"] == "SKILL_PACKAGE_RUNTIME_ERROR"
+    assert contract["details"]["stdout_truncated"] is True
+    assert contract["details"]["stderr_truncated"] is True
+    assert contract["details"]["stdout"].endswith("[已截断]")
+    assert contract["details"]["stderr"].endswith("[已截断]")
+
+
+def test_skill_package_runtime_error_does_not_leak_local_absolute_paths(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    handler = """
+def run(inputs, config):
+    raise RuntimeError("local path C:/Users/17343/secret/token.txt should be hidden")
+"""
+    client.post(
+        "/skills/packages/upload",
+        json={"filename": "path.zip", "content_base64": _plugin_zip(skill_id="plugin.path@0.1.0", handler=handler)},
+    )
+
+    contract = client.post("/skills/plugin.path@0.1.0/contract-test").json()
+    payload_text = json.dumps(contract, ensure_ascii=False)
+
+    assert contract["ok"] is False
+    assert contract["code"] == "SKILL_PACKAGE_RUNTIME_ERROR"
+    assert str(tmp_path) not in payload_text
+    assert "C:/Users/17343/secret" not in payload_text
+
+
+def _plugin_zip(skill_id: str = "plugin.echo@0.1.0", handler: str | None = None) -> str:
     manifest = {
-        "skill_id": "plugin.echo@0.1.0",
+        "skill_id": skill_id,
         "name": "Echo Plugin",
         "version": "0.1.0",
         "description": "Echo plugin",
@@ -58,10 +124,10 @@ def _plugin_zip() -> str:
         "example_input": {"text": "hello"},
         "example_config": {},
     }
-    handler = "def run(inputs, config):\n    return {'output': {'echo': inputs['text']}, 'metrics': {}}\n"
+    handler_body = handler or "def run(inputs, config):\n    return {'output': {'echo': inputs['text']}, 'metrics': {}}\n"
 
     buffer = BytesIO()
     with ZipFile(buffer, "w") as archive:
         archive.writestr("skill.json", json.dumps(manifest, ensure_ascii=False))
-        archive.writestr("handler.py", handler)
+        archive.writestr("handler.py", handler_body)
     return base64.b64encode(buffer.getvalue()).decode("ascii")

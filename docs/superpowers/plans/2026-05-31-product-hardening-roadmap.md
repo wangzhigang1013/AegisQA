@@ -196,10 +196,10 @@
 
 ### Task 5.2：安全执行边界
 
-- [ ] handler 返回体过大时失败。
-- [ ] handler stdout/stderr 过大时截断。
-- [ ] handler 异常保留错误摘要但不泄露本地绝对路径。
-- [ ] 运行后端安全测试。
+- [x] handler 返回体过大时失败。
+- [x] handler stdout/stderr 过大时截断。
+- [x] handler 异常保留错误摘要但不泄露本地绝对路径。
+- [x] 运行后端安全测试。
 
 ## 阶段 6：Experiment、CI Gate、Annotation 独立产品页
 

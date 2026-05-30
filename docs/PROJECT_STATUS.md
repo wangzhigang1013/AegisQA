@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 5（Skill 平台安全与审批）Task 5.1 已完成；本批已把 Skill 市场与治理页升级为插件审批体验，展示待审批、合约测试状态、审批人、审批时间和审批抽屉。下一步进入 Task 5.2：Skill 安全执行边界。
+产品严谨化阶段 5（Skill 平台安全与审批）Task 5.2 已完成；本批已补齐 Skill 插件执行安全边界：返回体过大失败、stdout/stderr 截断标记、本地绝对路径脱敏。下一步进入阶段 6：Experiment、CI Gate、Annotation 独立产品页。
 
 ## 当前已完成
 
@@ -37,10 +37,11 @@
 - 报告中心 Badcase 表格已支持单条加入 Golden、忽略、重开、加入 Annotation Queue，以及选择多条后批量加入 Golden；动作成功后刷新 Task Report。
 - Skill 插件包记录已保存合约测试时间、审批人、审批时间和审批备注；Skill 市场展示审批状态，治理页提供审批抽屉，未通过合约测试的插件不能在前端直接启用。
 - 前端 `AppShell` 的 TanStack QueryClient 已改为实例内创建，避免测试和嵌入式渲染场景复用旧缓存导致页面数据串扰。
+- Skill 插件受控子进程已增加 stdout 输出体积上限、stdout/stderr 截断标记和本地绝对路径脱敏，避免恶意或异常插件把大响应、本地路径泄露到 API 与前端。
 
 ## 最近验证
 
-- `python -m pytest -q`：37 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest -q`：40 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v6`，Run `run-9311b164dd1f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、27 个测试通过。
@@ -64,11 +65,37 @@
 
 ## 下一阶段目标
 
-- 进入阶段 5 Task 5.2：补齐 Skill 安全执行边界，包括 handler 返回体过大失败、stdout/stderr 过大截断、异常摘要脱敏本地绝对路径。
+- 进入阶段 6：把 Experiment、CI Gate、Annotation Queue 从最小 API 扩展为独立产品页，支持 baseline 对比、质量门禁评估、人工审阅领取/分派/回流 Golden。
 - 把 Experiment、Prompt/Skill 版本注册、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 从最小 API 能力继续扩展为完整页面与端到端操作流。
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 Skill 安全执行边界
+
+- 改动摘要：完成阶段 5 Task 5.2。`SubprocessPackageSkill` 对插件 stdout 增加 64KB 输出上限，超限返回 `SKILL_PACKAGE_OUTPUT_TOO_LARGE`；运行时错误会清洗本地绝对路径，并在 stdout/stderr 超长时返回截断内容和 `stdout_truncated`、`stderr_truncated` 标记。
+- 变更文件：
+  - `aegisqa/skills/packages.py`
+  - `tests/test_skill_package_security.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `python -m pytest tests/test_skill_package_security.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Skill 安全边界定向测试：4 passed。
+  - 后端全量：40 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - Typecheck：通过。
+  - 前端全量：4 个测试文件、27 passed。
+  - Build：通过。
+  - Playwright 全量 E2E：6 passed。
+- 下一步：进入阶段 6 Task 6.1，建设 Experiment 页面和 baseline 对比体验。
 
 ### 2026-05-31 Skill 审批体验
 
