@@ -112,6 +112,25 @@ const demoCIGates = [
   },
 ];
 
+const demoAnnotationTasks = [
+  {
+    task_id: 'anno-demo',
+    run_id: 'run-demo',
+    source_task_id: 'task-demo',
+    source_task_name: 'RAG 任务',
+    item_id: 'item-demo',
+    row_id: 'row-demo',
+    status: 'pending',
+    assignee: null,
+    priority: 'high',
+    reason: '低分或失败样本需要人工复核',
+    payload: { metrics: { judge_score: 0.2 }, context_snapshot: { context: { judge_label: 'fail' } }, steps: [] },
+    review: null,
+    created_at: '2026-05-31T00:00:00Z',
+    updated_at: '2026-05-31T00:00:00Z',
+  },
+];
+
 const pendingPackageSkill = {
   ...demoSkills[0],
   skill_id: 'plugin.echo@0.1.0',
@@ -583,6 +602,44 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /执行 Gate 评估/ }));
     expect(await screen.findByText('阻断原因')).toBeInTheDocument();
     expect(screen.getByText(/质量门禁未通过/)).toBeInTheDocument();
+  });
+
+  it('Annotation Queue 页面支持来源任务筛选、领取和审核回流', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/annotation-queue/anno-demo/assign')) {
+        return jsonResponse({ ...demoAnnotationTasks[0], status: 'assigned', assignee: 'current_user' });
+      }
+      if (url.includes('/annotation-queue/anno-demo/review')) {
+        return jsonResponse({ ...demoAnnotationTasks[0], status: 'reviewed', review: { human_label: 'fail', add_to_golden: true } });
+      }
+      if (url.includes('/annotation-queue')) {
+        return jsonResponse(demoAnnotationTasks);
+      }
+      if (url.endsWith('/tasks')) {
+        return jsonResponse([demoTask]);
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/annotation-queue');
+
+    expect(await screen.findByText('Annotation Queue 人工审核')).toBeInTheDocument();
+    expect(screen.getByText('RAG 任务')).toBeInTheDocument();
+    expect(screen.getByText('低分或失败样本需要人工复核')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('按负责人筛选')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /领取/ }));
+    expect(await screen.findByText(/样本已领取/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /审核/ }));
+    expect(await screen.findByText('审核样本')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /确认审核/ })).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText('例如：pass / fail'), { target: { value: 'fail' } });
+    fireEvent.click(screen.getByLabelText('回流 Golden Dataset'));
+    fireEvent.click(screen.getByRole('button', { name: /确认审核/ }));
+
+    expect(await screen.findByText(/审核已提交，并回流 Golden/)).toBeInTheDocument();
   });
 
   it('报告中心围绕任务展示报告和导出入口', async () => {

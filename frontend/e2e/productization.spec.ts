@@ -26,6 +26,39 @@ test('CI Gate 可以创建配置并阻断低通过率任务', async ({ page, req
   await expect(page.getByText(/质量门禁未通过：pass_rate/)).toBeVisible();
 });
 
+test('Annotation Queue 可以领取、审核并回流 Golden', async ({ page, request }) => {
+  const stamp = Date.now();
+  const datasetName = `e2e_annotation_dataset_${stamp}`;
+  const workflowName = `E2E Annotation Workflow ${stamp}`;
+  const taskName = `E2E Annotation 任务 ${stamp}`;
+
+  const dataset = await createDataset(request, datasetName);
+  const workflow = await publishWorkflow(request, workflowName);
+  const task = await createTask(request, taskName, dataset.dataset_id, dataset.version, workflow.version_id);
+  const executedTaskResponse = await request.post(`http://127.0.0.1:8000/tasks/${task.task_id}/execute`);
+  expect(executedTaskResponse.ok()).toBeTruthy();
+  const executedTask = await executedTaskResponse.json();
+
+  const seedResponse = await request.post('http://127.0.0.1:8000/annotation-queue/seed-from-run', {
+    data: { run_id: executedTask.run_id, strategy: 'failed_or_low_score', limit: 5 },
+  });
+  expect(seedResponse.ok()).toBeTruthy();
+  expect((await seedResponse.json()).created_count).toBeGreaterThan(0);
+
+  await page.goto('/annotation-queue');
+  await expect(page.getByText('Annotation Queue 人工审核')).toBeVisible();
+  await expect(page.getByText(taskName)).toBeVisible();
+
+  await page.getByRole('button', { name: /领取/ }).first().click();
+  await expect(page.getByText(/样本已领取/)).toBeVisible();
+
+  await page.getByRole('button', { name: /审核/ }).first().click();
+  await page.getByPlaceholder('例如：pass / fail').fill('fail');
+  await page.getByLabel('回流 Golden Dataset').check();
+  await page.getByRole('button', { name: /确认审核/ }).click();
+  await expect(page.getByText(/审核已提交，并回流 Golden/)).toBeVisible();
+});
+
 async function createDataset(request: import('@playwright/test').APIRequestContext, datasetName: string) {
   const response = await request.post('http://127.0.0.1:8000/datasets/source-materialize', {
     data: {

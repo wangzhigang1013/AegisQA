@@ -876,6 +876,7 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
     @app.post("/annotation-queue/seed-from-run")
     def seed_annotation_queue(request: AnnotationSeedRequest) -> dict[str, Any]:
         run = runner.get_run(request.run_id)
+        source_task = _find_task_by_run_id(store, run.run_id)
         created: list[dict[str, Any]] = []
         existing = {task.get("item_id") for task in _list_records(store, "annotation_tasks") if task.get("run_id") == run.run_id}
         for item in run.items:
@@ -883,19 +884,21 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
                 break
             if item.item_id in existing or not _needs_annotation(item.model_dump(mode="json"), strategy=request.strategy):
                 continue
-            task = _build_annotation_task(run.run_id, item.model_dump(mode="json"), assignee=request.assignee)
+            task = _build_annotation_task(run.run_id, item.model_dump(mode="json"), assignee=request.assignee, source_task=source_task)
             _save_record(store, "annotation_tasks", "task_id", task)
             created.append(task)
         audit_service.record(actor="api", action="annotation_queue.seed", target=run.run_id, detail={"created_count": len(created)})
         return {"run_id": run.run_id, "created_count": len(created), "tasks": created}
 
     @app.get("/annotation-queue")
-    def list_annotation_queue(status: str | None = None, assignee: str | None = None) -> list[dict[str, Any]]:
+    def list_annotation_queue(status: str | None = None, assignee: str | None = None, source_task_id: str | None = None) -> list[dict[str, Any]]:
         tasks = _list_records(store, "annotation_tasks")
         if status:
             tasks = [task for task in tasks if task.get("status") == status]
         if assignee:
             tasks = [task for task in tasks if task.get("assignee") == assignee]
+        if source_task_id:
+            tasks = [task for task in tasks if task.get("source_task_id") == source_task_id]
         return tasks
 
     @app.post("/annotation-queue/{task_id}/assign")
@@ -1613,10 +1616,22 @@ def _needs_annotation(item: dict[str, Any], *, strategy: str) -> bool:
     return item.get("status") == "failed" or label == "fail" or (isinstance(judge_score, (int, float)) and judge_score < 0.6)
 
 
-def _build_annotation_task(run_id: str, item: dict[str, Any], *, assignee: str | None) -> dict[str, Any]:
+def _find_task_by_run_id(store: JsonStore, run_id: str) -> dict[str, Any] | None:
+    for task in _list_records(store, "tasks"):
+        if task.get("run_id") == run_id:
+            return task
+        for attempt in task.get("attempts", []):
+            if attempt.get("run_id") == run_id:
+                return task
+    return None
+
+
+def _build_annotation_task(run_id: str, item: dict[str, Any], *, assignee: str | None, source_task: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "task_id": f"anno-{uuid4().hex[:12]}",
         "run_id": run_id,
+        "source_task_id": source_task.get("task_id") if source_task else None,
+        "source_task_name": source_task.get("name") if source_task else None,
         "item_id": item["item_id"],
         "row_id": item["row_id"],
         "status": "assigned" if assignee else "pending",

@@ -21,7 +21,7 @@ export function OverviewPage() {
   const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard });
   const runsQuery = useQuery({ queryKey: ['runs'], queryFn: api.runs });
   const experimentsQuery = useQuery({ queryKey: ['experiments'], queryFn: api.experiments });
-  const annotationQuery = useQuery({ queryKey: ['annotation-queue'], queryFn: api.annotationQueue });
+  const annotationQuery = useQuery({ queryKey: ['annotation-queue'], queryFn: () => api.annotationQueue() });
 
   const summary = dashboardQuery.data ?? {
     dataset_count: 0,

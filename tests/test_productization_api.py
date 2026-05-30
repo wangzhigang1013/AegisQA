@@ -171,3 +171,19 @@ def test_annotation_queue_supports_assignment_and_review(tmp_path: Path) -> None
     ).json()
     assert reviewed["status"] == "reviewed"
     assert reviewed["review"]["add_to_golden"] is True
+
+
+def test_annotation_queue_keeps_source_task_and_supports_filter(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    task = _executed_task(client, tmp_path)
+
+    seed = client.post("/annotation-queue/seed-from-run", json={"run_id": task["run_id"], "strategy": "failed_or_low_score", "limit": 5}).json()
+    assert seed["created_count"] == 1
+    annotation_task = seed["tasks"][0]
+    assert annotation_task["source_task_id"] == task["task_id"]
+    assert annotation_task["source_task_name"] == "CI Gate 任务"
+
+    matched = client.get(f"/annotation-queue?source_task_id={task['task_id']}").json()
+    assert [item["task_id"] for item in matched] == [annotation_task["task_id"]]
+    assert client.get("/annotation-queue?source_task_id=task-missing").json() == []

@@ -324,6 +324,8 @@ export type ExperimentRecord = {
 export type AnnotationTask = {
   task_id: string;
   run_id: string;
+  source_task_id?: string | null;
+  source_task_name?: string | null;
   item_id: string;
   row_id: string;
   status: string;

@@ -101,7 +101,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  annotationQueue: () => request<AnnotationTask[]>('/annotation-queue'),
+  annotationQueue: (filters: { status?: string; assignee?: string; source_task_id?: string } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<AnnotationTask[]>(`/annotation-queue${suffix}`);
+  },
   seedAnnotationQueue: (body: { run_id: string; strategy?: string; limit?: number; assignee?: string | null }) =>
     request<{ run_id: string; created_count: number; tasks: AnnotationTask[] }>('/annotation-queue/seed-from-run', {
       method: 'POST',

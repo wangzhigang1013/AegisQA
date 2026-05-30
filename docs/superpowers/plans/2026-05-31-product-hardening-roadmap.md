@@ -231,9 +231,9 @@
 
 ### Task 6.3：Annotation Queue 页面
 
-- [ ] 队列列表支持状态、负责人、来源 Task 筛选。
-- [ ] 支持领取、分派、审核、回流 Golden。
-- [ ] 运行 Annotation E2E。
+- [x] 队列列表支持状态、负责人、来源 Task 筛选。
+- [x] 支持领取、分派、审核、回流 Golden。
+- [x] 运行 Annotation E2E。
 
 ## 阶段 7：工程结构与生产化边界
 
