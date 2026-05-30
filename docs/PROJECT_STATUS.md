@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 7（工程结构与生产化边界）Task 7.1 已完成；本批已把 FastAPI 大体量内联路由拆成 datasets、skills、workflows、tasks、reports、judge、governance、productization 等独立路由模块，同时保持 `create_app()` 对外入口和现有 API 行为不变。下一步进入阶段 7.2：JSON Store 文件锁与生产化边界说明。
+产品严谨化阶段 7（工程结构与生产化边界）Task 7.2 已完成；本批已为本地 JSON Store 增加锁文件与原子写入保护，并在 README 明确 JSON Store 只适合本地 demo，生产应使用 MySQL/PostgreSQL、Redis/Celery 和对象存储。下一步进入最终验收。
 
 ## 当前已完成
 
@@ -42,10 +42,11 @@
 - 新增 CI Gate 质量门禁页面，主导航可进入，页面围绕发布门槛展示门禁配置列表、创建弹窗、Task/Run 评估控制台和阻断原因；后端新增 `GET/POST /ci-gates`，`POST /ci-gates/evaluate` 支持直接按 Task/Run 抽取指标。
 - 新增 Annotation Queue 人工审核页面，主导航可进入，页面围绕审核队列展示状态/负责人/来源任务筛选、领取、分派、审核和回流 Golden；后端队列记录已回填 `source_task_id` 与 `source_task_name`，支持按来源任务筛选。
 - FastAPI API 路由已按业务域拆分到 `aegisqa/api/routes/`，`aegisqa/api/app.py` 保留应用装配、错误处理、共享模型和辅助函数，降低后续维护成本。
+- JSON Store 已增加 `FileLock`、JSON 原子写入和 JSONL 读写锁保护，并新增并发写入测试；README 已说明该存储仅适合本地 demo，不承担生产数据库职责。
 
 ## 最近验证
 
-- `python -m pytest -q`：42 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest -q`：44 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v6`，Run `run-9311b164dd1f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、30 个测试通过。
@@ -69,11 +70,37 @@
 
 ## 下一阶段目标
 
-- 进入阶段 7 Task 7.2：为 JSON Store 增加文件锁/并发写入保护，并明确 JSON Store 只适合本地 demo，生产使用 MySQL/Redis/Celery。
+- 进入最终验收：重新运行后端、Demo、前端 typecheck/test/build/E2E，并检查状态文档、PRD 验收矩阵和交互验收矩阵是否需要补充。
 - 把 Experiment、Prompt/Skill 版本注册、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 从最小 API 能力继续扩展为完整页面与端到端操作流。
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 JSON Store 文件锁与生产化边界
+
+- 改动摘要：完成阶段 7 Task 7.2。新增跨平台 `FileLock`，通过进程内线程锁和独占 `.lock` 文件串行化本地文件访问；`JsonStore` 的 JSON 写入改为临时文件 + `os.replace` 原子替换，JSON/JSONL 读写都进入文件锁保护；README 增加本地 demo 存储与生产 MySQL/PostgreSQL、Redis/Celery、对象存储的边界说明。
+- 变更文件：
+  - `aegisqa/storage/file_lock.py`
+  - `aegisqa/storage/json_store.py`
+  - `tests/test_json_store_locking.py`
+  - `README.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `python -m pytest tests/test_json_store_locking.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 文件锁定向测试：2 passed。
+  - 后端全量：44 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - Typecheck：通过。
+  - 前端全量：4 个测试文件、30 passed。
+  - Build：通过。
+  - Playwright 全量 E2E：8 passed。
+- 下一步：进入最终验收，重新执行后端、1000 样本 Demo、前端构建与 E2E，并更新验收矩阵。
 
 ### 2026-05-31 API 路由拆分
 

@@ -261,9 +261,9 @@
 
 ### Task 7.2：JSON Store 文件锁
 
-- [ ] 新增并发写入测试。
-- [ ] 实现跨平台文件锁或进程内锁保护本地 demo store。
-- [ ] 文档说明 JSON Store 只适合 demo，生产使用 MySQL/Redis/Celery。
+- [x] 新增并发写入测试。
+- [x] 实现跨平台文件锁或进程内锁保护本地 demo store。
+- [x] 文档说明 JSON Store 只适合 demo，生产使用 MySQL/Redis/Celery。
 
 ## 最终验收
 

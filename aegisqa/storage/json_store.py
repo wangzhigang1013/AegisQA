@@ -7,8 +7,12 @@ MVP 为了便于面试演示和本地运行，默认使用文件存储承载元�
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Iterable, Iterator
+from uuid import uuid4
+
+from aegisqa.storage.file_lock import FileLock
 
 
 class JsonStore:
@@ -25,34 +29,48 @@ class JsonStore:
 
     def write_json(self, parts: Iterable[str], payload: Any) -> Path:
         path = self.path(*parts)
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        with FileLock(self._lock_path(path)):
+            self._atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2))
         return path
 
     def read_json(self, parts: Iterable[str], default: Any | None = None) -> Any:
         path = self.path(*parts)
-        if not path.exists():
-            return default
-        return json.loads(path.read_text(encoding="utf-8"))
+        with FileLock(self._lock_path(path)):
+            if not path.exists():
+                return default
+            return json.loads(path.read_text(encoding="utf-8"))
 
     def write_jsonl(self, parts: Iterable[str], rows: Iterable[dict[str, Any]]) -> Path:
         path = self.path(*parts)
-        with path.open("w", encoding="utf-8") as handle:
-            for row in rows:
-                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        content = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+        with FileLock(self._lock_path(path)):
+            self._atomic_write_text(path, content)
         return path
 
     def append_jsonl(self, parts: Iterable[str], row: dict[str, Any]) -> None:
         path = self.path(*parts)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        with FileLock(self._lock_path(path)):
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def iter_jsonl(self, parts: Iterable[str]) -> Iterator[dict[str, Any]]:
         path = self.path(*parts)
-        if not path.exists():
-            return
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if line:
-                    yield json.loads(line)
+        with FileLock(self._lock_path(path)):
+            if not path.exists():
+                rows: list[dict[str, Any]] = []
+            else:
+                rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        yield from rows
 
+    def _lock_path(self, path: Path) -> Path:
+        return path.with_name(f"{path.name}.lock")
+
+    def _atomic_write_text(self, path: Path, content: str) -> None:
+        # 先写临时文件再 os.replace，读者要么看到旧完整文件，要么看到新完整文件。
+        temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            temp_path.write_text(content, encoding="utf-8")
+            os.replace(temp_path, path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
