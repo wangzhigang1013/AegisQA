@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 5（Skill 平台安全与审批）Task 5.2 已完成；本批已补齐 Skill 插件执行安全边界：返回体过大失败、stdout/stderr 截断标记、本地绝对路径脱敏。下一步进入阶段 6：Experiment、CI Gate、Annotation 独立产品页。
+产品严谨化阶段 6（Experiment、CI Gate、Annotation 独立产品页）Task 6.1 已完成；本批已新增 Experiment 实验中心，支持实验快照列表、baseline 选择、通过率变化、失败样本变化、成本变化和从 Run 生成实验快照入口。下一步进入 Task 6.2：CI Gate 页面。
 
 ## 当前已完成
 
@@ -38,13 +38,14 @@
 - Skill 插件包记录已保存合约测试时间、审批人、审批时间和审批备注；Skill 市场展示审批状态，治理页提供审批抽屉，未通过合约测试的插件不能在前端直接启用。
 - 前端 `AppShell` 的 TanStack QueryClient 已改为实例内创建，避免测试和嵌入式渲染场景复用旧缓存导致页面数据串扰。
 - Skill 插件受控子进程已增加 stdout 输出体积上限、stdout/stderr 截断标记和本地绝对路径脱敏，避免恶意或异常插件把大响应、本地路径泄露到 API 与前端。
+- 新增 Experiment 实验中心页面，主导航可进入，页面围绕 Run 不可变快照展示 baseline 对比、指标变化、失败样本变化、成本变化，并支持从已完成 Run 生成实验快照。
 
 ## 最近验证
 
 - `python -m pytest -q`：40 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v6`，Run `run-9311b164dd1f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：4 个测试文件、27 个测试通过。
+- `cd frontend && npm test`：4 个测试文件、28 个测试通过。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：6 个 Playwright E2E 测试通过，覆盖任务主链路与 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Playwright E2E 测试通过，覆盖 Workflow 画布新增节点、聚合策略、删除下游连线、新增 Join、撤销/重做、删除节点、保存草稿回放、试运行回填、校验、发布。
@@ -65,11 +66,38 @@
 
 ## 下一阶段目标
 
-- 进入阶段 6：把 Experiment、CI Gate、Annotation Queue 从最小 API 扩展为独立产品页，支持 baseline 对比、质量门禁评估、人工审阅领取/分派/回流 Golden。
+- 进入阶段 6 Task 6.2：新增 CI Gate 页面，支持创建质量门禁配置、对 Task/Run 执行 gate 评估，并在 gate fail 时展示阻断原因。
 - 把 Experiment、Prompt/Skill 版本注册、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 从最小 API 能力继续扩展为完整页面与端到端操作流。
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 Experiment 实验中心
+
+- 改动摘要：完成阶段 6 Task 6.1。新增 `/experiments` 页面和主导航入口，展示实验快照列表、baseline 对比、通过率变化、失败样本变化、成本变化，并提供“从 Run 生成实验快照”的弹窗入口。
+- 变更文件：
+  - `frontend/src/App.tsx`
+  - `frontend/src/pages/ExperimentsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Experiment 页面"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Experiment 页面定向测试：1 passed。
+  - 后端全量：40 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - Typecheck：通过。
+  - 前端全量：4 个测试文件、28 passed。
+  - Build：通过。
+  - Playwright 全量 E2E：6 passed。
+- 下一步：进入阶段 6 Task 6.2，建设 CI Gate 页面和质量门禁评估体验。
 
 ### 2026-05-31 Skill 安全执行边界
 

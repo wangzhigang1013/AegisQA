@@ -93,7 +93,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | 对标能力 | 当前状态 | 证据 |
 |---|---|---|
 | Task 一等模型 | 已实现基础 | `GET/POST /tasks`、`POST /tasks/{task_id}/attempts`、`POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed`、`GET /tasks/{task_id}/report`、`GET /tasks/{task_id}/trace-tree`；Task 创建保存 `execution_config`，包含并发、repeat、重试和成本预算；Run Attempts 保留旧 Run 报告快照；前端执行中心默认展示任务列表并使用独立创建向导；Playwright E2E 覆盖创建和执行任务 |
-| Experiment 快照与 baseline 对比 | 已实现最小 API | `POST /experiments/from-run`，`GET /experiments`，保存 Workflow/Dataset/Skill/Prompt/Runtime 快照与 baseline diff |
+| Experiment 快照与 baseline 对比 | 已实现基础页面 | `POST /experiments/from-run`，`GET /experiments`，保存 Workflow/Dataset/Skill/Prompt/Runtime 快照与 baseline diff；React `/experiments` 页面展示实验快照列表、baseline 选择、通过率变化、失败样本变化、成本变化，并支持从 Run 生成实验快照 |
 | Prompt / Skill 版本注册 | 已实现基础 | Run snapshot 与 Experiment snapshot 记录 `skill_versions`、`prompt_skill_versions`、模型参数 |
 | Assertion DSL | 已实现最小 API | `POST /assertions/evaluate` 支持 contains、regex、json_schema、similarity、latency、cost、safety 的基础断言 |
 | CI Gate | 已实现最小 API | `POST /ci-gates/evaluate` 支持按指标阈值 blocking 发布 |

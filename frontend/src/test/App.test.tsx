@@ -68,6 +68,35 @@ const demoBadcase = {
   updated_at: '2026-05-31T00:00:00Z',
 };
 
+const demoExperiments = [
+  {
+    experiment_id: 'exp-main',
+    name: '主链路实验',
+    run_id: 'run-demo',
+    baseline_run_id: 'run-base',
+    status: 'snapshotted',
+    tags: ['rag'],
+    snapshot: { workflow_version: 'wf-demo:v1', dataset_version: 'dataset-demo:v1', skill_versions: ['llm.call@0.1.0'] },
+    metrics: { pass_rate: 0.82, badcase_count: 18, cost: 12.5 },
+    baseline_metrics: { pass_rate: 0.76, badcase_count: 24, cost: 10 },
+    diff: { pass_rate: 0.06, badcase_count: -6, cost: 2.5 },
+    created_at: '2026-05-31T00:00:00Z',
+  },
+  {
+    experiment_id: 'exp-base',
+    name: 'Baseline 实验',
+    run_id: 'run-base',
+    baseline_run_id: null,
+    status: 'snapshotted',
+    tags: ['baseline'],
+    snapshot: { workflow_version: 'wf-demo:v1', dataset_version: 'dataset-demo:v1', skill_versions: ['llm.call@0.1.0'] },
+    metrics: { pass_rate: 0.76, badcase_count: 24, cost: 10 },
+    baseline_metrics: null,
+    diff: null,
+    created_at: '2026-05-30T00:00:00Z',
+  },
+];
+
 const pendingPackageSkill = {
   ...demoSkills[0],
   skill_id: 'plugin.echo@0.1.0',
@@ -457,6 +486,35 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('输入 Schema')).toBeInTheDocument();
     expect(screen.getByText('未通过合约测试不能启用')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /审批启用/ })).toBeDisabled();
+  });
+
+  it('Experiment 页面展示实验快照、baseline 对比和创建入口', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/experiments/from-run') && init?.method === 'POST') {
+        return jsonResponse({ ...demoExperiments[0], experiment_id: 'exp-created', name: '新实验快照' });
+      }
+      if (url.endsWith('/experiments')) {
+        return jsonResponse(demoExperiments);
+      }
+      if (url.endsWith('/runs')) {
+        return jsonResponse([{ ...demoTask, run_id: 'run-demo', status: 'completed' }]);
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/experiments');
+
+    expect(await screen.findByText('Experiment 实验中心')).toBeInTheDocument();
+    expect(screen.getAllByText('主链路实验').length).toBeGreaterThan(0);
+    expect(screen.getByText('Baseline 对比')).toBeInTheDocument();
+    expect(screen.getByText('通过率变化')).toBeInTheDocument();
+    expect(screen.getByText('失败样本变化')).toBeInTheDocument();
+    expect(screen.getByText('成本变化')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /生成实验快照/ }));
+    expect(await screen.findByText('从 Run 生成实验快照')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '确认生成' })).toBeDisabled();
   });
 
   it('报告中心围绕任务展示报告和导出入口', async () => {
