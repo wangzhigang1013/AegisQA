@@ -19,9 +19,9 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 - 单元/API/扩展测试：`33 passed`。
 - 端到端 Demo：最新 Dataset `rag_qa_1000:v6`、Run `run-9311b164dd1f`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
-- 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 14 个交互/API client 测试，Playwright 覆盖 1 条任务主链路 E2E。
+- 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 16 个交互/API client/图模型测试，Playwright 覆盖 2 条 E2E。
 - 浏览器交互：Headless Chrome CDP 验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
-- Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden。
+- Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden；同时覆盖 Workflow 画布新增、删除、校验、发布。
 - 产品化增强：Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 已有后端 API 测试；首页已展示真实 Dashboard 和产品化增强入口。
 
 ## P0 功能覆盖
@@ -35,7 +35,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-SK-05 | Skill 合约测试入口 | 已实现 | `BaseSkill.contract_test()`，`POST /skills/{skill_id}/contract-test`，React Skill 详情按钮测试；插件包审批前也必须通过合约测试 |
 | FR-SK-08 | Skill 插件包上传与审批门禁 | 已实现基础 | `POST /skills/packages/upload`、`GET /skills/packages`、`aegisqa/skills/packages.py`；zip 必须包含 `skill.yaml|skill.json` 和 `handler.py`，默认 `pending_review`，非法 zip 路径会拒绝，插件合约测试超时返回 `SKILL_CONTRACT_TIMEOUT`，测试 `test_skill_package_upload_contract_and_approval_gate` 和 `test_p0_hardening.py`；Playwright E2E 覆盖真实 zip 上传、合约测试和治理启用 |
 | FR-WF-01 | 创建、编辑、复制、发布、归档 Workflow | 已实现基础 | `WorkflowService.publish/copy_workflow/archive`，`POST /workflow-graphs/publish`，`POST/PUT/DELETE /workflow-drafts`，React `Workflow 市场` + `Workflow 画布` |
-| FR-WF-02 | 线性步骤列表与图形化编排 | 已实现 | `WorkflowDraft` / `WorkflowStep`，`WorkflowGraph` 保留画布快照 |
+| FR-WF-02 | 线性步骤列表与图形化编排 | 已实现 | `WorkflowDraft` / `WorkflowStep`，`WorkflowGraph` 保留画布快照；前端图模型已独立测试，Playwright 覆盖画布新增、删除、校验、发布 |
 | FR-WF-03 | 字段映射与强类型校验 | 已实现 | `resolve_input_mapping`，失败不调用 Skill |
 | FR-WF-04 | 试运行 | 已实现基础 | `WorkflowRunner.dry_run` 支持 1-10 条样本，`POST /workflow-graphs/dry-run`，React Console 已接入按钮反馈 |
 | FR-DS-01 | CSV/JSONL 上传与流式解析 | 已实现 | `DatasetService.upload_dataset`，API `/datasets/upload` 与 `/datasets/from-path`，React 上传弹窗与禁用反馈已测试；空文件、坏 JSONL 行号、空 CSV 均有结构化错误 |

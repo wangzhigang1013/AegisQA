@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 1（P0 Bug 与稳定性修复）已完成，进入阶段 2：Workflow 画布精细化。
+产品严谨化阶段 2（Workflow 画布精细化）第一批已完成，继续推进画布拖拽、连线与 Inspector 深化。
 
 ## 当前已完成
 
@@ -17,15 +17,16 @@
 - 已新增正式 Playwright E2E，自动覆盖“上传数据 -> 上传并审批 Skill -> 创建 Workflow -> 发布 -> 创建 Task -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路。
 - 已新增全量优化执行计划 `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`，阶段顺序为 P0 稳定性、Workflow 画布、Task、Report/Badcase、Skill 安全、Experiment/CI/Annotation、工程结构。
 - 已完成 P0 稳定性第一批：数据集上传空文件/坏 JSONL/空 CSV 拒绝；Skill zip 非法路径拒绝；插件合约测试超时返回结构化 code；Task completed/running/canceled 状态禁止非法动作；前端任务动作按钮按状态禁用；API client 保留后端 code/details/trace_id。
+- Workflow 画布图模型已从页面抽离为 `frontend/src/pages/workflowDesigner/graphModel.ts`，新增独立单元测试；Playwright 已新增画布 E2E，覆盖进入画布、新增 Join、删除选中、校验、发布。
 
 ## 最近验证
 
 - `python -m pytest -q`：30 passed。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v6`，Run `run-9311b164dd1f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：2 个测试文件、14 个测试通过。
+- `cd frontend && npm test`：3 个测试文件、16 个测试通过。
 - `cd frontend && npm run build`：通过。
-- `cd frontend && npm run e2e`：1 个 Playwright E2E 测试通过，覆盖任务主链路。
+- `cd frontend && npm run e2e`：2 个 Playwright E2E 测试通过，覆盖任务主链路与 Workflow 画布新增/删除/校验/发布。
 - `http://127.0.0.1:8000/health`：FastAPI 页面健康检查通过。
 - `http://127.0.0.1:5173`：React 前端可访问。
 - 无头 Chrome 页面验证：`/`、`/skills`、`/workflows`、`/workflows/designer/draft-test`、`/runs`、`/reports` 均能打开并展示关键入口。
@@ -48,6 +49,30 @@
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 Workflow 画布图模型与 E2E 第一批
+
+- 改动摘要：启动阶段 2。把 Workflow 画布 nodes/edges 到后端 `WorkflowGraph` 的转换逻辑抽成独立 `graphModel.ts`，补前端单元测试覆盖 payload 转换、缺 Skill、Branch 条件缺失、坏 JSON 配置；新增 Playwright Workflow 画布 E2E，覆盖进入画布、新增 Join、删除选中、校验、发布。
+- 变更文件：
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/pages/workflowDesigner/graphModel.ts`
+  - `frontend/src/pages/workflowDesigner/graphModel.test.ts`
+  - `frontend/e2e/workflow-designer.spec.ts`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/pages/workflowDesigner/graphModel.test.ts`
+  - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 图模型单测：2 passed。
+  - 前端全量：3 个测试文件、16 个测试通过；typecheck 通过。
+  - Playwright：2 passed，包含任务主链路与 Workflow 画布路径。
+- 下一步：继续阶段 2，补真实连线/删除边、撤销/重做、保存草稿回放、试运行结果回填与更严格 Inspector 字段映射。
 
 ### 2026-05-31 P0 Bug 与稳定性修复完成
 

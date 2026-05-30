@@ -91,15 +91,16 @@
 
 ### Task 2.1：图模型转换独立化
 
-- [ ] 新增前端单元测试：nodes/edges 能转换为后端 `WorkflowGraph`。
-- [ ] 新增前端单元测试：空 Skill、坏 JSON mapping、缺 Branch 条件会产生前端校验错误。
-- [ ] 抽出 `graphModel.ts`，避免页面组件直接拼后端 payload。
-- [ ] 运行 `cd frontend && npm test`。
+- [x] 新增前端单元测试：nodes/edges 能转换为后端 `WorkflowGraph`。
+- [x] 新增前端单元测试：空 Skill、坏 JSON mapping、缺 Branch 条件会产生前端校验错误。
+- [x] 抽出 `graphModel.ts`，避免页面组件直接拼后端 payload。
+- [x] 运行 `cd frontend && npm test`。
 
 ### Task 2.2：画布节点与连线操作补齐
 
 - [ ] 新增 Playwright 失败测试：拖拽/点击添加 Source、Skill、Join、Output。
 - [ ] 新增 Playwright 失败测试：创建连线、删除连线、删除节点。
+- [x] 新增 Playwright E2E 第一批：进入画布、点击新增 Join、删除选中、校验、发布。
 - [ ] 实现节点工具栏和键盘删除。
 - [ ] 实现撤销/重做栈，覆盖新增节点、删除节点、连线。
 - [ ] 运行 `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`。

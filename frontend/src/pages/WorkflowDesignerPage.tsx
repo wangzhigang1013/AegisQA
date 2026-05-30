@@ -21,8 +21,6 @@ import {
   useEdgesState,
   useNodesState,
   type Connection,
-  type Edge,
-  type Node,
 } from '@xyflow/react';
 import { Alert, Button, Card, Col, Divider, Form, Input, InputNumber, Row, Select, Space, Tabs, Tag, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
@@ -32,24 +30,17 @@ import { api } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { demoSkills, demoWorkflowGraph } from '../data/demo';
 import type { DatasetVersion, GraphValidationResult, SkillManifest, WorkflowGraph, WorkflowGraphNode } from '../types';
-
-type FlowNodeData = {
-  label: string;
-  graphNode: WorkflowGraphNode;
-};
-
-type FlowNode = Node<FlowNodeData>;
-
-const paletteNodeTypes: WorkflowGraphNode['node_type'][] = ['source', 'branch', 'join', 'aggregator', 'output'];
-
-const nodeTypeLabel: Record<WorkflowGraphNode['node_type'], string> = {
-  source: 'Source',
-  skill: 'Skill',
-  branch: 'Branch',
-  join: 'Join',
-  aggregator: 'Aggregator',
-  output: 'Output',
-};
+import {
+  buildWorkflowGraph,
+  formatNodeLabel,
+  graphNodeToFlowNode,
+  graphToEdges,
+  graphToNodes,
+  nodeTypeLabel,
+  paletteNodeTypes,
+  parseJsonObjectField,
+  type FlowNode,
+} from './workflowDesigner/graphModel';
 
 export function WorkflowDesignerPage() {
   return (
@@ -94,7 +85,7 @@ function WorkflowDesignerContent() {
     [datasetsQuery.data],
   );
   const selectedDataset = datasetVersions.find((item) => item.version.version_id === selectedDatasetVersion)?.version ?? null;
-  const graph = useMemo(() => buildGraph(workflowName, nodes, edges), [workflowName, nodes, edges]);
+  const graph = useMemo(() => buildWorkflowGraph(workflowName, nodes, edges), [workflowName, nodes, edges]);
   const selectedNode = selectedNodeId ? nodes.find((node) => node.id === selectedNodeId) ?? null : null;
   const selectedGraphNode = selectedNode?.data.graphNode ?? null;
 
@@ -460,47 +451,6 @@ function WorkflowDesignerContent() {
   );
 }
 
-function graphNodeToFlowNode(graphNode: WorkflowGraphNode, position: { x: number; y: number }): FlowNode {
-  return {
-    id: graphNode.node_id,
-    type: graphNode.node_type === 'output' ? 'output' : 'default',
-    position,
-    data: { label: formatNodeLabel(graphNode), graphNode },
-  };
-}
-
-function graphToNodes(graph: WorkflowGraph): FlowNode[] {
-  return graph.nodes.map((graphNode, index) => graphNodeToFlowNode(graphNode, { x: 80 + (index % 4) * 250, y: 100 + Math.floor(index / 4) * 160 }));
-}
-
-function graphToEdges(graph: WorkflowGraph): Edge[] {
-  return graph.edges.map((edge) => ({
-    id: edgeId(edge.source, edge.target),
-    source: edge.source,
-    target: edge.target,
-    label: edge.condition,
-    markerEnd: { type: MarkerType.ArrowClosed },
-    animated: Boolean(edge.condition),
-  }));
-}
-
-function buildGraph(name: string, nodes: FlowNode[], edges: Edge[]): WorkflowGraph {
-  // 以画布当前状态作为唯一事实来源，避免“看到的图”和“提交到后端的图”不一致。
-  return {
-    name,
-    nodes: nodes.map((node) => ({ ...node.data.graphNode, node_id: node.id })),
-    edges: edges.map((edge) => ({ source: edge.source, target: edge.target, condition: typeof edge.label === 'string' ? edge.label : undefined })),
-  };
-}
-
-function formatNodeLabel(node: WorkflowGraphNode): string {
-  return `${node.label || node.node_id}\n${node.skill_ref || nodeTypeLabel[node.node_type]}`;
-}
-
-function edgeId(source: string, target: string): string {
-  return `${source}-${target}`;
-}
-
 function uniqueNodeId(base: string, nodes: FlowNode[]): string {
   const normalized = base.replace(/[^a-zA-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || 'node';
   const existing = new Set(nodes.map((node) => node.id));
@@ -539,10 +489,11 @@ function updateJsonPatch(
   updateSelectedNode: (patch: Partial<WorkflowGraphNode>) => void,
   setConsoleText: (text: string) => void,
 ) {
-  try {
-    updateSelectedNode({ [field]: JSON.parse(value || '{}') });
-  } catch (error) {
-    setConsoleText(error instanceof Error ? `JSON 解析失败：${error.message}` : 'JSON 解析失败');
+  const parsed = parseJsonObjectField(value, field);
+  if (parsed.ok) {
+    updateSelectedNode({ [field]: parsed.value });
+  } else {
+    setConsoleText(`JSON 解析失败：${parsed.issue.message}`);
   }
 }
 
