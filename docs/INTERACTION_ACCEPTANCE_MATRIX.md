@@ -9,8 +9,8 @@
 
 ## 最近一次交互验证
 
-- `npm test`：19 个前端交互/API client/图模型测试通过。
-- `npm run e2e`：3 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路，以及 Workflow 画布新增 Source/Skill/Join/Output、创建连线、删除节点、删除下游连线、校验、发布。
+- `npm test`：20 个前端交互/API client/图模型测试通过。
+- `npm run e2e`：4 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路，以及 Workflow 画布新增 Source/Skill/Join/Output、创建连线、删除节点、删除下游连线、键盘删除、校验、发布。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Headless Chrome CDP：概览页额外验证真实 Dashboard 指标，以及 Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 产品化入口。
 - 验证过程中发现 8000 端口曾运行旧 FastAPI 进程，导致 `/workflow-drafts` 返回 404；重启后端后，Workflow 保存草稿复测为“草稿已保存”。
@@ -35,7 +35,7 @@
 | Workflow 画布 | 选择流程 | 可用，支持草稿、已发布版本、模板入口 | `GET /workflow-drafts`、`GET /workflows`、`GET /workflow-templates` | `npm test` 覆盖选择器存在 |
 | Workflow 画布 | 新增节点 | 可用，Skill 与结构节点分开新增 | `GET /skills` | `npm test` 覆盖新增 Join；Playwright E2E 覆盖 Source、Skill、Join、Output 新增 |
 | Workflow 画布 | 连线 | 可用，React Flow `onConnect` 写入当前 edges；Inspector 同时提供“可连接目标”按钮，便于选择下游节点并创建依赖线 | 前端画布状态 | `npm test` 和 Playwright E2E 覆盖创建连线、删除下游连线 |
-| Workflow 画布 | 删除节点/连线 | 可用，删除选中节点或通过 Inspector 删除选中节点的下游连线，并同步画布状态 | 前端画布状态 | `npm test` 覆盖删除节点和删除下游连线；Playwright E2E 覆盖删除选中节点和 `answer -> judge_a` 下游连线 |
+| Workflow 画布 | 删除节点/连线 | 可用，删除选中节点、Inspector 删除当前节点、键盘 Delete/Backspace 删除，或通过 Inspector 删除选中节点的下游连线，并同步画布状态 | 前端画布状态 | `npm test` 覆盖删除节点、键盘删除和删除下游连线；Playwright E2E 覆盖节点工具栏、键盘删除、删除选中节点和 `answer -> judge_a` 下游连线 |
 | Workflow 画布 | 撤销/重做 | 可用，支持节点新增、删除、Inspector 编辑、自动布局、连线的历史回退与恢复 | 前端画布状态 | `npm test` 和 Playwright E2E 覆盖新增 Join 后撤销/重做 |
 | Workflow 画布 | Inspector 编辑 | 可用，支持名称、类型、Skill、条件、JSON 映射和配置 | 前端画布状态 | 类型检查覆盖 |
 | Workflow 画布 | 保存草稿 | 可用，新建或更新草稿，保存后回到 Workflow 市场 | `POST/PUT /workflow-drafts` | 后端契约测试覆盖 |
@@ -56,7 +56,7 @@
 
 ## 当前仍需增强
 
-- Workflow 画布已通过 Headless Chrome CDP 做核心烟测，Playwright 已覆盖进入画布、创建连线、删除节点、删除下游连线与发布后任务主链路；还需要进一步覆盖键盘删除、保存草稿回放、试运行、发布阻断等完整画布链路。
+- Workflow 画布已通过 Headless Chrome CDP 做核心烟测，Playwright 已覆盖进入画布、创建连线、删除节点、删除下游连线、键盘删除与发布后任务主链路；还需要进一步覆盖保存草稿回放、试运行、发布阻断等完整画布链路。
 - Task 创建向导需要进一步加入权限检查、成本预算、CI Gate 和实验 baseline 对比。
 - 报告中心需要把已实现的 Experiment/CI Gate/Annotation Queue/Trace Tree API 进一步做成独立可操作视图。
 - Judge 审计需要增加多 Judge 一致性和红队安全扫描视图。

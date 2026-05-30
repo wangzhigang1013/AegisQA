@@ -105,7 +105,7 @@
 - [x] 实现撤销/重做栈，覆盖节点新增、删除、Inspector 编辑、自动布局、连线。
 - [x] 实现 Inspector 下游连线管理区，支持查看并删除选中节点流出的连线。
 - [x] 实现 Inspector 可连接目标区，支持选择目标节点并创建下游连线。
-- [ ] 实现节点工具栏和键盘删除。
+- [x] 实现节点工具栏和键盘删除。
 - [x] 运行 `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`。
 
 ### Task 2.3：Inspector 字段映射与发布前校验

@@ -208,6 +208,19 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByRole('button', { name: /删除连线 answer -> judge_a/ })).toBeInTheDocument();
   });
 
+  it('Workflow Inspector 提供节点工具栏并支持键盘删除', async () => {
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    fireEvent.click(await screen.findByRole('button', { name: /删除当前节点/ }));
+    expect(await screen.findByText(/已删除节点：answer/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /撤销/ }));
+    expect(await screen.findByText(/已撤销/)).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Delete' });
+    expect(await screen.findByText(/已删除节点：answer/)).toBeInTheDocument();
+  });
+
   it('执行中心默认展示任务列表并可以创建任务', async () => {
     await renderWorkbench('/runs');
 

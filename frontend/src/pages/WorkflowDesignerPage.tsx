@@ -84,6 +84,23 @@ function WorkflowDesignerContent() {
     }
   }, [draftId, draftsQuery.data, routeDraftId]);
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target;
+      const isEditingText =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable);
+      if (isEditingText || (event.key !== 'Delete' && event.key !== 'Backspace')) return;
+      if (!selectedNodeId && !selectedEdgeId) return;
+      event.preventDefault();
+      deleteSelected();
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedNodeId, selectedEdgeId, nodes, edges, workflowName]);
+
   const skills = skillsQuery.data?.length ? skillsQuery.data : demoSkills;
   const datasetVersions = useMemo(
     () => datasetsQuery.data?.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))) ?? [],
@@ -427,6 +444,16 @@ function WorkflowDesignerContent() {
           <Card className="flat-card full-height" title="节点 Inspector">
             {selectedGraphNode ? (
               <Space direction="vertical" className="drawer-stack">
+                <Typography.Text strong>节点工具栏</Typography.Text>
+                <Space wrap>
+                  <Button danger icon={<DeleteOutlined />} onClick={deleteSelected}>
+                    删除当前节点
+                  </Button>
+                  <Button icon={<ApiOutlined />} onClick={autoLayout}>
+                    自动布局
+                  </Button>
+                </Space>
+                <Divider />
                 <div>
                   <Typography.Text type="secondary">节点 ID</Typography.Text>
                   <Input value={selectedGraphNode.node_id} onChange={(event) => updateSelectedNode({ node_id: event.target.value })} />

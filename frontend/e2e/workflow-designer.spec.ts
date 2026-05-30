@@ -46,3 +46,17 @@ test('Workflow 画布可以新增、删除、校验并发布流程', async ({ pa
   await page.getByRole('button', { name: '发布' }).click();
   await expect(page.getByText(/发布成功/)).toBeVisible();
 });
+
+test('Workflow 画布支持节点工具栏和键盘删除', async ({ page }) => {
+  await page.goto('/workflows');
+  await page.getByRole('button', { name: /新建 Workflow/ }).click();
+
+  await page.getByRole('button', { name: /删除当前节点/ }).click();
+  await expect(page.getByText(/已删除节点：answer/)).toBeVisible();
+
+  await page.getByRole('button', { name: '撤销' }).click();
+  await expect(page.getByText(/已撤销/)).toBeVisible();
+
+  await page.keyboard.press('Delete');
+  await expect(page.getByText(/已删除节点：answer/)).toBeVisible();
+});
