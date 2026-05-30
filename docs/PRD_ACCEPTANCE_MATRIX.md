@@ -17,8 +17,8 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 最近一次验证结果：
 
-- 单元/API/扩展测试：`42 passed`。
-- 端到端 Demo：最新 Dataset `rag_qa_1000:v6`、Run `run-9311b164dd1f`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
+- 单元/API/扩展测试：`44 passed`。
+- 端到端 Demo：最新 Dataset `rag_qa_1000:v7`、Run `run-5a86aceede3f`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
 - 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 30 个交互/API client/图模型/任务创建向导/Run Attempts/Experiment/CI Gate/Annotation Queue 测试，Playwright 覆盖 8 条 E2E。
 - 浏览器交互：Headless Chrome CDP 验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden；同时覆盖 CI Gate 创建配置和阻断评估、Annotation Queue 领取/审核/回流 Golden，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行回填、校验、发布。
@@ -103,7 +103,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 ## 生产化边界说明
 
-- 本地默认运行仍使用 JSON 文件仓储和单进程 Runner，便于面试演示和无外部依赖验证。
+- 本地默认运行仍使用 JSON 文件仓储和单进程 Runner，便于面试演示和无外部依赖验证；JSON Store 已增加锁文件与原子写入，降低本地多线程/多进程测试时的文件损坏风险，但不提供事务、索引、权限隔离、分布式一致性或高可用能力。
 - Skill 插件包执行默认走受控子进程，不在主 FastAPI 进程中直接 import 用户代码；当前已具备审批门禁、5 秒默认超时、stdout 输出上限、日志截断和本地路径脱敏，生产环境仍需补进程级 CPU/内存限额、依赖隔离和签名校验。
 - 生产适配资产已提供：`docker-compose.yml`、`infra/mysql/schema.sql`、`infra/celery/README.md`、`aegisqa/workers/celery_app.py`、`aegisqa/infrastructure/manifest.py`。
 - MySQL/Redis/Celery 生产服务需要在目标环境中安装依赖并启动容器后接入真实 Repository/Worker；当前测试验证了 schema、消息契约和 Worker 入口，而不是启动外部服务。

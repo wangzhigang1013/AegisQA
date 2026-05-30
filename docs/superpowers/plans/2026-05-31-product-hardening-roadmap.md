@@ -267,12 +267,12 @@
 
 ## 最终验收
 
-- [ ] `python -m pytest -q` 通过。
-- [ ] `python -m aegisqa.examples.run_mvp_demo` 通过。
-- [ ] `cd frontend && npm run typecheck` 通过。
-- [ ] `cd frontend && npm test` 通过。
-- [ ] `cd frontend && npm run build` 通过。
-- [ ] `cd frontend && npm run e2e` 通过。
-- [ ] `docs/PROJECT_STATUS.md` 已记录每个阶段。
-- [ ] `docs/PRD_ACCEPTANCE_MATRIX.md` 已更新覆盖状态。
-- [ ] `docs/INTERACTION_ACCEPTANCE_MATRIX.md` 已更新按钮验收状态。
+- [x] `python -m pytest -q` 通过。
+- [x] `python -m aegisqa.examples.run_mvp_demo` 通过。
+- [x] `cd frontend && npm run typecheck` 通过。
+- [x] `cd frontend && npm test` 通过。
+- [x] `cd frontend && npm run build` 通过。
+- [x] `cd frontend && npm run e2e` 通过。
+- [x] `docs/PROJECT_STATUS.md` 已记录每个阶段。
+- [x] `docs/PRD_ACCEPTANCE_MATRIX.md` 已更新覆盖状态。
+- [x] `docs/INTERACTION_ACCEPTANCE_MATRIX.md` 已更新按钮验收状态。

@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 7（工程结构与生产化边界）Task 7.2 已完成；本批已为本地 JSON Store 增加锁文件与原子写入保护，并在 README 明确 JSON Store 只适合本地 demo，生产应使用 MySQL/PostgreSQL、Redis/Celery 和对象存储。下一步进入最终验收。
+产品严谨化全方位优化计划已完成最终验收。本轮从 Experiment、CI Gate、Annotation Queue 产品页继续推进到 API 路由拆分、JSON Store 文件锁、生产化边界说明，并完成后端、1000 样本 Demo、前端 typecheck/test/build/E2E 全量验证。
 
 ## 当前已完成
 
@@ -47,7 +47,7 @@
 ## 最近验证
 
 - `python -m pytest -q`：44 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
-- `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v6`，Run `run-9311b164dd1f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
+- `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v7`，Run `run-5a86aceede3f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、30 个测试通过。
 - `cd frontend && npm run build`：通过。
@@ -70,11 +70,33 @@
 
 ## 下一阶段目标
 
-- 进入最终验收：重新运行后端、Demo、前端 typecheck/test/build/E2E，并检查状态文档、PRD 验收矩阵和交互验收矩阵是否需要补充。
-- 把 Experiment、Prompt/Skill 版本注册、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 从最小 API 能力继续扩展为完整页面与端到端操作流。
-- 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
+- 后续建议优先进入 Trace Tree 独立页面、CI Gate 历史记录、Annotation Queue 批量审核、多 Judge 一致性视图、红队安全扫描和真实 MySQL/Redis/Celery Repository/Worker 接入。
 
 ## 最近改动
+
+### 2026-05-31 最终验收
+
+- 改动摘要：完成产品严谨化全方位优化计划的最终验收。重新执行后端、1000 样本 Demo、前端类型检查、单元测试、生产构建和 Playwright E2E；同步更新 PRD 验收矩阵、交互验收矩阵和计划最终清单。
+- 变更文件：
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `python -m pytest -q`
+  - `python -m aegisqa.examples.run_mvp_demo`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端全量：44 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 1000 样本 Demo：Dataset `rag_qa_1000:v7`，Run `run-5a86aceede3f` completed，队列消息字段仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条。
+  - Typecheck：通过。
+  - 前端全量：4 个测试文件、30 passed。
+  - Build：通过。
+  - Playwright 全量 E2E：8 passed。
+- 下一步：进入下一轮产品增强规划，优先补 Trace Tree 独立视图、CI Gate 历史、批量人工审核、多 Judge 一致性和真实生产 Repository/Worker。
 
 ### 2026-05-31 JSON Store 文件锁与生产化边界
 
