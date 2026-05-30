@@ -1,0 +1,39 @@
+name: rag_customer_service_regression
+runtime:
+  concurrency: 8
+  chunk_size: 100
+  retry:
+    max_attempts: 2
+    backoff_seconds: 1
+  rate_limits:
+    llm.call@0.1.0: 4
+  sample_repeat_times: 1
+  cache:
+    enabled: true
+steps:
+  - step_id: answer
+    skill_ref: llm.call@0.1.0
+    cacheable: true
+    config:
+      model: demo-model
+      temperature: 0
+    input_mapping:
+      prompt: row.question
+    output_mapping:
+      answer: context.answer
+      tokens: metrics.tokens
+      latency_ms: metrics.answer_latency_ms
+  - step_id: judge
+    skill_ref: llm.judge@0.1.0
+    config:
+      model: judge-model
+      threshold: 0.6
+    input_mapping:
+      question: row.question
+      answer: context.answer
+      reference: row.reference
+    output_mapping:
+      score: metrics.judge_score
+      label: context.judge_label
+      reason: context.judge_reason
+

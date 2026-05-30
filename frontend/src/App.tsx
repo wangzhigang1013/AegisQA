@@ -1,0 +1,98 @@
+import {
+  ApartmentOutlined,
+  AuditOutlined,
+  BarChartOutlined,
+  ControlOutlined,
+  DatabaseOutlined,
+  DeploymentUnitOutlined,
+  ExperimentOutlined,
+  PlayCircleOutlined,
+  SafetyCertificateOutlined,
+} from '@ant-design/icons';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ConfigProvider, Layout, Menu, theme } from 'antd';
+import type { MenuProps } from 'antd';
+import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+
+import { DatasetsPage } from './pages/DatasetsPage';
+import { GovernancePage } from './pages/GovernancePage';
+import { JudgeAuditPage } from './pages/JudgeAuditPage';
+import { OverviewPage } from './pages/OverviewPage';
+import { ReportsPage } from './pages/ReportsPage';
+import { RunsPage } from './pages/RunsPage';
+import { SkillsPage } from './pages/SkillsPage';
+import { WorkflowDesignerPage } from './pages/WorkflowDesignerPage';
+import { WorkflowMarketPage } from './pages/WorkflowMarketPage';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      refetchOnWindowFocus: false,
+      staleTime: 30_000,
+    },
+  },
+});
+
+const navItems: MenuProps['items'] = [
+  { key: '/', icon: <BarChartOutlined />, label: <NavLink to="/">概览</NavLink> },
+  { key: '/datasets', icon: <DatabaseOutlined />, label: <NavLink to="/datasets">数据集</NavLink> },
+  { key: '/skills', icon: <ExperimentOutlined />, label: <NavLink to="/skills">Skill 市场</NavLink> },
+  { key: '/workflows', icon: <ApartmentOutlined />, label: <NavLink to="/workflows">Workflow 市场</NavLink> },
+  { key: '/runs', icon: <PlayCircleOutlined />, label: <NavLink to="/runs">执行中心</NavLink> },
+  { key: '/reports', icon: <BarChartOutlined />, label: <NavLink to="/reports">报告中心</NavLink> },
+  { key: '/judge', icon: <AuditOutlined />, label: <NavLink to="/judge">Judge 审计</NavLink> },
+  { key: '/governance', icon: <SafetyCertificateOutlined />, label: <NavLink to="/governance">治理与审计</NavLink> },
+];
+
+export function AppShell() {
+  const location = useLocation();
+  const selectedKey = `/${location.pathname.split('/')[1]}`.replace(/\/$/, '') || '/';
+
+  return (
+    <ConfigProvider
+      theme={{
+        algorithm: theme.defaultAlgorithm,
+        token: {
+          colorPrimary: '#2563eb',
+          colorSuccess: '#0f9f6e',
+          colorWarning: '#b45309',
+          colorError: '#dc2626',
+          borderRadius: 8,
+          fontFamily: 'Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif',
+        },
+      }}
+    >
+      <QueryClientProvider client={queryClient}>
+        <Layout className="app-shell">
+          <Layout.Sider className="app-sider" width={252}>
+            <div className="brand">
+              <DeploymentUnitOutlined />
+              <div>
+                <strong>AegisQA</strong>
+                <span>AI 评测工作台</span>
+              </div>
+            </div>
+            <Menu className="app-menu" mode="inline" selectedKeys={[selectedKey]} items={navItems} />
+          </Layout.Sider>
+          <Layout className="app-main">
+            <Layout.Content className="app-content">
+              <Routes>
+                <Route path="/" element={<OverviewPage />} />
+                <Route path="/datasets" element={<DatasetsPage />} />
+                <Route path="/skills" element={<SkillsPage />} />
+                <Route path="/workflow" element={<WorkflowMarketPage />} />
+                <Route path="/workflows" element={<WorkflowMarketPage />} />
+                <Route path="/workflows/designer/:draftId" element={<WorkflowDesignerPage />} />
+                <Route path="/runs" element={<RunsPage />} />
+                <Route path="/reports" element={<ReportsPage />} />
+                <Route path="/judge" element={<JudgeAuditPage />} />
+                <Route path="/governance" element={<GovernancePage />} />
+              </Routes>
+            </Layout.Content>
+          </Layout>
+        </Layout>
+      </QueryClientProvider>
+    </ConfigProvider>
+  );
+}

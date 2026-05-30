@@ -1,0 +1,10 @@
+选项一：最具极客感与大厂风（强烈推荐 ✨）
+项目代号： Aegis / AegisQA (埃吉斯)
+
+英文全称： Aegis: AI Engineering Governance & Integrated Skills-driven Evaluation Platform
+
+中文名称： 基于可插拔技能驱动的 AI 智能体工程化治理与全链路评测平台
+
+名字寓意： Aegis 是神话中宙斯/雅典娜的“宙斯盾”，代表绝对的防御与质量护盾。
+
+面试官听感： 听起来就像是阿里、腾讯或字节内部自研的底层核心质量基建。打着“治理（Governance）”和“工程化”的旗号，瞬间拔高了项目的技术站位。

@@ -1,0 +1,30 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: aegisqa_root
+      MYSQL_DATABASE: aegisqa
+      MYSQL_USER: aegisqa
+      MYSQL_PASSWORD: aegisqa_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./infra/mysql/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  worker:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: >
+      sh -c "pip install -e . celery redis pymysql &&
+             celery -A aegisqa.workers.celery_app worker --loglevel=INFO"
+    depends_on:
+      - redis
+      - mysql
+

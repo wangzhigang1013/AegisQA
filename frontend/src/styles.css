@@ -1,0 +1,283 @@
+:root {
+  color: #172033;
+  background: #f6f8fb;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: #f6f8fb;
+}
+
+code,
+pre {
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+pre {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  background: #fbfcff;
+  color: #22314d;
+  white-space: pre-wrap;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-sider {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  border-right: 1px solid #d9e2ef;
+  background: #ffffff !important;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 72px;
+  padding: 0 20px;
+  color: #172033;
+}
+
+.brand .anticon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 8px;
+  background: #e8f0ff;
+  color: #2563eb;
+  font-size: 20px;
+}
+
+.brand strong,
+.brand span {
+  display: block;
+}
+
+.brand strong {
+  font-size: 18px;
+}
+
+.brand span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.app-menu {
+  border-inline-end: 0 !important;
+}
+
+.app-main {
+  background: #f6f8fb;
+}
+
+.app-content {
+  width: 100%;
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.page-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 8px;
+}
+
+.page-header h1.ant-typography {
+  margin: 4px 0 8px;
+  color: #111827;
+  font-size: 30px;
+  line-height: 1.2;
+}
+
+.page-header .ant-typography {
+  max-width: 760px;
+  color: #5a667a;
+}
+
+.eyebrow {
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.flat-card,
+.metric-tile,
+.skill-card {
+  border-color: #d9e2ef;
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.04);
+}
+
+.metric-tile .ant-card-body {
+  min-height: 132px;
+}
+
+.metric-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.metric-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 8px;
+  font-size: 18px;
+}
+
+.metric-blue .metric-icon {
+  background: #e8f0ff;
+  color: #2563eb;
+}
+
+.metric-green .metric-icon {
+  background: #e7f7ef;
+  color: #0f9f6e;
+}
+
+.metric-amber .metric-icon {
+  background: #fff4df;
+  color: #b45309;
+}
+
+.metric-violet .metric-icon {
+  background: #f0e9ff;
+  color: #6d28d9;
+}
+
+.metric-red .metric-icon {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.section-band {
+  padding: 20px;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.section-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.section-title-row h2 {
+  margin: 0 0 6px;
+}
+
+.section-title-row p {
+  margin: 0;
+  color: #667085;
+}
+
+.compact-form {
+  margin-top: 18px;
+}
+
+.drawer-stack {
+  width: 100%;
+}
+
+.wide-search {
+  min-width: 260px;
+}
+
+.task-progress-cell {
+  min-width: 120px;
+}
+
+.skill-card .ant-card-body {
+  min-height: 152px;
+}
+
+.designer-grid {
+  align-items: stretch;
+}
+
+.full-height,
+.canvas-card {
+  height: 100%;
+}
+
+.canvas-card .ant-card-body {
+  height: 560px;
+  padding: 0;
+}
+
+.react-flow__node {
+  min-width: 150px;
+  border: 1px solid #9ab5df;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.12);
+  color: #172033;
+  white-space: pre-line;
+}
+
+.react-flow__node-output {
+  border-color: #0f9f6e;
+}
+
+.node-help {
+  margin-top: 10px;
+}
+
+.vertical-steps {
+  margin-top: 24px;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    display: block;
+  }
+
+  .app-sider {
+    position: relative;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto;
+  }
+
+  .app-content {
+    padding: 18px;
+  }
+
+  .page-header,
+  .section-title-row {
+    flex-direction: column;
+  }
+
+  .canvas-card .ant-card-body {
+    height: 420px;
+  }
+}
