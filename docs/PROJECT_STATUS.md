@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-正式 Playwright E2E 主链路已完成，进入画布精细化与产品化增强扩展阶段。
+正式 Playwright E2E 主链路已完成，已启动产品严谨化全量优化执行阶段。
 
 ## 当前已完成
 
@@ -15,6 +15,7 @@
 - 新增 Task 一等模型，Task 绑定 Dataset Version、Workflow Version 和底层 Run，执行中心与报告中心都围绕任务组织。
 - 已建立 `docs/INTERACTION_ACCEPTANCE_MATRIX.md`，逐页记录可见按钮的可用状态、依赖 API 和验收方式。
 - 已新增正式 Playwright E2E，自动覆盖“上传数据 -> 上传并审批 Skill -> 创建 Workflow -> 发布 -> 创建 Task -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路。
+- 已新增全量优化执行计划 `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`，阶段顺序为 P0 稳定性、Workflow 画布、Task、Report/Badcase、Skill 安全、Experiment/CI/Annotation、工程结构。
 
 ## 最近验证
 
@@ -46,6 +47,20 @@
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 产品严谨化全量计划启动
+
+- 改动摘要：根据用户要求，把下一阶段所有优化写入正式执行计划，并切换到 `feature/product-hardening-roadmap` 分支，后续按计划从 P0 Bug 与稳定性修复开始顺序执行。
+- 变更文件：
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `git switch -c feature/product-hardening-roadmap`
+  - `Select-String -Path docs\superpowers\plans\2026-05-31-product-hardening-roadmap.md -Pattern 'TBD|TODO|later|fill in|适当|类似'`
+- 测试结果：
+  - 计划文档已创建，未发现占位符。
+  - 本批次仅新增计划和状态同步，尚未修改业务代码。
+- 下一步：提交计划文档，然后按计划执行阶段 1：P0 Bug 与稳定性修复。
 
 ### 2026-05-31 Playwright E2E 主链路完成
 
