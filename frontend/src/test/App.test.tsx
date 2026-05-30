@@ -68,6 +68,31 @@ const demoBadcase = {
   updated_at: '2026-05-31T00:00:00Z',
 };
 
+const pendingPackageSkill = {
+  ...demoSkills[0],
+  skill_id: 'plugin.echo@0.1.0',
+  name: 'Echo 插件',
+  status: 'pending_review',
+  enabled: false,
+};
+
+const pendingSkillPackage = {
+  package_id: 'pkg-demo',
+  filename: 'echo.zip',
+  status: 'pending_review',
+  manifest: pendingPackageSkill,
+  package_dir: 'hidden',
+  handler_path: 'hidden',
+  last_contract_ok: false,
+  last_contract_result: { ok: false, message: '尚未运行' },
+  last_contract_at: null,
+  approved_by: null,
+  approved_at: null,
+  approval_note: null,
+  created_at: '2026-05-31T00:00:00Z',
+  updated_at: '2026-05-31T00:00:00Z',
+};
+
 async function renderWorkbench(path: string) {
   await act(async () => {
     render(
@@ -385,6 +410,53 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /运行合约测试/ }));
 
     expect(await screen.findByText(/合约测试通过/)).toBeInTheDocument();
+  });
+
+  it('Skill 市场展示插件包审批状态、合约测试状态和审批信息', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/skills')) {
+        return jsonResponse([...demoSkills, pendingPackageSkill]);
+      }
+      if (url.endsWith('/skills/packages')) {
+        return jsonResponse([pendingSkillPackage]);
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/skills');
+
+    expect(await screen.findByText('Echo 插件')).toBeInTheDocument();
+    expect(screen.getByText('待审批')).toBeInTheDocument();
+    expect(screen.getByText('合约未通过')).toBeInTheDocument();
+    expect(screen.getByText('未审批')).toBeInTheDocument();
+  });
+
+  it('治理页审批抽屉展示 manifest、schema 和未通过合约测试禁用原因', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/skills')) {
+        return jsonResponse([pendingPackageSkill]);
+      }
+      if (url.endsWith('/skills/packages')) {
+        return jsonResponse([pendingSkillPackage]);
+      }
+      if (url.endsWith('/audit-events')) {
+        return jsonResponse([]);
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/governance');
+
+    const approvalButtons = await screen.findAllByRole('button', { name: /审批详情/ });
+    fireEvent.click(approvalButtons[approvalButtons.length - 1]);
+
+    expect(await screen.findByText('Skill 审批详情')).toBeInTheDocument();
+    expect(screen.getByText('Manifest')).toBeInTheDocument();
+    expect(screen.getByText('输入 Schema')).toBeInTheDocument();
+    expect(screen.getByText('未通过合约测试不能启用')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /审批启用/ })).toBeDisabled();
   });
 
   it('报告中心围绕任务展示报告和导出入口', async () => {

@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react';
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { demoSkills } from '../data/demo';
-import type { SkillManifest } from '../types';
+import type { SkillManifest, SkillPackageRecord } from '../types';
 
 type UploadFormValues = {
   filename: string;
@@ -27,6 +27,7 @@ export function SkillsPage() {
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
   const packagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
   const skills = skillsQuery.data?.length ? skillsQuery.data : demoSkills;
+  const packageBySkillId = useMemo(() => indexPackagesBySkillId(packagesQuery.data ?? []), [packagesQuery.data]);
   const filteredSkills = useMemo(() => {
     const query = skillQuery.trim().toLowerCase();
     return skills.filter((skill) => {
@@ -62,6 +63,7 @@ export function SkillsPage() {
       const text = result.ok ? `合约测试通过：${result.skill_id}` : `合约测试失败：${result.message ?? result.error ?? '未知错误'}`;
       setContractResultText(text);
       setNotice(text);
+      void queryClient.invalidateQueries({ queryKey: ['skill-packages'] });
     },
     onError: (error) => setContractResultText(`合约测试失败：${formatApiError(error)}`),
   });
@@ -108,10 +110,41 @@ export function SkillsPage() {
           pagination={{ pageSize: 8 }}
           columns={[
             { title: 'Skill', dataIndex: 'skill_id', render: (value, record) => <Space direction="vertical" size={0}><Typography.Text strong>{record.name}</Typography.Text><code>{value}</code></Space> },
-            { title: '状态', dataIndex: 'status', render: (value, record) => <Tag color={record.enabled ? 'green' : 'orange'}>{value}</Tag> },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              render: (value, record) => (
+                <Space wrap>
+                  <Tag color={record.enabled ? 'green' : 'orange'}>{formatSkillStatus(value)}</Tag>
+                  {!record.enabled ? <Tag>未启用</Tag> : null}
+                </Space>
+              ),
+            },
+            {
+              title: '合约测试',
+              render: (_, record) => {
+                const packageRecord = packageBySkillId[record.skill_id];
+                if (!packageRecord) return <Tag>内置 Skill</Tag>;
+                return <Tag color={packageRecord.last_contract_ok ? 'green' : 'red'}>{packageRecord.last_contract_ok ? '合约已通过' : '合约未通过'}</Tag>;
+              },
+            },
+            {
+              title: '审批人',
+              render: (_, record) => {
+                const packageRecord = packageBySkillId[record.skill_id];
+                return packageRecord ? (packageRecord.approved_by ?? '未审批') : '-';
+              },
+            },
+            {
+              title: '审批时间',
+              render: (_, record) => {
+                const packageRecord = packageBySkillId[record.skill_id];
+                return packageRecord ? (packageRecord.approved_at ?? '-') : '-';
+              },
+            },
             { title: '标签', dataIndex: 'tags', render: (tags: string[]) => <Space wrap>{tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}</Space> },
             { title: '权限', dataIndex: 'permissions', render: (items: string[]) => <Space wrap>{items.map((item) => <Tag color="blue" key={item}>{item}</Tag>)}</Space> },
-            { title: '插件包', render: (_, record) => (packagesQuery.data?.some((item) => item.manifest.skill_id === record.skill_id) ? <Tag color="purple">package</Tag> : <Tag>builtin</Tag>) },
+            { title: '插件包', render: (_, record) => (packageBySkillId[record.skill_id] ? <Tag color="purple">package</Tag> : <Tag>builtin</Tag>) },
             {
               title: '操作',
               render: (_, record) => (
@@ -134,6 +167,17 @@ export function SkillsPage() {
         {activeSkill ? (
           <Space direction="vertical" size="large" className="drawer-stack">
             <Typography.Paragraph>{activeSkill.description}</Typography.Paragraph>
+            {packageBySkillId[activeSkill.skill_id] ? (
+              <Card size="small" title="插件审批状态">
+                <Space wrap>
+                  <Tag color={packageBySkillId[activeSkill.skill_id].last_contract_ok ? 'green' : 'red'}>
+                    {packageBySkillId[activeSkill.skill_id].last_contract_ok ? '合约已通过' : '合约未通过'}
+                  </Tag>
+                  <Typography.Text>审批人：{packageBySkillId[activeSkill.skill_id].approved_by ?? '未审批'}</Typography.Text>
+                  <Typography.Text>审批时间：{packageBySkillId[activeSkill.skill_id].approved_at ?? '未审批'}</Typography.Text>
+                </Space>
+              </Card>
+            ) : null}
             <Card size="small" title="输入 Schema"><pre>{JSON.stringify(activeSkill.input_schema, null, 2)}</pre></Card>
             <Card size="small" title="输出 Schema"><pre>{JSON.stringify(activeSkill.output_schema, null, 2)}</pre></Card>
             <Card size="small" title="配置 Schema"><pre>{JSON.stringify(activeSkill.config_schema, null, 2)}</pre></Card>
@@ -193,4 +237,20 @@ function getSelectedFile(uploadFile: UploadFile | null): File | null {
   // Ant Design Upload 的真实文件位置在不同触发路径下并不完全一致；
   // 这里统一归一化，让拖拽区和弹窗上传共用一套提交逻辑。
   return (uploadFile?.originFileObj ?? uploadFile ?? null) as File | null;
+}
+
+function indexPackagesBySkillId(packages: SkillPackageRecord[]): Record<string, SkillPackageRecord> {
+  return packages.reduce<Record<string, SkillPackageRecord>>((index, item) => {
+    index[item.manifest.skill_id] = item;
+    return index;
+  }, {});
+}
+
+function formatSkillStatus(status: string): string {
+  return {
+    approved: '已启用',
+    pending_review: '待审批',
+    disabled: '已禁用',
+    deprecated: '已废弃',
+  }[status] ?? status;
 }

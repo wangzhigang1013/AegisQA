@@ -337,6 +337,7 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
         if package:
             package["last_contract_ok"] = bool(result.get("ok"))
             package["last_contract_result"] = result
+            package["last_contract_at"] = _now()
             package["updated_at"] = _now()
             _save_record(store, "skill_packages", "package_id", package)
         return {"skill_id": skill_id, **result}
@@ -349,12 +350,13 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
         return manifest
 
     @app.post("/skills/{skill_id:path}/approve", response_model=SkillManifest)
-    def approve_skill(skill_id: str) -> SkillManifest:
+    def approve_skill(skill_id: str, request: SkillGovernanceRequest | None = None) -> SkillManifest:
         package = _find_skill_package(store, skill_id)
         if package and not package.get("last_contract_ok"):
             raise ValueError("插件包必须先通过合约测试，才能审批启用。")
         manifest = registry.approve(skill_id)
         _update_skill_package_status(store, manifest)
+        _mark_skill_package_approved(store, manifest.skill_id, request.reason if request else "")
         audit_service.record(actor="api", action="skill.approve", target=skill_id)
         return manifest
 
@@ -1067,6 +1069,10 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
         "handler_path": str(handler_path),
         "last_contract_ok": False,
         "last_contract_result": None,
+        "last_contract_at": None,
+        "approved_by": None,
+        "approved_at": None,
+        "approval_note": None,
         "created_at": _now(),
         "updated_at": _now(),
     }
@@ -1096,6 +1102,18 @@ def _update_skill_package_status(store: JsonStore, manifest: SkillManifest) -> N
         return
     package["status"] = manifest.status
     package["manifest"] = manifest.model_dump(mode="json")
+    package["updated_at"] = _now()
+    _save_record(store, "skill_packages", "package_id", package)
+
+
+def _mark_skill_package_approved(store: JsonStore, skill_id: str, approval_note: str) -> None:
+    package = _find_skill_package(store, skill_id)
+    if not package:
+        return
+    # 审批元数据写在插件包记录上，方便前端在市场和治理页同时展示生命周期证据。
+    package["approved_by"] = "api"
+    package["approved_at"] = _now()
+    package["approval_note"] = approval_note
     package["updated_at"] = _now()
     _save_record(store, "skill_packages", "package_id", package)
 

@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 4（任务报告与 Badcase 工作流）Task 4.2 已完成；本批已把报告页 Badcase 明细扩展为单条加入 Golden、忽略、重开、加入 Annotation Queue，以及批量加入 Golden。下一步进入阶段 5：Skill 平台安全与审批。
+产品严谨化阶段 5（Skill 平台安全与审批）Task 5.1 已完成；本批已把 Skill 市场与治理页升级为插件审批体验，展示待审批、合约测试状态、审批人、审批时间和审批抽屉。下一步进入 Task 5.2：Skill 安全执行边界。
 
 ## 当前已完成
 
@@ -35,13 +35,15 @@
 - Task Report API 已返回 `task_summary`、`version_snapshot`、`step_distribution`、`judge_score_distribution`、RunReport、Badcase 和导出链接。
 - 报告中心已拆出 `ReportSummary` 与 `BadcaseTable`，任务报告页面围绕版本快照、核心指标、Step 分布、Badcase 纠错和导出组织。
 - 报告中心 Badcase 表格已支持单条加入 Golden、忽略、重开、加入 Annotation Queue，以及选择多条后批量加入 Golden；动作成功后刷新 Task Report。
+- Skill 插件包记录已保存合约测试时间、审批人、审批时间和审批备注；Skill 市场展示审批状态，治理页提供审批抽屉，未通过合约测试的插件不能在前端直接启用。
+- 前端 `AppShell` 的 TanStack QueryClient 已改为实例内创建，避免测试和嵌入式渲染场景复用旧缓存导致页面数据串扰。
 
 ## 最近验证
 
-- `python -m pytest -q`：36 passed。
+- `python -m pytest -q`：37 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v6`，Run `run-9311b164dd1f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：4 个测试文件、25 个测试通过。
+- `cd frontend && npm test`：4 个测试文件、27 个测试通过。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：6 个 Playwright E2E 测试通过，覆盖任务主链路与 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Playwright E2E 测试通过，覆盖 Workflow 画布新增节点、聚合策略、删除下游连线、新增 Join、撤销/重做、删除节点、保存草稿回放、试运行回填、校验、发布。
@@ -62,11 +64,45 @@
 
 ## 下一阶段目标
 
-- 进入阶段 5：完善 Skill 审批体验，展示待审批、合约测试状态、审批人、审批时间，并在治理页提供审批抽屉。
+- 进入阶段 5 Task 5.2：补齐 Skill 安全执行边界，包括 handler 返回体过大失败、stdout/stderr 过大截断、异常摘要脱敏本地绝对路径。
 - 把 Experiment、Prompt/Skill 版本注册、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 从最小 API 能力继续扩展为完整页面与端到端操作流。
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 Skill 审批体验
+
+- 改动摘要：完成阶段 5 Task 5.1。后端插件包记录新增合约测试时间、审批人、审批时间和审批备注；Skill 市场展示待审批、合约测试状态、审批人和审批时间；治理页新增 `SkillApprovalDrawer`，展示 Manifest、输入/输出 Schema、测试日志，并在插件未通过合约测试时禁用审批启用。同步修复前端测试中的 QueryClient 缓存串扰，让每次 `AppShell` 渲染都有独立查询缓存。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `tests/test_skill_package_security.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/pages/SkillsPage.tsx`
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/pages/skills/SkillApprovalDrawer.tsx`
+  - `frontend/src/types.ts`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `python -m pytest tests/test_skill_package_security.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Skill 市场展示插件包审批状态|治理页审批抽屉"`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Skill 审批后端测试：1 passed。
+  - Skill 审批前端定向测试：2 passed。
+  - 后端全量：37 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：4 个测试文件、27 passed。
+  - Typecheck：通过。
+  - Build：通过。
+  - Playwright 全量 E2E：6 passed。
+- 下一步：进入阶段 5 Task 5.2，补 Skill 安全执行边界与脱敏策略。
 
 ### 2026-05-31 Badcase 状态流转与批量动作
 

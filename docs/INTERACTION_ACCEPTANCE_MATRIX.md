@@ -29,6 +29,7 @@
 | Skill 市场 | 搜索 Skill | 可用，支持按 Skill 名称、ID、标签过滤，避免历史数据过多时找不到新插件 | `GET /skills` | Playwright E2E 覆盖按新上传 Skill ID 搜索 |
 | Skill 市场 | 上传 Skill 插件包 | 可用，打开上传向导；zip 上传后进入待审批；非法路径、缺 manifest、缺 handler 会返回业务错误码 | `POST /skills/packages/upload`、`GET /skills/packages` | `npm test` 覆盖上传入口；Playwright E2E 覆盖真实 zip 上传；后端测试覆盖成功、缺 manifest/handler、非法路径 |
 | Skill 市场 | 运行合约测试 | 可用，调用后端并展示通过/失败；插件默认 5 秒超时，超时返回 `SKILL_CONTRACT_TIMEOUT` | `POST /skills/{skill_id}/contract-test` | `npm test` 与 Playwright E2E 覆盖合约测试结果；P0 测试覆盖超时；full E2E 覆盖并发场景 |
+| Skill 市场 | 审批状态展示 | 可用，列表展示待审批、合约已通过/未通过、审批人、审批时间 | `GET /skills`、`GET /skills/packages` | `npm test` 覆盖插件包审批状态、合约状态和审批信息 |
 | Workflow 市场 | 新建 Workflow | 可用，创建草稿并进入画布 | `POST /workflow-drafts` | `npm test` 覆盖新建入口 |
 | Workflow 市场 | 查看草稿/已发布版本/模板 | 可用，列表化展示流程资产 | `GET /workflow-drafts`、`GET /workflows`、`GET /workflow-templates` | `npm test` 覆盖市场页 |
 | Workflow 市场 | 搜索 Workflow | 可用，支持按名称过滤草稿和已发布流程 | `GET /workflow-drafts`、`GET /workflows` | Playwright E2E 覆盖发布后按名称搜索 |
@@ -52,7 +53,8 @@
 | Judge 审计 | 创建审计 | 可用，弹窗提交审计标签 | `POST /judge-profiles/{profile_id}/audits` | `npm test` 覆盖审计表单 |
 | 治理与审计 | 查看权限矩阵 | 可用，打开 RBAC 矩阵弹窗 | 前端静态矩阵 | `npm test` 覆盖矩阵弹窗 |
 | 治理与审计 | Skill 搜索 | 可用，支持按 Skill ID 或名称过滤生命周期表 | `GET /skills` | Playwright E2E 覆盖上传后搜索并审批 |
-| 治理与审计 | Skill 启用/禁用/废弃 | 可用，调用治理 API 并刷新列表 | `POST /skills/{skill_id}/approve|disable|deprecate` | Playwright E2E 覆盖启用新上传 Skill；前端 mutation 与后端 API 覆盖 |
+| 治理与审计 | Skill 审批详情 | 可用，打开审批抽屉，展示 Manifest、输入/输出 Schema、测试日志；未通过合约测试时审批启用禁用并说明原因 | `GET /skills`、`GET /skills/packages`、`POST /skills/{skill_id}/approve` | `npm test` 覆盖审批抽屉和禁用原因 |
+| 治理与审计 | Skill 启用/禁用/废弃 | 可用，调用治理 API 并刷新列表；插件未通过合约测试时前端禁用启用动作 | `POST /skills/{skill_id}/approve|disable|deprecate` | Playwright E2E 覆盖启用新上传 Skill；前端 mutation 与后端 API 覆盖 |
 | 治理与审计 | 审计日志 | 可用，展示后端审计事件 | `GET /audit-events` | 类型检查覆盖 |
 
 ## 当前仍需增强

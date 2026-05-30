@@ -214,6 +214,10 @@ export type SkillPackageRecord = {
   handler_path?: string;
   last_contract_ok: boolean;
   last_contract_result?: Record<string, unknown> | null;
+  last_contract_at?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  approval_note?: string | null;
   created_at: string;
   updated_at: string;
 };

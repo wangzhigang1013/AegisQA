@@ -12,6 +12,7 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConfigProvider, Layout, Menu, theme } from 'antd';
 import type { MenuProps } from 'antd';
+import { useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 
 import { DatasetsPage } from './pages/DatasetsPage';
@@ -24,15 +25,17 @@ import { SkillsPage } from './pages/SkillsPage';
 import { WorkflowDesignerPage } from './pages/WorkflowDesignerPage';
 import { WorkflowMarketPage } from './pages/WorkflowMarketPage';
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: false,
-      refetchOnWindowFocus: false,
-      staleTime: 30_000,
+function createAppQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        refetchOnWindowFocus: false,
+        staleTime: 30_000,
+      },
     },
-  },
-});
+  });
+}
 
 const navItems: MenuProps['items'] = [
   { key: '/', icon: <BarChartOutlined />, label: <NavLink to="/">概览</NavLink> },
@@ -48,6 +51,7 @@ const navItems: MenuProps['items'] = [
 export function AppShell() {
   const location = useLocation();
   const selectedKey = `/${location.pathname.split('/')[1]}`.replace(/\/$/, '') || '/';
+  const [queryClient] = useState(createAppQueryClient);
 
   return (
     <ConfigProvider

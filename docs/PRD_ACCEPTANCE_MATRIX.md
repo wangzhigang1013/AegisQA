@@ -32,8 +32,8 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-SK-02 | config_schema 生成参数表单 | 已实现基础 | Skill manifest 暴露 `config_schema`；React Skill 详情抽屉展示 schema；动态复杂表单仍可增强 |
 | FR-SK-03 | input/output schema 强校验 | 已实现 | `aegisqa/core/mapper.py`，`BaseSkill.execute`，TypeMismatch 测试 |
 | FR-SK-04 | Skill 版本、作者、依赖、场景、标签 | 已实现 | `SkillManifest` |
-| FR-SK-05 | Skill 合约测试入口 | 已实现 | `BaseSkill.contract_test()`，`POST /skills/{skill_id}/contract-test`，React Skill 详情按钮测试；插件包审批前也必须通过合约测试 |
-| FR-SK-08 | Skill 插件包上传与审批门禁 | 已实现基础 | `POST /skills/packages/upload`、`GET /skills/packages`、`aegisqa/skills/packages.py`；zip 必须包含 `skill.yaml|skill.json` 和 `handler.py`，默认 `pending_review`，非法 zip 路径会拒绝，插件合约测试默认 5 秒超时并返回 `SKILL_CONTRACT_TIMEOUT`，测试 `test_skill_package_upload_contract_and_approval_gate` 和 `test_p0_hardening.py`；Playwright E2E 覆盖真实 zip 上传、合约测试和治理启用 |
+| FR-SK-05 | Skill 合约测试入口 | 已实现 | `BaseSkill.contract_test()`，`POST /skills/{skill_id}/contract-test`，React Skill 详情按钮测试；插件包审批前也必须通过合约测试，插件包记录会保存 `last_contract_ok`、`last_contract_result`、`last_contract_at` |
+| FR-SK-08 | Skill 插件包上传与审批门禁 | 已实现基础 | `POST /skills/packages/upload`、`GET /skills/packages`、`aegisqa/skills/packages.py`；zip 必须包含 `skill.yaml|skill.json` 和 `handler.py`，默认 `pending_review`，非法 zip 路径会拒绝，插件合约测试默认 5 秒超时并返回 `SKILL_CONTRACT_TIMEOUT`，审批记录保存审批人、审批时间和审批备注；测试 `test_skill_package_upload_contract_and_approval_gate`、`test_skill_package_security.py` 和 `test_p0_hardening.py`；Playwright E2E 覆盖真实 zip 上传、合约测试和治理启用 |
 | FR-WF-01 | 创建、编辑、复制、发布、归档 Workflow | 已实现基础 | `WorkflowService.publish/copy_workflow/archive`，`POST /workflow-graphs/publish`，`POST/PUT/DELETE /workflow-drafts`，React `Workflow 市场` + `Workflow 画布` |
 | FR-WF-02 | 线性步骤列表与图形化编排 | 已实现 | `WorkflowDraft` / `WorkflowStep`，`WorkflowGraph` 保留画布快照；前端图模型已独立测试，Inspector 支持节点工具栏、键盘删除、下游连线可视化、选择目标创建连线、删除连线和 Aggregator 聚合策略，Playwright 覆盖 Source/Skill/Join/Output/Aggregator 新增、创建连线、删除节点、删除下游连线、撤销、重做、保存草稿回放、校验、发布 |
 | FR-WF-03 | 字段映射与强类型校验 | 已实现 | `resolve_input_mapping`，失败不调用 Skill |
@@ -68,7 +68,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 | 编号 | 需求 | 当前状态 | 证据 |
 |---|---|---|---|
-| FR-SK-06 | Skill 启用/禁用/审批/废弃 | 已实现基础 | `SkillRegistry.disable/approve/deprecate`，`POST /skills/{skill_id}/approve|disable|deprecate`，React 治理页面已接入 |
+| FR-SK-06 | Skill 启用/禁用/审批/废弃 | 已实现基础 | `SkillRegistry.disable/approve/deprecate`，`POST /skills/{skill_id}/approve|disable|deprecate`，React Skill 市场展示待审批、合约状态、审批人和审批时间；治理页新增审批抽屉展示 Manifest、Schema、测试日志，未通过合约测试的插件不能在前端直接启用 |
 | FR-SK-07 | Skill 安全策略声明 | 已实现基础 | `SkillManifest.permissions` |
 | FR-WF-05 | 模板化 Workflow | 已实现基础 | `WorkflowTemplateService`，React Workflow 页面提供示例图 |
 | FR-WF-06 | DAG/条件分支/并行节点 | 已实现基础 | `DAGWorkflow.execution_levels`、`DAGWorkflowExecutor` 支持条件 `exists/not exists` 和按层并行执行；`WorkflowGraphService` 支持画布 DAG 校验、点对多、多对一 Join/Aggregator 规则；发布前阻断测试覆盖未审批 Skill、多对一缺 Join/Aggregator、Branch 缺条件表达式 |

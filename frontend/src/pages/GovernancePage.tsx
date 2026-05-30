@@ -1,11 +1,12 @@
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Descriptions, Input, Modal, Space, Table, Tag, Timeline } from 'antd';
+import { Alert, Button, Card, Descriptions, Input, Modal, Space, Table, Tag, Timeline, Tooltip } from 'antd';
 import { useMemo, useState } from 'react';
 
 import { api } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { SkillManifest } from '../types';
+import { SkillApprovalDrawer } from './skills/SkillApprovalDrawer';
+import type { SkillManifest, SkillPackageRecord } from '../types';
 
 const permissionRows = [
   { key: 'admin', role: 'admin', permissions: 'workflow:publish, run:control, skill:governance, audit:read' },
@@ -18,8 +19,11 @@ export function GovernancePage() {
   const [matrixOpen, setMatrixOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [skillQuery, setSkillQuery] = useState('');
+  const [approvalSkill, setApprovalSkill] = useState<SkillManifest | null>(null);
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
+  const packagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
   const auditEventsQuery = useQuery({ queryKey: ['audit-events'], queryFn: api.auditEvents });
+  const packageBySkillId = useMemo(() => indexPackagesBySkillId(packagesQuery.data ?? []), [packagesQuery.data]);
   const filteredSkills = useMemo(() => {
     const query = skillQuery.trim().toLowerCase();
     if (!query) return skillsQuery.data ?? [];
@@ -32,6 +36,7 @@ export function GovernancePage() {
     onSuccess: async (skill) => {
       setNotice(`Skill 状态已更新：${skill.skill_id} / ${skill.status}`);
       await queryClient.invalidateQueries({ queryKey: ['skills'] });
+      await queryClient.invalidateQueries({ queryKey: ['skill-packages'] });
       await queryClient.invalidateQueries({ queryKey: ['audit-events'] });
     },
     onError: (error) => setNotice(error instanceof Error ? `治理动作失败：${error.message}` : '治理动作失败'),
@@ -69,21 +74,53 @@ export function GovernancePage() {
           dataSource={filteredSkills}
           columns={[
             { title: 'Skill', dataIndex: 'skill_id', render: (value) => <code>{value}</code> },
-            { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'approved' ? 'green' : value === 'disabled' ? 'orange' : 'red'}>{value}</Tag> },
+            { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'approved' ? 'green' : value === 'disabled' ? 'orange' : 'red'}>{formatSkillStatus(value)}</Tag> },
+            {
+              title: '合约测试',
+              render: (_, skill) => {
+                const packageRecord = packageBySkillId[skill.skill_id];
+                if (!packageRecord) return <Tag>内置 Skill</Tag>;
+                return <Tag color={packageRecord.last_contract_ok ? 'green' : 'red'}>{packageRecord.last_contract_ok ? '合约已通过' : '合约未通过'}</Tag>;
+              },
+            },
+            {
+              title: '审批信息',
+              render: (_, skill) => {
+                const packageRecord = packageBySkillId[skill.skill_id];
+                if (!packageRecord) return '-';
+                return `${packageRecord.approved_by ?? '未审批'} / ${packageRecord.approved_at ?? '-'}`;
+              },
+            },
             { title: '权限', dataIndex: 'permissions', render: (value: string[]) => value.length ? value.map((item) => <Tag key={item}>{item}</Tag>) : '-' },
             {
               title: '治理动作',
-              render: (_, skill) => (
-                <Space wrap>
-                  <Button size="small" loading={skillMutation.isPending} onClick={() => skillMutation.mutate({ skill, action: 'approve' })}>启用</Button>
-                  <Button size="small" loading={skillMutation.isPending} onClick={() => skillMutation.mutate({ skill, action: 'disable' })}>禁用</Button>
-                  <Button size="small" danger loading={skillMutation.isPending} onClick={() => skillMutation.mutate({ skill, action: 'deprecate' })}>废弃</Button>
-                </Space>
-              ),
+              render: (_, skill) => {
+                const packageRecord = packageBySkillId[skill.skill_id];
+                const approveDisabled = Boolean(packageRecord && !packageRecord.last_contract_ok);
+                return (
+                  <Space wrap>
+                    <Button size="small" onClick={() => setApprovalSkill(skill)}>审批详情</Button>
+                    <Tooltip title={approveDisabled ? '未通过合约测试不能启用' : ''}>
+                      <Button size="small" disabled={approveDisabled} loading={skillMutation.isPending} onClick={() => skillMutation.mutate({ skill, action: 'approve' })}>启用</Button>
+                    </Tooltip>
+                    <Button size="small" loading={skillMutation.isPending} onClick={() => skillMutation.mutate({ skill, action: 'disable' })}>禁用</Button>
+                    <Button size="small" danger loading={skillMutation.isPending} onClick={() => skillMutation.mutate({ skill, action: 'deprecate' })}>废弃</Button>
+                  </Space>
+                );
+              },
             },
           ]}
         />
       </Card>
+
+      <SkillApprovalDrawer
+        open={Boolean(approvalSkill)}
+        skill={approvalSkill}
+        packageRecord={approvalSkill ? packageBySkillId[approvalSkill.skill_id] : undefined}
+        loading={skillMutation.isPending}
+        onClose={() => setApprovalSkill(null)}
+        onApprove={(skill) => skillMutation.mutate({ skill, action: 'approve' })}
+      />
 
       <Card className="flat-card" title="审计日志">
         <Timeline
@@ -107,4 +144,20 @@ export function GovernancePage() {
       </Modal>
     </section>
   );
+}
+
+function indexPackagesBySkillId(packages: SkillPackageRecord[]): Record<string, SkillPackageRecord> {
+  return packages.reduce<Record<string, SkillPackageRecord>>((index, item) => {
+    index[item.manifest.skill_id] = item;
+    return index;
+  }, {});
+}
+
+function formatSkillStatus(status: string): string {
+  return {
+    approved: '已启用',
+    pending_review: '待审批',
+    disabled: '已禁用',
+    deprecated: '已废弃',
+  }[status] ?? status;
 }
