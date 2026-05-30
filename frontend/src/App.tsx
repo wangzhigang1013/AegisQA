@@ -16,6 +16,7 @@ import { useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 
 import { DatasetsPage } from './pages/DatasetsPage';
+import { CIGatesPage } from './pages/CIGatesPage';
 import { ExperimentsPage } from './pages/ExperimentsPage';
 import { GovernancePage } from './pages/GovernancePage';
 import { JudgeAuditPage } from './pages/JudgeAuditPage';
@@ -46,6 +47,7 @@ const navItems: MenuProps['items'] = [
   { key: '/runs', icon: <PlayCircleOutlined />, label: <NavLink to="/runs">执行中心</NavLink> },
   { key: '/reports', icon: <BarChartOutlined />, label: <NavLink to="/reports">报告中心</NavLink> },
   { key: '/experiments', icon: <ExperimentOutlined />, label: <NavLink to="/experiments">实验中心</NavLink> },
+  { key: '/ci-gates', icon: <ControlOutlined />, label: <NavLink to="/ci-gates">CI Gate</NavLink> },
   { key: '/judge', icon: <AuditOutlined />, label: <NavLink to="/judge">Judge 审计</NavLink> },
   { key: '/governance', icon: <SafetyCertificateOutlined />, label: <NavLink to="/governance">治理与审计</NavLink> },
 ];
@@ -93,6 +95,7 @@ export function AppShell() {
                 <Route path="/runs" element={<RunsPage />} />
                 <Route path="/reports" element={<ReportsPage />} />
                 <Route path="/experiments" element={<ExperimentsPage />} />
+                <Route path="/ci-gates" element={<CIGatesPage />} />
                 <Route path="/judge" element={<JudgeAuditPage />} />
                 <Route path="/governance" element={<GovernancePage />} />
               </Routes>

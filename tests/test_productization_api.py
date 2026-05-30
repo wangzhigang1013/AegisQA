@@ -54,6 +54,23 @@ def _executed_run(client: TestClient, tmp_path: Path) -> dict:
     return client.post(f"/runs/{run['run_id']}/execute").json()
 
 
+def _executed_task(client: TestClient, tmp_path: Path) -> dict:
+    data_path = tmp_path / "productization-task.jsonl"
+    _write_jsonl(data_path)
+    dataset = client.post("/datasets/from-path", json={"name": "productization_task_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "CI Gate 任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+        },
+    ).json()
+    return client.post(f"/tasks/{task['task_id']}/execute").json()
+
+
 def test_experiment_snapshot_and_trace_tree_are_created_from_run(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)
@@ -101,6 +118,37 @@ def test_assertion_dsl_and_ci_gate_return_actionable_results(tmp_path: Path) -> 
     ).json()
     assert gate_result["status"] == "blocked"
     assert gate_result["results"][0]["message"].startswith("质量门禁未通过")
+
+
+def test_ci_gate_config_can_be_saved_and_evaluated_against_run_and_task(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    run = _executed_run(client, tmp_path)
+    task = _executed_task(client, tmp_path)
+
+    config = client.post(
+        "/ci-gates",
+        json={
+            "name": "发布质量门禁",
+            "description": "正式发布前阻断低通过率任务",
+            "gates": [
+                {"gate_id": "pass-rate", "metric": "pass_rate", "operator": ">=", "threshold": 0.8, "blocking": True},
+                {"gate_id": "badcase-budget", "metric": "badcase_count", "operator": "<=", "threshold": 0, "blocking": False},
+            ],
+        },
+    ).json()
+    assert config["config_id"].startswith("gatecfg-")
+    assert client.get("/ci-gates").json()[0]["name"] == "发布质量门禁"
+
+    run_result = client.post("/ci-gates/evaluate", json={"config_id": config["config_id"], "run_id": run["run_id"]}).json()
+    assert run_result["status"] == "blocked"
+    assert run_result["target"] == {"kind": "run", "id": run["run_id"]}
+    assert run_result["blocking_failures"] == 1
+    assert run_result["results"][0]["message"].startswith("质量门禁未通过")
+
+    task_result = client.post("/ci-gates/evaluate", json={"config_id": config["config_id"], "task_id": task["task_id"]}).json()
+    assert task_result["status"] == "blocked"
+    assert task_result["target"] == {"kind": "task", "id": task["task_id"]}
 
 
 def test_annotation_queue_supports_assignment_and_review(tmp_path: Path) -> None:

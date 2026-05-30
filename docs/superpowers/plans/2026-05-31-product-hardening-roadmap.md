@@ -224,10 +224,10 @@
 
 ### Task 6.2：CI Gate 页面
 
-- [ ] 支持创建质量门禁配置。
-- [ ] 支持对 Task/Run 执行 gate 评估。
-- [ ] gate fail 展示阻断原因。
-- [ ] 运行 API 与 E2E 测试。
+- [x] 支持创建质量门禁配置。
+- [x] 支持对 Task/Run 执行 gate 评估。
+- [x] gate fail 展示阻断原因。
+- [x] 运行 API 与 E2E 测试。
 
 ### Task 6.3：Annotation Queue 页面
 

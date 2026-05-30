@@ -350,9 +350,29 @@ export type AssertionEvaluationResult = {
   }[];
 };
 
+export type CIGateRule = {
+  gate_id: string;
+  metric: string;
+  operator: string;
+  threshold: number;
+  blocking: boolean;
+};
+
+export type CIGateConfigRecord = {
+  config_id: string;
+  name: string;
+  description: string;
+  status: string;
+  gates: CIGateRule[];
+  created_at: string;
+  updated_at: string;
+};
+
 export type CIGateEvaluationResult = {
   status: 'passed' | 'blocked';
   blocking_failures: number;
+  target?: { kind: 'run' | 'task'; id: string } | null;
+  metrics?: Record<string, number>;
   results: {
     gate_id: string;
     metric: string;

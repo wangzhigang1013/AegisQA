@@ -2,6 +2,8 @@ import type {
   AnnotationTask,
   AssertionEvaluationResult,
   BadcaseRecord,
+  CIGateConfigRecord,
+  CIGateRule,
   CIGateEvaluationResult,
   DashboardSummary,
   DatasetSummary,
@@ -88,7 +90,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  evaluateCIGates: (body: { metrics: Record<string, number>; gates: { gate_id: string; metric: string; operator: string; threshold: number; blocking?: boolean }[] }) =>
+  ciGateConfigs: () => request<CIGateConfigRecord[]>('/ci-gates'),
+  createCIGateConfig: (body: { name: string; description?: string; gates: CIGateRule[]; status?: string }) =>
+    request<CIGateConfigRecord>('/ci-gates', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  evaluateCIGates: (body: { metrics?: Record<string, number>; gates?: CIGateRule[]; config_id?: string; run_id?: string; task_id?: string }) =>
     request<CIGateEvaluationResult>('/ci-gates/evaluate', {
       method: 'POST',
       body: JSON.stringify(body),

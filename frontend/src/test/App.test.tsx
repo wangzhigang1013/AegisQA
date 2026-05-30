@@ -97,6 +97,21 @@ const demoExperiments = [
   },
 ];
 
+const demoCIGates = [
+  {
+    config_id: 'gatecfg-demo',
+    name: '发布质量门禁',
+    description: '正式发布前阻断低通过率任务',
+    status: 'active',
+    gates: [
+      { gate_id: 'pass-rate', metric: 'pass_rate', operator: '>=', threshold: 0.8, blocking: true },
+      { gate_id: 'badcase-budget', metric: 'badcase_count', operator: '<=', threshold: 0, blocking: false },
+    ],
+    created_at: '2026-05-31T00:00:00Z',
+    updated_at: '2026-05-31T00:00:00Z',
+  },
+];
+
 const pendingPackageSkill = {
   ...demoSkills[0],
   skill_id: 'plugin.echo@0.1.0',
@@ -236,7 +251,7 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('92')).toBeInTheDocument();
     expect(screen.getByText('Experiment 快照')).toBeInTheDocument();
     expect(screen.getByText('Assertion DSL')).toBeInTheDocument();
-    expect(screen.getByText('CI Gate')).toBeInTheDocument();
+    expect(screen.getAllByText('CI Gate').length).toBeGreaterThan(0);
     expect(screen.getByText('Annotation Queue')).toBeInTheDocument();
     expect(screen.getByText('Trace Tree')).toBeInTheDocument();
   });
@@ -515,6 +530,59 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /生成实验快照/ }));
     expect(await screen.findByText('从 Run 生成实验快照')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '确认生成' })).toBeDisabled();
+  });
+
+  it('CI Gate 页面支持创建配置并对任务执行阻断评估', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/ci-gates') && init?.method === 'POST') {
+        return jsonResponse({ ...demoCIGates[0], config_id: 'gatecfg-created', name: '新质量门禁' });
+      }
+      if (url.endsWith('/ci-gates')) {
+        return jsonResponse(demoCIGates);
+      }
+      if (url.endsWith('/ci-gates/evaluate')) {
+        return jsonResponse({
+          status: 'blocked',
+          blocking_failures: 1,
+          target: { kind: 'task', id: 'task-demo' },
+          metrics: { pass_rate: 0.5, badcase_count: 1 },
+          results: [
+            {
+              gate_id: 'pass-rate',
+              metric: 'pass_rate',
+              operator: '>=',
+              threshold: 0.8,
+              actual: 0.5,
+              blocking: true,
+              status: 'failed',
+              message: '质量门禁未通过：pass_rate=0.5 不满足 >= 0.8',
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/tasks')) {
+        return jsonResponse([demoTask]);
+      }
+      if (url.endsWith('/runs')) {
+        return jsonResponse([]);
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/ci-gates');
+
+    expect(await screen.findByText('CI Gate 质量门禁')).toBeInTheDocument();
+    expect(screen.getAllByText('发布质量门禁').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /创建质量门禁/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /创建质量门禁/ }));
+    expect(await screen.findByText('新建质量门禁配置')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /执行 Gate 评估/ }));
+    expect(await screen.findByText('阻断原因')).toBeInTheDocument();
+    expect(screen.getByText(/质量门禁未通过/)).toBeInTheDocument();
   });
 
   it('报告中心围绕任务展示报告和导出入口', async () => {

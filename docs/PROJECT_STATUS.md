@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 6（Experiment、CI Gate、Annotation 独立产品页）Task 6.1 已完成；本批已新增 Experiment 实验中心，支持实验快照列表、baseline 选择、通过率变化、失败样本变化、成本变化和从 Run 生成实验快照入口。下一步进入 Task 6.2：CI Gate 页面。
+产品严谨化阶段 6（Experiment、CI Gate、Annotation 独立产品页）Task 6.2 已完成；本批已新增 CI Gate 质量门禁页面，支持创建门禁配置、对 Task/Run 执行评估，并在阻断时展示具体失败规则和修复方向。下一步进入 Task 6.3：Annotation Queue 页面。
 
 ## 当前已完成
 
@@ -39,15 +39,16 @@
 - 前端 `AppShell` 的 TanStack QueryClient 已改为实例内创建，避免测试和嵌入式渲染场景复用旧缓存导致页面数据串扰。
 - Skill 插件受控子进程已增加 stdout 输出体积上限、stdout/stderr 截断标记和本地绝对路径脱敏，避免恶意或异常插件把大响应、本地路径泄露到 API 与前端。
 - 新增 Experiment 实验中心页面，主导航可进入，页面围绕 Run 不可变快照展示 baseline 对比、指标变化、失败样本变化、成本变化，并支持从已完成 Run 生成实验快照。
+- 新增 CI Gate 质量门禁页面，主导航可进入，页面围绕发布门槛展示门禁配置列表、创建弹窗、Task/Run 评估控制台和阻断原因；后端新增 `GET/POST /ci-gates`，`POST /ci-gates/evaluate` 支持直接按 Task/Run 抽取指标。
 
 ## 最近验证
 
-- `python -m pytest -q`：40 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest -q`：41 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v6`，Run `run-9311b164dd1f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：4 个测试文件、28 个测试通过。
+- `cd frontend && npm test`：4 个测试文件、29 个测试通过。
 - `cd frontend && npm run build`：通过。
-- `cd frontend && npm run e2e`：6 个 Playwright E2E 测试通过，覆盖任务主链路与 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
+- `cd frontend && npm run e2e`：7 个 Playwright E2E 测试通过，覆盖任务主链路、CI Gate 创建与阻断评估，以及 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Playwright E2E 测试通过，覆盖 Workflow 画布新增节点、聚合策略、删除下游连线、新增 Join、撤销/重做、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `http://127.0.0.1:8000/health`：FastAPI 页面健康检查通过。
 - `http://127.0.0.1:5173`：React 前端可访问。
@@ -60,17 +61,53 @@
 - Workflow 画布的 Source/Skill/Join/Output/Aggregator 新增、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行、校验和发布已进入 Playwright；后续需要继续拆分 Palette/Inspector 组件，降低单文件维护成本。
 - Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；阶段 3.2 已补 Run Attempt，后续需要继续接入 CI Gate、baseline 对比和权限检查。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
-- Experiment 快照、CI Gate、Annotation Queue、Trace Tree 已有后端最小闭环；仍需做成完整独立页面、加入成本预算和 baseline 可视化对比。
+- Experiment 快照和 CI Gate 已有独立产品页；Annotation Queue、Trace Tree 仍需做成完整独立页面，并继续补成本预算、baseline 可视化对比和质量门禁历史记录。
 - 报告、Badcase、Judge 审计已经接入基础数据与动作，人工审阅队列已有后端最小闭环；仍需补齐多 Judge 一致性视图、红队安全扫描和跨任务 Score Analytics。
 - 本地服务曾出现旧 FastAPI 进程未重启导致新增路由 404 的问题；已重启后端并完成浏览器复测。后续修改后端 API 时必须确认 8000 端口加载的是最新代码。
 
 ## 下一阶段目标
 
-- 进入阶段 6 Task 6.2：新增 CI Gate 页面，支持创建质量门禁配置、对 Task/Run 执行 gate 评估，并在 gate fail 时展示阻断原因。
+- 进入阶段 6 Task 6.3：新增 Annotation Queue 页面，支持状态/负责人/来源筛选、领取/分派/审核，以及回流 Golden。
 - 把 Experiment、Prompt/Skill 版本注册、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 从最小 API 能力继续扩展为完整页面与端到端操作流。
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 CI Gate 质量门禁页面
+
+- 改动摘要：完成阶段 6 Task 6.2。后端新增质量门禁配置保存/列表接口，`POST /ci-gates/evaluate` 支持使用配置并直接按 Task 或 Run 抽取指标；前端新增 `/ci-gates` 页面和主导航入口，支持创建门禁配置、选择 Task/Run 执行评估，并在阻断时展示失败规则、实际值、阈值和阻断/预警状态。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `tests/test_productization_api.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/types.ts`
+  - `frontend/src/pages/CIGatesPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/e2e/productization.spec.ts`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `python -m pytest tests/test_productization_api.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "CI Gate"`
+  - `cd frontend && npm run e2e -- e2e/productization.spec.ts`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Productization API 定向测试：4 passed。
+  - CI Gate 前端定向测试：1 passed。
+  - Productization Playwright 定向测试：1 passed。
+  - 后端全量：41 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - Typecheck：通过。
+  - 前端全量：4 个测试文件、29 passed。
+  - Build：通过。
+  - Playwright 全量 E2E：7 passed。
+- 下一步：进入阶段 6 Task 6.3，建设 Annotation Queue 页面和人工审核回流体验。
 
 ### 2026-05-31 Experiment 实验中心
 

@@ -214,9 +214,19 @@ class CIGateRuleRequest(BaseModel):
     blocking: bool = True
 
 
-class CIGateEvaluateRequest(BaseModel):
-    metrics: dict[str, float]
+class CIGateConfigRequest(BaseModel):
+    name: str
+    description: str = ""
     gates: list[CIGateRuleRequest]
+    status: str = "active"
+
+
+class CIGateEvaluateRequest(BaseModel):
+    metrics: dict[str, float] = Field(default_factory=dict)
+    gates: list[CIGateRuleRequest] = Field(default_factory=list)
+    config_id: str | None = None
+    run_id: str | None = None
+    task_id: str | None = None
 
 
 class AnnotationSeedRequest(BaseModel):
@@ -800,13 +810,66 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
             "results": results,
         }
 
+    @app.post("/ci-gates")
+    def create_ci_gate_config(request: CIGateConfigRequest) -> dict[str, Any]:
+        if not request.gates:
+            raise AegisQAError(
+                "CI_GATE_EMPTY",
+                "质量门禁至少需要一条规则。",
+                status_code=400,
+                details={"field": "gates"},
+            )
+        config = _build_ci_gate_config(request)
+        _save_record(store, "ci_gate_configs", "config_id", config)
+        audit_service.record(actor="api", action="ci_gate.create", target=config["config_id"], detail={"gate_count": len(config["gates"])})
+        return config
+
+    @app.get("/ci-gates")
+    def list_ci_gate_configs() -> list[dict[str, Any]]:
+        return _list_records(store, "ci_gate_configs")
+
     @app.post("/ci-gates/evaluate")
     def evaluate_ci_gates(request: CIGateEvaluateRequest) -> dict[str, Any]:
-        results = [_evaluate_gate(request.metrics, gate) for gate in request.gates]
+        gates = list(request.gates)
+        if request.config_id:
+            config = _get_record(store, "ci_gate_configs", request.config_id)
+            if not gates:
+                gates = [CIGateRuleRequest.model_validate(gate) for gate in config.get("gates", [])]
+        if not gates:
+            raise AegisQAError(
+                "CI_GATE_RULES_REQUIRED",
+                "请先选择或创建质量门禁规则。",
+                status_code=400,
+                details={"config_id": request.config_id},
+            )
+
+        metrics = dict(request.metrics)
+        target: dict[str, str] | None = None
+        if request.run_id and request.task_id:
+            raise AegisQAError(
+                "CI_GATE_TARGET_CONFLICT",
+                "一次质量门禁评估只能选择 Run 或 Task 中的一种目标。",
+                status_code=400,
+                details={"run_id": request.run_id, "task_id": request.task_id},
+            )
+        if request.run_id:
+            run = runner.get_run(request.run_id)
+            metrics = _ci_gate_metrics_from_run(run) | metrics
+            target = {"kind": "run", "id": request.run_id}
+        if request.task_id:
+            task = _get_record(store, "tasks", request.task_id)
+            run = runner.get_run(task["run_id"])
+            # Task 是产品入口，Run 是底层执行实例；这里用 Run Report 指标并补充 Task 聚合字段。
+            metrics = _ci_gate_metrics_from_task(task, run) | metrics
+            target = {"kind": "task", "id": request.task_id}
+
+        results = [_evaluate_gate(metrics, gate) for gate in gates]
         blocking_failures = [item for item in results if item["status"] == "failed" and item["blocking"]]
         return {
             "status": "blocked" if blocking_failures else "passed",
             "blocking_failures": len(blocking_failures),
+            "target": target,
+            "metrics": metrics,
             "results": results,
         }
 
@@ -1407,6 +1470,51 @@ def _build_experiment_snapshot(run: RunRecord, *, name: str, baseline_run: RunRe
         "diff": diff,
         "created_at": _now(),
     }
+
+
+def _build_ci_gate_config(request: CIGateConfigRequest) -> dict[str, Any]:
+    now = _now()
+    return {
+        "config_id": f"gatecfg-{uuid4().hex[:12]}",
+        "name": request.name,
+        "description": request.description,
+        "status": request.status,
+        "gates": [gate.model_dump(mode="json") for gate in request.gates],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _ci_gate_metrics_from_run(run: RunRecord) -> dict[str, float]:
+    report = aggregate_run_report(run)
+    metrics = {
+        key: float(value)
+        for key, value in report.metrics.items()
+        if isinstance(value, (int, float))
+    }
+    metrics.update(
+        {
+            "pass_rate": float(report.pass_rate),
+            "error_rate": float(report.error_rate),
+            "badcase_count": float(len(report.badcases)),
+            "failed_items": float(report.failed_items),
+            "completed_items": float(report.completed_items),
+            "total_items": float(report.total_items),
+            "average_latency_ms": float(report.average_latency_ms),
+            "p95_latency_ms": float(report.p95_latency_ms),
+        }
+    )
+    return metrics
+
+
+def _ci_gate_metrics_from_task(task: dict[str, Any], run: RunRecord) -> dict[str, float]:
+    metrics = _ci_gate_metrics_from_run(run)
+    # Task 记录可能由人工控制动作刷新过，优先暴露任务中心看到的聚合字段，确保 UI 与门禁判断一致。
+    for key in ("pass_rate", "badcase_count", "failed_items", "completed_items", "total_items"):
+        value = task.get(key)
+        if isinstance(value, (int, float)):
+            metrics[key] = float(value)
+    return metrics
 
 
 def _build_trace_tree(run: RunRecord) -> dict[str, Any]:

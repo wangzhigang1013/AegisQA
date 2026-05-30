@@ -9,8 +9,8 @@
 
 ## 最近一次交互验证
 
-- `npm test`：25 个前端交互/API client/图模型/任务创建向导/Run Attempts 测试通过。
-- `npm run e2e`：6 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
+- `npm test`：29 个前端交互/API client/图模型/任务创建向导/Run Attempts/Experiment/CI Gate 测试通过。
+- `npm run e2e`：7 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路、CI Gate 创建配置与阻断评估，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Headless Chrome CDP：概览页额外验证真实 Dashboard 指标，以及 Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 产品化入口。
 - 验证过程中发现 8000 端口曾运行旧 FastAPI 进程，导致 `/workflow-drafts` 返回 404；重启后端后，Workflow 保存草稿复测为“草稿已保存”。
@@ -51,6 +51,8 @@
 | 报告中心 | Badcase 状态流转 | 可用；支持单条加入 Golden、忽略、重开、加入 Annotation Queue，以及批量加入 Golden；聚合报告中的 Badcase 若尚未持久化，会先创建 Badcase 再纠错入 Golden | `POST /badcases`、`POST /badcases/{badcase_id}/correct`、`POST /badcases/{badcase_id}/reopen`、`POST /badcases/bulk-correct`、`POST /annotation-queue/seed-from-run` | Playwright E2E 覆盖真实 Golden 纠错链路；`npm test` 覆盖报告页按钮和忽略反馈；后端服务测试覆盖状态流转 |
 | 实验中心 | 实验快照列表与 baseline 对比 | 可用，展示 Experiment 列表、当前实验、baseline、通过率变化、失败样本变化、成本变化 | `GET /experiments`、`GET /runs` | `npm test` 覆盖 `/experiments` 页面 |
 | 实验中心 | 从 Run 生成实验快照 | 可用，打开创建弹窗，必须选择 Run 和填写名称后才能提交 | `POST /experiments/from-run` | `npm test` 覆盖创建入口和禁用条件 |
+| CI Gate | 创建质量门禁配置 | 可用，弹窗创建发布门槛，默认包含通过率、Badcase 和 P95 耗时规则；未填写名称时禁用保存 | `POST /ci-gates`、`GET /ci-gates` | `npm test` 覆盖创建入口和禁用条件；Playwright E2E 覆盖真实创建 |
+| CI Gate | 对 Task/Run 执行评估 | 可用，可选择门禁配置和 Task/Run；后端自动抽取任务或 Run 指标，返回 blocking 状态、实际值和阈值 | `POST /ci-gates/evaluate`、`GET /tasks`、`GET /runs` | `tests/test_productization_api.py` 覆盖 Task/Run 评估；`npm test` 与 Playwright E2E 覆盖阻断原因 |
 | Judge 审计 | 创建 Profile | 可用，弹窗保存 Profile | `POST /judge-profiles` | 人工验证和类型检查覆盖 |
 | Judge 审计 | 创建审计 | 可用，弹窗提交审计标签 | `POST /judge-profiles/{profile_id}/audits` | `npm test` 覆盖审计表单 |
 | 治理与审计 | 查看权限矩阵 | 可用，打开 RBAC 矩阵弹窗 | 前端静态矩阵 | `npm test` 覆盖矩阵弹窗 |
@@ -63,5 +65,5 @@
 
 - Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；后续需要进一步拆分组件，并补更复杂字段映射 UI。
 - Task 创建向导已加入必选校验、并发/重试/repeat 和成本预算，任务详情已展示 Run Attempts；后续需要继续接入 CI Gate、实验 baseline 对比和权限检查。
-- 报告中心和实验中心已覆盖任务报告与 Experiment baseline 对比；后续需要把 CI Gate、Annotation Queue、Trace Tree API 继续做成独立可操作视图。
+- 报告中心、实验中心和 CI Gate 已覆盖任务报告、Experiment baseline 对比与质量门禁阻断评估；后续需要把 Annotation Queue、Trace Tree API 继续做成独立可操作视图。
 - Judge 审计需要增加多 Judge 一致性和红队安全扫描视图。
