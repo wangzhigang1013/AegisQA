@@ -9,7 +9,7 @@
 
 ## 最近一次交互验证
 
-- `npm test`：16 个前端交互/API client/图模型测试通过。
+- `npm test`：17 个前端交互/API client/图模型测试通过。
 - `npm run e2e`：2 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路，以及 Workflow 画布新增、删除、校验、发布。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Headless Chrome CDP：概览页额外验证真实 Dashboard 指标，以及 Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 产品化入口。
@@ -36,6 +36,7 @@
 | Workflow 画布 | 新增节点 | 可用，Skill 与结构节点分开新增 | `GET /skills` | `npm test` 覆盖新增 Join；Playwright E2E 覆盖真实画布新增 |
 | Workflow 画布 | 连线 | 可用，React Flow `onConnect` 写入当前 edges | 前端画布状态 | 前端交互和类型检查覆盖 |
 | Workflow 画布 | 删除节点/连线 | 可用，删除选中节点或连线并同步画布状态 | 前端画布状态 | `npm test` 覆盖删除入口；Playwright E2E 覆盖删除选中节点 |
+| Workflow 画布 | 撤销/重做 | 可用，支持节点新增、删除、Inspector 编辑、自动布局、连线的历史回退与恢复 | 前端画布状态 | `npm test` 和 Playwright E2E 覆盖新增 Join 后撤销/重做 |
 | Workflow 画布 | Inspector 编辑 | 可用，支持名称、类型、Skill、条件、JSON 映射和配置 | 前端画布状态 | 类型检查覆盖 |
 | Workflow 画布 | 保存草稿 | 可用，新建或更新草稿，保存后回到 Workflow 市场 | `POST/PUT /workflow-drafts` | 后端契约测试覆盖 |
 | Workflow 画布 | 校验 | 可用，提交当前画布 graph；前端已抽出图模型转换，避免提交静态 demo graph | `POST /workflow-graphs/validate` | 前端图模型单测与 Playwright E2E 覆盖 |

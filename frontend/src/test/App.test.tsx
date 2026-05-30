@@ -177,6 +177,19 @@ describe('AegisQA 前端工作台', () => {
     await waitFor(() => expect(screen.getAllByText(/Join/).length).toBeGreaterThan(joinCountBefore));
   });
 
+  it('Workflow 设计器支持撤销和重做节点操作', async () => {
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    fireEvent.click(screen.getByRole('button', { name: /新增 Join/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /撤销/ })).not.toBeDisabled());
+
+    fireEvent.click(screen.getByRole('button', { name: /撤销/ }));
+    expect(await screen.findByText(/已撤销/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /重做/ }));
+    expect(await screen.findByText(/已重做/)).toBeInTheDocument();
+  });
+
   it('执行中心默认展示任务列表并可以创建任务', async () => {
     await renderWorkbench('/runs');
 

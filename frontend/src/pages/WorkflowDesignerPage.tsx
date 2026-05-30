@@ -7,7 +7,9 @@ import {
   DeploymentUnitOutlined,
   PlayCircleOutlined,
   PlusOutlined,
+  RedoOutlined,
   SaveOutlined,
+  UndoOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -64,6 +66,8 @@ function WorkflowDesignerContent() {
   const [sampleSize, setSampleSize] = useState(1);
   const [consoleResult, setConsoleResult] = useState<GraphValidationResult | Record<string, unknown> | null>(null);
   const [consoleText, setConsoleText] = useState('等待校验。推荐先选择模板或草稿，再检查字段映射。');
+  const [historyPast, setHistoryPast] = useState<WorkflowGraph[]>([]);
+  const [historyFuture, setHistoryFuture] = useState<WorkflowGraph[]>([]);
 
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
   const templatesQuery = useQuery({ queryKey: ['workflow-templates'], queryFn: api.templates });
@@ -146,11 +150,14 @@ function WorkflowDesignerContent() {
     setSelectedNodeId(nextGraph.nodes[0]?.node_id ?? null);
     setSelectedEdgeId(null);
     setDraftId(nextDraftId);
+    setHistoryPast([]);
+    setHistoryFuture([]);
     setConsoleResult(nextGraph);
     setConsoleText(`已加载流程：${nextGraph.name}`);
   }
 
   function addSkillNode(skill: SkillManifest) {
+    rememberGraph();
     const id = uniqueNodeId(skill.skill_id.split('@')[0].replace('.', '_'), nodes);
     const graphNode: WorkflowGraphNode = {
       node_id: id,
@@ -167,6 +174,7 @@ function WorkflowDesignerContent() {
   }
 
   function addStructureNode(nodeType: WorkflowGraphNode['node_type']) {
+    rememberGraph();
     const id = uniqueNodeId(nodeType, nodes);
     const graphNode: WorkflowGraphNode = {
       node_id: id,
@@ -182,6 +190,7 @@ function WorkflowDesignerContent() {
 
   function deleteSelected() {
     if (selectedNodeId) {
+      rememberGraph();
       setNodes((current) => current.filter((node) => node.id !== selectedNodeId));
       setEdges((current) => current.filter((edge) => edge.source !== selectedNodeId && edge.target !== selectedNodeId));
       setSelectedNodeId(null);
@@ -189,6 +198,7 @@ function WorkflowDesignerContent() {
       return;
     }
     if (selectedEdgeId) {
+      rememberGraph();
       setEdges((current) => current.filter((edge) => edge.id !== selectedEdgeId));
       setSelectedEdgeId(null);
       setConsoleText(`已删除连线：${selectedEdgeId}`);
@@ -199,6 +209,7 @@ function WorkflowDesignerContent() {
 
   function updateSelectedNode(patch: Partial<WorkflowGraphNode>) {
     if (!selectedNodeId) return;
+    rememberGraph();
     setNodes((current) =>
       current.map((node) => {
         if (node.id !== selectedNodeId) return node;
@@ -209,6 +220,7 @@ function WorkflowDesignerContent() {
   }
 
   function autoLayout() {
+    rememberGraph();
     setNodes((current) =>
       current.map((node, index) => ({
         ...node,
@@ -216,6 +228,41 @@ function WorkflowDesignerContent() {
       })),
     );
     setConsoleText('已自动布局：节点按拓扑编辑顺序重新排列。');
+  }
+
+  function rememberGraph() {
+    const snapshot = buildWorkflowGraph(workflowName, nodes, edges);
+    setHistoryPast((current) => [...current.slice(-19), snapshot]);
+    setHistoryFuture([]);
+  }
+
+  function restoreGraphSnapshot(snapshot: WorkflowGraph) {
+    setWorkflowName(snapshot.name);
+    setNodes(graphToNodes(snapshot));
+    setEdges(graphToEdges(snapshot));
+    setSelectedNodeId(snapshot.nodes[0]?.node_id ?? null);
+    setSelectedEdgeId(null);
+    setConsoleResult(snapshot);
+  }
+
+  function undoGraph() {
+    if (!historyPast.length) return;
+    const current = buildWorkflowGraph(workflowName, nodes, edges);
+    const previous = historyPast[historyPast.length - 1];
+    setHistoryPast((items) => items.slice(0, -1));
+    setHistoryFuture((items) => [current, ...items].slice(0, 20));
+    restoreGraphSnapshot(previous);
+    setConsoleText('已撤销上一步画布操作。');
+  }
+
+  function redoGraph() {
+    if (!historyFuture.length) return;
+    const current = buildWorkflowGraph(workflowName, nodes, edges);
+    const next = historyFuture[0];
+    setHistoryFuture((items) => items.slice(1));
+    setHistoryPast((items) => [...items.slice(-19), current]);
+    restoreGraphSnapshot(next);
+    setConsoleText('已重做上一步画布操作。');
   }
 
   return (
@@ -317,6 +364,8 @@ function WorkflowDesignerContent() {
             title="DAG 画布"
             extra={
               <Space>
+                <Button icon={<UndoOutlined />} disabled={!historyPast.length} onClick={undoGraph}>撤销</Button>
+                <Button icon={<RedoOutlined />} disabled={!historyFuture.length} onClick={redoGraph}>重做</Button>
                 <Button icon={<ApiOutlined />} onClick={autoLayout}>自动布局</Button>
                 <Button icon={<DeleteOutlined />} danger onClick={deleteSelected}>删除选中</Button>
               </Space>
@@ -327,9 +376,10 @@ function WorkflowDesignerContent() {
               edges={edges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
-              onConnect={(connection: Connection) =>
-                setEdges((current) => addEdge({ ...connection, markerEnd: { type: MarkerType.ArrowClosed } }, current))
-              }
+              onConnect={(connection: Connection) => {
+                rememberGraph();
+                setEdges((current) => addEdge({ ...connection, markerEnd: { type: MarkerType.ArrowClosed } }, current));
+              }}
               onNodeClick={(_, node) => {
                 setSelectedNodeId(node.id);
                 setSelectedEdgeId(null);

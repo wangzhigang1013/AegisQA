@@ -10,6 +10,11 @@ test('Workflow 画布可以新增、删除、校验并发布流程', async ({ pa
   await page.getByRole('button', { name: /新增 Join/ }).click();
   await expect(page.locator('input[value="Join"]').first()).toBeVisible();
 
+  await page.getByRole('button', { name: '撤销' }).click();
+  await expect(page.getByText(/已撤销/)).toBeVisible();
+  await page.getByRole('button', { name: '重做' }).click();
+  await expect(page.getByText(/已重做/)).toBeVisible();
+
   await page.getByRole('button', { name: /删除选中/ }).click();
   await expect(page.getByText(/已删除节点/)).toBeVisible();
 

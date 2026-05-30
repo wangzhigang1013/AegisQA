@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 2（Workflow 画布精细化）第一批已完成，继续推进画布拖拽、连线与 Inspector 深化。
+产品严谨化阶段 2（Workflow 画布精细化）前两批已完成，继续推进画布拖拽、连线与 Inspector 深化。
 
 ## 当前已完成
 
@@ -18,13 +18,14 @@
 - 已新增全量优化执行计划 `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`，阶段顺序为 P0 稳定性、Workflow 画布、Task、Report/Badcase、Skill 安全、Experiment/CI/Annotation、工程结构。
 - 已完成 P0 稳定性第一批：数据集上传空文件/坏 JSONL/空 CSV 拒绝；Skill zip 非法路径拒绝；插件合约测试超时返回结构化 code；Task completed/running/canceled 状态禁止非法动作；前端任务动作按钮按状态禁用；API client 保留后端 code/details/trace_id。
 - Workflow 画布图模型已从页面抽离为 `frontend/src/pages/workflowDesigner/graphModel.ts`，新增独立单元测试；Playwright 已新增画布 E2E，覆盖进入画布、新增 Join、删除选中、校验、发布。
+- Workflow 画布已新增撤销/重做历史栈，节点新增、删除、自动布局、Inspector 编辑、连线会进入历史；组件测试和 Playwright 已覆盖新增 Join 后撤销/重做。
 
 ## 最近验证
 
 - `python -m pytest -q`：30 passed。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v6`，Run `run-9311b164dd1f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：3 个测试文件、16 个测试通过。
+- `cd frontend && npm test`：3 个测试文件、17 个测试通过。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：2 个 Playwright E2E 测试通过，覆盖任务主链路与 Workflow 画布新增/删除/校验/发布。
 - `http://127.0.0.1:8000/health`：FastAPI 页面健康检查通过。
@@ -73,6 +74,29 @@
   - 前端全量：3 个测试文件、16 个测试通过；typecheck 通过。
   - Playwright：2 passed，包含任务主链路与 Workflow 画布路径。
 - 下一步：继续阶段 2，补真实连线/删除边、撤销/重做、保存草稿回放、试运行结果回填与更严格 Inspector 字段映射。
+
+### 2026-05-31 Workflow 画布撤销重做
+
+- 改动摘要：为 Workflow 设计器增加撤销/重做历史栈，覆盖新增 Skill/结构节点、删除节点/边、Inspector 编辑、自动布局、连线等画布操作；画布工具栏新增“撤销”“重做”按钮，并在 Console 中展示操作反馈；Workflow 画布 E2E 追加撤销/重做路径。
+- 变更文件：
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/e2e/workflow-designer.spec.ts`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`
+  - `cd frontend && npm test`
+- 测试结果：
+  - App 交互测试：14 passed。
+  - 前端全量：3 个测试文件、17 passed。
+  - Workflow 画布 E2E：1 passed。
+  - Typecheck：通过。
+- 下一步：继续阶段 2，补真实连线/删除边的 E2E、保存草稿回放、试运行结果回填与更严格 Inspector 字段映射。
 
 ### 2026-05-31 P0 Bug 与稳定性修复完成
 
