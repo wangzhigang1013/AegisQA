@@ -16,14 +16,24 @@ from aegisqa.core.errors import AegisQAError
 from aegisqa.skills.base import BaseSkill, SkillManifest, SkillResult
 
 
+DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS = 5
+
+
 class SubprocessPackageSkill(BaseSkill):
     """通过受控子进程执行插件包 `handler.py` 的 Skill。"""
 
-    def __init__(self, manifest: SkillManifest, handler_path: Path, *, timeout_seconds: int = 1) -> None:
+    def __init__(
+        self,
+        manifest: SkillManifest,
+        handler_path: Path,
+        *,
+        timeout_seconds: int = DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS,
+    ) -> None:
         self.manifest = manifest
         # 子进程会把 cwd 切到插件目录；这里必须提前转成绝对路径，
         # 避免相对路径在子进程中被再次拼接导致 handler.py 找不到。
         self.handler_path = handler_path.resolve()
+        # 合约测试需要覆盖真实 Python 子进程冷启动；1 秒在 Windows 并发 E2E 下会误杀正常插件。
         self.timeout_seconds = timeout_seconds
         super().__init__()
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from aegisqa.api.app import create_app
+from aegisqa.skills.packages import DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS
 
 
 def test_dataset_upload_rejects_empty_files_and_reports_jsonl_line(tmp_path: Path) -> None:
@@ -56,12 +57,12 @@ def test_skill_package_rejects_unsafe_paths_and_reports_contract_timeout(tmp_pat
             "filename": "timeout.zip",
             "content_base64": _skill_zip(
                 skill_id="plugin.timeout@0.1.0",
-                handler_body="""
+                handler_body=f"""
 import time
 
 def run(inputs, config):
-    time.sleep(2)
-    return {"output": {"echo": inputs["text"]}}
+    time.sleep({DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS + 1})
+    return {{"output": {{"echo": inputs["text"]}}}}
 """,
             ),
         },
@@ -71,6 +72,7 @@ def run(inputs, config):
     contract = client.post("/skills/plugin.timeout@0.1.0/contract-test").json()
     assert contract["ok"] is False
     assert contract["code"] == "SKILL_CONTRACT_TIMEOUT"
+    assert contract["details"]["timeout_seconds"] == DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS
 
 
 def test_task_actions_reject_invalid_state_transitions(tmp_path: Path) -> None:

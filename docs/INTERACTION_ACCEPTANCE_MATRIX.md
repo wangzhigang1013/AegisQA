@@ -9,8 +9,8 @@
 
 ## 最近一次交互验证
 
-- `npm test`：20 个前端交互/API client/图模型测试通过。
-- `npm run e2e`：4 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路，以及 Workflow 画布新增 Source/Skill/Join/Output、创建连线、删除节点、删除下游连线、键盘删除、校验、发布。
+- `npm test`：22 个前端交互/API client/图模型测试通过。
+- `npm run e2e`：6 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Headless Chrome CDP：概览页额外验证真实 Dashboard 指标，以及 Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 产品化入口。
 - 验证过程中发现 8000 端口曾运行旧 FastAPI 进程，导致 `/workflow-drafts` 返回 404；重启后端后，Workflow 保存草稿复测为“草稿已保存”。
@@ -28,20 +28,20 @@
 | Skill 市场 | 查看详情 | 可用，打开抽屉 | `GET /skills` | `npm test` 覆盖详情入口 |
 | Skill 市场 | 搜索 Skill | 可用，支持按 Skill 名称、ID、标签过滤，避免历史数据过多时找不到新插件 | `GET /skills` | Playwright E2E 覆盖按新上传 Skill ID 搜索 |
 | Skill 市场 | 上传 Skill 插件包 | 可用，打开上传向导；zip 上传后进入待审批；非法路径、缺 manifest、缺 handler 会返回业务错误码 | `POST /skills/packages/upload`、`GET /skills/packages` | `npm test` 覆盖上传入口；Playwright E2E 覆盖真实 zip 上传；后端测试覆盖成功、缺 manifest/handler、非法路径 |
-| Skill 市场 | 运行合约测试 | 可用，调用后端并展示通过/失败；插件超时返回 `SKILL_CONTRACT_TIMEOUT` | `POST /skills/{skill_id}/contract-test` | `npm test` 与 Playwright E2E 覆盖合约测试结果；P0 测试覆盖超时 |
+| Skill 市场 | 运行合约测试 | 可用，调用后端并展示通过/失败；插件默认 5 秒超时，超时返回 `SKILL_CONTRACT_TIMEOUT` | `POST /skills/{skill_id}/contract-test` | `npm test` 与 Playwright E2E 覆盖合约测试结果；P0 测试覆盖超时；full E2E 覆盖并发场景 |
 | Workflow 市场 | 新建 Workflow | 可用，创建草稿并进入画布 | `POST /workflow-drafts` | `npm test` 覆盖新建入口 |
 | Workflow 市场 | 查看草稿/已发布版本/模板 | 可用，列表化展示流程资产 | `GET /workflow-drafts`、`GET /workflows`、`GET /workflow-templates` | `npm test` 覆盖市场页 |
 | Workflow 市场 | 搜索 Workflow | 可用，支持按名称过滤草稿和已发布流程 | `GET /workflow-drafts`、`GET /workflows` | Playwright E2E 覆盖发布后按名称搜索 |
 | Workflow 画布 | 选择流程 | 可用，支持草稿、已发布版本、模板入口 | `GET /workflow-drafts`、`GET /workflows`、`GET /workflow-templates` | `npm test` 覆盖选择器存在 |
-| Workflow 画布 | 新增节点 | 可用，Skill 与结构节点分开新增 | `GET /skills` | `npm test` 覆盖新增 Join；Playwright E2E 覆盖 Source、Skill、Join、Output 新增 |
+| Workflow 画布 | 新增节点 | 可用，Skill 与结构节点分开新增 | `GET /skills` | `npm test` 覆盖新增 Join；Playwright E2E 覆盖 Source、Skill、Join、Output、Aggregator 新增 |
 | Workflow 画布 | 连线 | 可用，React Flow `onConnect` 写入当前 edges；Inspector 同时提供“可连接目标”按钮，便于选择下游节点并创建依赖线 | 前端画布状态 | `npm test` 和 Playwright E2E 覆盖创建连线、删除下游连线 |
 | Workflow 画布 | 删除节点/连线 | 可用，删除选中节点、Inspector 删除当前节点、键盘 Delete/Backspace 删除，或通过 Inspector 删除选中节点的下游连线，并同步画布状态 | 前端画布状态 | `npm test` 覆盖删除节点、键盘删除和删除下游连线；Playwright E2E 覆盖节点工具栏、键盘删除、删除选中节点和 `answer -> judge_a` 下游连线 |
 | Workflow 画布 | 撤销/重做 | 可用，支持节点新增、删除、Inspector 编辑、自动布局、连线的历史回退与恢复 | 前端画布状态 | `npm test` 和 Playwright E2E 覆盖新增 Join 后撤销/重做 |
-| Workflow 画布 | Inspector 编辑 | 可用，支持名称、类型、Skill、条件、JSON 映射和配置 | 前端画布状态 | 类型检查覆盖 |
-| Workflow 画布 | 保存草稿 | 可用，新建或更新草稿，保存后回到 Workflow 市场 | `POST/PUT /workflow-drafts` | 后端契约测试覆盖 |
+| Workflow 画布 | Inspector 编辑 | 可用，支持名称、类型、Skill、条件、JSON 映射、配置和 Aggregator 聚合策略 | 前端画布状态 | `npm test` 覆盖 Aggregator 策略；类型检查覆盖 |
+| Workflow 画布 | 保存草稿 | 可用，新建或更新草稿，保存后回到 Workflow 市场，再打开仍保留名称与节点配置 | `POST/PUT /workflow-drafts` | 后端契约测试与 Playwright E2E 覆盖 |
 | Workflow 画布 | 校验 | 可用，提交当前画布 graph；前端已抽出图模型转换，避免提交静态 demo graph | `POST /workflow-graphs/validate` | 前端图模型单测与 Playwright E2E 覆盖 |
-| Workflow 画布 | 试运行 | 可用，要求先选择 Dataset Version | `POST /workflow-graphs/dry-run` | 既有后端契约测试覆盖 |
-| Workflow 画布 | 发布 | 可用，提交当前画布 graph | `POST /workflow-graphs/publish` | 后端契约测试与 Playwright E2E 覆盖 |
+| Workflow 画布 | 试运行 | 可用，要求先选择 Dataset Version，会回填 step trace 并提示队列消息只携带 `item_id` | `POST /workflow-graphs/dry-run` | 后端契约测试与 Playwright E2E 覆盖 |
+| Workflow 画布 | 发布 | 可用，提交当前画布 graph；后端发布阻断错误会回填到 Console“错误与建议” | `POST /workflow-graphs/publish` | 后端发布阻断测试、前端发布失败测试与 Playwright E2E 覆盖 |
 | 执行中心 | 创建任务 | 可用，弹窗选择 Workflow/Dataset；Select 支持搜索并在进入页面时刷新，避免历史数据过多时无法选择新版本 | `POST /tasks`、`GET /workflows`、`GET /datasets` | `npm test` 覆盖创建向导；Playwright E2E 覆盖真实创建 |
 | 执行中心 | 执行/暂停/恢复/取消/重试 | 可用，动作绑定任务并刷新列表；completed/running/canceled 等非法状态会被后端拒绝，前端按钮按状态禁用并显示原因 | `POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed` | `npm test` 覆盖执行状态刷新和完成态禁用；Playwright E2E 覆盖真实执行；P0 后端测试覆盖状态机 |
 | 执行中心 | 任务详情/Trace Tree | 可用，按选中 Task 展示基础信息和 Trace Tree | `GET /tasks`、`GET /tasks/{task_id}/trace-tree` | 类型检查和后端测试覆盖 |
@@ -56,7 +56,7 @@
 
 ## 当前仍需增强
 
-- Workflow 画布已通过 Headless Chrome CDP 做核心烟测，Playwright 已覆盖进入画布、创建连线、删除节点、删除下游连线、键盘删除与发布后任务主链路；还需要进一步覆盖保存草稿回放、试运行、发布阻断等完整画布链路。
-- Task 创建向导需要进一步加入权限检查、成本预算、CI Gate 和实验 baseline 对比。
+- Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；后续需要进一步拆分组件，并补更复杂字段映射 UI。
+- Task 创建向导需要进一步加入必选校验、并发/重试/repeat、成本预算、CI Gate 和实验 baseline 对比。
 - 报告中心需要把已实现的 Experiment/CI Gate/Annotation Queue/Trace Tree API 进一步做成独立可操作视图。
 - Judge 审计需要增加多 Judge 一致性和红队安全扫描视图。

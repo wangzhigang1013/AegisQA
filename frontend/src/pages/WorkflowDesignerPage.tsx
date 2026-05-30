@@ -24,11 +24,11 @@ import {
   useNodesState,
   type Connection,
 } from '@xyflow/react';
-import { Alert, Button, Card, Col, Divider, Form, Input, InputNumber, Row, Select, Space, Tabs, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, Divider, Form, Input, InputNumber, Row, Segmented, Select, Space, Tabs, Tag, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
-import { api } from '../api/client';
+import { ApiError, api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { demoSkills, demoWorkflowGraph } from '../data/demo';
 import type { DatasetVersion, GraphValidationResult, SkillManifest, WorkflowGraph, WorkflowGraphNode } from '../types';
@@ -143,7 +143,13 @@ function WorkflowDesignerContent() {
       setConsoleText(`发布成功：${workflow.version_id}`);
       await queryClient.invalidateQueries({ queryKey: ['workflows'] });
     },
-    onError: (error) => setConsoleText(error instanceof Error ? `发布失败：${error.message}` : '发布失败'),
+    onError: (error) => {
+      const validation = validationResultFromApiError(error, graph);
+      if (validation) {
+        setConsoleResult(validation);
+      }
+      setConsoleText(`发布失败：${formatApiError(error)}`);
+    },
   });
 
   const dryRunMutation = useMutation({
@@ -260,6 +266,12 @@ function WorkflowDesignerContent() {
         return { ...node, data: { label: formatNodeLabel(nextGraphNode), graphNode: nextGraphNode } };
       }),
     );
+  }
+
+  function updateAggregatorStrategy(strategy: string) {
+    if (!selectedGraphNode) return;
+    updateSelectedNode({ config: { ...(selectedGraphNode.config ?? {}), strategy } });
+    setConsoleText(`聚合策略已更新：${strategy}`);
   }
 
   function autoLayout() {
@@ -486,6 +498,21 @@ function WorkflowDesignerContent() {
                   <Typography.Text type="secondary">条件表达式</Typography.Text>
                   <Input value={selectedGraphNode.condition} onChange={(event) => updateSelectedNode({ condition: event.target.value })} placeholder="例如 metrics.score > 0.6" />
                 </div>
+                {selectedGraphNode.node_type === 'aggregator' ? (
+                  <div>
+                    <Typography.Text type="secondary">聚合策略</Typography.Text>
+                    <Segmented
+                      block
+                      value={String(selectedGraphNode.config?.strategy ?? 'majority_vote')}
+                      onChange={(value) => updateAggregatorStrategy(String(value))}
+                      options={[
+                        { label: '多数投票', value: 'majority_vote' },
+                        { label: '均值', value: 'mean' },
+                        { label: '一致性', value: 'agreement' },
+                      ]}
+                    />
+                  </div>
+                ) : null}
                 <Form layout="vertical">
                   <Form.Item label="输入映射 JSON">
                     <Input.TextArea
@@ -627,6 +654,29 @@ function updateJsonPatch(
   } else {
     setConsoleText(`JSON 解析失败：${parsed.issue.message}`);
   }
+}
+
+function validationResultFromApiError(error: unknown, graph: WorkflowGraph): GraphValidationResult | null {
+  if (!(error instanceof ApiError) || !Array.isArray(error.details.errors)) {
+    return null;
+  }
+  return {
+    ok: false,
+    errors: error.details.errors.map((issue) => {
+      const payload = issue as Record<string, unknown>;
+      return {
+        code: String(payload.code ?? 'GRAPH_ERROR'),
+        message: String(payload.message ?? 'Workflow Graph 校验失败'),
+        node_id: typeof payload.node_id === 'string' ? payload.node_id : undefined,
+        details: typeof payload.details === 'object' && payload.details ? (payload.details as Record<string, unknown>) : {},
+      };
+    }),
+    warnings: [],
+    execution_levels: [],
+    graph_tips: [],
+    node_count: graph.nodes.length,
+    edge_count: graph.edges.length,
+  };
 }
 
 function IssueList({ result }: { result: GraphValidationResult | Record<string, unknown> | null }) {

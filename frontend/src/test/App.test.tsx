@@ -53,6 +53,14 @@ function jsonResponse(payload: unknown) {
   } as Response);
 }
 
+function errorResponse(status: number, payload: unknown) {
+  return Promise.resolve({
+    ok: false,
+    status,
+    json: () => Promise.resolve(payload),
+  } as Response);
+}
+
 describe('AegisQA 前端工作台', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -219,6 +227,45 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.keyDown(window, { key: 'Delete' });
     expect(await screen.findByText(/已删除节点：answer/)).toBeInTheDocument();
+  });
+
+  it('Workflow 发布失败时展示后端校验错误和修复入口', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/workflow-graphs/publish')) {
+        return errorResponse(400, {
+          code: 'HTTP_ERROR',
+          message: 'Workflow Graph 校验失败',
+          details: {
+            errors: [{ code: 'BRANCH_CONDITION_REQUIRED', message: '条件分支必须配置条件表达式。', node_id: 'branch_low_score' }],
+          },
+          trace_id: 'trace_test',
+        });
+      }
+      if (url.endsWith('/skills')) return jsonResponse(demoSkills);
+      if (url.endsWith('/workflow-drafts')) return jsonResponse([{ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' }]);
+      if (url.endsWith('/workflows')) return jsonResponse([demoWorkflowVersion]);
+      if (url.endsWith('/workflow-templates') || url.endsWith('/datasets')) return jsonResponse([]);
+      return jsonResponse({});
+    });
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    fireEvent.click(await screen.findByRole('button', { name: /发布/ }));
+    expect(await screen.findByText(/发布失败：Workflow Graph 校验失败/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /错误与建议/ }));
+    expect(await screen.findByText('BRANCH_CONDITION_REQUIRED')).toBeInTheDocument();
+    expect(screen.getByText('条件分支必须配置条件表达式。')).toBeInTheDocument();
+  });
+
+  it('Workflow Aggregator 节点支持聚合策略配置', async () => {
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    fireEvent.click(screen.getByRole('button', { name: /新增 Aggregator/ }));
+    expect(await screen.findByText('聚合策略')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('均值'));
+    expect(await screen.findByText(/聚合策略已更新：mean/)).toBeInTheDocument();
   });
 
   it('执行中心默认展示任务列表并可以创建任务', async () => {

@@ -110,12 +110,12 @@
 
 ### Task 2.3：Inspector 字段映射与发布前校验
 
-- [ ] 新增测试：未审批 Skill 不能发布。
-- [ ] 新增测试：多对一没有 Join/Aggregator 时发布失败。
-- [ ] 新增测试：Branch 没条件表达式发布失败。
-- [ ] 右侧 Inspector 支持节点名称、Skill、输入映射、输出路径、条件表达式、聚合策略。
-- [ ] 保存草稿后返回 Workflow 市场，再打开仍保留所有配置。
-- [ ] 运行 `python -m pytest tests/test_workflow_graph_hardening.py -q` 和 Workflow E2E。
+- [x] 新增测试：未审批 Skill 不能发布。
+- [x] 新增测试：多对一没有 Join/Aggregator 时发布失败。
+- [x] 新增测试：Branch 没条件表达式发布失败。
+- [x] 右侧 Inspector 支持节点名称、Skill、输入映射、输出路径、条件表达式、聚合策略。
+- [x] 保存草稿后返回 Workflow 市场，再打开仍保留所有配置。
+- [x] 运行 `python -m pytest tests/test_workflow_graph_hardening.py -q` 和 Workflow E2E。
 
 ## 阶段 3：Task 执行中心严谨化
 
