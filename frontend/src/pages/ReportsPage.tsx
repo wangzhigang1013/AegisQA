@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { MetricTile } from '../components/MetricTile';
 import { PageHeader } from '../components/PageHeader';
-import type { BadcaseRecord } from '../types';
+import type { TaskRecord } from '../types';
 
 export function ReportsPage() {
   const queryClient = useQueryClient();
@@ -39,13 +39,15 @@ export function ReportsPage() {
   });
 
   const correctBadcaseMutation = useMutation({
-    mutationFn: (badcase: BadcaseRecord) =>
-      api.correctBadcase(badcase.badcase_id, {
+    mutationFn: async (badcase: Record<string, unknown>) => {
+      const badcaseId = await ensureBadcaseId(badcase, task);
+      return api.correctBadcase(badcaseId, {
         human_label: 'fail',
-        problem_type: badcase.problem_type ?? 'manual_review',
+        problem_type: String(badcase.problem_type ?? 'manual_review'),
         note: '从任务报告加入 Golden 候选。',
         add_to_golden: true,
-      }),
+      });
+    },
     onSuccess: async () => {
       setNotice('Badcase 已加入 Golden 候选。');
       await queryClient.invalidateQueries({ queryKey: ['task-report', selectedTask?.task_id] });
@@ -160,8 +162,8 @@ export function ReportsPage() {
                       <Button
                         icon={<PlusCircleOutlined />}
                         loading={correctBadcaseMutation.isPending}
-                        disabled={!record.badcase_id}
-                        onClick={() => correctBadcaseMutation.mutate(record as BadcaseRecord)}
+                        disabled={!canCorrectBadcase(record, task)}
+                        onClick={() => correctBadcaseMutation.mutate(record)}
                       >
                         加入 Golden
                       </Button>
@@ -179,4 +181,30 @@ export function ReportsPage() {
       )}
     </section>
   );
+}
+
+async function ensureBadcaseId(badcase: Record<string, unknown>, task: TaskRecord | null | undefined): Promise<string> {
+  if (badcase.badcase_id) {
+    return String(badcase.badcase_id);
+  }
+  if (!task?.run_id || !badcase.item_id) {
+    throw new Error('缺少 Run 或 Item 信息，无法创建 Badcase 纠错记录。');
+  }
+  // 聚合报告里的 Badcase 可能只是即时分析结果，还没有进入人工纠错表；
+  // 加入 Golden 前先创建正式 Badcase，后续状态流转和审计才能追踪。
+  const created = await api.createBadcase({
+    run_id: task.run_id,
+    item_id: String(badcase.item_id),
+    reason: String(badcase.reason ?? 'judge_fail'),
+    payload: asRecord(badcase.payload) ?? badcase,
+  });
+  return created.badcase_id;
+}
+
+function canCorrectBadcase(badcase: Record<string, unknown>, task: TaskRecord | null | undefined): boolean {
+  return Boolean(badcase.badcase_id || (task?.run_id && badcase.item_id));
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }

@@ -1,6 +1,7 @@
 import { ApartmentOutlined, CopyOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Card, Col, Empty, Row, Space, Table, Tag, Typography } from 'antd';
+import { Button, Card, Col, Empty, Input, Row, Space, Table, Tag, Typography } from 'antd';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
@@ -10,9 +11,34 @@ import { demoWorkflowGraph } from '../data/demo';
 export function WorkflowMarketPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const draftsQuery = useQuery({ queryKey: ['workflow-drafts'], queryFn: api.workflowDrafts });
-  const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows });
+  const [workflowQuery, setWorkflowQuery] = useState('');
+  const draftsQuery = useQuery({ queryKey: ['workflow-drafts'], queryFn: api.workflowDrafts, refetchOnMount: 'always' });
+  const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
   const templatesQuery = useQuery({ queryKey: ['workflow-templates'], queryFn: api.templates });
+  const workflowRows = useMemo(() => {
+    const rows = [
+      ...(draftsQuery.data ?? []).map((draft) => ({
+        key: `draft-${draft.draft_id}`,
+        name: draft.name,
+        type: '草稿',
+        status: draft.status,
+        version: '-',
+        updated_at: draft.updated_at,
+        action: () => navigate(`/workflows/designer/${draft.draft_id}`),
+      })),
+      ...(workflowsQuery.data ?? []).map((workflow) => ({
+        key: `workflow-${workflow.version_id}`,
+        name: workflow.name,
+        type: '已发布',
+        status: workflow.status,
+        version: `v${workflow.version}`,
+        updated_at: workflow.version_id,
+        action: () => workflow.graph && navigate(`/workflows/designer/${workflow.version_id}`),
+      })),
+    ];
+    const query = workflowQuery.trim().toLowerCase();
+    return query ? rows.filter((row) => `${row.name} ${row.type} ${row.status}`.toLowerCase().includes(query)) : rows;
+  }, [draftsQuery.data, navigate, workflowQuery, workflowsQuery.data]);
 
   const createDraftMutation = useMutation({
     mutationFn: () => api.createWorkflowDraft({ name: '未命名 Workflow', graph: { ...demoWorkflowGraph, name: '未命名 Workflow' } }),
@@ -33,30 +59,15 @@ export function WorkflowMarketPage() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={16}>
-          <Card className="flat-card" title="Workflow 列表">
+          <Card
+            className="flat-card"
+            title="Workflow 列表"
+            extra={<Input.Search allowClear placeholder="搜索 Workflow 名称" className="wide-search" onSearch={setWorkflowQuery} onChange={(event) => setWorkflowQuery(event.target.value)} />}
+          >
             <Table
               rowKey={(record) => record.key}
               pagination={{ pageSize: 8 }}
-              dataSource={[
-                ...(draftsQuery.data ?? []).map((draft) => ({
-                  key: `draft-${draft.draft_id}`,
-                  name: draft.name,
-                  type: '草稿',
-                  status: draft.status,
-                  version: '-',
-                  updated_at: draft.updated_at,
-                  action: () => navigate(`/workflows/designer/${draft.draft_id}`),
-                })),
-                ...(workflowsQuery.data ?? []).map((workflow) => ({
-                  key: `workflow-${workflow.version_id}`,
-                  name: workflow.name,
-                  type: '已发布',
-                  status: workflow.status,
-                  version: `v${workflow.version}`,
-                  updated_at: workflow.version_id,
-                  action: () => workflow.graph && navigate(`/workflows/designer/${workflow.version_id}`),
-                })),
-              ]}
+              dataSource={workflowRows}
               columns={[
                 { title: 'Workflow', dataIndex: 'name', render: (value) => <Space><ApartmentOutlined /><Typography.Text strong>{value}</Typography.Text></Space> },
                 { title: '类型', dataIndex: 'type', render: (value) => <Tag color={value === '草稿' ? 'orange' : 'green'}>{value}</Tag> },

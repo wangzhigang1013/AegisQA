@@ -11,6 +11,7 @@ cd frontend
 npm run typecheck
 npm test
 npm run build
+npm run e2e
 Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 ```
 
@@ -18,8 +19,9 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 - 单元/API/扩展测试：`30 passed`。
 - 端到端 Demo：最新 Dataset `rag_qa_1000:v6`、Run `run-9311b164dd1f`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
-- 前端：`npm run typecheck`、`npm test`、`npm run build` 已通过；`npm test` 覆盖 12 个交互测试。
+- 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 12 个交互测试，Playwright 覆盖 1 条任务主链路 E2E。
 - 浏览器交互：Headless Chrome CDP 验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
+- Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden。
 - 产品化增强：Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 已有后端 API 测试；首页已展示真实 Dashboard 和产品化增强入口。
 
 ## P0 功能覆盖
@@ -31,7 +33,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-SK-03 | input/output schema 强校验 | 已实现 | `aegisqa/core/mapper.py`，`BaseSkill.execute`，TypeMismatch 测试 |
 | FR-SK-04 | Skill 版本、作者、依赖、场景、标签 | 已实现 | `SkillManifest` |
 | FR-SK-05 | Skill 合约测试入口 | 已实现 | `BaseSkill.contract_test()`，`POST /skills/{skill_id}/contract-test`，React Skill 详情按钮测试；插件包审批前也必须通过合约测试 |
-| FR-SK-08 | Skill 插件包上传与审批门禁 | 已实现基础 | `POST /skills/packages/upload`、`GET /skills/packages`、`aegisqa/skills/packages.py`；zip 必须包含 `skill.yaml|skill.json` 和 `handler.py`，默认 `pending_review`，测试 `test_skill_package_upload_contract_and_approval_gate` |
+| FR-SK-08 | Skill 插件包上传与审批门禁 | 已实现基础 | `POST /skills/packages/upload`、`GET /skills/packages`、`aegisqa/skills/packages.py`；zip 必须包含 `skill.yaml|skill.json` 和 `handler.py`，默认 `pending_review`，测试 `test_skill_package_upload_contract_and_approval_gate`；Playwright E2E 覆盖真实 zip 上传、合约测试和治理启用 |
 | FR-WF-01 | 创建、编辑、复制、发布、归档 Workflow | 已实现基础 | `WorkflowService.publish/copy_workflow/archive`，`POST /workflow-graphs/publish`，`POST/PUT/DELETE /workflow-drafts`，React `Workflow 市场` + `Workflow 画布` |
 | FR-WF-02 | 线性步骤列表与图形化编排 | 已实现 | `WorkflowDraft` / `WorkflowStep`，`WorkflowGraph` 保留画布快照 |
 | FR-WF-03 | 字段映射与强类型校验 | 已实现 | `resolve_input_mapping`，失败不调用 Skill |
@@ -50,7 +52,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-RP-01 | Run 指标聚合 | 已实现 | `aggregate_run_report` |
 | FR-RP-02 | Skill 输出指标入库 | 已实现 | Item metrics 与 report 聚合 |
 | FR-RP-03 | Badcase 明细筛选 | 已实现 | `BadcaseService.filter_badcases`，`GET /badcases` 支持状态、问题类型、原因、Skill、关键词、得分区间 |
-| FR-RP-04 | 单次任务报告 | 已实现基础 | API `/tasks/{task_id}/report` 包装 RunReport、Badcase、导出链接；React 报告中心围绕 Task 展示 |
+| FR-RP-04 | 单次任务报告 | 已实现基础 | API `/tasks/{task_id}/report` 包装 RunReport、Badcase、导出链接；React 报告中心围绕 Task 展示；Playwright E2E 覆盖任务报告查看、导出和 Badcase 加入 Golden |
 | FR-ME-01 | Judge Profile 管理 | 已实现基础 | `JudgeProfileService.create_profile/get_profile`，API 已挂载 |
 | FR-ME-02 | Golden Dataset 裁判评测 | 已实现 | `audit_judge_profile` 输出 Accuracy/Precision/Recall/F1/Kappa/混淆矩阵 |
 | FR-ME-03 | 审计结果入库 | 已实现 | `JudgeProfileService.audit_and_store` |
@@ -90,7 +92,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 | 对标能力 | 当前状态 | 证据 |
 |---|---|---|
-| Task 一等模型 | 已实现基础 | `GET/POST /tasks`、`POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed`、`GET /tasks/{task_id}/report`、`GET /tasks/{task_id}/trace-tree`；前端执行中心默认展示任务列表 |
+| Task 一等模型 | 已实现基础 | `GET/POST /tasks`、`POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed`、`GET /tasks/{task_id}/report`、`GET /tasks/{task_id}/trace-tree`；前端执行中心默认展示任务列表；Playwright E2E 覆盖创建和执行任务 |
 | Experiment 快照与 baseline 对比 | 已实现最小 API | `POST /experiments/from-run`，`GET /experiments`，保存 Workflow/Dataset/Skill/Prompt/Runtime 快照与 baseline diff |
 | Prompt / Skill 版本注册 | 已实现基础 | Run snapshot 与 Experiment snapshot 记录 `skill_versions`、`prompt_skill_versions`、模型参数 |
 | Assertion DSL | 已实现最小 API | `POST /assertions/evaluate` 支持 contains、regex、json_schema、similarity、latency、cost、safety 的基础断言 |

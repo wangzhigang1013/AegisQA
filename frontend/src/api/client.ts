@@ -181,6 +181,11 @@ export const api = {
     }),
   badcaseClusters: () => request<Record<string, unknown>[]>('/badcases/clusters'),
   exportBadcases: () => request<Record<string, unknown>>('/badcases/export?file_format=jsonl'),
+  createBadcase: (body: { run_id: string; item_id: string; reason: string; payload: Record<string, unknown> }) =>
+    request<BadcaseRecord>('/badcases', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   judgeProfiles: () => request<JudgeProfile[]>('/judge-profiles'),
   judgeAudits: () => request<StoredJudgeAudit[]>('/judge-audits'),
   createJudgeProfile: (body: { name: string; model: string; prompt: string; rubric: Record<string, unknown>; threshold: number; output_schema: Record<string, unknown> }) =>

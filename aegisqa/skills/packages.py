@@ -20,7 +20,9 @@ class SubprocessPackageSkill(BaseSkill):
 
     def __init__(self, manifest: SkillManifest, handler_path: Path, *, timeout_seconds: int = 10) -> None:
         self.manifest = manifest
-        self.handler_path = handler_path
+        # 子进程会把 cwd 切到插件目录；这里必须提前转成绝对路径，
+        # 避免相对路径在子进程中被再次拼接导致 handler.py 找不到。
+        self.handler_path = handler_path.resolve()
         self.timeout_seconds = timeout_seconds
         super().__init__()
 

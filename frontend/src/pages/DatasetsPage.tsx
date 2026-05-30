@@ -48,13 +48,14 @@ export function DatasetsPage() {
 
   const uploadMutation = useMutation({
     mutationFn: async (values: UploadFormValues) => {
-      if (!uploadFile?.originFileObj) {
+      const selectedFile = getSelectedFile(uploadFile);
+      if (!selectedFile) {
         throw new Error('请先选择 CSV 或 JSONL 文件');
       }
-      const content = await readFileText(uploadFile.originFileObj);
+      const content = await readFileText(selectedFile);
       return api.uploadDataset({
         name: values.name,
-        filename: uploadFile.name,
+        filename: selectedFile.name,
         content,
         golden: values.golden,
         label_field: values.label_field,
@@ -260,4 +261,10 @@ function readFileText(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('文件读取失败'));
     reader.readAsText(file, 'utf-8');
   });
+}
+
+function getSelectedFile(uploadFile: UploadFile | null): File | null {
+  // Ant Design 在真实浏览器和测试环境中可能分别把文件放在 originFileObj 或对象本身；
+  // 提交前统一归一化，避免“界面已选文件但提交认为未选择”的状态错位。
+  return (uploadFile?.originFileObj ?? uploadFile ?? null) as File | null;
 }

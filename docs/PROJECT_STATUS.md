@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-任务中心化产品重构第一批已完成，进入端到端任务流强化阶段。
+正式 Playwright E2E 主链路已完成，进入画布精细化与产品化增强扩展阶段。
 
 ## 当前已完成
 
@@ -14,6 +14,7 @@
 - Skill 市场已支持 zip 插件包上传，后端校验 `skill.yaml|skill.json` 与 `handler.py`，上传后进入 `pending_review`，合约测试通过后才能审批启用。
 - 新增 Task 一等模型，Task 绑定 Dataset Version、Workflow Version 和底层 Run，执行中心与报告中心都围绕任务组织。
 - 已建立 `docs/INTERACTION_ACCEPTANCE_MATRIX.md`，逐页记录可见按钮的可用状态、依赖 API 和验收方式。
+- 已新增正式 Playwright E2E，自动覆盖“上传数据 -> 上传并审批 Skill -> 创建 Workflow -> 发布 -> 创建 Task -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路。
 
 ## 最近验证
 
@@ -22,6 +23,7 @@
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：1 个测试文件、12 个测试通过。
 - `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：1 个 Playwright E2E 测试通过，覆盖任务主链路。
 - `http://127.0.0.1:8000/health`：FastAPI 页面健康检查通过。
 - `http://127.0.0.1:5173`：React 前端可访问。
 - 无头 Chrome 页面验证：`/`、`/skills`、`/workflows`、`/workflows/designer/draft-test`、`/runs`、`/reports` 均能打开并展示关键入口。
@@ -30,8 +32,8 @@
 
 ## 当前问题
 
-- Workflow 画布的拖拽、连线、删除、保存草稿已经具备第一批闭环，但仍缺少正式 Playwright E2E、撤销/重做快捷键、复杂字段映射表单和更强的类型提示。
-- Task 已成为前端主线，但仍需要完整端到端 UI 流程：上传数据 -> 上传并审批 Skill -> 新建 Workflow -> 发布 -> 创建任务 -> 执行 -> 查看报告 -> 纠错 Badcase。
+- Workflow 画布的拖拽、连线、删除、保存草稿已经具备第一批闭环；正式 E2E 已验证画布入口与发布后的任务主链路，但仍需把精确拖拽、连线、删除、保存草稿、试运行、发布都纳入浏览器自动化。
+- Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；后续需要继续增强任务成本预算、CI Gate、baseline 对比和权限检查。
 - Skill 插件包已采用受控子进程执行，后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
 - Experiment 快照、CI Gate、Annotation Queue、Trace Tree 已有后端最小闭环；仍需做成完整独立页面、加入成本预算和 baseline 可视化对比。
 - 报告、Badcase、Judge 审计已经接入基础数据与动作，人工审阅队列已有后端最小闭环；仍需补齐多 Judge 一致性视图、红队安全扫描和跨任务 Score Analytics。
@@ -39,11 +41,47 @@
 
 ## 下一阶段目标
 
-- 建立正式 Playwright E2E：上传数据集 -> 上传并审批 Skill 插件包 -> 创建 Workflow -> 连线 -> 校验 -> 试运行 -> 发布 -> 创建 Task -> 执行 -> 查看任务报告 -> 纠错 Badcase。
+- 扩展 Playwright E2E：把 Workflow 画布的拖拽、连线、删除、保存草稿、试运行、发布全部纳入浏览器自动化。
 - 把 Experiment、Prompt/Skill 版本注册、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 从最小 API 能力继续扩展为完整页面与端到端操作流。
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 Playwright E2E 主链路完成
+
+- 改动摘要：把当前目录转为 Git 仓库并建立基线提交；新增正式 Playwright E2E，覆盖上传数据、上传并审批 Skill、发布 Workflow、创建并执行任务、查看任务报告、导出报告、Badcase 加入 Golden；同时修复 E2E 暴露出的真实交互问题，包括上传文件归一化、插件 handler 子进程路径、Skill/Workflow/Governance 搜索、任务创建可搜索 Select、报告聚合 Badcase 持久化纠错、Vitest 排除 E2E 文件和 Playwright 依赖重复。
+- 变更文件：
+  - `.gitignore`
+  - `aegisqa/skills/packages.py`
+  - `frontend/package.json`
+  - `frontend/package-lock.json`
+  - `frontend/playwright.config.ts`
+  - `frontend/e2e/task-flow.spec.ts`
+  - `frontend/vitest.config.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/DatasetsPage.tsx`
+  - `frontend/src/pages/SkillsPage.tsx`
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/pages/WorkflowMarketPage.tsx`
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `git init`
+  - `git commit -m "chore: 初始化 AegisQA 项目基线"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Git：基线提交 `9770009 chore: 初始化 AegisQA 项目基线` 已创建。
+  - 后端：30 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端：typecheck 通过；Vitest 1 个测试文件、12 个测试通过；生产构建通过。
+  - Playwright：1 个 E2E 测试通过，主链路从数据上传跑到报告纠错。
+- 下一步：提交本批次 E2E 改动，并继续把 Workflow 画布精确拖拽、连线、删除、保存草稿、试运行、发布纳入 Playwright 自动化。
 
 ### 2026-05-31 Git 初始化与 Playwright E2E 批次启动
 

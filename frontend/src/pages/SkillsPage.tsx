@@ -20,24 +20,30 @@ export function SkillsPage() {
   const [uploadFile, setUploadFile] = useState<UploadFile | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [skillQuery, setSkillQuery] = useState('');
   const [contractResultText, setContractResultText] = useState<string | null>(null);
   const [form] = Form.useForm<UploadFormValues>();
 
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
   const packagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
   const skills = skillsQuery.data?.length ? skillsQuery.data : demoSkills;
-  const filteredSkills = useMemo(
-    () => (statusFilter === 'all' ? skills : skills.filter((skill) => skill.status === statusFilter)),
-    [skills, statusFilter],
-  );
+  const filteredSkills = useMemo(() => {
+    const query = skillQuery.trim().toLowerCase();
+    return skills.filter((skill) => {
+      const matchesStatus = statusFilter === 'all' || skill.status === statusFilter;
+      const matchesQuery = !query || `${skill.skill_id} ${skill.name} ${skill.tags.join(' ')}`.toLowerCase().includes(query);
+      return matchesStatus && matchesQuery;
+    });
+  }, [skillQuery, skills, statusFilter]);
 
   const uploadMutation = useMutation({
     mutationFn: async (values: UploadFormValues) => {
-      if (!uploadFile?.originFileObj) {
+      const selectedFile = getSelectedFile(uploadFile);
+      if (!selectedFile) {
         throw new Error('请选择 zip 插件包。');
       }
-      const content_base64 = await readFileBase64(uploadFile.originFileObj);
-      return api.uploadSkillPackage({ filename: values.filename || uploadFile.name, content_base64 });
+      const content_base64 = await readFileBase64(selectedFile);
+      return api.uploadSkillPackage({ filename: values.filename || selectedFile.name, content_base64 });
     },
     onSuccess: async (record) => {
       setNotice(`插件包已上传：${record.manifest.skill_id}，当前状态 ${record.status}`);
@@ -73,7 +79,13 @@ export function SkillsPage() {
 
       <Card className="flat-card" title="筛选">
         <Space wrap>
-          <Input.Search placeholder="搜索 Skill 名称或 ID" allowClear className="wide-search" />
+          <Input.Search
+            placeholder="搜索 Skill 名称或 ID"
+            allowClear
+            className="wide-search"
+            onSearch={setSkillQuery}
+            onChange={(event) => setSkillQuery(event.target.value)}
+          />
           <Select
             value={statusFilter}
             onChange={setStatusFilter}
@@ -175,4 +187,10 @@ async function readFileBase64(file: File): Promise<string> {
     binary += String.fromCharCode(byte);
   }
   return btoa(binary);
+}
+
+function getSelectedFile(uploadFile: UploadFile | null): File | null {
+  // Ant Design Upload 的真实文件位置在不同触发路径下并不完全一致；
+  // 这里统一归一化，让拖拽区和弹窗上传共用一套提交逻辑。
+  return (uploadFile?.originFileObj ?? uploadFile ?? null) as File | null;
 }

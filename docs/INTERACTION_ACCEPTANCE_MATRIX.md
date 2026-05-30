@@ -10,6 +10,7 @@
 ## 最近一次交互验证
 
 - `npm test`：12 个前端交互测试通过。
+- `npm run e2e`：1 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Headless Chrome CDP：概览页额外验证真实 Dashboard 指标，以及 Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 产品化入口。
 - 验证过程中发现 8000 端口曾运行旧 FastAPI 进程，导致 `/workflow-drafts` 返回 404；重启后端后，Workflow 保存草稿复测为“草稿已保存”。
@@ -21,14 +22,16 @@
 | 概览 | 开始一次评测 | 可用，跳转 Workflow 市场 | 前端路由 | `npm test` 覆盖导航入口 |
 | 概览 | Dashboard 指标 | 可用，从后端读取真实数据 | `GET /dashboard/summary`、`GET /runs` | `npm test` 覆盖真实数值，CDP 验证页面渲染 |
 | 概览 | 产品化增强入口 | 可用，展示 Experiment、Assertion、CI Gate、Annotation、Trace Tree 状态 | `GET /experiments`、`GET /annotation-queue` | `npm test` 与 CDP 验证入口 |
-| 数据集 | 上传 CSV/JSONL | 可用，弹窗选择文件、提交、成功后刷新数据集列表 | `POST /datasets/upload`、`GET /datasets` | `npm test` 覆盖上传弹窗 |
+| 数据集 | 上传 CSV/JSONL | 可用，弹窗选择文件、提交、成功后刷新数据集列表；已修复 Upload 真实文件归一化问题 | `POST /datasets/upload`、`GET /datasets` | `npm test` 覆盖上传弹窗；Playwright E2E 覆盖真实 JSONL 上传 |
 | 数据集 | Source Skill 物化 | 可用，JSON rows 物化为 Dataset Version | `POST /datasets/source-materialize` | 人工验证和后端契约测试覆盖 |
 | 数据集 | 字段预览 | 可用，优先展示真实 Dataset Version 字段 | `GET /datasets` | 前端类型检查覆盖字段契约 |
 | Skill 市场 | 查看详情 | 可用，打开抽屉 | `GET /skills` | `npm test` 覆盖详情入口 |
-| Skill 市场 | 上传 Skill 插件包 | 可用，打开上传向导；zip 上传后进入待审批 | `POST /skills/packages/upload`、`GET /skills/packages` | `npm test` 覆盖上传入口；后端测试覆盖成功与缺 manifest/handler 失败 |
-| Skill 市场 | 运行合约测试 | 可用，调用后端并展示通过/失败 | `POST /skills/{skill_id}/contract-test` | `npm test` 覆盖合约测试结果 |
+| Skill 市场 | 搜索 Skill | 可用，支持按 Skill 名称、ID、标签过滤，避免历史数据过多时找不到新插件 | `GET /skills` | Playwright E2E 覆盖按新上传 Skill ID 搜索 |
+| Skill 市场 | 上传 Skill 插件包 | 可用，打开上传向导；zip 上传后进入待审批 | `POST /skills/packages/upload`、`GET /skills/packages` | `npm test` 覆盖上传入口；Playwright E2E 覆盖真实 zip 上传；后端测试覆盖成功与缺 manifest/handler 失败 |
+| Skill 市场 | 运行合约测试 | 可用，调用后端并展示通过/失败 | `POST /skills/{skill_id}/contract-test` | `npm test` 与 Playwright E2E 覆盖合约测试结果 |
 | Workflow 市场 | 新建 Workflow | 可用，创建草稿并进入画布 | `POST /workflow-drafts` | `npm test` 覆盖新建入口 |
 | Workflow 市场 | 查看草稿/已发布版本/模板 | 可用，列表化展示流程资产 | `GET /workflow-drafts`、`GET /workflows`、`GET /workflow-templates` | `npm test` 覆盖市场页 |
+| Workflow 市场 | 搜索 Workflow | 可用，支持按名称过滤草稿和已发布流程 | `GET /workflow-drafts`、`GET /workflows` | Playwright E2E 覆盖发布后按名称搜索 |
 | Workflow 画布 | 选择流程 | 可用，支持草稿、已发布版本、模板入口 | `GET /workflow-drafts`、`GET /workflows`、`GET /workflow-templates` | `npm test` 覆盖选择器存在 |
 | Workflow 画布 | 新增节点 | 可用，Skill 与结构节点分开新增 | `GET /skills` | `npm test` 覆盖新增 Join |
 | Workflow 画布 | 连线 | 可用，React Flow `onConnect` 写入当前 edges | 前端画布状态 | 前端交互和类型检查覆盖 |
@@ -38,20 +41,21 @@
 | Workflow 画布 | 校验 | 可用，提交当前画布 graph | `POST /workflow-graphs/validate` | 既有前后端契约测试覆盖 |
 | Workflow 画布 | 试运行 | 可用，要求先选择 Dataset Version | `POST /workflow-graphs/dry-run` | 既有后端契约测试覆盖 |
 | Workflow 画布 | 发布 | 可用，提交当前画布 graph | `POST /workflow-graphs/publish` | 既有后端契约测试覆盖 |
-| 执行中心 | 创建任务 | 可用，弹窗选择 Workflow/Dataset | `POST /tasks`、`GET /workflows`、`GET /datasets` | `npm test` 覆盖创建向导 |
-| 执行中心 | 执行/暂停/恢复/取消/重试 | 可用，动作绑定任务并刷新列表 | `POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed` | `npm test` 覆盖执行状态刷新，后端测试覆盖动作 |
+| 执行中心 | 创建任务 | 可用，弹窗选择 Workflow/Dataset；Select 支持搜索并在进入页面时刷新，避免历史数据过多时无法选择新版本 | `POST /tasks`、`GET /workflows`、`GET /datasets` | `npm test` 覆盖创建向导；Playwright E2E 覆盖真实创建 |
+| 执行中心 | 执行/暂停/恢复/取消/重试 | 可用，动作绑定任务并刷新列表 | `POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed` | `npm test` 覆盖执行状态刷新，Playwright E2E 覆盖真实执行，后端测试覆盖动作 |
 | 执行中心 | 任务详情/Trace Tree | 可用，按选中 Task 展示基础信息和 Trace Tree | `GET /tasks`、`GET /tasks/{task_id}/trace-tree` | 类型检查和后端测试覆盖 |
 | 报告中心 | 导出 HTML/CSV | 可用，围绕选中任务导出底层 Run 报告 | `GET /tasks/{task_id}/report`、`GET /runs/{run_id}/report/export` | `npm test` 覆盖导出成功反馈 |
-| 报告中心 | Badcase 加入 Golden | 可用，调用纠错 API | `POST /badcases/{badcase_id}/correct` | 前端 mutation 与后端服务能力覆盖 |
+| 报告中心 | Badcase 加入 Golden | 可用；聚合报告中的 Badcase 若尚未持久化，会先创建 Badcase 再纠错入 Golden | `POST /badcases`、`POST /badcases/{badcase_id}/correct` | Playwright E2E 覆盖真实纠错链路；前端 mutation 与后端服务能力覆盖 |
 | Judge 审计 | 创建 Profile | 可用，弹窗保存 Profile | `POST /judge-profiles` | 人工验证和类型检查覆盖 |
 | Judge 审计 | 创建审计 | 可用，弹窗提交审计标签 | `POST /judge-profiles/{profile_id}/audits` | `npm test` 覆盖审计表单 |
 | 治理与审计 | 查看权限矩阵 | 可用，打开 RBAC 矩阵弹窗 | 前端静态矩阵 | `npm test` 覆盖矩阵弹窗 |
-| 治理与审计 | Skill 启用/禁用/废弃 | 可用，调用治理 API 并刷新列表 | `POST /skills/{skill_id}/approve|disable|deprecate` | 前端 mutation 与后端 API 覆盖 |
+| 治理与审计 | Skill 搜索 | 可用，支持按 Skill ID 或名称过滤生命周期表 | `GET /skills` | Playwright E2E 覆盖上传后搜索并审批 |
+| 治理与审计 | Skill 启用/禁用/废弃 | 可用，调用治理 API 并刷新列表 | `POST /skills/{skill_id}/approve|disable|deprecate` | Playwright E2E 覆盖启用新上传 Skill；前端 mutation 与后端 API 覆盖 |
 | 治理与审计 | 审计日志 | 可用，展示后端审计事件 | `GET /audit-events` | 类型检查覆盖 |
 
 ## 当前仍需增强
 
-- Workflow 画布已通过 Headless Chrome CDP 做核心烟测；还需要正式 Playwright E2E 覆盖拖拽、连线、删除、保存草稿、试运行、发布完整链路。
+- Workflow 画布已通过 Headless Chrome CDP 做核心烟测，Playwright 已覆盖进入画布与发布后任务主链路；还需要进一步覆盖精确拖拽、连线、删除、保存草稿、试运行、发布完整画布链路。
 - Task 创建向导需要进一步加入权限检查、成本预算、CI Gate 和实验 baseline 对比。
 - 报告中心需要把已实现的 Experiment/CI Gate/Annotation Queue/Trace Tree API 进一步做成独立可操作视图。
 - Judge 审计需要增加多 Judge 一致性和红队安全扫描视图。

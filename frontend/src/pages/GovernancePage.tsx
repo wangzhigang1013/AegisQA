@@ -1,7 +1,7 @@
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Descriptions, Modal, Space, Table, Tag, Timeline } from 'antd';
-import { useState } from 'react';
+import { Alert, Button, Card, Descriptions, Input, Modal, Space, Table, Tag, Timeline } from 'antd';
+import { useMemo, useState } from 'react';
 
 import { api } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
@@ -17,8 +17,14 @@ export function GovernancePage() {
   const queryClient = useQueryClient();
   const [matrixOpen, setMatrixOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [skillQuery, setSkillQuery] = useState('');
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
   const auditEventsQuery = useQuery({ queryKey: ['audit-events'], queryFn: api.auditEvents });
+  const filteredSkills = useMemo(() => {
+    const query = skillQuery.trim().toLowerCase();
+    if (!query) return skillsQuery.data ?? [];
+    return (skillsQuery.data ?? []).filter((skill) => `${skill.skill_id} ${skill.name}`.toLowerCase().includes(query));
+  }, [skillQuery, skillsQuery.data]);
 
   const skillMutation = useMutation({
     mutationFn: ({ skill, action }: { skill: SkillManifest; action: 'approve' | 'disable' | 'deprecate' }) =>
@@ -51,12 +57,16 @@ export function GovernancePage() {
         </Descriptions>
       </Card>
 
-      <Card className="flat-card" title="Skill 生命周期">
+      <Card
+        className="flat-card"
+        title="Skill 生命周期"
+        extra={<Input.Search allowClear placeholder="搜索 Skill ID 或名称" className="wide-search" onSearch={setSkillQuery} onChange={(event) => setSkillQuery(event.target.value)} />}
+      >
         <Table
           rowKey="skill_id"
           pagination={{ pageSize: 6 }}
           loading={skillsQuery.isLoading}
-          dataSource={skillsQuery.data ?? []}
+          dataSource={filteredSkills}
           columns={[
             { title: 'Skill', dataIndex: 'skill_id', render: (value) => <code>{value}</code> },
             { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'approved' ? 'green' : value === 'disabled' ? 'orange' : 'red'}>{value}</Tag> },

@@ -44,9 +44,9 @@ export function RunsPage() {
   const watchedWorkflow = Form.useWatch('workflow_version_id', form);
   const watchedDataset = Form.useWatch('dataset_version_id', form);
 
-  const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
-  const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows });
-  const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets });
+  const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks, refetchOnMount: 'always' });
+  const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
+  const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets, refetchOnMount: 'always' });
 
   const datasetVersions = useMemo(
     () => datasetsQuery.data?.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))) ?? [],
@@ -183,12 +183,16 @@ export function RunsPage() {
           </Form.Item>
           <Form.Item name="dataset_version_id" label="Dataset Version" rules={[{ required: true, message: '请选择 Dataset' }]}>
             <Select
+              showSearch
+              optionFilterProp="label"
               placeholder="选择数据版本"
               options={datasetVersions.map(({ version }) => ({ value: version.version_id, label: `${version.name} v${version.version} / ${version.row_count} 条` }))}
             />
           </Form.Item>
           <Form.Item name="workflow_version_id" label="Workflow Version" rules={[{ required: true, message: '请选择 Workflow' }]}>
             <Select
+              showSearch
+              optionFilterProp="label"
               placeholder="选择已发布 Workflow"
               options={(workflowsQuery.data ?? []).map((workflow) => ({ value: workflow.version_id, label: `${workflow.name} v${workflow.version}` }))}
             />
