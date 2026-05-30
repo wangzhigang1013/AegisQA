@@ -169,10 +169,10 @@
 
 ### Task 4.2：Badcase 状态流转
 
-- [ ] 新增测试：加入 Golden、加入 Annotation Queue、标记误判、忽略、重开。
-- [ ] 前端 Badcase 表格支持单条和批量动作。
-- [ ] 所有动作成功后刷新 Task Report。
-- [ ] 运行 `cd frontend && npm run e2e -- e2e/report-badcase.spec.ts`。
+- [x] 新增测试：加入 Golden、加入 Annotation Queue、标记误判、忽略、重开。
+- [x] 前端 Badcase 表格支持单条和批量动作。
+- [x] 所有动作成功后刷新 Task Report。
+- [x] 运行 `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心"`。
 
 ## 阶段 5：Skill 平台安全与审批
 

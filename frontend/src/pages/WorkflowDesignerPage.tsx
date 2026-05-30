@@ -373,6 +373,8 @@ function WorkflowDesignerContent() {
           <Col xs={24} lg={8}>
             <Typography.Text type="secondary">试运行数据集</Typography.Text>
             <Select
+              showSearch
+              optionFilterProp="label"
               placeholder="选择 Dataset Version"
               className="full-width-control"
               value={selectedDatasetVersion}

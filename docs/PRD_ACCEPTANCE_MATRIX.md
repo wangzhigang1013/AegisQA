@@ -57,9 +57,9 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-ME-02 | Golden Dataset 裁判评测 | 已实现 | `audit_judge_profile` 输出 Accuracy/Precision/Recall/F1/Kappa/混淆矩阵 |
 | FR-ME-03 | 审计结果入库 | 已实现 | `JudgeProfileService.audit_and_store` |
 | FR-HL-01 | Badcase 列表和详情 | 已实现基础 | Report badcases、BadcaseService |
-| FR-HL-02 | 人工标签/说明/责任归类 | 已实现 | `correct_badcase` |
+| FR-HL-02 | 人工标签/说明/责任归类 | 已实现 | `correct_badcase`；报告中心支持加入 Golden、忽略、重开、加入 Annotation Queue |
 | FR-HL-03 | 加入错题本/Golden 候选 | 已实现基础 | `golden_candidate` 与 `accepted_to_golden` |
-| FR-HL-04 | 处理状态流转 | 已实现 | pending_review/corrected/accepted_to_golden/ignored/reopened |
+| FR-HL-04 | 处理状态流转 | 已实现 | pending_review/corrected/accepted_to_golden/ignored/reopened；React Badcase 表格提供单条状态动作 |
 | FR-AU-01 | 敏感配置脱敏 | 已实现 | `redact_secrets`，保留 tokens 成本指标 |
 | FR-AU-02 | 运行快照 | 已实现 | Run snapshot 记录 Workflow、Skill、Dataset、Runtime |
 | FR-AU-03 | 可信 Skill 来源限制 | 已实现基础 | 只扫描本地可信 manifest，不执行任意上传代码 |
@@ -84,7 +84,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-ME-05 | 人工纠错反哺候选池 | 已实现基础 | `PromptCandidateService` 可从 Badcase 创建 Prompt 优化候选并评审 |
 | FR-ME-06 | 多裁判交叉验证 | 已实现基础 | `JudgeProfileService.cross_validate` |
 | FR-HL-05 | Badcase 聚类 | 已实现 | `cluster_badcases(method="rule")` 与 `cluster_badcases(method="embedding")` |
-| FR-HL-06 | 批量处理与导出 | 已实现基础 | `bulk_correct`、`export_badcases`，`POST /badcases/bulk-correct`，`GET /badcases/export` |
+| FR-HL-06 | 批量处理与导出 | 已实现基础 | `bulk_correct`、`export_badcases`，`POST /badcases/bulk-correct`，`GET /badcases/export`；报告中心支持勾选多条后批量加入 Golden |
 | FR-AU-04 | 角色权限 | 已实现基础 | `AccessControl` |
 | FR-AU-05 | 操作审计 | 已实现基础 | `AuditService` |
 

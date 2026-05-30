@@ -2,7 +2,7 @@ import { DownloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, Empty, Row, Select, Space, Table, Tag, Typography } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type Key } from 'react';
 
 import { api } from '../api/client';
 import { MetricTile } from '../components/MetricTile';
@@ -15,6 +15,7 @@ export function ReportsPage() {
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [selectedBadcaseKeys, setSelectedBadcaseKeys] = useState<Key[]>([]);
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
   const selectedTask = tasksQuery.data?.find((task) => task.task_id === selectedTaskId) ?? tasksQuery.data?.[0] ?? null;
   const reportQuery = useQuery({
@@ -40,21 +41,58 @@ export function ReportsPage() {
     onError: (error) => setNotice(error instanceof Error ? error.message : '报告导出失败'),
   });
 
-  const correctBadcaseMutation = useMutation({
-    mutationFn: async (badcase: Record<string, unknown>) => {
+  const badcaseActionMutation = useMutation({
+    mutationFn: async ({ action, badcase }: { action: 'golden' | 'ignore' | 'reopen' | 'annotation'; badcase: Record<string, unknown> }) => {
+      if (action === 'annotation') {
+        if (!task?.run_id) throw new Error('缺少 Run 信息，无法加入审阅队列。');
+        return api.seedAnnotationQueue({ run_id: task.run_id, strategy: 'badcase', limit: 1 });
+      }
+      if (action === 'reopen') {
+        if (!badcase.badcase_id) throw new Error('只有已持久化 Badcase 可以重开。');
+        return api.reopenBadcase(String(badcase.badcase_id));
+      }
       const badcaseId = await ensureBadcaseId(badcase, task);
       return api.correctBadcase(badcaseId, {
-        human_label: 'fail',
+        human_label: action === 'ignore' ? 'ignored' : 'fail',
         problem_type: String(badcase.problem_type ?? 'manual_review'),
-        note: '从任务报告加入 Golden 候选。',
+        note: action === 'ignore' ? '从任务报告标记忽略。' : '从任务报告加入 Golden 候选。',
+        add_to_golden: action === 'golden',
+        ignore: action === 'ignore',
+      });
+    },
+    onSuccess: async (_, variables) => {
+      const messageMap = {
+        golden: 'Badcase 已加入 Golden 候选。',
+        ignore: 'Badcase 已忽略。',
+        reopen: 'Badcase 已重开。',
+        annotation: 'Badcase 已加入 Annotation Queue。',
+      };
+      setNotice(messageMap[variables.action]);
+      await queryClient.invalidateQueries({ queryKey: ['task-report', selectedTask?.task_id] });
+    },
+    onError: (error) => setNotice(error instanceof Error ? `Badcase 操作失败：${error.message}` : 'Badcase 操作失败'),
+  });
+
+  const bulkGoldenMutation = useMutation({
+    mutationFn: () => {
+      const badcaseIds = selectedBadcaseKeys.map(String).filter((key) => key.startsWith('badcase-'));
+      if (!badcaseIds.length) {
+        throw new Error('请选择已经持久化的 Badcase 后再批量处理。');
+      }
+      return api.bulkCorrectBadcases({
+        badcase_ids: badcaseIds,
+        human_label: 'fail',
+        problem_type: 'manual_review',
+        note: '从任务报告批量加入 Golden 候选。',
         add_to_golden: true,
       });
     },
     onSuccess: async () => {
-      setNotice('Badcase 已加入 Golden 候选。');
+      setSelectedBadcaseKeys([]);
+      setNotice('已批量加入 Golden 候选。');
       await queryClient.invalidateQueries({ queryKey: ['task-report', selectedTask?.task_id] });
     },
-    onError: (error) => setNotice(error instanceof Error ? `Badcase 操作失败：${error.message}` : 'Badcase 操作失败'),
+    onError: (error) => setNotice(error instanceof Error ? `批量处理失败：${error.message}` : '批量处理失败'),
   });
 
   const report = reportQuery.data?.report;
@@ -155,7 +193,22 @@ export function ReportsPage() {
           </Card>
 
           <Card className="flat-card" title="Badcase 明细">
-            <BadcaseTable badcases={badcases} task={task} loading={correctBadcaseMutation.isPending} onAddGolden={(badcase) => correctBadcaseMutation.mutate(badcase)} />
+            <Space direction="vertical" className="full-width-control">
+              <Button type="primary" disabled={!selectedBadcaseKeys.length} loading={bulkGoldenMutation.isPending} onClick={() => bulkGoldenMutation.mutate()}>
+                批量加入 Golden
+              </Button>
+              <BadcaseTable
+                badcases={badcases}
+                task={task}
+                loading={badcaseActionMutation.isPending}
+                selectedRowKeys={selectedBadcaseKeys}
+                onSelectionChange={setSelectedBadcaseKeys}
+                onAddGolden={(badcase) => badcaseActionMutation.mutate({ action: 'golden', badcase })}
+                onIgnore={(badcase) => badcaseActionMutation.mutate({ action: 'ignore', badcase })}
+                onReopen={(badcase) => badcaseActionMutation.mutate({ action: 'reopen', badcase })}
+                onAddAnnotation={(badcase) => badcaseActionMutation.mutate({ action: 'annotation', badcase })}
+              />
+            </Space>
           </Card>
         </>
       ) : (

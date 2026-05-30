@@ -96,8 +96,13 @@ test('Workflow 试运行会使用所选数据集并回填结果', async ({ page 
 
   await page.goto('/workflows');
   await page.getByRole('button', { name: /新建 Workflow/ }).click();
-  await page.getByRole('combobox').nth(1).click();
-  await page.getByText(`${datasetName} v1`).click();
+  const datasetSelect = page.getByRole('combobox').nth(1);
+  await datasetSelect.click();
+  await datasetSelect.fill(datasetName);
+  await page
+    .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content')
+    .filter({ hasText: `${datasetName} v1` })
+    .click();
   await page.getByRole('button', { name: /试运行/ }).click();
 
   await expect(page.getByText(/试运行完成/)).toBeVisible();

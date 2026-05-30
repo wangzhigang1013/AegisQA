@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 4（任务报告与 Badcase 工作流）Task 4.1 已完成；本批已把 Task Report 从裸 RunReport 扩展为任务摘要、版本快照、Step 分布、Judge 分数分布、Badcase 和导出内容的结构化报告。下一步进入 Task 4.2：Badcase 状态流转与批量处理。
+产品严谨化阶段 4（任务报告与 Badcase 工作流）Task 4.2 已完成；本批已把报告页 Badcase 明细扩展为单条加入 Golden、忽略、重开、加入 Annotation Queue，以及批量加入 Golden。下一步进入阶段 5：Skill 平台安全与审批。
 
 ## 当前已完成
 
@@ -34,6 +34,7 @@
 - 前端任务详情已展示 Run Attempts、当前 Attempt、执行参数和 Trace Tree，并提供“新建 Attempt”动作。
 - Task Report API 已返回 `task_summary`、`version_snapshot`、`step_distribution`、`judge_score_distribution`、RunReport、Badcase 和导出链接。
 - 报告中心已拆出 `ReportSummary` 与 `BadcaseTable`，任务报告页面围绕版本快照、核心指标、Step 分布、Badcase 纠错和导出组织。
+- 报告中心 Badcase 表格已支持单条加入 Golden、忽略、重开、加入 Annotation Queue，以及选择多条后批量加入 Golden；动作成功后刷新 Task Report。
 
 ## 最近验证
 
@@ -61,11 +62,41 @@
 
 ## 下一阶段目标
 
-- 进入阶段 4 Task 4.2：补 Badcase 加入 Golden、加入 Annotation Queue、标记误判、忽略、重开、批量动作，并让所有动作成功后刷新 Task Report。
+- 进入阶段 5：完善 Skill 审批体验，展示待审批、合约测试状态、审批人、审批时间，并在治理页提供审批抽屉。
 - 把 Experiment、Prompt/Skill 版本注册、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 从最小 API 能力继续扩展为完整页面与端到端操作流。
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 Badcase 状态流转与批量动作
+
+- 改动摘要：完成阶段 4 Task 4.2。`BadcaseTable` 增加行选择、单条加入 Golden、忽略、重开、加入 Annotation Queue，以及批量加入 Golden；报告页统一通过 mutation 执行动作，成功后刷新 Task Report 并给出中文反馈。现有后端 Badcase API 已覆盖 correct/reopen/bulk/annotation 队列入口，本批重点补齐前端工作流。
+- 变更文件：
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/pages/report/BadcaseTable.tsx`
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/e2e/task-flow.spec.ts`
+  - `frontend/e2e/workflow-designer.spec.ts`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心"`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 报告中心 Badcase 动作测试：1 passed。
+  - 后端全量：36 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：4 个测试文件、25 passed。
+  - Typecheck：通过。
+  - Build：通过。
+  - Playwright 全量 E2E：6 passed。
+- 下一步：进入阶段 5 Task 5.1，完善 Skill 审批体验和治理审批抽屉。
 
 ### 2026-05-31 Task Report 结构化
 

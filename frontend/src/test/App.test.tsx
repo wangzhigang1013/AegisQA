@@ -56,6 +56,18 @@ const demoTask = {
   updated_at: '2026-05-31T00:00:00Z',
 };
 
+const demoBadcase = {
+  badcase_id: 'badcase-demo',
+  run_id: 'run-demo',
+  item_id: 'item-demo',
+  status: 'pending_review',
+  reason: 'judge_label=fail',
+  payload: { question: '坏例样本', score: 0.2 },
+  golden_candidate: false,
+  created_at: '2026-05-31T00:00:00Z',
+  updated_at: '2026-05-31T00:00:00Z',
+};
+
 async function renderWorkbench(path: string) {
   await act(async () => {
     render(
@@ -129,8 +141,8 @@ describe('AegisQA 前端工作台', () => {
             { step_id: 'answer', skill_ref: 'llm.call@0.1.0', total_calls: 100, succeeded: 100, failed: 0, cache_hits: 0, total_latency_ms: 100, average_latency_ms: 1 },
           ],
           judge_score_distribution: [{ bucket: '0.8-1.0', count: 80 }],
-          report: { run_id: 'run-demo', pass_rate: 0.8, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [] },
-          badcases: [],
+          report: { run_id: 'run-demo', pass_rate: 0.8, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [demoBadcase] },
+          badcases: [demoBadcase],
           export_links: { html: '/runs/run-demo/report/export?file_format=html', csv: '/runs/run-demo/report/export?file_format=csv', json: '/runs/run-demo/report/export?file_format=json' },
         });
       }
@@ -386,6 +398,11 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('80')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /导出 HTML \/ CSV/ }));
     expect(await screen.findByText(/报告导出成功/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /忽略/ }));
+    expect(await screen.findByText(/Badcase 已忽略/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /重开/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /加入审阅队列/ })).toBeInTheDocument();
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {
