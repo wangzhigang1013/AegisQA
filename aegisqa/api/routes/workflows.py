@@ -10,6 +10,7 @@ from aegisqa.api.app import (
     WorkflowDraftCreateRequest,
     WorkflowDraftUpdateRequest,
     WorkflowGraphDryRunRequest,
+    WorkflowParameterPreviewRequest,
     WorkflowGraphPublishRequest,
     WorkflowGraphValidateRequest,
     _get_workflow_draft,
@@ -18,7 +19,9 @@ from aegisqa.api.app import (
     _save_workflow_draft,
 )
 from aegisqa.api.routes.context import RouteContext
+from aegisqa.core.errors import AegisQAError
 from aegisqa.engine.runner import RunRecord
+from aegisqa.skills.parameters import SkillParameterResolver
 from aegisqa.workflows.graph import WorkflowGraph, WorkflowGraphValidationResult
 from aegisqa.workflows.models import WorkflowDraft, WorkflowVersion
 from aegisqa.workflows.templates import WorkflowTemplate
@@ -114,6 +117,36 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
             raise HTTPException(status_code=400, detail={"message": "Workflow Graph 校验失败", "errors": [error.model_dump(mode="json") for error in validation.errors]})
         workflow = ctx.graph_service.to_workflow_draft(request.graph).publish()
         return ctx.runner.dry_run(workflow, request.dataset_id, request.dataset_version, sample_size=request.sample_size)
+
+    @app.post("/workflow-graphs/parameter-preview")
+    def preview_workflow_parameters(request: WorkflowParameterPreviewRequest) -> dict[str, Any]:
+        workflow = ctx.graph_service.to_workflow_draft(request.graph).publish()
+        runtime_context = {"row": request.sample_row, "context": {}, "metrics": {}, "artifacts": {}, "errors": [], "steps": {}}
+        nodes: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+        for step in workflow.steps:
+            skill = ctx.registry.get(step.skill_ref)
+            try:
+                resolved = SkillParameterResolver(skill.manifest.config_schema).resolve(
+                    workflow_config=step.config,
+                    task_override=request.task_overrides.get(step.step_id, {}),
+                    runtime_context=runtime_context,
+                    secret_values={},
+                )
+            except Exception as exc:  # noqa: BLE001 - 参数预览要把每个节点的错误收敛成前端可修复信息。
+                errors.append({"step_id": step.step_id, "skill_ref": step.skill_ref, "message": str(exc), "type": type(exc).__name__})
+                continue
+            nodes.append(
+                {
+                    "node_id": step.step_id,
+                    "skill_ref": step.skill_ref,
+                    "resolved_config": resolved.config,
+                    "parameter_trace": resolved.trace,
+                }
+            )
+        if errors:
+            raise AegisQAError("PARAMETER_PREVIEW_FAILED", "Workflow 参数预览失败，请检查表达式路径和参数类型。", status_code=400, details={"errors": errors})
+        return {"workflow_name": workflow.name, "nodes": nodes}
 
     @app.post("/workflows/publish", response_model=WorkflowVersion)
     def publish_workflow(draft: WorkflowDraft) -> WorkflowVersion:

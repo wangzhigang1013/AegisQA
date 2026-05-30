@@ -47,30 +47,30 @@
 
 ### Task 1.1：参数解析器
 
-- [ ] 新增测试：`config_schema` default 会进入最终参数。
-- [ ] 新增测试：Workflow 节点配置覆盖 schema default。
-- [ ] 新增测试：Task execution_config 的 `skill_overrides` 覆盖节点配置。
-- [ ] 新增测试：表达式参数 `{ "type": "expression", "path": "row.question" }` 能解析到当前样本。
-- [ ] 新增测试：Secret 参数只显示 `secret_ref`，Trace 中不落明文。
-- [ ] 实现 `SkillParameterResolver`，固定优先级：
+- [x] 新增测试：`config_schema` default 会进入最终参数。
+- [x] 新增测试：Workflow 节点配置覆盖 schema default。
+- [x] 新增测试：Task execution_config 的 `skill_overrides` 覆盖节点配置。
+- [x] 新增测试：表达式参数 `{ "type": "expression", "path": "row.question" }` 能解析到当前样本。
+- [x] 新增测试：Secret 参数只显示 `secret_ref`，Trace 中不落明文。
+- [x] 实现 `SkillParameterResolver`，固定优先级：
   `schema_default < workflow_config < task_override < runtime_expression < secret_ref`。
-- [ ] 输出 `resolved_config` 与 `parameter_trace`，每个字段包含 `source`、`value_preview`、`redacted`。
+- [x] 输出 `resolved_config` 与 `parameter_trace`，每个字段包含 `source`、`value_preview`、`redacted`。
 
 ### Task 1.2：Runner 接入参数解析
 
-- [ ] 新增测试：RunItemStep 记录 `config_snapshot` 与 `parameter_trace`。
-- [ ] 新增测试：Task 创建后的参数快照不会受后续 Workflow 修改影响。
-- [ ] 修改 `RunRequest`，增加 `task_config_snapshot`。
-- [ ] 修改 `RunItemStep`，增加 `config_snapshot`、`parameter_trace`。
-- [ ] `WorkflowRunner._execute_item` 调 Skill 前使用参数解析器，不再直接传 `workflow_step.config`。
-- [ ] `run.snapshot` 保存 workflow 参数、task overrides、skill config hash。
+- [x] 新增测试：RunItemStep 记录 `config_snapshot` 与 `parameter_trace`。
+- [x] 新增测试：Task 创建后的参数快照不会受后续 Workflow 修改影响。
+- [x] 修改 `RunRequest`，增加 `task_config_snapshot`。
+- [x] 修改 `RunItemStep`，增加 `config_snapshot`、`parameter_trace`。
+- [x] `WorkflowRunner._execute_item` 调 Skill 前使用参数解析器，不再直接传 `workflow_step.config`。
+- [x] `run.snapshot` 保存 workflow 参数、task overrides、skill config hash。
 
 ### Task 1.3：参数预览 API
 
-- [ ] 新增 API 测试：`POST /workflow-graphs/parameter-preview` 返回每个节点的最终参数。
-- [ ] 新增 API 测试：坏表达式返回结构化错误和修复建议。
-- [ ] 在 Workflow 路由中新增参数预览接口，输入 graph、dataset、sample_row、task_overrides。
-- [ ] 前端 API client 增加 `previewWorkflowParameters`。
+- [x] 新增 API 测试：`POST /workflow-graphs/parameter-preview` 返回每个节点的最终参数。
+- [x] 新增 API 测试：坏表达式返回结构化错误和修复建议。
+- [x] 在 Workflow 路由中新增参数预览接口，输入 graph、dataset、sample_row、task_overrides。
+- [x] 前端 API client 增加 `previewWorkflowParameters`。
 
 ## 阶段 2：Trace 数据流模型与独立页面
 

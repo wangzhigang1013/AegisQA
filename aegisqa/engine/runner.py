@@ -14,6 +14,7 @@ from aegisqa.core.mapper import MappingPathError, TypeMismatchError, resolve_inp
 from aegisqa.core.security import redact_secrets
 from aegisqa.datasets.service import DatasetRow, DatasetService
 from aegisqa.engine.rate_limit import InMemoryRateLimiter
+from aegisqa.skills.parameters import SkillParameterResolver
 from aegisqa.skills.registry import SkillRegistry
 from aegisqa.storage.json_store import JsonStore
 from aegisqa.workflows.models import WorkflowVersion
@@ -29,6 +30,7 @@ class RunRequest(BaseModel):
     concurrency: int | None = None
     sample_repeat_times: int | None = None
     rate_limits: dict[str, float] = Field(default_factory=dict)
+    task_config_snapshot: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunItemStep(BaseModel):
@@ -39,6 +41,8 @@ class RunItemStep(BaseModel):
     status: str = "pending"
     input_snapshot: dict[str, Any] = Field(default_factory=dict)
     output_snapshot: dict[str, Any] = Field(default_factory=dict)
+    config_snapshot: dict[str, Any] = Field(default_factory=dict)
+    parameter_trace: dict[str, dict[str, Any]] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
     logs: list[str] = Field(default_factory=list)
     error: dict[str, Any] | None = None
@@ -159,6 +163,7 @@ class WorkflowRunner:
                     "sample_repeat_times": repeat_times,
                     "rate_limits": request.rate_limits,
                 },
+                "task_config_snapshot": redact_secrets(request.task_config_snapshot),
             },
         )
         self._save_run(run)
@@ -322,12 +327,22 @@ class WorkflowRunner:
                 inputs = resolve_input_mapping(workflow_step.input_mapping, context, skill.manifest.input_schema)
                 step.input_snapshot = redact_secrets(inputs)
                 step.input_hash = _stable_hash(inputs)
+                task_config_snapshot = run.snapshot.get("task_config_snapshot", {})
+                task_overrides = task_config_snapshot.get("skill_overrides", {}) if isinstance(task_config_snapshot, dict) else {}
+                resolved_parameters = SkillParameterResolver(skill.manifest.config_schema).resolve(
+                    workflow_config=workflow_step.config,
+                    task_override=task_overrides.get(workflow_step.step_id, {}) if isinstance(task_overrides, dict) else {},
+                    runtime_context=context,
+                    secret_values={},
+                )
+                step.config_snapshot = redact_secrets(resolved_parameters.config)
+                step.parameter_trace = resolved_parameters.trace
                 decision = limiter.acquire(workflow_step.skill_ref)
                 step.rate_limited_count = decision.rate_limited_count
                 step.rate_limit_wait_ms = decision.wait_ms
                 step.status = "rate_limited" if decision.rate_limited_count else "running"
 
-                cache_key = self._cache_key(workflow_step, skill.manifest.version, inputs)
+                cache_key = self._cache_key(workflow_step, skill.manifest.version, inputs, resolved_parameters.config)
                 step.cache_key = cache_key[:16]
                 if workflow_step.cacheable and cache_key in self._cache:
                     raw_output = self._cache[cache_key]
@@ -339,7 +354,7 @@ class WorkflowRunner:
                     logs = ["命中 Step 级 Evaluation Cache，跳过真实 Skill 调用。"]
                 else:
                     step.called_skill = True
-                    result, latency_ms = skill.execute(inputs, workflow_step.config)
+                    result, latency_ms = skill.execute(inputs, resolved_parameters.config)
                     output = result.output
                     metrics = result.metrics
                     logs = result.logs
@@ -391,13 +406,13 @@ class WorkflowRunner:
         # 在 execute_run 中建立索引。数据集创建和队列投递阶段仍保持流式。
         return {row.row_id: row for row in self.dataset_service.iter_rows(dataset_id, dataset_version, chunk_size=1)}
 
-    def _cache_key(self, step: Any, skill_version: str, inputs: dict[str, Any]) -> str:
+    def _cache_key(self, step: Any, skill_version: str, inputs: dict[str, Any], config: dict[str, Any]) -> str:
         payload = {
             "step_input_hash": _stable_hash(inputs),
             "skill_version_hash": hashlib.sha256(skill_version.encode("utf-8")).hexdigest(),
-            "config_hash": _stable_hash(step.config),
-            "prompt_hash": _stable_hash({"prompt": step.config.get("prompt") or step.config.get("rubric")}),
-            "model_params_hash": _stable_hash({key: step.config.get(key) for key in ("model", "temperature", "threshold") if key in step.config}),
+            "config_hash": _stable_hash(config),
+            "prompt_hash": _stable_hash({"prompt": config.get("prompt") or config.get("rubric")}),
+            "model_params_hash": _stable_hash({key: config.get(key) for key in ("model", "temperature", "threshold") if key in config}),
             "dependency_hash": _stable_hash({"dependencies": self.registry.get(step.skill_ref).manifest.dependencies}),
             "schema_version": "json-schema-mvp-v1",
         }

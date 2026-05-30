@@ -22,6 +22,7 @@ import type {
   TraceTree,
   WorkflowDraftRecord,
   WorkflowGraph,
+  WorkflowParameterPreview,
   WorkflowVersion,
 } from '../types';
 
@@ -183,6 +184,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  previewWorkflowParameters: (body: { graph: WorkflowGraph; sample_row: Record<string, unknown>; task_overrides?: Record<string, Record<string, unknown>> }) =>
+    request<WorkflowParameterPreview>('/workflow-graphs/parameter-preview', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   createRun: (body: { workflow: WorkflowVersion; dataset_id: string; dataset_version: number; chunk_size?: number; concurrency?: number; sample_repeat_times?: number }) =>
     request<RunRecord>('/runs', {
       method: 'POST',
@@ -201,6 +207,7 @@ export const api = {
     max_retries?: number;
     retry_backoff_seconds?: number;
     cost_budget?: number;
+    skill_overrides?: Record<string, Record<string, unknown>>;
   }) =>
     request<TaskRecord>('/tasks', {
       method: 'POST',

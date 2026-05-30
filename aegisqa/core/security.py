@@ -36,7 +36,8 @@ SENSITIVE_EXACT_KEYS = {
 
 # 文本维度兜底：即使调用方把 Bearer Token 写进普通日志字符串，也要做基本屏蔽。
 BEARER_PATTERN = re.compile(r"(Bearer\s+)[A-Za-z0-9._\-]+", re.IGNORECASE)
-OPENAI_KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_\-]+")
+# 只在 token 边界匹配 OpenAI 风格密钥，避免把 task-model 这类普通词里的 "sk-" 误脱敏。
+OPENAI_KEY_PATTERN = re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]+")
 
 
 def _is_sensitive_key(key: str) -> bool:

@@ -45,6 +45,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 chunk_size=request.chunk_size,
                 concurrency=request.concurrency,
                 sample_repeat_times=request.sample_repeat_times,
+                task_config_snapshot={"skill_overrides": request.skill_overrides},
             )
         )
         execution_config = {
@@ -56,6 +57,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 "backoff_seconds": request.retry_backoff_seconds,
             },
             "cost_budget": request.cost_budget,
+            "skill_overrides": request.skill_overrides,
         }
         task = _build_task_record(request.name, dataset.model_dump(mode="json"), workflow, run, execution_config=execution_config)
         _save_record(ctx.store, "tasks", "task_id", task)
@@ -87,6 +89,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 chunk_size=execution_config.get("chunk_size"),
                 concurrency=execution_config.get("concurrency"),
                 sample_repeat_times=execution_config.get("sample_repeat_times"),
+                task_config_snapshot={"skill_overrides": execution_config.get("skill_overrides", {})},
             )
         )
         attempts = _task_attempts(task)

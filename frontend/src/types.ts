@@ -248,6 +248,7 @@ export type TaskRecord = {
       backoff_seconds?: number | null;
     };
     cost_budget?: number | null;
+    skill_overrides?: Record<string, Record<string, unknown>>;
   };
   current_attempt?: number;
   attempts?: {
@@ -399,5 +400,24 @@ export type TraceTree = {
     metrics: Record<string, unknown>;
     error?: Record<string, unknown> | null;
     children: Record<string, unknown>[];
+  }[];
+};
+
+export type WorkflowParameterPreview = {
+  workflow_name: string;
+  nodes: {
+    node_id: string;
+    skill_ref: string;
+    resolved_config: Record<string, unknown>;
+    parameter_trace: Record<
+      string,
+      {
+        source: string;
+        value_preview: unknown;
+        redacted: boolean;
+        expression_path?: string;
+        secret_ref?: string;
+      }
+    >;
   }[];
 };

@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“评测数据流与产品体验升级”已进入执行准备阶段。用户确认按专家建议一次性推进，当前已新增完整实施计划，下一步从 P0 的 Skill 参数解析与冻结开始实现。
+新一轮“评测数据流与产品体验升级”正在执行中。阶段 1（Skill 参数解析与冻结）已完成：后端新增统一参数解析器，Runner 已记录参数快照和来源追踪，并新增 Workflow 参数预览 API；下一步进入阶段 2：Trace 数据流模型与独立页面。
 
 ## 当前已完成
 
@@ -43,10 +43,11 @@
 - 新增 Annotation Queue 人工审核页面，主导航可进入，页面围绕审核队列展示状态/负责人/来源任务筛选、领取、分派、审核和回流 Golden；后端队列记录已回填 `source_task_id` 与 `source_task_name`，支持按来源任务筛选。
 - FastAPI API 路由已按业务域拆分到 `aegisqa/api/routes/`，`aegisqa/api/app.py` 保留应用装配、错误处理、共享模型和辅助函数，降低后续维护成本。
 - JSON Store 已增加 `FileLock`、JSON 原子写入和 JSONL 读写锁保护，并新增并发写入测试；README 已说明该存储仅适合本地 demo，不承担生产数据库职责。
+- Skill 参数处理已从各节点散落配置升级为统一解析：`schema_default < workflow_config < task_override < runtime_expression < secret_ref`，Run Step 会保存脱敏后的 `config_snapshot` 和字段级 `parameter_trace`。
 
 ## 最近验证
 
-- `python -m pytest -q`：44 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest -q`：47 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v7`，Run `run-5a86aceede3f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、30 个测试通过。
@@ -73,6 +74,37 @@
 - 后续建议优先进入 Trace Tree 独立页面、CI Gate 历史记录、Annotation Queue 批量审核、多 Judge 一致性视图、红队安全扫描和真实 MySQL/Redis/Celery Repository/Worker 接入。
 
 ## 最近改动
+
+### 2026-05-31 Skill 参数解析与冻结
+
+- 改动摘要：完成评测数据流升级计划阶段 1。新增 `SkillParameterResolver`，支持 schema default、Workflow 节点配置、Task skill_overrides、运行时表达式和 Secret 引用的统一解析；Runner 调用 Skill 前解析最终参数，并在 Step Trace 中保存脱敏 `config_snapshot` 与 `parameter_trace`；新增 `POST /workflow-graphs/parameter-preview`，前端 API client 和类型已接入；同时修复脱敏正则误把 `task-model` 中的 `sk-` 当成密钥的问题。
+- 变更文件：
+  - `aegisqa/skills/parameters.py`
+  - `aegisqa/engine/runner.py`
+  - `aegisqa/core/security.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/api/routes/workflows.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/types.ts`
+  - `tests/test_skill_parameter_resolution.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/superpowers/plans/2026-05-31-evaluation-flow-productization.md`
+- 验证命令：
+  - `python -m pytest tests/test_skill_parameter_resolution.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Skill 参数定向测试：3 passed。
+  - 后端全量：47 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - Typecheck：通过。
+  - 前端全量：4 个测试文件、30 passed。
+  - Build：通过。
+  - Playwright 全量 E2E：8 passed。
+- 下一步：进入阶段 2，构建 Task Trace Flow API 和独立 Trace 页面。
 
 ### 2026-05-31 评测数据流与产品体验升级计划
 

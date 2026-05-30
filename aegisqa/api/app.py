@@ -139,6 +139,12 @@ class WorkflowGraphDryRunRequest(BaseModel):
     sample_size: int = 1
 
 
+class WorkflowParameterPreviewRequest(BaseModel):
+    graph: WorkflowGraph
+    sample_row: dict[str, Any]
+    task_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
 class WorkflowDraftCreateRequest(BaseModel):
     name: str
     graph: WorkflowGraph
@@ -178,6 +184,7 @@ class TaskCreateRequest(BaseModel):
     max_retries: int | None = None
     retry_backoff_seconds: int | None = None
     cost_budget: float | None = None
+    skill_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class ExperimentFromRunRequest(BaseModel):
