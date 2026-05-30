@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 6（Experiment、CI Gate、Annotation 独立产品页）Task 6.3 已完成；本批已新增 Annotation Queue 人工审核页面，支持来源任务筛选、负责人筛选、领取、分派、审核和回流 Golden。下一步进入阶段 7.1：API 路由拆分。
+产品严谨化阶段 7（工程结构与生产化边界）Task 7.1 已完成；本批已把 FastAPI 大体量内联路由拆成 datasets、skills、workflows、tasks、reports、judge、governance、productization 等独立路由模块，同时保持 `create_app()` 对外入口和现有 API 行为不变。下一步进入阶段 7.2：JSON Store 文件锁与生产化边界说明。
 
 ## 当前已完成
 
@@ -41,6 +41,7 @@
 - 新增 Experiment 实验中心页面，主导航可进入，页面围绕 Run 不可变快照展示 baseline 对比、指标变化、失败样本变化、成本变化，并支持从已完成 Run 生成实验快照。
 - 新增 CI Gate 质量门禁页面，主导航可进入，页面围绕发布门槛展示门禁配置列表、创建弹窗、Task/Run 评估控制台和阻断原因；后端新增 `GET/POST /ci-gates`，`POST /ci-gates/evaluate` 支持直接按 Task/Run 抽取指标。
 - 新增 Annotation Queue 人工审核页面，主导航可进入，页面围绕审核队列展示状态/负责人/来源任务筛选、领取、分派、审核和回流 Golden；后端队列记录已回填 `source_task_id` 与 `source_task_name`，支持按来源任务筛选。
+- FastAPI API 路由已按业务域拆分到 `aegisqa/api/routes/`，`aegisqa/api/app.py` 保留应用装配、错误处理、共享模型和辅助函数，降低后续维护成本。
 
 ## 最近验证
 
@@ -68,11 +69,46 @@
 
 ## 下一阶段目标
 
-- 进入阶段 7 Task 7.1：拆分 FastAPI 路由，保持 `create_app()` 对外不变，降低 `aegisqa/api/app.py` 单文件维护成本。
+- 进入阶段 7 Task 7.2：为 JSON Store 增加文件锁/并发写入保护，并明确 JSON Store 只适合本地 demo，生产使用 MySQL/Redis/Celery。
 - 把 Experiment、Prompt/Skill 版本注册、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 从最小 API 能力继续扩展为完整页面与端到端操作流。
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 API 路由拆分
+
+- 改动摘要：完成阶段 7 Task 7.1。将 `aegisqa/api/app.py` 中的内联业务路由拆分为独立 domain route 模块，新增共享 `RouteContext`，`create_app()` 继续作为唯一对外应用工厂并按域注册路由；拆分过程中修正了治理概览、权限检查和 Judge 审计路由对现有服务 API 的调用方式，保持前端契约不变。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/__init__.py`
+  - `aegisqa/api/routes/context.py`
+  - `aegisqa/api/routes/datasets.py`
+  - `aegisqa/api/routes/governance.py`
+  - `aegisqa/api/routes/judge.py`
+  - `aegisqa/api/routes/productization.py`
+  - `aegisqa/api/routes/reports.py`
+  - `aegisqa/api/routes/skills.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/api/routes/workflows.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `python -m pytest tests/test_productization_api.py tests/test_task_center_api.py -q`
+  - `python -m pytest tests/test_api.py::test_api_runs_full_mvp_flow tests/test_api_interaction_contract.py::test_frontend_list_and_summary_api_contract tests/test_api_interaction_contract.py::test_badcase_judge_and_export_actions -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Productization + Task Center 定向测试：7 passed。
+  - 拆分回归定向测试：3 passed。
+  - 后端全量：42 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - Typecheck：通过。
+  - 前端全量：4 个测试文件、30 passed。
+  - Build：通过。
+  - Playwright 全量 E2E：8 passed。
+- 下一步：进入阶段 7 Task 7.2，新增 JSON Store 并发写入保护和生产化边界说明。
 
 ### 2026-05-31 Annotation Queue 人工审核页面
 

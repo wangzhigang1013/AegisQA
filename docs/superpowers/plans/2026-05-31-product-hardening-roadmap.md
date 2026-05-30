@@ -254,10 +254,10 @@
 
 ### Task 7.1：API 路由拆分
 
-- [ ] 先跑全量后端测试作为基线。
-- [ ] 按 domain 拆分 routes。
-- [ ] 保持 `create_app()` 对外不变。
-- [ ] 全量测试通过后提交。
+- [x] 先跑全量后端测试作为基线。
+- [x] 按 domain 拆分 routes。
+- [x] 保持 `create_app()` 对外不变。
+- [x] 全量测试通过后提交。
 
 ### Task 7.2：JSON Store 文件锁
 
