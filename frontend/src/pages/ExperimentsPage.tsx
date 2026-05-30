@@ -19,16 +19,26 @@ export function ExperimentsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedExperimentId, setSelectedExperimentId] = useState<string | null>(null);
   const [baselineExperimentId, setBaselineExperimentId] = useState<string | null>(null);
+  const [datasetFilter, setDatasetFilter] = useState<string | undefined>();
+  const [workflowFilter, setWorkflowFilter] = useState<string | undefined>();
   const [form] = Form.useForm<ExperimentCreateValues>();
   const selectedRunId = Form.useWatch('run_id', form);
   const experimentName = Form.useWatch('name', form);
 
-  const experimentsQuery = useQuery({ queryKey: ['experiments'], queryFn: api.experiments });
+  const allExperimentsQuery = useQuery({ queryKey: ['experiments', 'all'], queryFn: () => api.experiments() });
+  const experimentsQuery = useQuery({
+    queryKey: ['experiments', datasetFilter, workflowFilter],
+    queryFn: () => api.experiments({ dataset_id: datasetFilter, workflow_id: workflowFilter }),
+  });
   const runsQuery = useQuery({ queryKey: ['runs'], queryFn: api.runs });
   const experiments = experimentsQuery.data ?? [];
+  const allExperiments = allExperimentsQuery.data ?? experiments;
   const activeExperiment = experiments.find((item) => item.experiment_id === selectedExperimentId) ?? experiments[0];
-  const selectedBaseline = experiments.find((item) => item.experiment_id === baselineExperimentId);
+  const selectedBaseline =
+    allExperiments.find((item) => item.experiment_id === baselineExperimentId) ??
+    allExperiments.find((item) => item.run_id === activeExperiment?.baseline_run_id);
   const comparison = useMemo(() => buildComparison(activeExperiment, selectedBaseline), [activeExperiment, selectedBaseline]);
+  const failureDistribution = useMemo(() => buildFailureDistribution(activeExperiment, selectedBaseline), [activeExperiment, selectedBaseline]);
 
   const createMutation = useMutation({
     mutationFn: (values: ExperimentCreateValues) =>
@@ -62,6 +72,34 @@ export function ExperimentsPage() {
       <Card className="flat-card" title="Baseline 对比" extra={<Button icon={<ReloadOutlined />} onClick={() => void experimentsQuery.refetch()}>刷新</Button>}>
         <Row gutter={[16, 16]}>
           <Col xs={24} lg={8}>
+            <Typography.Text type="secondary">Dataset 过滤</Typography.Text>
+            <Select
+              allowClear
+              className="full-width-control"
+              placeholder="按 Dataset 过滤"
+              value={datasetFilter}
+              onChange={setDatasetFilter}
+              options={uniqueOptions(allExperiments, 'dataset_id')}
+            />
+          </Col>
+          <Col xs={24} lg={8}>
+            <Typography.Text type="secondary">Workflow 过滤</Typography.Text>
+            <Select
+              allowClear
+              className="full-width-control"
+              placeholder="按 Workflow 过滤"
+              value={workflowFilter}
+              onChange={setWorkflowFilter}
+              options={uniqueOptions(allExperiments, 'workflow_id', (item) => item.workflow_name ?? item.workflow_id ?? '-')}
+            />
+          </Col>
+          <Col xs={24} lg={8}>
+            <Typography.Text type="secondary">过滤结果</Typography.Text>
+            <div>
+              <Tag color="blue">{experiments.length} 个实验快照</Tag>
+            </div>
+          </Col>
+          <Col xs={24} lg={8}>
             <Typography.Text type="secondary">当前实验</Typography.Text>
             <Select
               className="full-width-control"
@@ -79,7 +117,7 @@ export function ExperimentsPage() {
               placeholder="选择 baseline 实验"
               value={baselineExperimentId}
               onChange={(value) => setBaselineExperimentId(value ?? null)}
-              options={experiments.filter((item) => item.experiment_id !== activeExperiment?.experiment_id).map((item) => ({ value: item.experiment_id, label: item.name }))}
+              options={allExperiments.filter((item) => item.experiment_id !== activeExperiment?.experiment_id).map((item) => ({ value: item.experiment_id, label: item.name }))}
             />
           </Col>
           <Col xs={24} lg={8}>
@@ -91,14 +129,54 @@ export function ExperimentsPage() {
         </Row>
 
         <Row gutter={[12, 12]} className="metric-row">
-          <Col xs={24} md={8}>
+          <Col xs={24} md={6}>
             <ComparisonCard title="通过率变化" value={formatPercentDelta(comparison.passRateDelta)} />
           </Col>
-          <Col xs={24} md={8}>
+          <Col xs={24} md={6}>
             <ComparisonCard title="失败样本变化" value={formatNumberDelta(comparison.badcaseDelta)} />
           </Col>
-          <Col xs={24} md={8}>
+          <Col xs={24} md={6}>
+            <ComparisonCard title="P95 耗时变化" value={formatLatencyDelta(comparison.latencyDelta)} />
+          </Col>
+          <Col xs={24} md={6}>
             <ComparisonCard title="成本变化" value={formatCurrencyDelta(comparison.costDelta)} />
+          </Col>
+        </Row>
+      </Card>
+
+      <Card className="flat-card" title="A/B 对比面板">
+        <Row gutter={[16, 16]}>
+          <Col xs={24} lg={12}>
+            <Card size="small" title="指标对比">
+              <Table
+                rowKey="metric"
+                size="small"
+                pagination={false}
+                dataSource={buildMetricRows(activeExperiment, selectedBaseline)}
+                columns={[
+                  { title: '指标', dataIndex: 'label' },
+                  { title: '当前实验', dataIndex: 'current' },
+                  { title: 'Baseline', dataIndex: 'baseline' },
+                  { title: '变化', dataIndex: 'delta' },
+                ]}
+              />
+            </Card>
+          </Col>
+          <Col xs={24} lg={12}>
+            <Card size="small" title="失败分布对比">
+              <Table
+                rowKey="reason"
+                size="small"
+                pagination={false}
+                dataSource={failureDistribution}
+                columns={[
+                  { title: '失败原因', dataIndex: 'reason' },
+                  { title: '当前实验', dataIndex: 'current' },
+                  { title: 'Baseline', dataIndex: 'baseline' },
+                  { title: '变化', dataIndex: 'delta' },
+                ]}
+              />
+            </Card>
           </Col>
         </Row>
       </Card>
@@ -175,6 +253,7 @@ function buildComparison(active?: ExperimentRecord, selectedBaseline?: Experimen
   return {
     passRateDelta: numberMetric(diff?.pass_rate),
     badcaseDelta: numberMetric(diff?.badcase_count),
+    latencyDelta: numberMetric(diff?.p95_latency_ms),
     costDelta: numberMetric(diff?.cost),
   };
 }
@@ -210,4 +289,64 @@ function formatCurrency(value: unknown): string {
 
 function formatCurrencyDelta(value: number): string {
   return `${value >= 0 ? '+' : ''}$${value.toFixed(2)}`;
+}
+
+function formatLatencyDelta(value: number): string {
+  return `${value >= 0 ? '+' : ''}${Math.round(value)} ms`;
+}
+
+function uniqueOptions(experiments: ExperimentRecord[], key: 'dataset_id' | 'workflow_id', labelOf?: (experiment: ExperimentRecord) => string) {
+  const seen = new Map<string, string>();
+  experiments.forEach((experiment) => {
+    const value = experiment[key];
+    if (value && !seen.has(value)) {
+      seen.set(value, labelOf ? labelOf(experiment) : value);
+    }
+  });
+  return Array.from(seen.entries()).map(([value, label]) => ({ value, label }));
+}
+
+function buildMetricRows(active?: ExperimentRecord, baseline?: ExperimentRecord) {
+  return [
+    {
+      metric: 'pass_rate',
+      label: '通过率',
+      current: formatPercent(active?.metrics.pass_rate),
+      baseline: formatPercent(baseline?.metrics.pass_rate),
+      delta: formatPercentDelta(numberMetric(active?.metrics.pass_rate) - numberMetric(baseline?.metrics.pass_rate)),
+    },
+    {
+      metric: 'badcase_count',
+      label: 'Badcase',
+      current: numberMetric(active?.metrics.badcase_count),
+      baseline: numberMetric(baseline?.metrics.badcase_count),
+      delta: formatNumberDelta(numberMetric(active?.metrics.badcase_count) - numberMetric(baseline?.metrics.badcase_count)),
+    },
+    {
+      metric: 'p95_latency_ms',
+      label: 'P95 耗时',
+      current: `${Math.round(numberMetric(active?.metrics.p95_latency_ms))} ms`,
+      baseline: `${Math.round(numberMetric(baseline?.metrics.p95_latency_ms))} ms`,
+      delta: formatLatencyDelta(numberMetric(active?.metrics.p95_latency_ms) - numberMetric(baseline?.metrics.p95_latency_ms)),
+    },
+    {
+      metric: 'cost',
+      label: '成本',
+      current: formatCurrency(active?.metrics.cost),
+      baseline: formatCurrency(baseline?.metrics.cost),
+      delta: formatCurrencyDelta(numberMetric(active?.metrics.cost) - numberMetric(baseline?.metrics.cost)),
+    },
+  ];
+}
+
+function buildFailureDistribution(active?: ExperimentRecord, baseline?: ExperimentRecord) {
+  const current = active?.failure_distribution ?? {};
+  const base = baseline?.failure_distribution ?? {};
+  const reasons = Array.from(new Set([...Object.keys(current), ...Object.keys(base)]));
+  return reasons.map((reason) => ({
+    reason,
+    current: current[reason] ?? 0,
+    baseline: base[reason] ?? 0,
+    delta: formatNumberDelta((current[reason] ?? 0) - (base[reason] ?? 0)),
+  }));
 }

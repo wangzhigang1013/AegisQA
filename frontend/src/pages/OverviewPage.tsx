@@ -25,7 +25,7 @@ export function OverviewPage() {
   const runsQuery = useQuery({ queryKey: ['runs'], queryFn: api.runs });
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
   const skillPackagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
-  const experimentsQuery = useQuery({ queryKey: ['experiments'], queryFn: api.experiments });
+  const experimentsQuery = useQuery({ queryKey: ['experiments'], queryFn: () => api.experiments() });
   const annotationQuery = useQuery({ queryKey: ['annotation-queue'], queryFn: () => api.annotationQueue() });
   const ciGatesQuery = useQuery({ queryKey: ['ci-gates'], queryFn: api.ciGateConfigs });
 

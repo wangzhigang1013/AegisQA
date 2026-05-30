@@ -88,6 +88,22 @@ def test_experiment_snapshot_and_trace_tree_are_created_from_run(tmp_path: Path)
     assert "latency_ms" in trace_tree["items"][0]["children"][0]
 
 
+def test_experiments_can_be_filtered_by_dataset_and_workflow_metadata(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    run = _executed_run(client, tmp_path)
+
+    experiment = client.post("/experiments/from-run", json={"run_id": run["run_id"], "name": "可过滤实验", "baseline_run_id": None}).json()
+
+    assert experiment["dataset_id"] == run["dataset_id"]
+    assert experiment["workflow_id"] == run["workflow"]["workflow_id"]
+    assert experiment["workflow_version_id"] == run["workflow"]["version_id"]
+    assert "p95_latency_ms" in experiment["metrics"]
+    assert client.get(f"/experiments?dataset_id={run['dataset_id']}").json()[0]["experiment_id"] == experiment["experiment_id"]
+    assert client.get(f"/experiments?workflow_id={run['workflow']['workflow_id']}").json()[0]["experiment_id"] == experiment["experiment_id"]
+    assert client.get("/experiments?dataset_id=dataset-missing").json() == []
+
+
 def test_assertion_dsl_and_ci_gate_return_actionable_results(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)
@@ -149,6 +165,32 @@ def test_ci_gate_config_can_be_saved_and_evaluated_against_run_and_task(tmp_path
     task_result = client.post("/ci-gates/evaluate", json={"config_id": config["config_id"], "task_id": task["task_id"]}).json()
     assert task_result["status"] == "blocked"
     assert task_result["target"] == {"kind": "task", "id": task["task_id"]}
+
+
+def test_ci_gate_evaluation_history_is_saved_and_filterable(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    task = _executed_task(client, tmp_path)
+    config = client.post(
+        "/ci-gates",
+        json={
+            "name": "历史质量门禁",
+            "description": "保存每次质量评估结果",
+            "gates": [{"gate_id": "pass-rate", "metric": "pass_rate", "operator": ">=", "threshold": 0.8, "blocking": True}],
+        },
+    ).json()
+
+    result = client.post("/ci-gates/evaluate", json={"config_id": config["config_id"], "task_id": task["task_id"]}).json()
+
+    assert result["evaluation_id"].startswith("gateeval-")
+    history = client.get("/ci-gates/evaluations").json()
+    assert history[0]["evaluation_id"] == result["evaluation_id"]
+    assert history[0]["config_id"] == config["config_id"]
+    assert history[0]["target"] == {"kind": "task", "id": task["task_id"]}
+    assert history[0]["blocking_failures"] == 1
+    assert client.get(f"/ci-gates/evaluations?config_id={config['config_id']}").json()[0]["evaluation_id"] == result["evaluation_id"]
+    assert client.get(f"/ci-gates/evaluations?task_id={task['task_id']}").json()[0]["evaluation_id"] == result["evaluation_id"]
+    assert client.get("/ci-gates/evaluations?run_id=run-missing").json() == []
 
 
 def test_annotation_queue_supports_assignment_and_review(tmp_path: Path) -> None:

@@ -55,9 +55,12 @@
 | 报告中心 | 导出 HTML/CSV/JSON | 可用，围绕选中任务导出底层 Run 报告 | `GET /tasks/{task_id}/report`、`GET /runs/{run_id}/report/export` | 后端测试校验 HTML/CSV/JSON 内容；`npm test` 覆盖导出成功反馈 |
 | 报告中心 | Badcase 状态流转 | 可用；支持单条加入 Golden、忽略、重开、加入 Annotation Queue，以及批量加入 Golden；聚合报告中的 Badcase 若尚未持久化，会先创建 Badcase 再纠错入 Golden | `POST /badcases`、`POST /badcases/{badcase_id}/correct`、`POST /badcases/{badcase_id}/reopen`、`POST /badcases/bulk-correct`、`POST /annotation-queue/seed-from-run` | Playwright E2E 覆盖真实 Golden 纠错链路；`npm test` 覆盖报告页按钮和忽略反馈；后端服务测试覆盖状态流转 |
 | 实验中心 | 实验快照列表与 baseline 对比 | 可用，展示 Experiment 列表、当前实验、baseline、通过率变化、失败样本变化、成本变化 | `GET /experiments`、`GET /runs` | `npm test` 覆盖 `/experiments` 页面 |
+| 实验中心 | Dataset/Workflow 过滤 | 可用，支持按 Dataset 和 Workflow 过滤实验快照，避免跨业务线对比混乱 | `GET /experiments?dataset_id=&workflow_id=` | `tests/test_productization_api.py` 覆盖后端过滤；`npm test` 覆盖过滤入口 |
+| 实验中心 | A/B 对比面板 | 可用，展示通过率、Badcase、P95 耗时、成本和失败分布差异 | `GET /experiments` | `npm test` 覆盖 A/B 面板和失败分布 |
 | 实验中心 | 从 Run 生成实验快照 | 可用，打开创建弹窗，必须选择 Run 和填写名称后才能提交 | `POST /experiments/from-run` | `npm test` 覆盖创建入口和禁用条件 |
 | CI Gate | 创建质量门禁配置 | 可用，弹窗创建发布门槛，默认包含通过率、Badcase 和 P95 耗时规则；未填写名称时禁用保存 | `POST /ci-gates`、`GET /ci-gates` | `npm test` 覆盖创建入口和禁用条件；Playwright E2E 覆盖真实创建 |
 | CI Gate | 对 Task/Run 执行评估 | 可用，可选择门禁配置和 Task/Run；后端自动抽取任务或 Run 指标，返回 blocking 状态、实际值和阈值 | `POST /ci-gates/evaluate`、`GET /tasks`、`GET /runs` | `tests/test_productization_api.py` 覆盖 Task/Run 评估；`npm test` 与 Playwright E2E 覆盖阻断原因 |
+| CI Gate | 评估历史与趋势 | 可用，每次评估保存 history，页面展示历史评估、阻断次数、通过次数、目标和主要原因 | `GET /ci-gates/evaluations?config_id=&task_id=&run_id=` | `tests/test_productization_api.py` 覆盖保存和过滤；`npm test` 覆盖历史趋势展示 |
 | Annotation Queue | 队列筛选 | 可用，支持状态、负责人、来源任务筛选；来源任务由后端根据 Run 回填 | `GET /annotation-queue?status=&assignee=&source_task_id=`、`GET /tasks` | `tests/test_productization_api.py` 覆盖来源任务筛选；`npm test` 覆盖筛选入口 |
 | Annotation Queue | 领取/分派/审核 | 可用，支持领取为当前用户、分派给指定负责人、填写人工标签和说明，审核结果可回流 Golden Dataset | `POST /annotation-queue/{task_id}/assign`、`POST /annotation-queue/{task_id}/review` | `npm test` 覆盖领取和审核弹窗；Playwright E2E 覆盖真实领取、审核和回流 Golden |
 | Annotation Queue | 批量审核 | 可用，支持多选待审核样本，批量设置人工标签、说明和是否回流 Golden，提交后刷新队列和候选资产 | `POST /annotation-queue/bulk-review` | `tests/test_productization_api.py` 覆盖批量审核生成候选资产；`npm test` 覆盖批量审核弹窗和成功反馈；Playwright E2E 覆盖真实批量审核 |
@@ -74,5 +77,5 @@
 
 - Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；字段映射表格和参数预览已进入 Vitest，后续需要进一步拆分组件并补真实浏览器中的字段映射编辑 E2E。
 - Task 创建向导已加入必选校验、并发/重试/repeat 和成本预算，任务详情已升级为驾驶舱页签；后续需要继续接入 CI Gate、实验 baseline 对比和权限检查。
-- 报告中心、Trace Flow、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、样本级数据流、Experiment baseline 对比、质量门禁阻断评估、人工审核回流和批量审核候选资产沉淀；后续需要增强更复杂的跨任务 Score Analytics。
+- 报告中心、Trace Flow、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、样本级数据流、Experiment baseline/A-B 对比、质量门禁阻断评估与历史趋势、人工审核回流和批量审核候选资产沉淀；后续需要增强更复杂的跨任务 Score Analytics。
 - Judge 审计需要增加多 Judge 一致性和红队安全扫描视图。

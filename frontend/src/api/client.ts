@@ -4,6 +4,7 @@ import type {
   AssertionEvaluationResult,
   BadcaseRecord,
   CIGateConfigRecord,
+  CIGateEvaluationRecord,
   CIGateRule,
   CIGateEvaluationResult,
   DashboardSummary,
@@ -79,7 +80,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<{ status: string; service: string }>('/health'),
   dashboard: () => request<DashboardSummary>('/dashboard/summary'),
-  experiments: () => request<ExperimentRecord[]>('/experiments'),
+  experiments: (filters: { dataset_id?: string; workflow_id?: string } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<ExperimentRecord[]>(`/experiments${suffix}`);
+  },
   createExperimentFromRun: (body: { run_id: string; name: string; baseline_run_id?: string | null; tags?: string[] }) =>
     request<ExperimentRecord>('/experiments/from-run', {
       method: 'POST',
@@ -104,6 +112,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  ciGateEvaluations: (filters: { config_id?: string; task_id?: string; run_id?: string } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<CIGateEvaluationRecord[]>(`/ci-gates/evaluations${suffix}`);
+  },
   annotationQueue: (filters: { status?: string; assignee?: string; source_task_id?: string } = {}) => {
     const query = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => {

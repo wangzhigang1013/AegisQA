@@ -48,8 +48,16 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         return experiment
 
     @app.get("/experiments")
-    def list_experiments() -> list[dict[str, Any]]:
-        return _list_records(ctx.store, "experiments")
+    def list_experiments(
+        dataset_id: str | None = Query(default=None),
+        workflow_id: str | None = Query(default=None),
+    ) -> list[dict[str, Any]]:
+        experiments = _list_records(ctx.store, "experiments")
+        if dataset_id:
+            experiments = [experiment for experiment in experiments if experiment.get("dataset_id") == dataset_id]
+        if workflow_id:
+            experiments = [experiment for experiment in experiments if experiment.get("workflow_id") == workflow_id]
+        return experiments
 
     @app.post("/assertions/evaluate")
     def evaluate_assertions(request: AssertionEvaluateRequest) -> dict[str, Any]:
@@ -114,13 +122,34 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             target = {"kind": "task", "id": request.task_id}
         results = [_evaluate_gate(metrics, gate) for gate in gates]
         blocking_failures = [item for item in results if item["status"] == "failed" and item["blocking"]]
-        return {
+        evaluation = {
+            "evaluation_id": f"gateeval-{uuid4().hex[:12]}",
+            "config_id": request.config_id,
             "status": "blocked" if blocking_failures else "passed",
             "blocking_failures": len(blocking_failures),
             "target": target,
             "metrics": metrics,
             "results": results,
+            "created_at": _now(),
         }
+        _save_record(ctx.store, "ci_gate_evaluations", "evaluation_id", evaluation)
+        ctx.audit_service.record(actor="api", action="ci_gate.evaluate", target=evaluation["evaluation_id"], detail={"status": evaluation["status"], "config_id": request.config_id, "target": target})
+        return evaluation
+
+    @app.get("/ci-gates/evaluations")
+    def list_ci_gate_evaluations(
+        config_id: str | None = Query(default=None),
+        task_id: str | None = Query(default=None),
+        run_id: str | None = Query(default=None),
+    ) -> list[dict[str, Any]]:
+        evaluations = _list_records(ctx.store, "ci_gate_evaluations")
+        if config_id:
+            evaluations = [item for item in evaluations if item.get("config_id") == config_id]
+        if task_id:
+            evaluations = [item for item in evaluations if item.get("target") == {"kind": "task", "id": task_id}]
+        if run_id:
+            evaluations = [item for item in evaluations if item.get("target") == {"kind": "run", "id": run_id}]
+        return evaluations
 
     @app.post("/annotation-queue/seed-from-run")
     def seed_annotation_queue(request: AnnotationSeedRequest) -> dict[str, Any]:

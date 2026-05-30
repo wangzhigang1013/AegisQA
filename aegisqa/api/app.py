@@ -757,17 +757,43 @@ def _build_experiment_snapshot(run: RunRecord, *, name: str, baseline_run: RunRe
         }
         for step in run.workflow.steps
     ]
-    metrics = report.metrics | {"pass_rate": report.pass_rate, "error_rate": report.error_rate, "badcase_count": len(report.badcases)}
+    metrics = report.metrics | {
+        "pass_rate": report.pass_rate,
+        "error_rate": report.error_rate,
+        "badcase_count": len(report.badcases),
+        "total_items": report.total_items,
+        "completed_items": report.completed_items,
+        "failed_items": report.failed_items,
+        "average_latency_ms": report.average_latency_ms,
+        "p95_latency_ms": report.p95_latency_ms,
+        "cost": float(report.metrics.get("cost", 0) or 0),
+    }
     baseline_metrics = None
     diff = None
     if baseline_report:
-        baseline_metrics = baseline_report.metrics | {"pass_rate": baseline_report.pass_rate, "error_rate": baseline_report.error_rate, "badcase_count": len(baseline_report.badcases)}
+        baseline_metrics = baseline_report.metrics | {
+            "pass_rate": baseline_report.pass_rate,
+            "error_rate": baseline_report.error_rate,
+            "badcase_count": len(baseline_report.badcases),
+            "total_items": baseline_report.total_items,
+            "completed_items": baseline_report.completed_items,
+            "failed_items": baseline_report.failed_items,
+            "average_latency_ms": baseline_report.average_latency_ms,
+            "p95_latency_ms": baseline_report.p95_latency_ms,
+            "cost": float(baseline_report.metrics.get("cost", 0) or 0),
+        }
         diff = {key: metrics.get(key, 0) - baseline_metrics.get(key, 0) for key in sorted(set(metrics) | set(baseline_metrics))}
     return {
         "experiment_id": f"exp-{uuid4().hex[:12]}",
         "name": name,
         "run_id": run.run_id,
         "baseline_run_id": baseline_run.run_id if baseline_run else None,
+        "dataset_id": run.dataset_id,
+        "dataset_version": run.dataset_version,
+        "dataset_version_id": run.snapshot.get("dataset_version"),
+        "workflow_id": run.workflow.workflow_id,
+        "workflow_name": run.workflow.name,
+        "workflow_version_id": run.workflow.version_id,
         "status": "snapshotted",
         "tags": tags,
         "snapshot": {
@@ -781,8 +807,18 @@ def _build_experiment_snapshot(run: RunRecord, *, name: str, baseline_run: RunRe
         "metrics": metrics,
         "baseline_metrics": baseline_metrics,
         "diff": diff,
+        "failure_distribution": _badcase_reason_distribution(report),
         "created_at": _now(),
     }
+
+
+def _badcase_reason_distribution(report: Any) -> dict[str, int]:
+    distribution: dict[str, int] = {}
+    for badcase in report.badcases:
+        distribution[badcase.reason] = distribution.get(badcase.reason, 0) + 1
+    for error_type, count in report.error_distribution.items():
+        distribution[error_type] = distribution.get(error_type, 0) + count
+    return distribution
 
 
 def _build_ci_gate_config(request: CIGateConfigRequest) -> dict[str, Any]:

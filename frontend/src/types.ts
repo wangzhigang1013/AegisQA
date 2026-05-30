@@ -332,12 +332,19 @@ export type ExperimentRecord = {
   name: string;
   run_id: string;
   baseline_run_id?: string | null;
+  dataset_id?: string;
+  dataset_version?: number;
+  dataset_version_id?: string | null;
+  workflow_id?: string;
+  workflow_name?: string;
+  workflow_version_id?: string;
   status: string;
   tags: string[];
   snapshot: Record<string, unknown>;
   metrics: Record<string, number>;
   baseline_metrics?: Record<string, number> | null;
   diff?: Record<string, number> | null;
+  failure_distribution?: Record<string, number>;
   created_at: string;
 };
 
@@ -409,6 +416,8 @@ export type CIGateConfigRecord = {
 };
 
 export type CIGateEvaluationResult = {
+  evaluation_id?: string;
+  config_id?: string | null;
   status: 'passed' | 'blocked';
   blocking_failures: number;
   target?: { kind: 'run' | 'task'; id: string } | null;
@@ -423,6 +432,13 @@ export type CIGateEvaluationResult = {
     status: string;
     message: string;
   }[];
+  created_at?: string;
+};
+
+export type CIGateEvaluationRecord = CIGateEvaluationResult & {
+  evaluation_id: string;
+  config_id?: string | null;
+  created_at: string;
 };
 
 export type TraceTree = {

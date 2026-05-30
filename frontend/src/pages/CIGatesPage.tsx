@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { CIGateConfigRecord, CIGateEvaluationResult } from '../types';
+import type { CIGateConfigRecord, CIGateEvaluationRecord, CIGateEvaluationResult } from '../types';
 
 type CIGateCreateValues = {
   name: string;
@@ -40,6 +40,12 @@ export function CIGatesPage() {
   const activeTaskId = selectedTaskId ?? tasks[0]?.task_id;
   const activeRunId = selectedRunId ?? runs[0]?.run_id;
   const canEvaluate = Boolean(activeConfigId && (targetKind === 'task' ? activeTaskId : activeRunId));
+  const evaluationsQuery = useQuery({
+    queryKey: ['ci-gate-evaluations', activeConfigId],
+    queryFn: () => api.ciGateEvaluations(activeConfigId ? { config_id: activeConfigId } : {}),
+  });
+  const evaluationHistory = evaluationsQuery.data ?? [];
+  const historySummary = buildHistorySummary(evaluationHistory);
 
   const createMutation = useMutation({
     mutationFn: (values: CIGateCreateValues) =>
@@ -91,9 +97,10 @@ export function CIGatesPage() {
       if (!activeRunId) throw new Error('请先选择 Run。');
       return api.evaluateCIGates({ config_id: activeConfigId, run_id: activeRunId });
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       setEvaluation(result);
       setNotice(result.status === 'blocked' ? `质量门禁阻断：${result.blocking_failures} 条阻断规则未通过。` : '质量门禁通过，可以进入后续发布流程。');
+      await queryClient.invalidateQueries({ queryKey: ['ci-gate-evaluations'] });
     },
     onError: (error) => setNotice(`质量门禁评估失败：${formatApiError(error)}`),
   });
@@ -193,6 +200,37 @@ export function CIGatesPage() {
         </Row>
       ) : null}
 
+      <Card className="flat-card" title="历史趋势">
+        <Row gutter={[12, 12]} className="metric-row">
+          <Col xs={24} md={8}>
+            <HistoryTile title="历史评估" value={historySummary.total} note={`最近：${historySummary.latestStatus}`} />
+          </Col>
+          <Col xs={24} md={8}>
+            <HistoryTile title="阻断次数" value={historySummary.blocked} note="blocking gate 未通过" />
+          </Col>
+          <Col xs={24} md={8}>
+            <HistoryTile title="通过次数" value={historySummary.passed} note="可进入发布流程" />
+          </Col>
+        </Row>
+      </Card>
+
+      <Card className="flat-card" title="评估历史">
+        <Table
+          rowKey="evaluation_id"
+          loading={evaluationsQuery.isLoading}
+          dataSource={evaluationHistory}
+          pagination={{ pageSize: 6 }}
+          columns={[
+            { title: '评估 ID', dataIndex: 'evaluation_id', render: (value) => <code>{value}</code> },
+            { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'passed' ? 'green' : 'red'}>{value === 'passed' ? '通过' : '阻断'}</Tag> },
+            { title: '目标', render: (_, record: CIGateEvaluationRecord) => formatTarget(record.target) },
+            { title: '阻断规则', dataIndex: 'blocking_failures' },
+            { title: '主要原因', render: (_, record: CIGateEvaluationRecord) => record.results.find((item) => item.status === 'failed')?.message ?? '全部规则通过' },
+            { title: '时间', dataIndex: 'created_at' },
+          ]}
+        />
+      </Card>
+
       <Card className="flat-card" title="质量门禁配置列表">
         <Table
           rowKey="config_id"
@@ -268,4 +306,31 @@ export function CIGatesPage() {
 function formatMetric(value: unknown): string {
   if (typeof value !== 'number') return '-';
   return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function HistoryTile({ title, value, note }: { title: string; value: number; note: string }) {
+  return (
+    <Card size="small">
+      <h3>{title}</h3>
+      <Typography.Title level={3}>{value}</Typography.Title>
+      <Typography.Text type="secondary">{note}</Typography.Text>
+    </Card>
+  );
+}
+
+function buildHistorySummary(history: CIGateEvaluationRecord[]) {
+  const blocked = history.filter((item) => item.status === 'blocked').length;
+  const passed = history.filter((item) => item.status === 'passed').length;
+  const latest = history[history.length - 1];
+  return {
+    total: history.length,
+    blocked,
+    passed,
+    latestStatus: latest ? (latest.status === 'passed' ? '通过' : '阻断') : '暂无',
+  };
+}
+
+function formatTarget(target: CIGateEvaluationRecord['target']): string {
+  if (!target) return '手动指标';
+  return `${target.kind} / ${target.id}`;
 }

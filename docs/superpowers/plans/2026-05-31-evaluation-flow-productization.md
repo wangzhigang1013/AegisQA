@@ -217,14 +217,14 @@
 
 ### Task 7.1：CI Gate 历史
 
-- [ ] `POST /ci-gates/evaluate` 保存 evaluation record。
-- [ ] `GET /ci-gates/evaluations` 支持按 config、task、run 筛选。
-- [ ] CI Gate 页面展示历史、阻断原因和趋势。
+- [x] `POST /ci-gates/evaluate` 保存 evaluation record。
+- [x] `GET /ci-gates/evaluations` 支持按 config、task、run 筛选。
+- [x] CI Gate 页面展示历史、阻断原因和趋势。
 
 ### Task 7.2：Experiment 对比增强
 
-- [ ] Experiment 页面增加按 Dataset/Workflow 过滤。
-- [ ] 增加 A/B 对比面板：通过率、Badcase、耗时、成本、失败分布。
+- [x] Experiment 页面增加按 Dataset/Workflow 过滤。
+- [x] 增加 A/B 对比面板：通过率、Badcase、耗时、成本、失败分布。
 
 ## 阶段 8：生产化边界与移除整理
 

@@ -137,10 +137,17 @@ const demoExperiments = [
     baseline_run_id: 'run-base',
     status: 'snapshotted',
     tags: ['rag'],
+    dataset_id: 'dataset-demo',
+    dataset_version: 1,
+    dataset_version_id: 'dataset-demo:v1',
+    workflow_id: 'wf-demo',
+    workflow_name: 'RAG 回归评测',
+    workflow_version_id: 'wf-demo:v1',
     snapshot: { workflow_version: 'wf-demo:v1', dataset_version: 'dataset-demo:v1', skill_versions: ['llm.call@0.1.0'] },
-    metrics: { pass_rate: 0.82, badcase_count: 18, cost: 12.5 },
-    baseline_metrics: { pass_rate: 0.76, badcase_count: 24, cost: 10 },
-    diff: { pass_rate: 0.06, badcase_count: -6, cost: 2.5 },
+    metrics: { pass_rate: 0.82, badcase_count: 18, cost: 12.5, p95_latency_ms: 820 },
+    baseline_metrics: { pass_rate: 0.76, badcase_count: 24, cost: 10, p95_latency_ms: 900 },
+    diff: { pass_rate: 0.06, badcase_count: -6, cost: 2.5, p95_latency_ms: -80 },
+    failure_distribution: { 'judge_label=fail': 18 },
     created_at: '2026-05-31T00:00:00Z',
   },
   {
@@ -150,10 +157,17 @@ const demoExperiments = [
     baseline_run_id: null,
     status: 'snapshotted',
     tags: ['baseline'],
+    dataset_id: 'dataset-demo',
+    dataset_version: 1,
+    dataset_version_id: 'dataset-demo:v1',
+    workflow_id: 'wf-demo',
+    workflow_name: 'RAG 回归评测',
+    workflow_version_id: 'wf-demo:v1',
     snapshot: { workflow_version: 'wf-demo:v1', dataset_version: 'dataset-demo:v1', skill_versions: ['llm.call@0.1.0'] },
-    metrics: { pass_rate: 0.76, badcase_count: 24, cost: 10 },
+    metrics: { pass_rate: 0.76, badcase_count: 24, cost: 10, p95_latency_ms: 900 },
     baseline_metrics: null,
     diff: null,
+    failure_distribution: { 'judge_label=fail': 24 },
     created_at: '2026-05-30T00:00:00Z',
   },
 ];
@@ -170,6 +184,30 @@ const demoCIGates = [
     ],
     created_at: '2026-05-31T00:00:00Z',
     updated_at: '2026-05-31T00:00:00Z',
+  },
+];
+
+const demoCIGateEvaluations = [
+  {
+    evaluation_id: 'gateeval-demo',
+    config_id: 'gatecfg-demo',
+    status: 'blocked',
+    blocking_failures: 1,
+    target: { kind: 'task', id: 'task-demo' },
+    metrics: { pass_rate: 0.5, badcase_count: 1 },
+    results: [
+      {
+        gate_id: 'pass-rate',
+        metric: 'pass_rate',
+        operator: '>=',
+        threshold: 0.8,
+        actual: 0.5,
+        blocking: true,
+        status: 'failed',
+        message: '质量门禁未通过：pass_rate=0.5 不满足 >= 0.8',
+      },
+    ],
+    created_at: '2026-05-31T01:00:00Z',
   },
 ];
 
@@ -368,7 +406,7 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/dashboard/summary')) {
         return jsonResponse({ dataset_count: 12, skill_count: 34, workflow_count: 5, run_count: 8, latest_run: null, pass_rate: 0.92, badcase_count: 7 });
       }
-      if (url.endsWith('/experiments') || url.endsWith('/annotation-queue')) {
+      if (url.includes('/experiments') || url.endsWith('/annotation-queue')) {
         if (url.endsWith('/annotation-queue')) return jsonResponse(demoAnnotationTasks);
         return jsonResponse(demoExperiments);
       }
@@ -377,6 +415,9 @@ describe('AegisQA 前端工作台', () => {
       }
       if (url.endsWith('/ci-gates')) {
         return jsonResponse(demoCIGates);
+      }
+      if (url.includes('/ci-gates/evaluations')) {
+        return jsonResponse(demoCIGateEvaluations);
       }
       if (url.endsWith('/workflow-graphs/validate')) {
         return jsonResponse({ ok: true, errors: [], warnings: [], execution_levels: [['answer'], ['judge']], graph_tips: [], node_count: 2, edge_count: 1 });
@@ -740,7 +781,7 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/experiments/from-run') && init?.method === 'POST') {
         return jsonResponse({ ...demoExperiments[0], experiment_id: 'exp-created', name: '新实验快照' });
       }
-      if (url.endsWith('/experiments')) {
+      if (url.includes('/experiments')) {
         return jsonResponse(demoExperiments);
       }
       if (url.endsWith('/runs')) {
@@ -756,7 +797,12 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('Baseline 对比')).toBeInTheDocument();
     expect(screen.getByText('通过率变化')).toBeInTheDocument();
     expect(screen.getByText('失败样本变化')).toBeInTheDocument();
+    expect(screen.getByText('P95 耗时变化')).toBeInTheDocument();
     expect(screen.getByText('成本变化')).toBeInTheDocument();
+    expect(screen.getByText('Dataset 过滤')).toBeInTheDocument();
+    expect(screen.getByText('Workflow 过滤')).toBeInTheDocument();
+    expect(screen.getByText('失败分布对比')).toBeInTheDocument();
+    expect(screen.getByText('judge_label=fail')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /生成实验快照/ }));
     expect(await screen.findByText('从 Run 生成实验快照')).toBeInTheDocument();
@@ -773,24 +819,10 @@ describe('AegisQA 前端工作台', () => {
         return jsonResponse(demoCIGates);
       }
       if (url.endsWith('/ci-gates/evaluate')) {
-        return jsonResponse({
-          status: 'blocked',
-          blocking_failures: 1,
-          target: { kind: 'task', id: 'task-demo' },
-          metrics: { pass_rate: 0.5, badcase_count: 1 },
-          results: [
-            {
-              gate_id: 'pass-rate',
-              metric: 'pass_rate',
-              operator: '>=',
-              threshold: 0.8,
-              actual: 0.5,
-              blocking: true,
-              status: 'failed',
-              message: '质量门禁未通过：pass_rate=0.5 不满足 >= 0.8',
-            },
-          ],
-        });
+        return jsonResponse(demoCIGateEvaluations[0]);
+      }
+      if (url.includes('/ci-gates/evaluations')) {
+        return jsonResponse(demoCIGateEvaluations);
       }
       if (url.endsWith('/tasks')) {
         return jsonResponse([demoTask]);
@@ -806,6 +838,9 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText('CI Gate 质量门禁')).toBeInTheDocument();
     expect(screen.getAllByText('发布质量门禁').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /创建质量门禁/ })).toBeInTheDocument();
+    expect(screen.getByText('评估历史')).toBeInTheDocument();
+    expect(screen.getByText('历史趋势')).toBeInTheDocument();
+    expect(screen.getByText('gateeval-demo')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /创建质量门禁/ }));
     expect(await screen.findByText('新建质量门禁配置')).toBeInTheDocument();
@@ -813,7 +848,7 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /执行 Gate 评估/ }));
     expect(await screen.findByText('阻断原因')).toBeInTheDocument();
-    expect(screen.getByText(/质量门禁未通过/)).toBeInTheDocument();
+    expect(screen.getAllByText(/质量门禁未通过/).length).toBeGreaterThan(0);
   });
 
   it('Annotation Queue 页面支持来源任务筛选、领取和审核回流', async () => {
