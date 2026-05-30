@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“评测数据流与产品体验升级”正在执行中。阶段 1（Skill 参数解析与冻结）和阶段 2（Trace 数据流模型与独立页面）已完成：后端已提供 Task Trace Flow API，前端已新增独立 Trace Flow 页面，并在任务详情、报告页和 Playwright 主链路中接入；下一步进入阶段 3：UI 信息架构与任务驾驶舱优化。
+新一轮“评测数据流与产品体验升级”正在执行中。阶段 1（Skill 参数解析与冻结）、阶段 2（Trace 数据流模型与独立页面）和阶段 3（UI 信息架构与任务驾驶舱）已完成：后端已提供 Task Trace Flow API，前端已新增独立 Trace Flow 页面，首页已改为任务工作台，任务详情已升级为概览、样本、Trace、Badcase、Attempts、参数页签；下一步进入阶段 4：Workflow 字段映射与参数预览升级。
 
 ## 当前已完成
 
@@ -45,13 +45,15 @@
 - JSON Store 已增加 `FileLock`、JSON 原子写入和 JSONL 读写锁保护，并新增并发写入测试；README 已说明该存储仅适合本地 demo，不承担生产数据库职责。
 - Skill 参数处理已从各节点散落配置升级为统一解析：`schema_default < workflow_config < task_override < runtime_expression < secret_ref`，Run Step 会保存脱敏后的 `config_snapshot` 和字段级 `parameter_trace`。
 - Trace Flow 已从 Trace Tree 中独立出来，支持按 Task 查看 Dataset Row、Skill Input、参数来源、Output、Metrics、Badcase 和队列消息形状，帮助解释评测过程中的数据流转。
+- 首页已从产品能力展示调整为任务工作台，优先展示最近任务、待审批 Skill、待审核样本、失败任务和 CI Gate 阻断，并固定“上传数据 -> 选择 Workflow -> 创建任务 -> 查看报告”主流程入口。
+- 任务详情已抽成驾驶舱组件，按概览、样本、Trace、Badcase、Attempts、参数组织，参数页可查看任务冻结参数、Skill 参数来源和 Secret 脱敏说明。
 
 ## 最近验证
 
 - `python -m pytest -q`：48 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v7`，Run `run-5a86aceede3f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：4 个测试文件、31 个测试通过。
+- `cd frontend && npm test`：4 个测试文件、33 个测试通过。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：8 个 Playwright E2E 测试通过，覆盖任务主链路、任务报告进入 Trace Flow、参数来源查看、CI Gate 创建与阻断评估、Annotation Queue 领取/审核/回流 Golden，以及 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Playwright E2E 测试通过，覆盖 Workflow 画布新增节点、聚合策略、删除下游连线、新增 Join、撤销/重做、删除节点、保存草稿回放、试运行回填、校验、发布。
@@ -75,6 +77,37 @@
 - 后续建议优先进入 Trace Tree 独立页面、CI Gate 历史记录、Annotation Queue 批量审核、多 Judge 一致性视图、红队安全扫描和真实 MySQL/Redis/Celery Repository/Worker 接入。
 
 ## 最近改动
+
+### 2026-05-31 首页任务工作台与任务详情驾驶舱
+
+- 改动摘要：完成评测数据流升级计划阶段 3。首页从“能力展示”改为“任务工作台”，展示最近任务、待审批 Skill、待审核样本、失败任务和 CI Gate 阻断，并固定上传数据、选择 Workflow、创建任务、查看报告四个主流程入口；执行中心任务详情抽成 `TaskOperationsDrawer`，按概览、样本、Trace、Badcase、Attempts、参数组织，参数页展示任务冻结参数、Skill 参数来源和 Secret 脱敏说明。
+- 变更文件：
+  - `frontend/src/pages/OverviewPage.tsx`
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/pages/task/TaskOperationsDrawer.tsx`
+  - `frontend/src/pages/task/TaskSnapshotPanel.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/e2e/task-flow.spec.ts`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-evaluation-flow-productization.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "任务工作台|任务详情驾驶舱|任务详情展示"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 阶段 3 前端定向测试：3 passed。
+  - Typecheck：通过。
+  - Task Flow Playwright 定向测试：1 passed。
+  - 后端全量：48 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：4 个测试文件、33 passed。
+  - Build：通过。
+  - Playwright 全量 E2E：8 passed。
+- 下一步：进入阶段 4，升级 Workflow 设计器字段映射，减少手写 JSON，并接入参数预览面板。
 
 ### 2026-05-31 Trace Flow 数据流独立页面
 

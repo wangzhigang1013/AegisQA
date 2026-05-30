@@ -228,7 +228,7 @@ describe('AegisQA 前端工作台', () => {
         return jsonResponse(demoSkills);
       }
       if (url.endsWith('/skills/packages')) {
-        return jsonResponse([]);
+        return jsonResponse([pendingSkillPackage]);
       }
       if (url.endsWith('/skills/packages/upload')) {
         return jsonResponse({ package_id: 'pkg-demo', status: 'pending_review', manifest: { ...demoSkills[0], skill_id: 'plugin.echo@0.1.0', status: 'pending_review', enabled: false } });
@@ -285,7 +285,11 @@ describe('AegisQA 前端工作台', () => {
         return jsonResponse({ dataset_count: 12, skill_count: 34, workflow_count: 5, run_count: 8, latest_run: null, pass_rate: 0.92, badcase_count: 7 });
       }
       if (url.endsWith('/experiments') || url.endsWith('/annotation-queue')) {
-        return jsonResponse([]);
+        if (url.endsWith('/annotation-queue')) return jsonResponse(demoAnnotationTasks);
+        return jsonResponse(demoExperiments);
+      }
+      if (url.endsWith('/ci-gates')) {
+        return jsonResponse(demoCIGates);
       }
       if (url.endsWith('/workflow-graphs/validate')) {
         return jsonResponse({ ok: true, errors: [], warnings: [], execution_levels: [['answer'], ['judge']], graph_tips: [], node_count: 2, edge_count: 1 });
@@ -300,7 +304,7 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('AegisQA')).toBeInTheDocument();
     expect(screen.getByText('开始一次评测')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Workflow 市场/ })).toBeInTheDocument();
-    expect(screen.getByText('最近 Run 状态')).toBeInTheDocument();
+    expect(screen.getAllByText('最近任务').length).toBeGreaterThan(0);
   });
 
   it('概览页读取真实 Dashboard 并展示产品化增强入口', async () => {
@@ -312,8 +316,24 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('Experiment 快照')).toBeInTheDocument();
     expect(screen.getByText('Assertion DSL')).toBeInTheDocument();
     expect(screen.getAllByText('CI Gate').length).toBeGreaterThan(0);
-    expect(screen.getByText('Annotation Queue')).toBeInTheDocument();
+    expect(screen.getAllByText('Annotation Queue').length).toBeGreaterThan(0);
     expect(screen.getByText('Trace Tree')).toBeInTheDocument();
+  });
+
+  it('首页作为任务工作台展示待办队列和主流程入口', async () => {
+    await renderWorkbench('/');
+
+    expect(await screen.findByText('任务工作台')).toBeInTheDocument();
+    expect(screen.getAllByText('最近任务').length).toBeGreaterThan(0);
+    expect(screen.getByText('待审批 Skill')).toBeInTheDocument();
+    expect(screen.getByText('待审核样本')).toBeInTheDocument();
+    expect(screen.getByText('失败任务')).toBeInTheDocument();
+    expect(screen.getByText(/CI Gate 阻断/)).toBeInTheDocument();
+    expect(screen.getByText('RAG 任务')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /上传数据/ }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('link', { name: /选择 Workflow/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /创建任务/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /查看报告/ }).length).toBeGreaterThan(0);
   });
 
   it('Workflow 市场展示草稿、已发布版本、模板和新建入口', async () => {
@@ -478,9 +498,32 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'RAG 任务' }));
 
+    fireEvent.click(await screen.findByRole('tab', { name: 'Attempts' }));
     expect(await screen.findByText('Run Attempts')).toBeInTheDocument();
     expect(screen.getByText(/#1 \/ queued \/ run-demo/)).toBeInTheDocument();
-    expect(screen.getByText(/并发 2 \/ repeat 1 \/ 重试 1/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '参数' }));
+    expect(screen.getAllByText(/并发 2 \/ repeat 1 \/ 重试 1/).length).toBeGreaterThan(0);
+  });
+
+  it('任务详情驾驶舱按概览、样本、Trace、Badcase、Attempts 和参数组织', async () => {
+    await renderWorkbench('/runs');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'RAG 任务' }));
+
+    expect(await screen.findByRole('tab', { name: '概览' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '样本' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Trace' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Badcase' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Attempts' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '参数' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: '参数' }));
+    expect(await screen.findByText('任务冻结参数')).toBeInTheDocument();
+    expect(screen.getByText('Skill 参数来源')).toBeInTheDocument();
+    expect(screen.getByText(/cost_budget/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Trace' }));
+    expect(await screen.findByText('Trace Tree')).toBeInTheDocument();
   });
 
   it('完成态任务不能重复执行', async () => {

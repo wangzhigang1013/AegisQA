@@ -120,6 +120,12 @@ async function createAndExecuteTask(page: Page, datasetName: string, workflowNam
 
   await page.getByRole('dialog').getByRole('button', { name: '执行' }).click();
   await expect(page.getByText(/任务状态已更新：completed/)).toBeVisible();
+  await expect(page.getByRole('tab', { name: '概览' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Trace' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Attempts' })).toBeVisible();
+  await page.getByRole('tab', { name: '参数' }).click();
+  await expect(page.getByText('任务冻结参数')).toBeVisible();
+  await expect(page.getByText(/cost_budget|concurrency/)).toBeVisible();
 }
 
 async function verifyReportAndCorrectBadcase(page: Page, taskName: string) {

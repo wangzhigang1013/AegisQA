@@ -1,28 +1,23 @@
-import { DownloadOutlined, PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
+import { DownloadOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
   Button,
   Card,
-  Descriptions,
-  Drawer,
   Empty,
   Progress,
   Space,
   Table,
   Tag,
-  Tooltip,
-  Timeline,
 } from 'antd';
-import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import type { TaskRecord } from '../types';
 import { TaskCreateWizard, type TaskCreateFormValues } from './task/TaskCreateWizard';
-
-type TaskAction = 'execute' | 'pause' | 'resume' | 'cancel' | 'retry' | 'attempt';
+import { TaskActionButton, TaskOperationsDrawer, type TaskAction } from './task/TaskOperationsDrawer';
+import { taskProgress } from './task/TaskSnapshotPanel';
 
 export function RunsPage() {
   const queryClient = useQueryClient();
@@ -157,7 +152,7 @@ export function RunsPage() {
         onSubmit={(values) => createTaskMutation.mutate(values)}
       />
 
-      <TaskDetailDrawer
+      <TaskOperationsDrawer
         task={detailTask}
         loading={taskActionMutation.isPending}
         onClose={() => setDetailTask(null)}
@@ -165,135 +160,6 @@ export function RunsPage() {
       />
     </section>
   );
-}
-
-function TaskDetailDrawer({
-  task,
-  loading,
-  onClose,
-  onAction,
-}: {
-  task: TaskRecord | null;
-  loading: boolean;
-  onClose: () => void;
-  onAction: (task: TaskRecord, action: TaskAction) => void;
-}) {
-  const traceQuery = useQuery({
-    queryKey: ['task-trace-tree', task?.task_id],
-    queryFn: () => api.taskTraceTree(task?.task_id ?? ''),
-    enabled: Boolean(task?.task_id),
-  });
-
-  return (
-    <Drawer title={task ? `任务详情：${task.name}` : '任务详情'} width={720} open={Boolean(task)} onClose={onClose}>
-      {task ? (
-        <Space direction="vertical" className="drawer-stack" size="large">
-          <Space wrap>
-            <TaskActionButton task={task} action="execute" loading={loading} onClick={onAction} icon={<PlayCircleOutlined />} label="执行" />
-            <TaskActionButton task={task} action="pause" loading={loading} onClick={onAction} icon={<PauseCircleOutlined />} label="暂停" />
-            <TaskActionButton task={task} action="resume" loading={loading} onClick={onAction} icon={<PlayCircleOutlined />} label="恢复" />
-            <TaskActionButton task={task} action="cancel" loading={loading} onClick={onAction} icon={<StopOutlined />} label="取消" danger />
-            <TaskActionButton task={task} action="retry" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="重试失败项" />
-            <TaskActionButton task={task} action="attempt" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="新建 Attempt" />
-            <Button href={`/tasks/${task.task_id}/trace`}>查看 Trace Flow</Button>
-          </Space>
-          <Descriptions bordered column={1} size="small">
-            <Descriptions.Item label="数据源">{task.dataset_name} v{task.dataset_version}</Descriptions.Item>
-            <Descriptions.Item label="Workflow">{task.workflow_name}</Descriptions.Item>
-            <Descriptions.Item label="Run">{task.run_id}</Descriptions.Item>
-            <Descriptions.Item label="当前 Attempt">{task.current_attempt ?? 1}</Descriptions.Item>
-            <Descriptions.Item label="进度">{task.completed_items} / {task.total_items}</Descriptions.Item>
-            <Descriptions.Item label="Badcase">{task.badcase_count}</Descriptions.Item>
-            <Descriptions.Item label="执行参数">{formatExecutionConfig(task)}</Descriptions.Item>
-          </Descriptions>
-          <Card size="small" title="Run Attempts">
-            {task.attempts?.length ? (
-              <Timeline
-                items={task.attempts.map((attempt) => ({
-                  color: attempt.run_id === task.run_id ? 'blue' : attempt.status === 'completed' ? 'green' : 'gray',
-                  children: `#${attempt.attempt_index} / ${attempt.status} / ${attempt.run_id} / 通过率 ${Math.round(Number(attempt.pass_rate ?? 0) * 100)}%`,
-                }))}
-              />
-            ) : (
-              <Alert type="info" showIcon message="当前任务还没有历史 Attempt。重新执行时会保留旧报告并创建新的 Run。" />
-            )}
-          </Card>
-          <Card size="small" title="Trace Tree">
-            {traceQuery.data?.items?.length ? (
-              <Timeline
-                items={traceQuery.data.items.slice(0, 5).map((item) => ({
-                  color: item.status === 'succeeded' ? 'green' : item.status === 'failed' ? 'red' : 'blue',
-                  children: `${item.item_id} / ${item.status}`,
-                }))}
-              />
-            ) : (
-              <Alert type="info" showIcon message="执行任务后展示 Skill 级调用树、输入输出、耗时、错误和缓存命中。" />
-            )}
-          </Card>
-        </Space>
-      ) : null}
-    </Drawer>
-  );
-}
-
-function TaskActionButton({
-  task,
-  action,
-  loading,
-  onClick,
-  icon,
-  label,
-  danger = false,
-}: {
-  task: TaskRecord;
-  action: TaskAction;
-  loading: boolean;
-  onClick: (task: TaskRecord, action: TaskAction) => void;
-  icon: ReactNode;
-  label: string;
-  danger?: boolean;
-}) {
-  const disabledReason = taskActionDisabledReason(task, action);
-  const button = (
-    <Button danger={danger} icon={icon} loading={loading} disabled={Boolean(disabledReason)} onClick={() => onClick(task, action)}>
-      {label}
-    </Button>
-  );
-  return disabledReason ? <Tooltip title={disabledReason}>{button}</Tooltip> : button;
-}
-
-function taskActionDisabledReason(task: TaskRecord, action: TaskAction): string | null {
-  const status = task.status;
-  if (action === 'execute') {
-    if (status === 'completed') return '任务已完成，请复制任务或创建新任务后重新执行。';
-    if (status === 'running') return '任务正在执行中。';
-    if (status === 'canceled' || status === 'cancelled') return '任务已取消，不能执行。';
-    return null;
-  }
-  if (action === 'pause') return ['queued', 'running'].includes(status) ? null : '只有 queued/running 任务可以暂停。';
-  if (action === 'resume') return status === 'paused' ? null : '只有 paused 任务可以恢复。';
-  if (action === 'cancel') return ['queued', 'running', 'paused', 'failed'].includes(status) ? null : '当前状态不能取消。';
-  if (action === 'retry') return status === 'failed' ? null : '只有 failed 任务可以重试失败项。';
-  if (action === 'attempt') return ['queued', 'running', 'paused'].includes(status) ? '当前任务仍有活动执行实例，结束后才能新建 Attempt。' : null;
-  return null;
-}
-
-function taskProgress(task: TaskRecord): number {
-  if (!task.total_items) return 0;
-  return Math.round((task.completed_items / task.total_items) * 100);
-}
-
-function formatExecutionConfig(task: TaskRecord): string {
-  const config = task.execution_config;
-  if (!config) return '-';
-  const retry = config.retry ?? {};
-  return [
-    `并发 ${config.concurrency ?? '-'}`,
-    `repeat ${config.sample_repeat_times ?? '-'}`,
-    `重试 ${retry.max_retries ?? '-'}`,
-    `退避 ${retry.backoff_seconds ?? '-'}s`,
-    `预算 ${config.cost_budget ?? '-'}`,
-  ].join(' / ');
 }
 
 function statusColor(status: string): string {

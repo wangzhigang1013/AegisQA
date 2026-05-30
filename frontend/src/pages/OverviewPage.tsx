@@ -6,11 +6,14 @@ import {
   CodeOutlined,
   DatabaseOutlined,
   ExperimentOutlined,
+  FileDoneOutlined,
   PlayCircleOutlined,
   SafetyCertificateOutlined,
+  ToolOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Empty, Row, Steps, Table, Tag } from 'antd';
+import { Alert, Button, Card, Col, Empty, Row, Space, Steps, Table, Tag, Typography } from 'antd';
 import { Link } from 'react-router-dom';
 
 import { api } from '../api/client';
@@ -20,8 +23,11 @@ import { MetricTile } from '../components/MetricTile';
 export function OverviewPage() {
   const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard });
   const runsQuery = useQuery({ queryKey: ['runs'], queryFn: api.runs });
+  const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
+  const skillPackagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
   const experimentsQuery = useQuery({ queryKey: ['experiments'], queryFn: api.experiments });
   const annotationQuery = useQuery({ queryKey: ['annotation-queue'], queryFn: () => api.annotationQueue() });
+  const ciGatesQuery = useQuery({ queryKey: ['ci-gates'], queryFn: api.ciGateConfigs });
 
   const summary = dashboardQuery.data ?? {
     dataset_count: 0,
@@ -33,15 +39,12 @@ export function OverviewPage() {
     latest_run: null,
   };
   const passRate = Math.round(summary.pass_rate * 100);
-  const recentRuns =
-    runsQuery.data?.slice(0, 5).map((run) => ({
-      key: run.run_id,
-      run_id: run.run_id,
-      status: run.status,
-      total_items: run.total_items,
-      item_count: run.items.length,
-      queue_shape: run.queue_messages[0] ? Object.keys(run.queue_messages[0]).join(', ') : 'item_id',
-    })) ?? [];
+  const tasks = tasksQuery.data ?? [];
+  const recentTasks = tasks.slice(0, 6);
+  const pendingSkillPackages = (skillPackagesQuery.data ?? []).filter((item) => item.status === 'pending_review');
+  const pendingAnnotation = (annotationQuery.data ?? []).filter((item) => item.status !== 'reviewed');
+  const failedTasks = tasks.filter((task) => task.status === 'failed' || task.failed_items > 0);
+  const blockingGateCount = (ciGatesQuery.data ?? []).filter((gate) => gate.status === 'active').length;
   const productCapabilities = [
     { name: 'Experiment 快照', value: experimentsQuery.data?.length ?? 0, note: 'Run 不可变快照', icon: <ExperimentOutlined /> },
     { name: 'Assertion DSL', value: '7 类', note: 'contains/regex/schema/latency/cost/safety', icon: <CodeOutlined /> },
@@ -55,11 +58,16 @@ export function OverviewPage() {
       <PageHeader
         eyebrow="工作台总览"
         title="AegisQA 评测工作台"
-        description="从数据集、Skill、Workflow 到执行、报告、Badcase 和 Judge 审计的一站式评测流程。"
+        description="任务工作台围绕一次评测组织信息：先看待办，再沿着数据、Workflow、任务和报告完成闭环。"
         primaryAction={
-          <Link to="/workflows">
-            <HeaderButton icon={<PlayCircleOutlined />}>开始一次评测</HeaderButton>
-          </Link>
+          <Space wrap>
+            <Link to="/datasets">
+              <Button icon={<DatabaseOutlined />}>上传数据</Button>
+            </Link>
+            <Link to="/workflows">
+              <HeaderButton icon={<PlayCircleOutlined />}>开始一次评测</HeaderButton>
+            </Link>
+          </Space>
         }
       />
 
@@ -83,12 +91,38 @@ export function OverviewPage() {
       <div className="section-band">
         <div className="section-title-row">
           <div>
+            <h2>任务工作台</h2>
+            <p>先处理阻塞项，再从主流程入口创建新的评测任务。</p>
+          </div>
+          <Space wrap>
+            <Link to="/datasets"><Button icon={<DatabaseOutlined />}>上传数据</Button></Link>
+            <Link to="/workflows"><Button icon={<ArrowRightOutlined />}>选择 Workflow</Button></Link>
+            <Link to="/runs"><Button icon={<PlayCircleOutlined />}>创建任务</Button></Link>
+            <Link to="/reports"><Button icon={<FileDoneOutlined />}>查看报告</Button></Link>
+          </Space>
+        </div>
+        <Row gutter={[12, 12]}>
+          <Col xs={24} md={12} xl={6}>
+            <MetricTile title="最近任务" value={tasks.length} icon={<PlayCircleOutlined />} tone="blue" note="Task 主对象" />
+          </Col>
+          <Col xs={24} md={12} xl={6}>
+            <MetricTile title="待审批 Skill" value={pendingSkillPackages.length} icon={<ToolOutlined />} tone="amber" note="插件合约测试后启用" />
+          </Col>
+          <Col xs={24} md={12} xl={6}>
+            <MetricTile title="待审核样本" value={pendingAnnotation.length} icon={<AuditOutlined />} tone="violet" note="Annotation Queue" />
+          </Col>
+          <Col xs={24} md={12} xl={6}>
+            <MetricTile title="失败任务" value={failedTasks.length} icon={<WarningOutlined />} tone="red" note={`CI Gate 阻断 ${blockingGateCount}`} />
+          </Col>
+        </Row>
+      </div>
+
+      <div className="section-band">
+        <div className="section-title-row">
+          <div>
             <h2>推荐操作路径</h2>
             <p>新用户按这条路径走，就能完成一次可追溯评测。</p>
           </div>
-          <Link to="/datasets">
-            <Button icon={<ArrowRightOutlined />}>准备数据</Button>
-          </Link>
         </div>
         <Steps
           responsive
@@ -128,28 +162,43 @@ export function OverviewPage() {
         </Row>
       </div>
 
-      <Card className="flat-card" title="最近 Run 状态">
-        {recentRuns.length ? (
+      <Card className="flat-card" title="最近任务">
+        {recentTasks.length ? (
           <Table
             pagination={false}
-            loading={runsQuery.isLoading}
-            dataSource={recentRuns}
+            loading={tasksQuery.isLoading}
+            rowKey="task_id"
+            dataSource={recentTasks}
             columns={[
-              { title: 'Run', dataIndex: 'run_id' },
-              { title: '状态', dataIndex: 'status', render: (status) => <Tag color={status === 'completed' ? 'green' : 'blue'}>{status}</Tag> },
-              { title: '样本数', dataIndex: 'total_items' },
-              { title: 'Item', dataIndex: 'item_count' },
-              { title: '队列消息字段', dataIndex: 'queue_shape' },
+              { title: '任务', dataIndex: 'name' },
+              { title: '数据源', dataIndex: 'dataset_name' },
+              { title: 'Workflow', dataIndex: 'workflow_name' },
+              { title: '状态', dataIndex: 'status', render: (status) => <Tag color={status === 'completed' ? 'green' : status === 'failed' ? 'red' : 'blue'}>{status}</Tag> },
+              { title: '进度', render: (_, task) => `${task.completed_items} / ${task.total_items}` },
+              { title: 'Badcase', dataIndex: 'badcase_count' },
+              {
+                title: '下一步',
+                render: (_, task) => (
+                  <Space>
+                    <Link to={`/tasks/${task.task_id}/trace`}>Trace</Link>
+                    <Link to="/reports">报告</Link>
+                  </Space>
+                ),
+              },
             ]}
           />
         ) : (
-          <Empty description="暂无 Run">
+          <Empty description="暂无任务。请按主流程上传数据、发布 Workflow，再创建任务。">
             <Link to="/runs">
               <Button icon={<PlayCircleOutlined />}>创建任务</Button>
             </Link>
           </Empty>
         )}
       </Card>
+
+      {runsQuery.data?.length ? (
+        <Typography.Text type="secondary">底层 Run 仍保留为执行批次，用户主线以任务为准。</Typography.Text>
+      ) : null}
     </section>
   );
 }

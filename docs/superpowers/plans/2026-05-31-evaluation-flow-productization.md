@@ -121,16 +121,16 @@
 
 ### Task 3.1：首页工作台
 
-- [ ] 首页改为评测工作台：最近任务、待审批 Skill、待审核 Annotation、失败任务、CI Gate 阻断。
-- [ ] 所有入口围绕“上传数据 -> 选择 Workflow -> 创建任务 -> 查看报告”。
-- [ ] 移除不围绕 Task 的大段说明文本。
+- [x] 首页改为评测工作台：最近任务、待审批 Skill、待审核 Annotation、失败任务、CI Gate 阻断。
+- [x] 所有入口围绕“上传数据 -> 选择 Workflow -> 创建任务 -> 查看报告”。
+- [x] 移除不围绕 Task 的大段说明文本。
 
 ### Task 3.2：任务详情驾驶舱
 
-- [ ] 任务详情改为 Tab：概览、样本、Trace、Badcase、Attempts、参数。
-- [ ] 参数 Tab 展示 Task 冻结参数、Skill 参数来源和 Secret 脱敏。
-- [ ] Attempts Tab 明确 Run 是底层执行批次。
-- [ ] 执行动作展示影响范围：重跑多少条、是否产生新 Attempt、是否覆盖报告。
+- [x] 任务详情改为 Tab：概览、样本、Trace、Badcase、Attempts、参数。
+- [x] 参数 Tab 展示 Task 冻结参数、Skill 参数来源和 Secret 脱敏。
+- [x] Attempts Tab 明确 Run 是底层执行批次。
+- [x] 执行动作展示影响范围：重跑多少条、是否产生新 Attempt、是否覆盖报告。
 
 ## 阶段 4：Workflow 设计器字段映射升级
 
