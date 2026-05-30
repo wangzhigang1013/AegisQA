@@ -194,14 +194,14 @@
 
 ### Task 6.1：批量审核
 
-- [ ] API 增加 `POST /annotation-queue/bulk-review`。
-- [ ] 前端支持多选任务、批量设置标签、说明和回流 Golden。
-- [ ] 审核结果保留 reviewer、reviewed_at、source_task_id。
+- [x] API 增加 `POST /annotation-queue/bulk-review`。
+- [x] 前端支持多选任务、批量设置标签、说明和回流 Golden。
+- [x] 审核结果保留 reviewer、reviewed_at、source_task_id。
 
 ### Task 6.2：候选资产
 
-- [ ] Badcase/Annotation 审核后生成 Golden 候选和 Assertion 候选记录。
-- [ ] 前端显示候选资产数量和来源任务。
+- [x] Badcase/Annotation 审核后生成 Golden 候选和 Assertion 候选记录。
+- [x] 前端显示候选资产数量和来源任务。
 
 ## 阶段 7：Experiment 与 CI Gate 历史
 

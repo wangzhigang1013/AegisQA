@@ -253,6 +253,10 @@ class AnnotationReviewRequest(BaseModel):
     add_to_golden: bool = False
 
 
+class AnnotationBulkReviewRequest(AnnotationReviewRequest):
+    task_ids: list[str]
+
+
 def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
     """创建可测试、可嵌入的 FastAPI 应用。"""
 

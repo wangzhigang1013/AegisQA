@@ -187,3 +187,25 @@ def test_annotation_queue_keeps_source_task_and_supports_filter(tmp_path: Path) 
     matched = client.get(f"/annotation-queue?source_task_id={task['task_id']}").json()
     assert [item["task_id"] for item in matched] == [annotation_task["task_id"]]
     assert client.get("/annotation-queue?source_task_id=task-missing").json() == []
+
+
+def test_annotation_queue_bulk_review_creates_candidate_assets(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    task = _executed_task(client, tmp_path)
+
+    seed = client.post("/annotation-queue/seed-from-run", json={"run_id": task["run_id"], "strategy": "all", "limit": 10}).json()
+    task_ids = [item["task_id"] for item in seed["tasks"]]
+    assert len(task_ids) == 2
+
+    reviewed = client.post(
+        "/annotation-queue/bulk-review",
+        json={"task_ids": task_ids, "human_label": "fail", "note": "批量确认失败样本", "add_to_golden": True},
+    ).json()
+
+    assert reviewed["reviewed_count"] == 2
+    assert {item["status"] for item in reviewed["tasks"]} == {"reviewed"}
+    assert reviewed["candidate_summary"] == {"golden": 2, "assertion": 2}
+    candidates = client.get(f"/annotation-candidates?source_task_id={task['task_id']}").json()
+    assert {item["kind"] for item in candidates} == {"golden", "assertion"}
+    assert {item["reviewer"] for item in candidates} == {"api"}

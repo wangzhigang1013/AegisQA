@@ -10,7 +10,7 @@
 ## 最近一次交互验证
 
 - `npm test`：35 个前端交互/API client/图模型/任务创建向导/首页任务工作台/任务详情驾驶舱/Trace Flow/Workflow 字段映射/参数预览/报告分层分析/Experiment/CI Gate/Annotation Queue 测试通过。
-- `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
+- `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - 最终验收确认：本轮 API 路由拆分和 JSON Store 文件锁不新增可见按钮，现有按钮矩阵仍覆盖全部用户可见主动作。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Headless Chrome CDP：概览页额外验证真实 Dashboard 指标，以及 Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 产品化入口。
@@ -60,6 +60,8 @@
 | CI Gate | 对 Task/Run 执行评估 | 可用，可选择门禁配置和 Task/Run；后端自动抽取任务或 Run 指标，返回 blocking 状态、实际值和阈值 | `POST /ci-gates/evaluate`、`GET /tasks`、`GET /runs` | `tests/test_productization_api.py` 覆盖 Task/Run 评估；`npm test` 与 Playwright E2E 覆盖阻断原因 |
 | Annotation Queue | 队列筛选 | 可用，支持状态、负责人、来源任务筛选；来源任务由后端根据 Run 回填 | `GET /annotation-queue?status=&assignee=&source_task_id=`、`GET /tasks` | `tests/test_productization_api.py` 覆盖来源任务筛选；`npm test` 覆盖筛选入口 |
 | Annotation Queue | 领取/分派/审核 | 可用，支持领取为当前用户、分派给指定负责人、填写人工标签和说明，审核结果可回流 Golden Dataset | `POST /annotation-queue/{task_id}/assign`、`POST /annotation-queue/{task_id}/review` | `npm test` 覆盖领取和审核弹窗；Playwright E2E 覆盖真实领取、审核和回流 Golden |
+| Annotation Queue | 批量审核 | 可用，支持多选待审核样本，批量设置人工标签、说明和是否回流 Golden，提交后刷新队列和候选资产 | `POST /annotation-queue/bulk-review` | `tests/test_productization_api.py` 覆盖批量审核生成候选资产；`npm test` 覆盖批量审核弹窗和成功反馈；Playwright E2E 覆盖真实批量审核 |
+| Annotation Queue | 候选资产 | 可用，展示当前来源任务沉淀出的 Golden 候选和 Assertion 候选数量 | `GET /annotation-candidates?source_task_id=` | `npm test` 覆盖候选资产摘要展示 |
 | Judge 审计 | 创建 Profile | 可用，弹窗保存 Profile | `POST /judge-profiles` | 人工验证和类型检查覆盖 |
 | Judge 审计 | 创建审计 | 可用，弹窗提交审计标签 | `POST /judge-profiles/{profile_id}/audits` | `npm test` 覆盖审计表单 |
 | 治理与审计 | 查看权限矩阵 | 可用，打开 RBAC 矩阵弹窗 | 前端静态矩阵 | `npm test` 覆盖矩阵弹窗 |
@@ -72,5 +74,5 @@
 
 - Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；字段映射表格和参数预览已进入 Vitest，后续需要进一步拆分组件并补真实浏览器中的字段映射编辑 E2E。
 - Task 创建向导已加入必选校验、并发/重试/repeat 和成本预算，任务详情已升级为驾驶舱页签；后续需要继续接入 CI Gate、实验 baseline 对比和权限检查。
-- 报告中心、Trace Flow、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、样本级数据流、Experiment baseline 对比、质量门禁阻断评估和人工审核回流；后续需要增强批量审核和更复杂的跨任务 Score Analytics。
+- 报告中心、Trace Flow、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、样本级数据流、Experiment baseline 对比、质量门禁阻断评估、人工审核回流和批量审核候选资产沉淀；后续需要增强更复杂的跨任务 Score Analytics。
 - Judge 审计需要增加多 Judge 一致性和红队安全扫描视图。

@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“评测数据流与产品体验升级”正在执行中。阶段 1（Skill 参数解析与冻结）、阶段 2（Trace 数据流模型与独立页面）、阶段 3（UI 信息架构与任务驾驶舱）、阶段 4（Workflow 字段映射与参数预览升级）和阶段 5（报告分层分析与闭环动作）已完成：后端已提供 Task Trace Flow API，前端已新增独立 Trace Flow 页面，首页已改为任务工作台，任务详情已升级为概览、样本、Trace、Badcase、Attempts、参数页签，Workflow Inspector 已支持字段路径表格映射与参数预览，任务报告已支持按业务字段分层分析和下一步建议；下一步进入阶段 6：Annotation / Golden 批量闭环。
+新一轮“评测数据流与产品体验升级”正在执行中。阶段 1（Skill 参数解析与冻结）、阶段 2（Trace 数据流模型与独立页面）、阶段 3（UI 信息架构与任务驾驶舱）、阶段 4（Workflow 字段映射与参数预览升级）、阶段 5（报告分层分析与闭环动作）和阶段 6（Annotation / Golden 批量闭环）已完成：后端已提供 Task Trace Flow API，前端已新增独立 Trace Flow 页面，首页已改为任务工作台，任务详情已升级为概览、样本、Trace、Badcase、Attempts、参数页签，Workflow Inspector 已支持字段路径表格映射与参数预览，任务报告已支持按业务字段分层分析和下一步建议，Annotation Queue 已支持批量审核并沉淀 Golden / Assertion 候选资产；下一步进入阶段 7：Experiment 与 CI Gate 历史。
 
 ## 当前已完成
 
@@ -51,15 +51,16 @@
 - Workflow Inspector 已新增“参数预览”Tab，可选择 Dataset Version 调用 `/workflow-graphs/parameter-preview`，展示解析后配置和 default/workflow_config/task_override/expression/secret_ref 来源。
 - Task Report 已新增 `segments` 和 `recommendations`，支持按 `scene`、`expected_label`、`model_version`、`prompt_version` 统计样本量、通过率、Badcase，并给出 Annotation、Golden 候选、CI Gate 建议。
 - 报告中心已新增“分层分析”组件，围绕低通过率分组展示分组指标和下一步动作建议，避免只看总体通过率。
+- Annotation Queue 已新增批量审核接口和前端多选审核弹窗，支持一次性设置人工标签、说明和 Golden 回流；审核记录会保留 reviewer、reviewed_at、source_task_id，并同步生成 Golden 候选和 Assertion 候选资产。
 
 ## 最近验证
 
-- `python -m pytest -q`：49 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest -q`：50 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v7`，Run `run-5a86aceede3f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、35 个测试通过。
 - `cd frontend && npm run build`：通过。
-- `cd frontend && npm run e2e`：8 个 Playwright E2E 测试通过，覆盖任务主链路、任务报告进入 Trace Flow、参数来源查看、CI Gate 创建与阻断评估、Annotation Queue 领取/审核/回流 Golden，以及 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
+- `cd frontend && npm run e2e`：8 个 Playwright E2E 测试通过，覆盖任务主链路、任务报告进入 Trace Flow、参数来源查看、CI Gate 创建与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Playwright E2E 测试通过，覆盖 Workflow 画布新增节点、聚合策略、删除下游连线、新增 Join、撤销/重做、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `http://127.0.0.1:8000/health`：FastAPI 页面健康检查通过。
 - `http://127.0.0.1:5173`：React 前端可访问。
@@ -72,15 +73,50 @@
 - Workflow 画布的 Source/Skill/Join/Output/Aggregator 新增、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行、校验和发布已进入 Playwright；后续需要继续拆分 Palette/Inspector 组件，降低单文件维护成本。
 - Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；阶段 3.2 已补 Run Attempt，后续需要继续接入 CI Gate、baseline 对比和权限检查。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
-- Experiment 快照、CI Gate 和 Annotation Queue 已有独立产品页；Trace Tree 仍需做成完整独立页面，并继续补成本预算、baseline 可视化对比、质量门禁历史记录和审核任务批量操作。
+- Experiment 快照、CI Gate 和 Annotation Queue 已有独立产品页；Trace Tree 仍需做成完整独立页面，并继续补成本预算、baseline 可视化对比和质量门禁历史记录。
 - 报告、Badcase、Judge 审计已经接入基础数据与动作，人工审阅队列已有后端最小闭环；仍需补齐多 Judge 一致性视图、红队安全扫描和跨任务 Score Analytics。
 - 本地服务曾出现旧 FastAPI 进程未重启导致新增路由 404 的问题；已重启后端并完成浏览器复测。后续修改后端 API 时必须确认 8000 端口加载的是最新代码。
 
 ## 下一阶段目标
 
-- 后续建议优先进入 Trace Tree 独立页面、CI Gate 历史记录、Annotation Queue 批量审核、多 Judge 一致性视图、红队安全扫描和真实 MySQL/Redis/Celery Repository/Worker 接入。
+- 后续建议优先进入 CI Gate 历史记录、Experiment A/B 对比、Trace Tree 独立页面、多 Judge 一致性视图、红队安全扫描和真实 MySQL/Redis/Celery Repository/Worker 接入。
 
 ## 最近改动
+
+### 2026-05-31 Annotation / Golden 批量闭环
+
+- 改动摘要：完成评测数据流升级计划阶段 6。后端新增 `POST /annotation-queue/bulk-review` 和 `GET /annotation-candidates`，支持批量审核 Annotation 任务、保存 reviewer/reviewed_at/source_task_id，并在回流 Golden 时同时生成 Golden 候选与 Assertion 候选；前端 Annotation Queue 新增多选、批量审核弹窗和候选资产摘要，用户可以看到 Golden / Assertion 候选数量以及来源任务。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_productization_api.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/types.ts`
+  - `frontend/src/pages/AnnotationQueuePage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/e2e/productization.spec.ts`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-evaluation-flow-productization.md`
+- 验证命令：
+  - `python -m pytest tests\test_productization_api.py -q -k "bulk_review"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Annotation Queue 页面"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e -- e2e/productization.spec.ts`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Annotation 批量审核后端定向测试：1 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - Annotation Queue 前端定向测试：1 passed。
+  - Typecheck：通过。
+  - 后端全量：50 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：4 个测试文件、35 passed。
+  - Build：通过。
+  - Productization Playwright 定向：2 passed。
+  - Playwright 全量 E2E：8 passed。
+- 下一步：进入阶段 7，新增 CI Gate 评估历史与 Experiment A/B 对比增强。
 
 ### 2026-05-31 报告分层分析与下一步建议
 

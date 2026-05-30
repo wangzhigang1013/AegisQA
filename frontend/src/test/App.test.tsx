@@ -192,6 +192,35 @@ const demoAnnotationTasks = [
   },
 ];
 
+const demoAnnotationCandidates = [
+  {
+    candidate_id: 'cand-golden',
+    kind: 'golden',
+    source: 'annotation_queue',
+    annotation_task_id: 'anno-demo',
+    source_task_id: 'task-demo',
+    source_task_name: 'RAG 任务',
+    item_id: 'item-demo',
+    human_label: 'fail',
+    reviewer: 'qa_owner',
+    status: 'candidate',
+    created_at: '2026-05-31T00:00:00Z',
+  },
+  {
+    candidate_id: 'cand-assertion',
+    kind: 'assertion',
+    source: 'annotation_queue',
+    annotation_task_id: 'anno-demo',
+    source_task_id: 'task-demo',
+    source_task_name: 'RAG 任务',
+    item_id: 'item-demo',
+    human_label: 'fail',
+    reviewer: 'qa_owner',
+    status: 'candidate',
+    created_at: '2026-05-31T00:00:00Z',
+  },
+];
+
 const pendingPackageSkill = {
   ...demoSkills[0],
   skill_id: 'plugin.echo@0.1.0',
@@ -342,6 +371,9 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/experiments') || url.endsWith('/annotation-queue')) {
         if (url.endsWith('/annotation-queue')) return jsonResponse(demoAnnotationTasks);
         return jsonResponse(demoExperiments);
+      }
+      if (url.endsWith('/annotation-candidates')) {
+        return jsonResponse(demoAnnotationCandidates);
       }
       if (url.endsWith('/ci-gates')) {
         return jsonResponse(demoCIGates);
@@ -793,6 +825,17 @@ describe('AegisQA 前端工作台', () => {
       if (url.includes('/annotation-queue/anno-demo/review')) {
         return jsonResponse({ ...demoAnnotationTasks[0], status: 'reviewed', review: { human_label: 'fail', add_to_golden: true } });
       }
+      if (url.includes('/annotation-queue/bulk-review')) {
+        return jsonResponse({
+          reviewed_count: 1,
+          tasks: [{ ...demoAnnotationTasks[0], status: 'reviewed', review: { human_label: 'fail', add_to_golden: true } }],
+          candidate_summary: { golden: 1, assertion: 1 },
+          candidates: demoAnnotationCandidates,
+        });
+      }
+      if (url.includes('/annotation-candidates')) {
+        return jsonResponse(demoAnnotationCandidates);
+      }
       if (url.includes('/annotation-queue')) {
         return jsonResponse(demoAnnotationTasks);
       }
@@ -808,11 +851,13 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('RAG 任务')).toBeInTheDocument();
     expect(screen.getByText('低分或失败样本需要人工复核')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('按负责人筛选')).toBeInTheDocument();
+    expect(screen.getByText('候选资产')).toBeInTheDocument();
+    expect(screen.getByText(/Golden 1 \/ Assertion 1/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /领取/ }));
     expect(await screen.findByText(/样本已领取/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /审核/ }));
+    fireEvent.click(screen.getByRole('button', { name: /audit 审核/ }));
     expect(await screen.findByText('审核样本')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /确认审核/ })).toBeDisabled();
     fireEvent.change(screen.getByPlaceholderText('例如：pass / fail'), { target: { value: 'fail' } });
@@ -820,6 +865,14 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /确认审核/ }));
 
     expect(await screen.findByText(/审核已提交，并回流 Golden/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    fireEvent.click(screen.getByRole('button', { name: /批量审核/ }));
+    expect(await screen.findByText('批量审核样本')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('批量标签，例如：pass / fail'), { target: { value: 'fail' } });
+    fireEvent.click(screen.getByLabelText('批量回流 Golden Dataset'));
+    fireEvent.click(screen.getByRole('button', { name: /确认批量审核/ }));
+    expect(await screen.findByText(/批量审核完成/)).toBeInTheDocument();
   });
 
   it('报告中心围绕任务展示报告和导出入口', async () => {

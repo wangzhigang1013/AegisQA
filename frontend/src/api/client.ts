@@ -1,5 +1,6 @@
 import type {
   AnnotationTask,
+  AnnotationCandidate,
   AssertionEvaluationResult,
   BadcaseRecord,
   CIGateConfigRecord,
@@ -126,6 +127,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  bulkReviewAnnotationTasks: (body: { task_ids: string[]; human_label: string; note?: string; add_to_golden?: boolean }) =>
+    request<{ reviewed_count: number; tasks: AnnotationTask[]; candidate_summary: { golden: number; assertion: number }; candidates: AnnotationCandidate[] }>('/annotation-queue/bulk-review', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  annotationCandidates: (filters: { source_task_id?: string; kind?: string } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<AnnotationCandidate[]>(`/annotation-candidates${suffix}`);
+  },
   skills: () => request<SkillManifest[]>('/skills'),
   skillPackages: () => request<SkillPackageRecord[]>('/skills/packages'),
   uploadSkillPackage: (body: { filename: string; content_base64: string }) =>

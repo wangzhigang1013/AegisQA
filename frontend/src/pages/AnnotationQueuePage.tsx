@@ -1,7 +1,7 @@
 import { AuditOutlined, CheckOutlined, ReloadOutlined, UserAddOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Checkbox, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useState, type Key } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
@@ -17,6 +17,8 @@ type AssignValues = {
   assignee: string;
 };
 
+type BulkReviewValues = ReviewValues;
+
 export function AnnotationQueuePage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
@@ -24,17 +26,25 @@ export function AnnotationQueuePage() {
   const [sourceTaskId, setSourceTaskId] = useState<string | undefined>();
   const [reviewTask, setReviewTask] = useState<AnnotationTask | null>(null);
   const [assignTask, setAssignTask] = useState<AnnotationTask | null>(null);
+  const [bulkReviewOpen, setBulkReviewOpen] = useState(false);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [reviewForm] = Form.useForm<ReviewValues>();
   const [assignForm] = Form.useForm<AssignValues>();
+  const [bulkReviewForm] = Form.useForm<BulkReviewValues>();
   const reviewLabel = Form.useWatch('human_label', reviewForm);
   const assignee = Form.useWatch('assignee', assignForm);
+  const bulkReviewLabel = Form.useWatch('human_label', bulkReviewForm);
 
   const queueQuery = useQuery({
     queryKey: ['annotation-queue', statusFilter, assigneeFilter, sourceTaskId],
     queryFn: () => api.annotationQueue({ status: statusFilter, assignee: assigneeFilter, source_task_id: sourceTaskId }),
   });
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
+  const candidatesQuery = useQuery({
+    queryKey: ['annotation-candidates', sourceTaskId],
+    queryFn: () => api.annotationCandidates({ source_task_id: sourceTaskId }),
+  });
 
   const assignMutation = useMutation({
     mutationFn: ({ task, nextAssignee }: { task: AnnotationTask; nextAssignee: string }) =>
@@ -66,6 +76,27 @@ export function AnnotationQueuePage() {
     },
     onError: (error) => setNotice(`审核失败：${formatApiError(error)}`),
   });
+
+  const bulkReviewMutation = useMutation({
+    mutationFn: (values: BulkReviewValues) =>
+      api.bulkReviewAnnotationTasks({
+        task_ids: selectedRowKeys.map(String),
+        human_label: values.human_label,
+        note: values.note,
+        add_to_golden: Boolean(values.add_to_golden),
+      }),
+    onSuccess: async (result) => {
+      setBulkReviewOpen(false);
+      setSelectedRowKeys([]);
+      bulkReviewForm.resetFields();
+      setNotice(`批量审核完成：${result.reviewed_count} 条，Golden ${result.candidate_summary.golden} / Assertion ${result.candidate_summary.assertion}。`);
+      await queryClient.invalidateQueries({ queryKey: ['annotation-queue'] });
+      await queryClient.invalidateQueries({ queryKey: ['annotation-candidates'] });
+    },
+    onError: (error) => setNotice(`批量审核失败：${formatApiError(error)}`),
+  });
+
+  const candidateSummary = summarizeCandidates(candidatesQuery.data ?? []);
 
   function openReview(task: AnnotationTask) {
     setReviewTask(task);
@@ -121,11 +152,27 @@ export function AnnotationQueuePage() {
         </Space>
       </Card>
 
-      <Card className="flat-card" title="审核队列">
+      <Card className="flat-card" title="候选资产">
+        <Space wrap>
+          <Tag color="green">Golden {candidateSummary.golden} / Assertion {candidateSummary.assertion}</Tag>
+          <Typography.Text type="secondary">候选资产来自已审核样本，后续可进入 Golden Dataset、Assertion DSL 或 CI Gate 建议。</Typography.Text>
+        </Space>
+      </Card>
+
+      <Card
+        className="flat-card"
+        title="审核队列"
+        extra={
+          <Button type="primary" disabled={!selectedRowKeys.length} onClick={() => setBulkReviewOpen(true)}>
+            批量审核
+          </Button>
+        }
+      >
         <Table
           rowKey="task_id"
           loading={queueQuery.isLoading}
           dataSource={queueQuery.data ?? []}
+          rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys, getCheckboxProps: (record) => ({ disabled: record.status === 'reviewed' }) }}
           pagination={{ pageSize: 8 }}
           columns={[
             { title: '来源任务', dataIndex: 'source_task_name', render: (value) => value || '-' },
@@ -213,8 +260,49 @@ export function AnnotationQueuePage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Modal
+        title="批量审核样本"
+        open={bulkReviewOpen}
+        forceRender
+        onCancel={() => setBulkReviewOpen(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setBulkReviewOpen(false)}>取消</Button>,
+          <Button
+            key="submit"
+            type="primary"
+            disabled={!bulkReviewLabel}
+            loading={bulkReviewMutation.isPending}
+            onClick={() => bulkReviewForm.submit()}
+          >
+            确认批量审核
+          </Button>,
+        ]}
+      >
+        <Space direction="vertical" className="drawer-stack">
+          <Typography.Text type="secondary">已选择 {selectedRowKeys.length} 条样本。批量审核会保留 reviewer、reviewed_at 和来源任务，并按需生成 Golden/Assertion 候选资产。</Typography.Text>
+          <Form form={bulkReviewForm} layout="vertical" onFinish={(values) => bulkReviewMutation.mutate(values)}>
+            <Form.Item name="human_label" label="批量人工标签" rules={[{ required: true, message: '请输入批量标签' }]}>
+              <Input placeholder="批量标签，例如：pass / fail" />
+            </Form.Item>
+            <Form.Item name="note" label="批量审核说明">
+              <Input.TextArea rows={3} placeholder="说明这一批样本的共性问题或回流策略。" />
+            </Form.Item>
+            <Form.Item name="add_to_golden" valuePropName="checked">
+              <Checkbox>批量回流 Golden Dataset</Checkbox>
+            </Form.Item>
+          </Form>
+        </Space>
+      </Modal>
     </section>
   );
+}
+
+function summarizeCandidates(candidates: { kind: string }[]) {
+  return {
+    golden: candidates.filter((candidate) => candidate.kind === 'golden').length,
+    assertion: candidates.filter((candidate) => candidate.kind === 'assertion').length,
+  };
 }
 
 function renderStatus(status: string) {

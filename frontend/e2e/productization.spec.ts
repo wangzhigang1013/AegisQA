@@ -40,23 +40,47 @@ test('Annotation Queue 可以领取、审核并回流 Golden', async ({ page, re
   const executedTask = await executedTaskResponse.json();
 
   const seedResponse = await request.post('http://127.0.0.1:8000/annotation-queue/seed-from-run', {
-    data: { run_id: executedTask.run_id, strategy: 'failed_or_low_score', limit: 5 },
+    data: { run_id: executedTask.run_id, strategy: 'all', limit: 5 },
   });
   expect(seedResponse.ok()).toBeTruthy();
   expect((await seedResponse.json()).created_count).toBeGreaterThan(0);
 
   await page.goto('/annotation-queue');
   await expect(page.getByText('Annotation Queue 人工审核')).toBeVisible();
-  await expect(page.getByText(taskName)).toBeVisible();
+  await expect(page.getByText(taskName).first()).toBeVisible();
 
   await page.getByRole('button', { name: /领取/ }).first().click();
   await expect(page.getByText(/样本已领取/)).toBeVisible();
 
-  await page.getByRole('button', { name: /审核/ }).first().click();
-  await page.getByPlaceholder('例如：pass / fail').fill('fail');
-  await page.getByLabel('回流 Golden Dataset').check();
-  await page.getByRole('button', { name: /确认审核/ }).click();
+  await page.getByRole('button', { name: /audit 审核/ }).first().click();
+  const reviewModal = page.locator('.ant-modal').filter({ has: page.getByText('审核样本', { exact: true }) });
+  await reviewModal.getByPlaceholder('例如：pass / fail', { exact: true }).fill('fail');
+  await reviewModal.getByLabel('回流 Golden Dataset').check();
+  await reviewModal.getByRole('button', { name: /确认审核/ }).click();
   await expect(page.getByText(/审核已提交，并回流 Golden/)).toBeVisible();
+
+  const bulkTaskName = `${taskName} 批量`;
+  const bulkTask = await createTask(request, bulkTaskName, dataset.dataset_id, dataset.version, workflow.version_id);
+  const executedBulkTaskResponse = await request.post(`http://127.0.0.1:8000/tasks/${bulkTask.task_id}/execute`);
+  expect(executedBulkTaskResponse.ok()).toBeTruthy();
+  const executedBulkTask = await executedBulkTaskResponse.json();
+  const bulkSeedResponse = await request.post('http://127.0.0.1:8000/annotation-queue/seed-from-run', {
+    data: { run_id: executedBulkTask.run_id, strategy: 'all', limit: 5 },
+  });
+  expect(bulkSeedResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await expect(page.getByText(bulkTaskName).first()).toBeVisible();
+  const bulkRow = page.locator('.ant-table-tbody tr').filter({ hasText: bulkTaskName }).first();
+  await bulkRow.locator('.ant-checkbox-input').check({ force: true });
+  await expect(page.getByRole('button', { name: /^批量审核$/ })).toBeEnabled();
+  await page.getByRole('button', { name: /^批量审核$/ }).click();
+  const bulkReviewModal = page.locator('.ant-modal').filter({ has: page.getByText('批量审核样本', { exact: true }) });
+  await bulkReviewModal.getByPlaceholder('批量标签，例如：pass / fail').fill('fail');
+  await bulkReviewModal.getByLabel('批量回流 Golden Dataset').check();
+  await bulkReviewModal.getByRole('button', { name: /确认批量审核/ }).click();
+  await expect(page.getByText(/批量审核完成/)).toBeVisible();
+  await expect(page.getByText(/Golden \d+ \/ Assertion \d+/).first()).toBeVisible();
 });
 
 async function createDataset(request: import('@playwright/test').APIRequestContext, datasetName: string) {

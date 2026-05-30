@@ -358,6 +358,24 @@ export type AnnotationTask = {
   updated_at: string;
 };
 
+export type AnnotationCandidate = {
+  candidate_id: string;
+  kind: 'golden' | 'assertion' | string;
+  source: string;
+  annotation_task_id: string;
+  source_task_id?: string | null;
+  source_task_name?: string | null;
+  run_id?: string | null;
+  item_id: string;
+  row_id?: string | null;
+  human_label: string;
+  note?: string;
+  reviewer?: string;
+  status: string;
+  created_at: string;
+  updated_at?: string;
+};
+
 export type AssertionEvaluationResult = {
   ok: boolean;
   summary: { passed: number; failed: number };

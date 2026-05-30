@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI, Query
 
 from aegisqa.api.app import (
     AnnotationAssignRequest,
+    AnnotationBulkReviewRequest,
     AnnotationReviewRequest,
     AnnotationSeedRequest,
     AssertionEvaluateRequest,
@@ -164,10 +166,109 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/annotation-queue/{task_id}/review")
     def review_annotation_task(task_id: str, request: AnnotationReviewRequest) -> dict[str, Any]:
-        task = _get_record(ctx.store, "annotation_tasks", task_id)
-        task["status"] = "reviewed"
-        task["review"] = {"human_label": request.human_label, "note": request.note, "add_to_golden": request.add_to_golden, "reviewed_at": _now()}
-        task["updated_at"] = _now()
-        _save_record(ctx.store, "annotation_tasks", "task_id", task)
+        task, _ = _review_annotation_task(ctx, task_id, request, reviewer="api")
         ctx.audit_service.record(actor="api", action="annotation_task.review", target=task_id, detail={"add_to_golden": request.add_to_golden})
         return task
+
+    @app.post("/annotation-queue/bulk-review")
+    def bulk_review_annotation_tasks(request: AnnotationBulkReviewRequest) -> dict[str, Any]:
+        if not request.task_ids:
+            raise AegisQAError(
+                "ANNOTATION_TASK_IDS_REQUIRED",
+                "批量审核至少需要选择一个样本。",
+                status_code=400,
+                details={"field": "task_ids"},
+            )
+        reviewed_tasks: list[dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
+        review_request = AnnotationReviewRequest(human_label=request.human_label, note=request.note, add_to_golden=request.add_to_golden)
+        for task_id in request.task_ids:
+            task, task_candidates = _review_annotation_task(ctx, task_id, review_request, reviewer="api")
+            reviewed_tasks.append(task)
+            candidates.extend(task_candidates)
+        summary = {
+            "golden": sum(1 for candidate in candidates if candidate["kind"] == "golden"),
+            "assertion": sum(1 for candidate in candidates if candidate["kind"] == "assertion"),
+        }
+        ctx.audit_service.record(actor="api", action="annotation_task.bulk_review", target="annotation_queue", detail={"reviewed_count": len(reviewed_tasks), "candidate_summary": summary})
+        return {"reviewed_count": len(reviewed_tasks), "tasks": reviewed_tasks, "candidate_summary": summary, "candidates": candidates}
+
+    @app.get("/annotation-candidates")
+    def list_annotation_candidates(
+        source_task_id: str | None = Query(default=None),
+        kind: str | None = Query(default=None),
+    ) -> list[dict[str, Any]]:
+        candidates = _list_records(ctx.store, "annotation_candidates")
+        if source_task_id:
+            candidates = [candidate for candidate in candidates if candidate.get("source_task_id") == source_task_id]
+        if kind:
+            candidates = [candidate for candidate in candidates if candidate.get("kind") == kind]
+        return candidates
+
+
+def _review_annotation_task(ctx: RouteContext, task_id: str, request: AnnotationReviewRequest, *, reviewer: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    task = _get_record(ctx.store, "annotation_tasks", task_id)
+    reviewed_at = _now()
+    review = {
+        "human_label": request.human_label,
+        "note": request.note,
+        "add_to_golden": request.add_to_golden,
+        "reviewer": reviewer,
+        "reviewed_at": reviewed_at,
+    }
+    candidates = _create_annotation_candidates(ctx, task, review) if request.add_to_golden else []
+    task["status"] = "reviewed"
+    task["review"] = review
+    task["review_assets"] = [{"candidate_id": candidate["candidate_id"], "kind": candidate["kind"]} for candidate in candidates]
+    task["updated_at"] = reviewed_at
+    _save_record(ctx.store, "annotation_tasks", "task_id", task)
+    return task, candidates
+
+
+def _create_annotation_candidates(ctx: RouteContext, task: dict[str, Any], review: dict[str, Any]) -> list[dict[str, Any]]:
+    existing = {
+        candidate.get("kind"): candidate
+        for candidate in _list_records(ctx.store, "annotation_candidates")
+        if candidate.get("annotation_task_id") == task.get("task_id")
+    }
+    candidates: list[dict[str, Any]] = []
+    for kind in ("golden", "assertion"):
+        candidate = existing.get(kind) or _build_annotation_candidate(task, review, kind=kind)
+        candidate["human_label"] = review["human_label"]
+        candidate["note"] = review["note"]
+        candidate["reviewer"] = review["reviewer"]
+        candidate["updated_at"] = _now()
+        _save_record(ctx.store, "annotation_candidates", "candidate_id", candidate)
+        candidates.append(candidate)
+    return candidates
+
+
+def _build_annotation_candidate(task: dict[str, Any], review: dict[str, Any], *, kind: str) -> dict[str, Any]:
+    return {
+        "candidate_id": f"candidate-{uuid4().hex[:12]}",
+        "kind": kind,
+        "source": "annotation_queue",
+        "annotation_task_id": task["task_id"],
+        "source_task_id": task.get("source_task_id"),
+        "source_task_name": task.get("source_task_name"),
+        "run_id": task.get("run_id"),
+        "item_id": task.get("item_id"),
+        "row_id": task.get("row_id"),
+        "human_label": review["human_label"],
+        "note": review["note"],
+        "reviewer": review["reviewer"],
+        "payload": task.get("payload", {}),
+        "status": "candidate",
+        "assertion_seed": _build_assertion_seed(task, review) if kind == "assertion" else None,
+        "created_at": _now(),
+        "updated_at": _now(),
+    }
+
+
+def _build_assertion_seed(task: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "human_label",
+        "field_path": "context_snapshot.context.judge_label",
+        "expected": review["human_label"],
+        "source_item_id": task.get("item_id"),
+    }
