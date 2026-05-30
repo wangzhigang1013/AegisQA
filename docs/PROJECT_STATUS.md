@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化全方位优化计划已完成最终验收。本轮从 Experiment、CI Gate、Annotation Queue 产品页继续推进到 API 路由拆分、JSON Store 文件锁、生产化边界说明，并完成后端、1000 样本 Demo、前端 typecheck/test/build/E2E 全量验证。
+新一轮“评测数据流与产品体验升级”已进入执行准备阶段。用户确认按专家建议一次性推进，当前已新增完整实施计划，下一步从 P0 的 Skill 参数解析与冻结开始实现。
 
 ## 当前已完成
 
@@ -73,6 +73,18 @@
 - 后续建议优先进入 Trace Tree 独立页面、CI Gate 历史记录、Annotation Queue 批量审核、多 Judge 一致性视图、红队安全扫描和真实 MySQL/Redis/Celery Repository/Worker 接入。
 
 ## 最近改动
+
+### 2026-05-31 评测数据流与产品体验升级计划
+
+- 改动摘要：新增下一轮全面优化计划，覆盖 UI 信息架构、评测数据流转、Skill 参数解析与冻结、Trace 独立页面、任务驾驶舱、Workflow 字段映射、报告分层分析、Annotation/Golden 闭环、CI Gate 历史和需要移除/降级的功能。
+- 变更文件：
+  - `docs/superpowers/plans/2026-05-31-evaluation-flow-productization.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - 文档计划批次未运行测试；下一批进入代码实现时按计划执行后端、前端和 E2E 验证。
+- 测试结果：
+  - 未运行测试。
+- 下一步：执行阶段 1，新增 `SkillParameterResolver`，让 Skill 参数来源、覆盖优先级、表达式、Secret 脱敏和 Task 参数冻结可追踪。
 
 ### 2026-05-31 最终验收
 
