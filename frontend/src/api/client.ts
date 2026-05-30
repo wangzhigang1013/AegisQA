@@ -192,6 +192,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
   executeTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/execute`, { method: 'POST' }),
+  createTaskAttempt: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/attempts`, { method: 'POST' }),
   pauseTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/pause`, { method: 'POST' }),
   resumeTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/resume`, { method: 'POST' }),
   cancelTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/cancel`, { method: 'POST' }),

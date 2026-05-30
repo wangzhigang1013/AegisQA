@@ -245,6 +245,21 @@ export type TaskRecord = {
     };
     cost_budget?: number | null;
   };
+  current_attempt?: number;
+  attempts?: {
+    attempt_index: number;
+    run_id: string;
+    status: string;
+    total_items: number;
+    completed_items: number;
+    failed_items: number;
+    pass_rate: number;
+    badcase_count: number;
+    report?: Partial<RunReport>;
+    created_at: string;
+    started_at?: string | null;
+    finished_at?: string | null;
+  }[];
   created_at: string;
   updated_at: string;
 };

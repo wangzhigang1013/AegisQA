@@ -32,6 +32,26 @@ const demoTask = {
   failed_items: 0,
   pass_rate: 0,
   badcase_count: 0,
+  execution_config: {
+    concurrency: 2,
+    sample_repeat_times: 1,
+    retry: { max_retries: 1, backoff_seconds: 0 },
+    cost_budget: 20,
+  },
+  current_attempt: 1,
+  attempts: [
+    {
+      attempt_index: 1,
+      run_id: 'run-demo',
+      status: 'queued',
+      total_items: 100,
+      completed_items: 0,
+      failed_items: 0,
+      pass_rate: 0,
+      badcase_count: 0,
+      created_at: '2026-05-31T00:00:00Z',
+    },
+  ],
   created_at: '2026-05-31T00:00:00Z',
   updated_at: '2026-05-31T00:00:00Z',
 };
@@ -288,6 +308,16 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(await screen.findByRole('button', { name: /执行/ }));
 
     expect(await screen.findByText(/任务状态已更新/)).toBeInTheDocument();
+  });
+
+  it('任务详情展示 Run Attempts 和执行参数', async () => {
+    await renderWorkbench('/runs');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'RAG 任务' }));
+
+    expect(await screen.findByText('Run Attempts')).toBeInTheDocument();
+    expect(screen.getByText(/#1 \/ queued \/ run-demo/)).toBeInTheDocument();
+    expect(screen.getByText(/并发 2 \/ repeat 1 \/ 重试 1/)).toBeInTheDocument();
   });
 
   it('完成态任务不能重复执行', async () => {

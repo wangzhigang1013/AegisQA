@@ -589,6 +589,42 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
         run = runner.execute_run(task["run_id"])
         return _refresh_task_from_run(store, task, run)
 
+    @app.post("/tasks/{task_id}/attempts")
+    def create_task_attempt(task_id: str) -> dict[str, Any]:
+        task = _get_record(store, "tasks", task_id)
+        _ensure_task_can_create_attempt(task)
+        workflow = workflow_service.get(task["workflow_version_id"])
+        execution_config = task.get("execution_config", {})
+        run = runner.create_run(
+            RunRequest(
+                workflow=workflow,
+                dataset_id=task["dataset_id"],
+                dataset_version=task["dataset_version"],
+                chunk_size=execution_config.get("chunk_size"),
+                concurrency=execution_config.get("concurrency"),
+                sample_repeat_times=execution_config.get("sample_repeat_times"),
+            )
+        )
+        attempts = _task_attempts(task)
+        attempt_index = len(attempts) + 1
+        task.update(
+            {
+                "run_id": run.run_id,
+                "status": run.status,
+                "total_items": run.total_items,
+                "completed_items": 0,
+                "failed_items": 0,
+                "pass_rate": 0.0,
+                "badcase_count": 0,
+                "current_attempt": attempt_index,
+                "attempts": attempts + [_build_attempt_record(run, attempt_index)],
+                "updated_at": _now(),
+            }
+        )
+        _save_record(store, "tasks", "task_id", task)
+        audit_service.record(actor="api", action="task.attempt.create", target=task["task_id"], detail={"run_id": run.run_id, "attempt": attempt_index})
+        return task
+
     @app.post("/tasks/{task_id}/pause")
     def pause_task(task_id: str) -> dict[str, Any]:
         task = _get_record(store, "tasks", task_id)
@@ -1108,6 +1144,8 @@ def _build_task_record(name: str, dataset: dict[str, Any], workflow: WorkflowVer
         "pass_rate": 0.0,
         "badcase_count": 0,
         "execution_config": execution_config or {},
+        "current_attempt": 1,
+        "attempts": [_build_attempt_record(run, 1)],
         "created_at": now,
         "updated_at": now,
     }
@@ -1123,11 +1161,67 @@ def _refresh_task_from_run(store: JsonStore, task: dict[str, Any], run: RunRecor
             "failed_items": report.failed_items,
             "pass_rate": report.pass_rate,
             "badcase_count": len(report.badcases),
+            "attempts": _replace_attempt_record(task, run, report),
             "updated_at": _now(),
         }
     )
     _save_record(store, "tasks", "task_id", task)
     return task
+
+
+def _build_attempt_record(run: RunRecord, attempt_index: int, report: RunReport | None = None) -> dict[str, Any]:
+    report = report or aggregate_run_report(run)
+    return {
+        "attempt_index": attempt_index,
+        "run_id": run.run_id,
+        "status": run.status,
+        "total_items": run.total_items,
+        "completed_items": report.completed_items,
+        "failed_items": report.failed_items,
+        "pass_rate": report.pass_rate,
+        "badcase_count": len(report.badcases),
+        "report": report.model_dump(mode="json"),
+        "created_at": run.created_at,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+    }
+
+
+def _task_attempts(task: dict[str, Any]) -> list[dict[str, Any]]:
+    attempts = task.get("attempts")
+    if isinstance(attempts, list) and attempts:
+        return attempts
+    return []
+
+
+def _replace_attempt_record(task: dict[str, Any], run: RunRecord, report: RunReport) -> list[dict[str, Any]]:
+    attempts = _task_attempts(task)
+    attempt_index = int(task.get("current_attempt") or len(attempts) or 1)
+    replacement = _build_attempt_record(run, attempt_index, report)
+    replaced = False
+    next_attempts: list[dict[str, Any]] = []
+    for attempt in attempts:
+        if attempt.get("run_id") == run.run_id:
+            next_attempts.append(replacement)
+            replaced = True
+        else:
+            next_attempts.append(attempt)
+    if not replaced:
+        next_attempts.append(replacement)
+    return next_attempts
+
+
+def _ensure_task_can_create_attempt(task: dict[str, Any]) -> None:
+    """新建 Attempt 必须等当前执行实例结束，避免同一任务同时拥有两个活动 Run。"""
+
+    status = str(task.get("status", "unknown"))
+    if status in {"queued", "running", "paused"}:
+        raise AegisQAError(
+            "TASK_ATTEMPT_ACTIVE",
+            "当前任务仍有活动执行实例，结束后才能创建新的 Attempt。",
+            status_code=409,
+            details={"task_id": task.get("task_id"), "current_status": status},
+        )
 
 
 def _ensure_task_action_allowed(task: dict[str, Any], action: str) -> None:

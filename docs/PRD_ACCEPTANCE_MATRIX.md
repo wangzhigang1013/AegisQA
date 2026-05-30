@@ -19,7 +19,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 - 单元/API/扩展测试：`36 passed`。
 - 端到端 Demo：最新 Dataset `rag_qa_1000:v6`、Run `run-9311b164dd1f`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
-- 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 24 个交互/API client/图模型/任务创建向导测试，Playwright 覆盖 6 条 E2E。
+- 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 25 个交互/API client/图模型/任务创建向导/Run Attempts 测试，Playwright 覆盖 6 条 E2E。
 - 浏览器交互：Headless Chrome CDP 验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden；同时覆盖 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行回填、校验、发布。
 - 产品化增强：Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 已有后端 API 测试；首页已展示真实 Dashboard 和产品化增强入口。
@@ -92,7 +92,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 | 对标能力 | 当前状态 | 证据 |
 |---|---|---|
-| Task 一等模型 | 已实现基础 | `GET/POST /tasks`、`POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed`、`GET /tasks/{task_id}/report`、`GET /tasks/{task_id}/trace-tree`；Task 创建保存 `execution_config`，包含并发、repeat、重试和成本预算；前端执行中心默认展示任务列表并使用独立创建向导；Playwright E2E 覆盖创建和执行任务 |
+| Task 一等模型 | 已实现基础 | `GET/POST /tasks`、`POST /tasks/{task_id}/attempts`、`POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed`、`GET /tasks/{task_id}/report`、`GET /tasks/{task_id}/trace-tree`；Task 创建保存 `execution_config`，包含并发、repeat、重试和成本预算；Run Attempts 保留旧 Run 报告快照；前端执行中心默认展示任务列表并使用独立创建向导；Playwright E2E 覆盖创建和执行任务 |
 | Experiment 快照与 baseline 对比 | 已实现最小 API | `POST /experiments/from-run`，`GET /experiments`，保存 Workflow/Dataset/Skill/Prompt/Runtime 快照与 baseline diff |
 | Prompt / Skill 版本注册 | 已实现基础 | Run snapshot 与 Experiment snapshot 记录 `skill_versions`、`prompt_skill_versions`、模型参数 |
 | Assertion DSL | 已实现最小 API | `POST /assertions/evaluate` 支持 contains、regex、json_schema、similarity、latency、cost、safety 的基础断言 |

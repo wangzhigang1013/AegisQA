@@ -160,6 +160,20 @@ def test_task_lifecycle_report_and_trace_tree(tmp_path: Path) -> None:
     assert report["report"]["run_id"] == executed["run_id"]
     assert report["export_links"]["html"].endswith("file_format=html")
 
+    next_attempt = client.post(f"/tasks/{task['task_id']}/attempts").json()
+    assert next_attempt["run_id"] != executed["run_id"]
+    assert next_attempt["current_attempt"] == 2
+    assert next_attempt["attempts"][0]["run_id"] == executed["run_id"]
+    assert next_attempt["attempts"][0]["report"]["pass_rate"] == 0.5
+    assert next_attempt["attempts"][1]["run_id"] == next_attempt["run_id"]
+    assert next_attempt["attempts"][1]["status"] == "queued"
+
+    second_executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    assert second_executed["run_id"] == next_attempt["run_id"]
+    assert second_executed["attempts"][0]["run_id"] == executed["run_id"]
+    assert second_executed["attempts"][0]["report"]["run_id"] == executed["run_id"]
+    assert second_executed["attempts"][1]["report"]["run_id"] == next_attempt["run_id"]
+
     trace_tree = client.get(f"/tasks/{task['task_id']}/trace-tree").json()
-    assert trace_tree["run_id"] == executed["run_id"]
+    assert trace_tree["run_id"] == next_attempt["run_id"]
     assert trace_tree["items"][0]["children"][0]["skill_ref"] == "llm.call@0.1.0"

@@ -141,10 +141,10 @@
 
 ### Task 3.2：任务详情与 Run Attempt
 
-- [ ] 后端新增 Run Attempt 模型或轻量字段，保留历史执行记录。
-- [ ] 新增测试：重新执行不会覆盖旧报告。
-- [ ] 任务详情展示 attempts、当前 attempt、失败原因、Trace Tree。
-- [ ] 运行 `python -m pytest tests/test_task_state_machine.py -q`。
+- [x] 后端新增 Run Attempt 模型或轻量字段，保留历史执行记录。
+- [x] 新增测试：重新执行不会覆盖旧报告。
+- [x] 任务详情展示 attempts、当前 attempt、失败原因、Trace Tree。
+- [x] 运行 `python -m pytest tests/test_task_center_api.py -q`。
 
 ## 阶段 4：任务报告与 Badcase 工作流
 

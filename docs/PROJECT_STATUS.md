@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 3（Task 执行中心严谨化）Task 3.1 已完成；本批已抽出任务创建向导，强制选择 Dataset Version 和 Workflow Version，并把并发、重试、repeat、成本预算纳入任务创建参数和后端任务快照。下一步进入 Task 3.2：任务详情与 Run Attempt。
+产品严谨化阶段 3（Task 执行中心严谨化）Task 3.2 已完成；本批已新增 Run Attempt 历史执行记录，重新执行任务会创建新的 Run 并保留旧报告快照，任务详情可以展示当前 Attempt、历史 attempts、执行参数和 Trace Tree。下一步进入阶段 4：任务报告与 Badcase 工作流。
 
 ## 当前已完成
 
@@ -30,13 +30,15 @@
 - Workflow 草稿保存后可从 Workflow 市场重新打开并保留流程名称、节点名称等配置；试运行会使用当前选择的数据集并回填 step trace 与队列消息提示。
 - 执行中心已抽出 `TaskCreateWizard`，创建任务前必须选择 Dataset Version 和 Workflow Version；任务参数支持分片大小、并发、repeat、最大重试、重试退避和成本预算。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
+- 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
+- 前端任务详情已展示 Run Attempts、当前 Attempt、执行参数和 Trace Tree，并提供“新建 Attempt”动作。
 
 ## 最近验证
 
 - `python -m pytest -q`：36 passed。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v6`，Run `run-9311b164dd1f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：4 个测试文件、24 个测试通过。
+- `cd frontend && npm test`：4 个测试文件、25 个测试通过。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：6 个 Playwright E2E 测试通过，覆盖任务主链路与 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Playwright E2E 测试通过，覆盖 Workflow 画布新增节点、聚合策略、删除下游连线、新增 Join、撤销/重做、删除节点、保存草稿回放、试运行回填、校验、发布。
@@ -49,7 +51,7 @@
 ## 当前问题
 
 - Workflow 画布的 Source/Skill/Join/Output/Aggregator 新增、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行、校验和发布已进入 Playwright；后续需要继续拆分 Palette/Inspector 组件，降低单文件维护成本。
-- Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；阶段 3.1 已增强任务创建向导和成本预算参数，后续需要继续补 Run Attempt、CI Gate、baseline 对比和权限检查。
+- Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；阶段 3.2 已补 Run Attempt，后续需要继续接入 CI Gate、baseline 对比和权限检查。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
 - Experiment 快照、CI Gate、Annotation Queue、Trace Tree 已有后端最小闭环；仍需做成完整独立页面、加入成本预算和 baseline 可视化对比。
 - 报告、Badcase、Judge 审计已经接入基础数据与动作，人工审阅队列已有后端最小闭环；仍需补齐多 Judge 一致性视图、红队安全扫描和跨任务 Score Analytics。
@@ -57,11 +59,43 @@
 
 ## 下一阶段目标
 
-- 进入阶段 3 Task 3.2：新增 Run Attempt 或轻量历史执行字段，确保重新执行不覆盖旧报告；任务详情继续展示 attempts、当前 attempt、失败原因和 Trace Tree。
+- 进入阶段 4：拆分任务报告详情结构，补任务摘要、版本快照、指标、Step 分布、Badcase、Trace Tree，并把 Badcase 状态流转做成更完整的工作流。
 - 把 Experiment、Prompt/Skill 版本注册、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 从最小 API 能力继续扩展为完整页面与端到端操作流。
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 Task Run Attempt 历史执行记录
+
+- 改动摘要：完成阶段 3 Task 3.2。后端新增 `POST /tasks/{task_id}/attempts`，为已完成/失败/取消等非活动任务创建新的 Run Attempt，旧 Run 的报告快照保留在 `attempts` 中，避免重新执行覆盖历史报告；任务详情展示当前 Attempt、历史 Run Attempts、执行参数和 Trace Tree，并新增“新建 Attempt”动作。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `tests/test_task_center_api.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Run Attempts"`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Task Center API：2 passed。
+  - 后端全量：36 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - Run Attempts 前端测试：1 passed。
+  - 前端全量：4 个测试文件、25 passed。
+  - Typecheck：通过。
+  - Build：通过。
+  - Playwright 全量 E2E：6 passed。
+- 下一步：进入阶段 4 Task 4.1，重构任务报告详情结构并补报告导出内容校验。
 
 ### 2026-05-31 Task 创建向导与执行参数快照
 

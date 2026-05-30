@@ -22,7 +22,7 @@ import { PageHeader } from '../components/PageHeader';
 import type { TaskRecord } from '../types';
 import { TaskCreateWizard, type TaskCreateFormValues } from './task/TaskCreateWizard';
 
-type TaskAction = 'execute' | 'pause' | 'resume' | 'cancel' | 'retry';
+type TaskAction = 'execute' | 'pause' | 'resume' | 'cancel' | 'retry' | 'attempt';
 
 export function RunsPage() {
   const queryClient = useQueryClient();
@@ -74,6 +74,7 @@ export function RunsPage() {
       if (action === 'pause') return api.pauseTask(taskId);
       if (action === 'resume') return api.resumeTask(taskId);
       if (action === 'cancel') return api.cancelTask(taskId);
+      if (action === 'attempt') return api.createTaskAttempt(taskId);
       return api.retryFailedTask(taskId);
     },
     onSuccess: async (task) => {
@@ -193,15 +194,29 @@ function TaskDetailDrawer({
             <TaskActionButton task={task} action="resume" loading={loading} onClick={onAction} icon={<PlayCircleOutlined />} label="恢复" />
             <TaskActionButton task={task} action="cancel" loading={loading} onClick={onAction} icon={<StopOutlined />} label="取消" danger />
             <TaskActionButton task={task} action="retry" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="重试失败项" />
+            <TaskActionButton task={task} action="attempt" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="新建 Attempt" />
           </Space>
           <Descriptions bordered column={1} size="small">
             <Descriptions.Item label="数据源">{task.dataset_name} v{task.dataset_version}</Descriptions.Item>
             <Descriptions.Item label="Workflow">{task.workflow_name}</Descriptions.Item>
             <Descriptions.Item label="Run">{task.run_id}</Descriptions.Item>
+            <Descriptions.Item label="当前 Attempt">{task.current_attempt ?? 1}</Descriptions.Item>
             <Descriptions.Item label="进度">{task.completed_items} / {task.total_items}</Descriptions.Item>
             <Descriptions.Item label="Badcase">{task.badcase_count}</Descriptions.Item>
             <Descriptions.Item label="执行参数">{formatExecutionConfig(task)}</Descriptions.Item>
           </Descriptions>
+          <Card size="small" title="Run Attempts">
+            {task.attempts?.length ? (
+              <Timeline
+                items={task.attempts.map((attempt) => ({
+                  color: attempt.run_id === task.run_id ? 'blue' : attempt.status === 'completed' ? 'green' : 'gray',
+                  children: `#${attempt.attempt_index} / ${attempt.status} / ${attempt.run_id} / 通过率 ${Math.round(Number(attempt.pass_rate ?? 0) * 100)}%`,
+                }))}
+              />
+            ) : (
+              <Alert type="info" showIcon message="当前任务还没有历史 Attempt。重新执行时会保留旧报告并创建新的 Run。" />
+            )}
+          </Card>
           <Card size="small" title="Trace Tree">
             {traceQuery.data?.items?.length ? (
               <Timeline
@@ -258,6 +273,7 @@ function taskActionDisabledReason(task: TaskRecord, action: TaskAction): string 
   if (action === 'resume') return status === 'paused' ? null : '只有 paused 任务可以恢复。';
   if (action === 'cancel') return ['queued', 'running', 'paused', 'failed'].includes(status) ? null : '当前状态不能取消。';
   if (action === 'retry') return status === 'failed' ? null : '只有 failed 任务可以重试失败项。';
+  if (action === 'attempt') return ['queued', 'running', 'paused'].includes(status) ? '当前任务仍有活动执行实例，结束后才能新建 Attempt。' : null;
   return null;
 }
 
