@@ -290,6 +290,35 @@ describe('AegisQA 前端工作台', () => {
             { step_id: 'answer', skill_ref: 'llm.call@0.1.0', total_calls: 100, succeeded: 100, failed: 0, cache_hits: 0, total_latency_ms: 100, average_latency_ms: 1 },
           ],
           judge_score_distribution: [{ bucket: '0.8-1.0', count: 80 }],
+          segments: [
+            { segment_key: 'scene', segment_value: 'payment', sample_count: 20, pass_count: 8, fail_count: 12, badcase_count: 12, pass_rate: 0.4 },
+            { segment_key: 'expected_label', segment_value: 'fail', sample_count: 20, pass_count: 10, fail_count: 10, badcase_count: 10, pass_rate: 0.5 },
+          ],
+          recommendations: [
+            {
+              type: 'segment_low_pass_rate',
+              title: '低通过率分组加入 Annotation',
+              message: 'scene=payment 通过率 40%，建议抽样人工复核。',
+              action: 'add_to_annotation_queue',
+              segment_key: 'scene',
+              segment_value: 'payment',
+              severity: 'warning',
+            },
+            {
+              type: 'golden_candidate',
+              title: '生成 Golden 候选',
+              message: '将失败样本沉淀为 Golden 候选。',
+              action: 'create_golden_candidates',
+              severity: 'info',
+            },
+            {
+              type: 'ci_gate_suggestion',
+              title: '生成 CI Gate 建议',
+              message: '建议为 payment 场景设置通过率门禁。',
+              action: 'create_ci_gate',
+              severity: 'critical',
+            },
+          ],
           report: { run_id: 'run-demo', pass_rate: 0.8, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [demoBadcase] },
           badcases: [demoBadcase],
           export_links: { html: '/runs/run-demo/report/export?file_format=html', csv: '/runs/run-demo/report/export?file_format=csv', json: '/runs/run-demo/report/export?file_format=json' },
@@ -800,6 +829,9 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('RAG 任务')).toBeInTheDocument();
     expect(screen.getByText('任务摘要与版本快照')).toBeInTheDocument();
     expect(screen.getByText('Step 分布与耗时')).toBeInTheDocument();
+    expect(screen.getByText('分层分析')).toBeInTheDocument();
+    expect(screen.getByText('scene=payment')).toBeInTheDocument();
+    expect(screen.getByText('低通过率分组加入 Annotation')).toBeInTheDocument();
     expect(screen.getByText('answer')).toBeInTheDocument();
     expect(screen.getByText('80')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /导出 HTML \/ CSV/ }));

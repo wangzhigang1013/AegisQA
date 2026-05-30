@@ -9,7 +9,7 @@
 
 ## 最近一次交互验证
 
-- `npm test`：35 个前端交互/API client/图模型/任务创建向导/首页任务工作台/任务详情驾驶舱/Trace Flow/Workflow 字段映射/参数预览/Experiment/CI Gate/Annotation Queue 测试通过。
+- `npm test`：35 个前端交互/API client/图模型/任务创建向导/首页任务工作台/任务详情驾驶舱/Trace Flow/Workflow 字段映射/参数预览/报告分层分析/Experiment/CI Gate/Annotation Queue 测试通过。
 - `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - 最终验收确认：本轮 API 路由拆分和 JSON Store 文件锁不新增可见按钮，现有按钮矩阵仍覆盖全部用户可见主动作。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
@@ -51,6 +51,7 @@
 | 执行中心 | 任务详情驾驶舱 | 可用，按概览、样本、Trace、Badcase、Attempts、参数组织；参数页展示任务冻结参数、Skill 参数来源和 Secret 脱敏说明；已完成任务可新建 Attempt 且不覆盖旧报告 | `GET /tasks`、`GET /tasks/{task_id}/trace-tree`、`GET /tasks/{task_id}/trace-flow`、`GET /tasks/{task_id}/report`、`POST /tasks/{task_id}/attempts` | 后端测试覆盖历史报告保留；前端测试覆盖驾驶舱页签；Playwright 覆盖任务执行后查看驾驶舱 |
 | Trace Flow | 样本级数据流 | 可用，从任务详情和报告页进入；展示 Dataset、Workflow、Attempt、队列消息形状、样本列表、Step Timeline、Row、Context、Metrics、Input、参数来源、Output、Error 和 Badcase 状态 | `GET /tasks/{task_id}/trace-flow` | `tests/test_trace_flow_api.py`、`npm test` 和 Playwright 主链路覆盖 |
 | 报告中心 | 任务报告详情 | 可用，围绕选中任务展示任务摘要、版本快照、指标、Step 分布、Judge 分数分布、Badcase 和导出入口 | `GET /tasks/{task_id}/report` | 后端测试覆盖结构化字段；`npm test` 覆盖报告中心展示 |
+| 报告中心 | 分层分析与下一步建议 | 可用，按 scene、expected_label、model_version、prompt_version 展示样本数、通过率、Badcase，并给出加入 Annotation、生成 Golden 候选、生成 CI Gate 建议 | `GET /tasks/{task_id}/report` 中的 `segments`、`recommendations` | `tests/test_report_segment_analysis.py` 和 `npm test` 覆盖分层字段与建议展示 |
 | 报告中心 | 导出 HTML/CSV/JSON | 可用，围绕选中任务导出底层 Run 报告 | `GET /tasks/{task_id}/report`、`GET /runs/{run_id}/report/export` | 后端测试校验 HTML/CSV/JSON 内容；`npm test` 覆盖导出成功反馈 |
 | 报告中心 | Badcase 状态流转 | 可用；支持单条加入 Golden、忽略、重开、加入 Annotation Queue，以及批量加入 Golden；聚合报告中的 Badcase 若尚未持久化，会先创建 Badcase 再纠错入 Golden | `POST /badcases`、`POST /badcases/{badcase_id}/correct`、`POST /badcases/{badcase_id}/reopen`、`POST /badcases/bulk-correct`、`POST /annotation-queue/seed-from-run` | Playwright E2E 覆盖真实 Golden 纠错链路；`npm test` 覆盖报告页按钮和忽略反馈；后端服务测试覆盖状态流转 |
 | 实验中心 | 实验快照列表与 baseline 对比 | 可用，展示 Experiment 列表、当前实验、baseline、通过率变化、失败样本变化、成本变化 | `GET /experiments`、`GET /runs` | `npm test` 覆盖 `/experiments` 页面 |

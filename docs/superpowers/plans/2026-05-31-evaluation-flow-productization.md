@@ -173,13 +173,13 @@
 
 ### Task 5.1：分层分析 API
 
-- [ ] 按 `scene`、`expected_label`、`model_version`、`prompt_version` 统计通过率、失败率、样本数、Badcase 数。
-- [ ] API 返回 `segments`，字段包含 segment_key、segment_value、sample_count、pass_rate、badcase_count。
+- [x] 按 `scene`、`expected_label`、`model_version`、`prompt_version` 统计通过率、失败率、样本数、Badcase 数。
+- [x] API 返回 `segments`，字段包含 segment_key、segment_value、sample_count、pass_rate、badcase_count。
 
 ### Task 5.2：报告 UI
 
-- [ ] 报告详情增加分层分析表和图表。
-- [ ] 增加“下一步建议”：低通过率分组加入 Annotation、生成 Golden 候选、生成 CI Gate 建议。
+- [x] 报告详情增加分层分析表和图表。
+- [x] 增加“下一步建议”：低通过率分组加入 Annotation、生成 Golden 候选、生成 CI Gate 建议。
 
 ## 阶段 6：Annotation / Golden 批量闭环
 

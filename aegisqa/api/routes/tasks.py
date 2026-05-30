@@ -25,7 +25,7 @@ from aegisqa.api.app import (
 )
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.engine.runner import RunRecord, RunRequest
-from aegisqa.reports.aggregator import aggregate_run_report
+from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments
 from aegisqa.reports.trace_flow import build_task_trace_flow
 
 
@@ -146,12 +146,15 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         task = _get_record(ctx.store, "tasks", task_id)
         run = ctx.runner.get_run(task["run_id"])
         report = aggregate_run_report(run)
+        segments = build_report_segments(run)
         return {
             "task": task,
             "task_summary": _build_task_report_summary(task, run),
             "version_snapshot": _build_task_report_version_snapshot(task, run),
             "step_distribution": _build_step_distribution(run),
             "judge_score_distribution": _build_judge_score_distribution(run),
+            "segments": [segment.model_dump(mode="json") for segment in segments],
+            "recommendations": [recommendation.model_dump(mode="json") for recommendation in build_report_recommendations(segments)],
             "report": report.model_dump(mode="json"),
             "badcases": [badcase.model_dump(mode="json") for badcase in report.badcases],
             "export_links": {

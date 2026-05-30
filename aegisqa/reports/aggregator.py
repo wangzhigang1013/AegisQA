@@ -36,6 +36,27 @@ class RunReport(BaseModel):
     badcases: list[ReportBadcase]
 
 
+class ReportSegment(BaseModel):
+    segment_key: str
+    segment_value: str
+    sample_count: int
+    pass_count: int
+    fail_count: int
+    badcase_count: int
+    pass_rate: float
+    average_score: float | None = None
+
+
+class ReportRecommendation(BaseModel):
+    type: str
+    title: str
+    message: str
+    action: str
+    severity: str = "info"
+    segment_key: str | None = None
+    segment_value: str | None = None
+
+
 def aggregate_run_report(run: RunRecord) -> RunReport:
     """把 Item/Step 明细聚合成 Run 级报告。"""
 
@@ -102,6 +123,94 @@ def aggregate_run_report(run: RunRecord) -> RunReport:
     )
 
 
+def build_report_segments(run: RunRecord, keys: tuple[str, ...] = ("scene", "expected_label", "model_version", "prompt_version")) -> list[ReportSegment]:
+    """按业务维度拆解报告，避免总通过率掩盖局部质量问题。"""
+
+    buckets: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in run.items:
+        row = item.context_snapshot.get("row", {})
+        if not isinstance(row, dict):
+            row = {}
+        label = _item_label(item)
+        score = _item_score(item)
+        is_pass = label == "pass"
+        is_badcase = _is_badcase_item(item)
+
+        for key in keys:
+            value = _segment_value(key, row, item)
+            if value is None:
+                continue
+            bucket = buckets.setdefault(
+                (key, value),
+                {"segment_key": key, "segment_value": value, "sample_count": 0, "pass_count": 0, "badcase_count": 0, "scores": []},
+            )
+            bucket["sample_count"] += 1
+            if is_pass:
+                bucket["pass_count"] += 1
+            if is_badcase:
+                bucket["badcase_count"] += 1
+            if score is not None:
+                bucket["scores"].append(score)
+
+    segments: list[ReportSegment] = []
+    for bucket in buckets.values():
+        sample_count = bucket["sample_count"]
+        pass_count = bucket["pass_count"]
+        scores = bucket["scores"]
+        segments.append(
+            ReportSegment(
+                segment_key=bucket["segment_key"],
+                segment_value=bucket["segment_value"],
+                sample_count=sample_count,
+                pass_count=pass_count,
+                fail_count=sample_count - pass_count,
+                badcase_count=bucket["badcase_count"],
+                pass_rate=pass_count / sample_count if sample_count else 0.0,
+                average_score=mean(scores) if scores else None,
+            )
+        )
+    return sorted(segments, key=lambda item: (item.segment_key, item.pass_rate, item.segment_value))
+
+
+def build_report_recommendations(segments: list[ReportSegment], pass_rate_threshold: float = 0.8) -> list[ReportRecommendation]:
+    weak_segments = [segment for segment in segments if segment.sample_count > 0 and segment.pass_rate < pass_rate_threshold]
+    if not weak_segments:
+        return []
+
+    target = sorted(weak_segments, key=lambda segment: (segment.pass_rate, -segment.badcase_count, segment.segment_key))[0]
+    label = f"{target.segment_key}={target.segment_value}"
+    rate_text = f"{round(target.pass_rate * 100)}%"
+    return [
+        ReportRecommendation(
+            type="segment_low_pass_rate",
+            title="低通过率分组加入 Annotation",
+            message=f"{label} 通过率 {rate_text}，建议抽样进入人工审核，先确认失败原因是否来自数据、Prompt 或 Judge。",
+            action="add_to_annotation_queue",
+            severity="warning",
+            segment_key=target.segment_key,
+            segment_value=target.segment_value,
+        ),
+        ReportRecommendation(
+            type="golden_candidate",
+            title="生成 Golden 候选",
+            message=f"{label} 有 {target.badcase_count} 条 Badcase，建议沉淀为 Golden 候选，后续用于回归评测和 Judge 审计。",
+            action="create_golden_candidates",
+            severity="info",
+            segment_key=target.segment_key,
+            segment_value=target.segment_value,
+        ),
+        ReportRecommendation(
+            type="ci_gate_suggestion",
+            title="生成 CI Gate 建议",
+            message=f"建议为 {label} 设置通过率门禁，防止局部场景退化被总体指标掩盖。",
+            action="create_ci_gate",
+            severity="critical",
+            segment_key=target.segment_key,
+            segment_value=target.segment_value,
+        ),
+    ]
+
+
 def _item_label(item: Any) -> str | None:
     return item.context_snapshot.get("context", {}).get("judge_label")
 
@@ -109,6 +218,25 @@ def _item_label(item: Any) -> str | None:
 def _item_score(item: Any) -> float | None:
     score = item.metrics.get("judge_score") or item.context_snapshot.get("metrics", {}).get("judge_score")
     return float(score) if score is not None else None
+
+
+def _is_badcase_item(item: Any) -> bool:
+    if item.error:
+        return True
+    label = _item_label(item)
+    score = _item_score(item)
+    return label == "fail" or (score is not None and score < 0.6)
+
+
+def _segment_value(key: str, row: dict[str, Any], item: Any) -> str | None:
+    if key in row and row[key] not in (None, ""):
+        return str(row[key])
+    if key == "model_version":
+        for step in item.steps:
+            model = step.config_snapshot.get("model") if isinstance(step.config_snapshot, dict) else None
+            if model not in (None, ""):
+                return str(model)
+    return None
 
 
 def _aggregate_numeric_metrics(run: RunRecord) -> dict[str, Any]:

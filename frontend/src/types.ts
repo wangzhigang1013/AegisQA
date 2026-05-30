@@ -299,6 +299,25 @@ export type TaskReport = {
     average_latency_ms: number;
   }[];
   judge_score_distribution?: { bucket: string; count: number }[];
+  segments?: {
+    segment_key: string;
+    segment_value: string;
+    sample_count: number;
+    pass_count: number;
+    fail_count: number;
+    badcase_count: number;
+    pass_rate: number;
+    average_score?: number | null;
+  }[];
+  recommendations?: {
+    type: string;
+    title: string;
+    message: string;
+    action: string;
+    severity: string;
+    segment_key?: string | null;
+    segment_value?: string | null;
+  }[];
   report: RunReport;
   badcases: Record<string, unknown>[];
   export_links: {

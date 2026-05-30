@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“评测数据流与产品体验升级”正在执行中。阶段 1（Skill 参数解析与冻结）、阶段 2（Trace 数据流模型与独立页面）、阶段 3（UI 信息架构与任务驾驶舱）和阶段 4（Workflow 字段映射与参数预览升级）已完成：后端已提供 Task Trace Flow API，前端已新增独立 Trace Flow 页面，首页已改为任务工作台，任务详情已升级为概览、样本、Trace、Badcase、Attempts、参数页签，Workflow Inspector 已支持字段路径表格映射与参数预览；下一步进入阶段 5：报告分层分析与闭环动作。
+新一轮“评测数据流与产品体验升级”正在执行中。阶段 1（Skill 参数解析与冻结）、阶段 2（Trace 数据流模型与独立页面）、阶段 3（UI 信息架构与任务驾驶舱）、阶段 4（Workflow 字段映射与参数预览升级）和阶段 5（报告分层分析与闭环动作）已完成：后端已提供 Task Trace Flow API，前端已新增独立 Trace Flow 页面，首页已改为任务工作台，任务详情已升级为概览、样本、Trace、Badcase、Attempts、参数页签，Workflow Inspector 已支持字段路径表格映射与参数预览，任务报告已支持按业务字段分层分析和下一步建议；下一步进入阶段 6：Annotation / Golden 批量闭环。
 
 ## 当前已完成
 
@@ -49,10 +49,12 @@
 - 任务详情已抽成驾驶舱组件，按概览、样本、Trace、Badcase、Attempts、参数组织，参数页可查看任务冻结参数、Skill 参数来源和 Secret 脱敏说明。
 - Workflow Inspector 已从纯 JSON 编辑升级为字段映射表格，字段路径可从 Dataset `field_paths`、字段 schema 和上游节点 `output_mapping` 自动推导，并保留 JSON 高级模式。
 - Workflow Inspector 已新增“参数预览”Tab，可选择 Dataset Version 调用 `/workflow-graphs/parameter-preview`，展示解析后配置和 default/workflow_config/task_override/expression/secret_ref 来源。
+- Task Report 已新增 `segments` 和 `recommendations`，支持按 `scene`、`expected_label`、`model_version`、`prompt_version` 统计样本量、通过率、Badcase，并给出 Annotation、Golden 候选、CI Gate 建议。
+- 报告中心已新增“分层分析”组件，围绕低通过率分组展示分组指标和下一步动作建议，避免只看总体通过率。
 
 ## 最近验证
 
-- `python -m pytest -q`：48 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest -q`：49 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v7`，Run `run-5a86aceede3f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、35 个测试通过。
@@ -79,6 +81,38 @@
 - 后续建议优先进入 Trace Tree 独立页面、CI Gate 历史记录、Annotation Queue 批量审核、多 Judge 一致性视图、红队安全扫描和真实 MySQL/Redis/Celery Repository/Worker 接入。
 
 ## 最近改动
+
+### 2026-05-31 报告分层分析与下一步建议
+
+- 改动摘要：完成评测数据流升级计划阶段 5。后端任务报告新增分层分析能力，按 `scene`、`expected_label`、`model_version`、`prompt_version` 统计样本数、通过数、失败数、Badcase、通过率和平均分；报告接口返回 `segments` 与 `recommendations`，当局部分组通过率低于阈值时给出加入 Annotation、生成 Golden 候选、生成 CI Gate 的建议；前端报告中心新增“分层分析”组件，用表格和建议卡把问题分组和下一步动作串起来。
+- 变更文件：
+  - `aegisqa/reports/aggregator.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_report_segment_analysis.py`
+  - `frontend/src/types.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/pages/report/ReportSegmentAnalysis.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-evaluation-flow-productization.md`
+- 验证命令：
+  - `python -m pytest tests\test_report_segment_analysis.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 报告分层后端定向测试：1 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 报告中心前端定向测试：1 passed。
+  - Typecheck：通过。
+  - 后端全量：49 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：4 个测试文件、35 passed。
+  - Build：通过。
+  - Playwright 全量 E2E：8 passed。
+- 下一步：进入阶段 6，新增 Annotation Queue 批量审核与候选资产沉淀。
 
 ### 2026-05-31 Workflow 字段映射与参数预览
 

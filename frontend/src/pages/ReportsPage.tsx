@@ -9,6 +9,7 @@ import { MetricTile } from '../components/MetricTile';
 import { PageHeader } from '../components/PageHeader';
 import type { TaskRecord } from '../types';
 import { BadcaseTable } from './report/BadcaseTable';
+import { ReportSegmentAnalysis } from './report/ReportSegmentAnalysis';
 import { ReportSummary } from './report/ReportSummary';
 
 export function ReportsPage() {
@@ -191,6 +192,8 @@ export function ReportsPage() {
             ) : null}
             <ReactECharts option={chartOption} style={{ height: 280 }} />
           </Card>
+
+          <ReportSegmentAnalysis segments={reportQuery.data?.segments} recommendations={reportQuery.data?.recommendations} />
 
           <Card className="flat-card" title="Badcase 明细">
             <Space direction="vertical" className="full-width-control">
