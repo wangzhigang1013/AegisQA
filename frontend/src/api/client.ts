@@ -25,6 +25,30 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api';
 
+export class ApiError extends Error {
+  code: string;
+  details: Record<string, unknown>;
+  traceId?: string;
+  status: number;
+
+  constructor(message: string, options: { code?: string; details?: Record<string, unknown>; trace_id?: string; status: number }) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = options.code ?? 'HTTP_ERROR';
+    this.details = options.details ?? {};
+    this.traceId = options.trace_id;
+    this.status = options.status;
+  }
+}
+
+export function formatApiError(error: unknown): string {
+  if (error instanceof ApiError) {
+    const trace = error.traceId ? `，trace_id=${error.traceId}` : '';
+    return `${error.message}（${error.code}${trace}）`;
+  }
+  return error instanceof Error ? error.message : '未知错误';
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -37,7 +61,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = payload?.message ?? payload?.detail ?? `请求失败：${response.status}`;
-    throw new Error(message);
+    throw new ApiError(message, {
+      code: payload?.code,
+      details: payload?.details,
+      trace_id: payload?.trace_id,
+      status: response.status,
+    });
   }
   return payload as T;
 }

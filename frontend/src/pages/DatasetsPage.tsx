@@ -4,7 +4,7 @@ import { Alert, Button, Card, Checkbox, Col, Form, Input, Modal, Row, Select, Sp
 import type { UploadFile } from 'antd';
 import { useMemo, useState } from 'react';
 
-import { api } from '../api/client';
+import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { fieldPreview } from '../data/demo';
 import type { DatasetVersion } from '../types';
@@ -70,7 +70,7 @@ export function DatasetsPage() {
       uploadForm.resetFields();
       await queryClient.invalidateQueries({ queryKey: ['datasets'] });
     },
-    onError: (error) => setNotice(error instanceof Error ? `上传失败：${error.message}` : '上传失败：未知错误'),
+    onError: (error) => setNotice(`上传失败：${formatApiError(error)}`),
   });
 
   const materializeMutation = useMutation({
@@ -92,7 +92,7 @@ export function DatasetsPage() {
       setMaterializeOpen(false);
       await queryClient.invalidateQueries({ queryKey: ['datasets'] });
     },
-    onError: (error) => setNotice(error instanceof Error ? `物化失败：${error.message}` : '物化失败：未知错误'),
+    onError: (error) => setNotice(`物化失败：${formatApiError(error)}`),
   });
 
   return (

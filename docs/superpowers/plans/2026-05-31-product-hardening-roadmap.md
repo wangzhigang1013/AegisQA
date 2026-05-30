@@ -42,38 +42,38 @@
 
 ### Task 1.1：数据集上传严谨校验
 
-- [ ] 新增后端失败测试：空文件上传返回结构化错误。
-- [ ] 新增后端失败测试：JSONL 某一行不是 JSON 时，错误包含行号。
-- [ ] 新增后端失败测试：CSV 只有表头没有数据时拒绝创建 Dataset Version。
-- [ ] 实现 `DatasetService.upload_dataset` 的空内容、空行、坏 JSON 行、空 CSV 校验。
-- [ ] 前端上传弹窗展示后端错误 message 和修复建议。
-- [ ] 运行 `python -m pytest tests/test_p0_hardening.py -q`。
+- [x] 新增后端失败测试：空文件上传返回结构化错误。
+- [x] 新增后端失败测试：JSONL 某一行不是 JSON 时，错误包含行号。
+- [x] 新增后端失败测试：CSV 只有表头没有数据时拒绝创建 Dataset Version。
+- [x] 实现 `DatasetService.upload_dataset` 的空内容、空行、坏 JSON 行、空 CSV 校验。
+- [x] 前端上传弹窗展示后端错误 message 和修复建议。
+- [x] 运行 `python -m pytest tests/test_p0_hardening.py -q`。
 
 ### Task 1.2：Skill zip 安全校验
 
-- [ ] 新增后端失败测试：zip 内包含 `../evil.py` 时拒绝上传。
-- [ ] 新增后端失败测试：zip 内包含绝对路径时拒绝上传。
-- [ ] 新增后端失败测试：handler 超时返回 `SKILL_CONTRACT_TIMEOUT`。
-- [ ] 实现插件包路径规范化检查。
-- [ ] 为受控子进程增加 timeout、stdout/stderr 最大长度和结构化错误。
-- [ ] 前端 Skill 上传失败时展示错误 code、message、details。
-- [ ] 运行 `python -m pytest tests/test_p0_hardening.py -q`。
+- [x] 新增后端失败测试：zip 内包含 `../evil.py` 时拒绝上传。
+- [x] 新增后端失败测试：zip 内包含绝对路径时拒绝上传。
+- [x] 新增后端失败测试：handler 超时返回 `SKILL_CONTRACT_TIMEOUT`。
+- [x] 实现插件包路径规范化检查。
+- [x] 为受控子进程增加 timeout、stdout/stderr 最大长度和结构化错误。
+- [x] 前端 Skill 上传失败时展示错误 code、message、details。
+- [x] 运行 `python -m pytest tests/test_p0_hardening.py -q`。
 
 ### Task 1.3：Task 状态机与重复动作保护
 
-- [ ] 新增后端失败测试：running Task 再次 execute 返回 `TASK_ALREADY_RUNNING`。
-- [ ] 新增后端失败测试：completed Task 再次 execute 生成新 attempt 或明确拒绝，本项目第一阶段选择明确拒绝并提示“请复制任务重新执行”。
-- [ ] 新增后端失败测试：cancelled Task 不能 pause/resume。
-- [ ] 实现 Task action 状态机校验。
-- [ ] 前端执行按钮根据状态禁用，并展示禁用原因 Tooltip。
-- [ ] 运行 `python -m pytest tests/test_p0_hardening.py -q` 和 `cd frontend && npm test`。
+- [x] 新增后端失败测试：running Task 再次 execute 返回 `TASK_ALREADY_RUNNING`。
+- [x] 新增后端失败测试：completed Task 再次 execute 生成新 attempt 或明确拒绝，本项目第一阶段选择明确拒绝并提示“请复制任务重新执行”。
+- [x] 新增后端失败测试：cancelled Task 不能 pause/resume。
+- [x] 实现 Task action 状态机校验。
+- [x] 前端执行按钮根据状态禁用，并展示禁用原因 Tooltip。
+- [x] 运行 `python -m pytest tests/test_p0_hardening.py -q` 和 `cd frontend && npm test`。
 
 ### Task 1.4：统一错误响应覆盖关键 API
 
-- [ ] 新增 API 测试：Dataset、Skill、Workflow、Task 的业务错误均返回 `{ code, message, details, trace_id }`。
-- [ ] 补齐异常转换，避免前端收到纯字符串错误。
-- [ ] 前端 API client 解析结构化错误，页面统一显示中文修复建议。
-- [ ] 运行后端与前端全量验证。
+- [x] 新增 API 测试：Dataset、Skill、Workflow、Task 的业务错误均返回 `{ code, message, details, trace_id }`。
+- [x] 补齐异常转换，避免前端收到纯字符串错误。
+- [x] 前端 API client 解析结构化错误，页面统一显示中文修复建议。
+- [x] 运行后端与前端全量验证。
 
 ## 阶段 2：Workflow 画布精细化
 

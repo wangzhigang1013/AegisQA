@@ -199,6 +199,29 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/任务状态已更新/)).toBeInTheDocument();
   });
 
+  it('完成态任务不能重复执行', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/tasks')) {
+        return jsonResponse([{ ...demoTask, status: 'completed', completed_items: 100, pass_rate: 0.8 }]);
+      }
+      if (url.endsWith('/workflows')) {
+        return jsonResponse([demoWorkflowVersion]);
+      }
+      if (url.endsWith('/datasets')) {
+        return jsonResponse([]);
+      }
+      if (url.endsWith('/task-trace-tree')) {
+        return jsonResponse({ items: [] });
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/runs');
+
+    expect(await screen.findByRole('button', { name: /执行/ })).toBeDisabled();
+  });
+
   it('Skill 合约测试按钮会调用后端并展示结果', async () => {
     vi.mocked(globalThis.fetch).mockImplementation((input) => {
       const url = String(input);

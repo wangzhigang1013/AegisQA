@@ -18,11 +18,13 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   Timeline,
 } from 'antd';
+import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 
-import { api } from '../api/client';
+import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import type { TaskRecord } from '../types';
 
@@ -34,6 +36,8 @@ type TaskFormValues = {
   concurrency?: number;
   sample_repeat_times?: number;
 };
+
+type TaskAction = 'execute' | 'pause' | 'resume' | 'cancel' | 'retry';
 
 export function RunsPage() {
   const queryClient = useQueryClient();
@@ -77,11 +81,11 @@ export function RunsPage() {
       form.resetFields();
       await queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
-    onError: (error) => setNotice(error instanceof Error ? `创建失败：${error.message}` : '创建失败'),
+    onError: (error) => setNotice(`创建失败：${formatApiError(error)}`),
   });
 
   const taskActionMutation = useMutation({
-    mutationFn: ({ taskId, action }: { taskId: string; action: 'execute' | 'pause' | 'resume' | 'cancel' | 'retry' }) => {
+    mutationFn: ({ taskId, action }: { taskId: string; action: TaskAction }) => {
       if (action === 'execute') return api.executeTask(taskId);
       if (action === 'pause') return api.pauseTask(taskId);
       if (action === 'resume') return api.resumeTask(taskId);
@@ -93,10 +97,10 @@ export function RunsPage() {
       setNotice(`任务状态已更新：${task.status}`);
       await queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
-    onError: (error) => setNotice(error instanceof Error ? `操作失败：${error.message}` : '操作失败'),
+    onError: (error) => setNotice(`操作失败：${formatApiError(error)}`),
   });
 
-  function triggerTaskAction(task: TaskRecord, action: 'execute' | 'pause' | 'resume' | 'cancel' | 'retry') {
+  function triggerTaskAction(task: TaskRecord, action: TaskAction) {
     taskActionMutation.mutate({ taskId: task.task_id, action });
   }
 
@@ -149,8 +153,8 @@ export function RunsPage() {
               fixed: 'right',
               render: (_, record) => (
                 <Space>
-                  <Button icon={<PlayCircleOutlined />} loading={taskActionMutation.isPending} onClick={() => triggerTaskAction(record, 'execute')}>执行</Button>
-                  <Button icon={<ReloadOutlined />} loading={taskActionMutation.isPending} onClick={() => triggerTaskAction(record, 'retry')}>重试失败</Button>
+                  <TaskActionButton task={record} action="execute" loading={taskActionMutation.isPending} onClick={triggerTaskAction} icon={<PlayCircleOutlined />} label="执行" />
+                  <TaskActionButton task={record} action="retry" loading={taskActionMutation.isPending} onClick={triggerTaskAction} icon={<ReloadOutlined />} label="重试失败" />
                   <Button icon={<DownloadOutlined />} onClick={() => setDetailTask(record)}>详情</Button>
                 </Space>
               ),
@@ -236,7 +240,7 @@ function TaskDetailDrawer({
   task: TaskRecord | null;
   loading: boolean;
   onClose: () => void;
-  onAction: (task: TaskRecord, action: 'execute' | 'pause' | 'resume' | 'cancel' | 'retry') => void;
+  onAction: (task: TaskRecord, action: TaskAction) => void;
 }) {
   const traceQuery = useQuery({
     queryKey: ['task-trace-tree', task?.task_id],
@@ -249,11 +253,11 @@ function TaskDetailDrawer({
       {task ? (
         <Space direction="vertical" className="drawer-stack" size="large">
           <Space wrap>
-            <Button icon={<PlayCircleOutlined />} loading={loading} onClick={() => onAction(task, 'execute')}>执行</Button>
-            <Button icon={<PauseCircleOutlined />} loading={loading} onClick={() => onAction(task, 'pause')}>暂停</Button>
-            <Button icon={<PlayCircleOutlined />} loading={loading} onClick={() => onAction(task, 'resume')}>恢复</Button>
-            <Button danger icon={<StopOutlined />} loading={loading} onClick={() => onAction(task, 'cancel')}>取消</Button>
-            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => onAction(task, 'retry')}>重试失败项</Button>
+            <TaskActionButton task={task} action="execute" loading={loading} onClick={onAction} icon={<PlayCircleOutlined />} label="执行" />
+            <TaskActionButton task={task} action="pause" loading={loading} onClick={onAction} icon={<PauseCircleOutlined />} label="暂停" />
+            <TaskActionButton task={task} action="resume" loading={loading} onClick={onAction} icon={<PlayCircleOutlined />} label="恢复" />
+            <TaskActionButton task={task} action="cancel" loading={loading} onClick={onAction} icon={<StopOutlined />} label="取消" danger />
+            <TaskActionButton task={task} action="retry" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="重试失败项" />
           </Space>
           <Descriptions bordered column={1} size="small">
             <Descriptions.Item label="数据源">{task.dataset_name} v{task.dataset_version}</Descriptions.Item>
@@ -278,6 +282,47 @@ function TaskDetailDrawer({
       ) : null}
     </Drawer>
   );
+}
+
+function TaskActionButton({
+  task,
+  action,
+  loading,
+  onClick,
+  icon,
+  label,
+  danger = false,
+}: {
+  task: TaskRecord;
+  action: TaskAction;
+  loading: boolean;
+  onClick: (task: TaskRecord, action: TaskAction) => void;
+  icon: ReactNode;
+  label: string;
+  danger?: boolean;
+}) {
+  const disabledReason = taskActionDisabledReason(task, action);
+  const button = (
+    <Button danger={danger} icon={icon} loading={loading} disabled={Boolean(disabledReason)} onClick={() => onClick(task, action)}>
+      {label}
+    </Button>
+  );
+  return disabledReason ? <Tooltip title={disabledReason}>{button}</Tooltip> : button;
+}
+
+function taskActionDisabledReason(task: TaskRecord, action: TaskAction): string | null {
+  const status = task.status;
+  if (action === 'execute') {
+    if (status === 'completed') return '任务已完成，请复制任务或创建新任务后重新执行。';
+    if (status === 'running') return '任务正在执行中。';
+    if (status === 'canceled' || status === 'cancelled') return '任务已取消，不能执行。';
+    return null;
+  }
+  if (action === 'pause') return ['queued', 'running'].includes(status) ? null : '只有 queued/running 任务可以暂停。';
+  if (action === 'resume') return status === 'paused' ? null : '只有 paused 任务可以恢复。';
+  if (action === 'cancel') return ['queued', 'running', 'paused', 'failed'].includes(status) ? null : '当前状态不能取消。';
+  if (action === 'retry') return status === 'failed' ? null : '只有 failed 任务可以重试失败项。';
+  return null;
 }
 
 function taskProgress(task: TaskRecord): number {

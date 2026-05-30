@@ -12,6 +12,7 @@ from typing import Any, Iterator
 
 from pydantic import BaseModel, Field
 
+from aegisqa.core.errors import AegisQAError
 from aegisqa.storage.json_store import JsonStore
 
 
@@ -57,7 +58,11 @@ class DatasetService:
         version = self._next_version(dataset_id)
         file_format = path.suffix.lower().lstrip(".")
         if file_format not in {"csv", "jsonl"}:
-            raise ValueError("MVP 仅支持 CSV/JSONL 数据集")
+            raise AegisQAError(
+                "DATASET_UNSUPPORTED_FORMAT",
+                "MVP 仅支持 CSV/JSONL 数据集。",
+                details={"filename": path.name, "supported_formats": ["csv", "jsonl"]},
+            )
 
         row_store_parts = ["datasets", dataset_id, f"v{version}", "rows.jsonl"]
         row_count = 0
@@ -79,6 +84,13 @@ class DatasetService:
                 for field, value in row_data.items():
                     if len(samples_by_field[field]) < 50:
                         samples_by_field[field].append(value)
+
+        if row_count == 0:
+            raise AegisQAError(
+                "DATASET_EMPTY",
+                "数据集没有可执行样本，请上传至少一行有效数据。",
+                details={"filename": path.name, "file_format": file_format},
+            )
 
         dataset = DatasetVersion(
             dataset_id=dataset_id,
@@ -267,12 +279,23 @@ class DatasetService:
             return
 
         with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
+            for line_number, line in enumerate(handle, start=1):
                 line = line.strip()
                 if line:
-                    payload = json.loads(line)
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise AegisQAError(
+                            "DATASET_PARSE_ERROR",
+                            f"JSONL 第 {line_number} 行不是合法 JSON。",
+                            details={"line_number": line_number, "error": exc.msg},
+                        ) from exc
                     if not isinstance(payload, dict):
-                        raise ValueError("JSONL 每行必须是对象")
+                        raise AegisQAError(
+                            "DATASET_PARSE_ERROR",
+                            f"JSONL 第 {line_number} 行必须是对象。",
+                            details={"line_number": line_number, "actual_type": type(payload).__name__},
+                        )
                     yield payload
 
 

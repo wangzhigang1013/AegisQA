@@ -80,5 +80,10 @@ class BaseSkill(ABC):
         try:
             result, latency_ms = self.execute(self.manifest.example_input, self.manifest.example_config)
         except Exception as exc:  # noqa: BLE001 - 合约测试需要把任意异常转成结构化结果。
-            return {"ok": False, "error": type(exc).__name__, "message": str(exc)}
+            payload = {"ok": False, "error": type(exc).__name__, "message": str(exc)}
+            if hasattr(exc, "code"):
+                payload["code"] = getattr(exc, "code")
+            if hasattr(exc, "details"):
+                payload["details"] = getattr(exc, "details")
+            return payload
         return {"ok": True, "latency_ms": latency_ms, "output": result.output, "metrics": result.metrics}

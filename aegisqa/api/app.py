@@ -10,7 +10,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timezone
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 from typing import Any
 from uuid import uuid4
@@ -24,6 +24,7 @@ import yaml
 
 from aegisqa.badcases.service import BadcaseService
 from aegisqa.audit.service import AuditService
+from aegisqa.core.errors import AegisQAError
 from aegisqa.datasets.service import DatasetService
 from aegisqa.engine.runner import RunRecord, RunRequest, WorkflowRunner
 from aegisqa.judge.audit import JudgeAuditResult, audit_judge_profile
@@ -267,8 +268,17 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
     def http_error_handler(_: Any, exc: HTTPException) -> JSONResponse:
         code = "NOT_FOUND" if exc.status_code == 404 else "HTTP_ERROR"
         details = exc.detail if isinstance(exc.detail, dict) else {}
-        message = exc.detail.get("message", code) if isinstance(exc.detail, dict) else str(exc.detail)
+        if isinstance(exc.detail, dict):
+            code = str(exc.detail.get("code") or code)
+            message = str(exc.detail.get("message") or code)
+            details = exc.detail.get("details") if isinstance(exc.detail.get("details"), dict) else {key: value for key, value in exc.detail.items() if key not in {"code", "message"}}
+        else:
+            message = str(exc.detail)
         return JSONResponse(status_code=exc.status_code, content=_api_error(code, message, details))
+
+    @app.exception_handler(AegisQAError)
+    def aegisqa_error_handler(_: Any, exc: AegisQAError) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content=_api_error(exc.code, exc.message, exc.details))
 
     @app.exception_handler(KeyError)
     def key_error_handler(_: Any, exc: KeyError) -> JSONResponse:
@@ -378,6 +388,12 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
         前端 Streamlit 已支持真实文件上传；HTTP API 则用文本内容表达同一能力。
         """
 
+        if not request.content.strip():
+            raise AegisQAError(
+                "DATASET_EMPTY",
+                "数据集没有可执行样本，请上传至少一行有效数据。",
+                details={"filename": Path(request.filename).name, "file_format": (Path(request.filename).suffix or ".jsonl").lstrip(".")},
+            )
         suffix = Path(request.filename).suffix or ".jsonl"
         upload_path = store.path("uploads", f"{request.name}{suffix}")
         upload_path.write_text(request.content, encoding="utf-8")
@@ -556,30 +572,35 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
     @app.post("/tasks/{task_id}/execute")
     def execute_task(task_id: str) -> dict[str, Any]:
         task = _get_record(store, "tasks", task_id)
+        _ensure_task_action_allowed(task, "execute")
         run = runner.execute_run(task["run_id"])
         return _refresh_task_from_run(store, task, run)
 
     @app.post("/tasks/{task_id}/pause")
     def pause_task(task_id: str) -> dict[str, Any]:
         task = _get_record(store, "tasks", task_id)
+        _ensure_task_action_allowed(task, "pause")
         run = runner.pause_run(task["run_id"])
         return _refresh_task_from_run(store, task, run)
 
     @app.post("/tasks/{task_id}/resume")
     def resume_task(task_id: str) -> dict[str, Any]:
         task = _get_record(store, "tasks", task_id)
+        _ensure_task_action_allowed(task, "resume")
         run = runner.resume_run(task["run_id"])
         return _refresh_task_from_run(store, task, run)
 
     @app.post("/tasks/{task_id}/cancel")
     def cancel_task(task_id: str) -> dict[str, Any]:
         task = _get_record(store, "tasks", task_id)
+        _ensure_task_action_allowed(task, "cancel")
         run = runner.cancel_run(task["run_id"])
         return _refresh_task_from_run(store, task, run)
 
     @app.post("/tasks/{task_id}/retry-failed")
     def retry_failed_task(task_id: str) -> dict[str, Any]:
         task = _get_record(store, "tasks", task_id)
+        _ensure_task_action_allowed(task, "retry")
         run = runner.retry_failed_items(task["run_id"])
         return _refresh_task_from_run(store, task, run)
 
@@ -958,7 +979,7 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
     try:
         raw = base64.b64decode(request.content_base64)
     except Exception as exc:  # noqa: BLE001 - API 边界需要返回稳定错误。
-        raise ValueError("插件包内容不是合法 base64。") from exc
+        raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包内容不是合法 base64。") from exc
     package_id = f"pkg-{uuid4().hex[:12]}"
     package_dir = store.path("uploaded_skill_packages", package_id, "package")
     package_dir.mkdir(parents=True, exist_ok=True)
@@ -969,14 +990,14 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
         with zipfile.ZipFile(zip_path) as archive:
             _safe_extract_zip(archive, package_dir)
     except zipfile.BadZipFile as exc:
-        raise ValueError("插件包必须是合法 zip 文件。") from exc
+        raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包必须是合法 zip 文件。") from exc
 
     manifest_path = _first_existing(package_dir, ["skill.yaml", "skill.yml", "skill.json"])
     handler_path = package_dir / "handler.py"
     if not manifest_path:
-        raise ValueError("插件包缺少 skill.yaml 或 skill.json。")
+        raise AegisQAError("SKILL_PACKAGE_MANIFEST_MISSING", "插件包缺少 skill.yaml 或 skill.json。")
     if not handler_path.exists():
-        raise ValueError("插件包缺少 handler.py。")
+        raise AegisQAError("SKILL_PACKAGE_HANDLER_MISSING", "插件包缺少 handler.py。")
 
     manifest_payload = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
     manifest = SkillManifest(**manifest_payload)
@@ -1028,9 +1049,21 @@ def _update_skill_package_status(store: JsonStore, manifest: SkillManifest) -> N
 def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> None:
     destination = destination.resolve()
     for member in archive.infolist():
+        filename = member.filename.replace("\\", "/")
+        parts = PurePosixPath(filename).parts
+        if filename.startswith("/") or re.match(r"^[a-zA-Z]:", filename) or ".." in parts:
+            raise AegisQAError(
+                "SKILL_PACKAGE_INVALID_PATH",
+                "插件包包含非法路径，禁止绝对路径或跨目录文件。",
+                details={"filename": member.filename},
+            )
         target = (destination / member.filename).resolve()
         if destination not in target.parents and target != destination:
-            raise ValueError("插件包包含非法路径。")
+            raise AegisQAError(
+                "SKILL_PACKAGE_INVALID_PATH",
+                "插件包包含非法路径，禁止绝对路径或跨目录文件。",
+                details={"filename": member.filename},
+            )
     archive.extractall(destination)
 
 
@@ -1081,6 +1114,41 @@ def _refresh_task_from_run(store: JsonStore, task: dict[str, Any], run: RunRecor
     )
     _save_record(store, "tasks", "task_id", task)
     return task
+
+
+def _ensure_task_action_allowed(task: dict[str, Any], action: str) -> None:
+    """保护 Task 状态机，避免重复执行或对终态任务做无意义动作。"""
+
+    status = str(task.get("status", "unknown"))
+    if action == "execute" and status == "completed":
+        raise AegisQAError(
+            "TASK_ALREADY_COMPLETED",
+            "任务已经完成。请复制任务或创建新任务后重新执行，避免覆盖历史报告。",
+            status_code=409,
+            details={"task_id": task.get("task_id"), "current_status": status},
+        )
+    if action == "execute" and status == "running":
+        raise AegisQAError(
+            "TASK_ALREADY_RUNNING",
+            "任务正在执行中，请等待当前执行结束。",
+            status_code=409,
+            details={"task_id": task.get("task_id"), "current_status": status},
+        )
+
+    allowed_statuses = {
+        "execute": {"queued", "failed", "paused"},
+        "pause": {"queued", "running"},
+        "resume": {"paused"},
+        "cancel": {"queued", "running", "paused", "failed"},
+        "retry": {"failed"},
+    }
+    if status not in allowed_statuses.get(action, set()):
+        raise AegisQAError(
+            "TASK_ACTION_INVALID",
+            "当前任务状态不允许执行该操作。",
+            status_code=409,
+            details={"task_id": task.get("task_id"), "action": action, "current_status": status},
+        )
 
 
 def _build_experiment_snapshot(run: RunRecord, *, name: str, baseline_run: RunRecord | None, tags: list[str]) -> dict[str, Any]:

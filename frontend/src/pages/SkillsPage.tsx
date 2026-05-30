@@ -4,7 +4,7 @@ import { Alert, Button, Card, Drawer, Form, Input, Modal, Select, Space, Table, 
 import type { UploadFile } from 'antd';
 import { useMemo, useState } from 'react';
 
-import { api } from '../api/client';
+import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { demoSkills } from '../data/demo';
 import type { SkillManifest } from '../types';
@@ -53,7 +53,7 @@ export function SkillsPage() {
       await queryClient.invalidateQueries({ queryKey: ['skills'] });
       await queryClient.invalidateQueries({ queryKey: ['skill-packages'] });
     },
-    onError: (error) => setNotice(error instanceof Error ? `上传失败：${error.message}` : '上传失败'),
+    onError: (error) => setNotice(`上传失败：${formatApiError(error)}`),
   });
 
   const contractMutation = useMutation({
@@ -63,7 +63,7 @@ export function SkillsPage() {
       setContractResultText(text);
       setNotice(text);
     },
-    onError: (error) => setContractResultText(error instanceof Error ? `合约测试失败：${error.message}` : '合约测试失败：未知错误'),
+    onError: (error) => setContractResultText(`合约测试失败：${formatApiError(error)}`),
   });
 
   return (

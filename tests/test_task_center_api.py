@@ -87,7 +87,7 @@ def test_skill_package_upload_contract_and_approval_gate(tmp_path: Path) -> None
         json={"filename": "broken.zip", "content_base64": _plugin_zip(include_manifest=False)},
     )
     assert missing_manifest.status_code == 400
-    assert missing_manifest.json()["code"] == "BAD_REQUEST"
+    assert missing_manifest.json()["code"] == "SKILL_PACKAGE_MANIFEST_MISSING"
 
     uploaded = client.post(
         "/skills/packages/upload",

@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-正式 Playwright E2E 主链路已完成，已启动产品严谨化全量优化执行阶段。
+产品严谨化阶段 1（P0 Bug 与稳定性修复）已完成，进入阶段 2：Workflow 画布精细化。
 
 ## 当前已完成
 
@@ -16,13 +16,14 @@
 - 已建立 `docs/INTERACTION_ACCEPTANCE_MATRIX.md`，逐页记录可见按钮的可用状态、依赖 API 和验收方式。
 - 已新增正式 Playwright E2E，自动覆盖“上传数据 -> 上传并审批 Skill -> 创建 Workflow -> 发布 -> 创建 Task -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路。
 - 已新增全量优化执行计划 `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`，阶段顺序为 P0 稳定性、Workflow 画布、Task、Report/Badcase、Skill 安全、Experiment/CI/Annotation、工程结构。
+- 已完成 P0 稳定性第一批：数据集上传空文件/坏 JSONL/空 CSV 拒绝；Skill zip 非法路径拒绝；插件合约测试超时返回结构化 code；Task completed/running/canceled 状态禁止非法动作；前端任务动作按钮按状态禁用；API client 保留后端 code/details/trace_id。
 
 ## 最近验证
 
 - `python -m pytest -q`：30 passed。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v6`，Run `run-9311b164dd1f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：1 个测试文件、12 个测试通过。
+- `cd frontend && npm test`：2 个测试文件、14 个测试通过。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：1 个 Playwright E2E 测试通过，覆盖任务主链路。
 - `http://127.0.0.1:8000/health`：FastAPI 页面健康检查通过。
@@ -47,6 +48,41 @@
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 P0 Bug 与稳定性修复完成
+
+- 改动摘要：按全量计划完成阶段 1。新增统一业务异常 `AegisQAError`；数据集上传增加空文件、坏 JSONL 行号、空 CSV 校验；Skill 插件包增加非法路径 code、子进程 timeout 和输出截断；Task API 增加状态机保护，防止 completed/running/canceled 状态重复或非法动作；前端执行按钮根据状态禁用并展示原因；API client 解析结构化错误并保留 `code/details/trace_id`。
+- 变更文件：
+  - `aegisqa/core/errors.py`
+  - `aegisqa/datasets/service.py`
+  - `aegisqa/skills/base.py`
+  - `aegisqa/skills/packages.py`
+  - `aegisqa/api/app.py`
+  - `tests/test_p0_hardening.py`
+  - `tests/test_task_center_api.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/DatasetsPage.tsx`
+  - `frontend/src/pages/SkillsPage.tsx`
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/apiClient.test.ts`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_p0_hardening.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - P0 后端新增测试：3 passed。
+  - 后端全量：33 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端：typecheck 通过；Vitest 2 个测试文件、14 个测试通过；生产构建通过。
+  - Playwright：1 个 E2E 测试通过，主链路未被 P0 状态机和插件 timeout 破坏。
+- 下一步：进入阶段 2，抽出 Workflow 图模型转换，补画布拖拽/连线/删除/保存/试运行/发布的精细 E2E。
 
 ### 2026-05-31 产品严谨化全量计划启动
 
