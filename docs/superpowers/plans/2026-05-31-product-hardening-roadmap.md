@@ -98,7 +98,7 @@
 
 ### Task 2.2：画布节点与连线操作补齐
 
-- [ ] 新增 Playwright 失败测试：拖拽/点击添加 Source、Skill、Join、Output。
+- [x] 新增 Playwright 失败测试：点击添加 Source、Skill、Join、Output。
 - [ ] 新增 Playwright 失败测试：创建连线。
 - [x] 新增 Playwright 失败测试：删除连线、删除节点。
 - [x] 新增 Playwright E2E 第一批：进入画布、点击新增 Join、删除选中、校验、发布。

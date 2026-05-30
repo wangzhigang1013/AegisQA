@@ -1,5 +1,22 @@
 import { expect, test } from '@playwright/test';
 
+test('Workflow 画布可以从 Palette 新增 Source、Skill、Join、Output', async ({ page }) => {
+  await page.goto('/workflows');
+  await page.getByRole('button', { name: /新建 Workflow/ }).click();
+
+  await page.getByRole('button', { name: /新增 Source/ }).click();
+  await expect(page.locator('input[value="Source"]').first()).toBeVisible();
+
+  await page.getByRole('button', { name: /Deterministic LLM Call/ }).click();
+  await expect(page.locator('input[value="Deterministic LLM Call"]').first()).toBeVisible();
+
+  await page.getByRole('button', { name: /新增 Join/ }).click();
+  await expect(page.locator('input[value="Join"]').first()).toBeVisible();
+
+  await page.getByRole('button', { name: /新增 Output/ }).click();
+  await expect(page.locator('input[value="Output"]').first()).toBeVisible();
+});
+
 test('Workflow 画布可以新增、删除、校验并发布流程', async ({ page }) => {
   await page.goto('/workflows');
   await page.getByRole('button', { name: /新建 Workflow/ }).click();
