@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“评测数据流与产品体验升级”正在执行中。阶段 1（Skill 参数解析与冻结）、阶段 2（Trace 数据流模型与独立页面）和阶段 3（UI 信息架构与任务驾驶舱）已完成：后端已提供 Task Trace Flow API，前端已新增独立 Trace Flow 页面，首页已改为任务工作台，任务详情已升级为概览、样本、Trace、Badcase、Attempts、参数页签；下一步进入阶段 4：Workflow 字段映射与参数预览升级。
+新一轮“评测数据流与产品体验升级”正在执行中。阶段 1（Skill 参数解析与冻结）、阶段 2（Trace 数据流模型与独立页面）、阶段 3（UI 信息架构与任务驾驶舱）和阶段 4（Workflow 字段映射与参数预览升级）已完成：后端已提供 Task Trace Flow API，前端已新增独立 Trace Flow 页面，首页已改为任务工作台，任务详情已升级为概览、样本、Trace、Badcase、Attempts、参数页签，Workflow Inspector 已支持字段路径表格映射与参数预览；下一步进入阶段 5：报告分层分析与闭环动作。
 
 ## 当前已完成
 
@@ -47,13 +47,15 @@
 - Trace Flow 已从 Trace Tree 中独立出来，支持按 Task 查看 Dataset Row、Skill Input、参数来源、Output、Metrics、Badcase 和队列消息形状，帮助解释评测过程中的数据流转。
 - 首页已从产品能力展示调整为任务工作台，优先展示最近任务、待审批 Skill、待审核样本、失败任务和 CI Gate 阻断，并固定“上传数据 -> 选择 Workflow -> 创建任务 -> 查看报告”主流程入口。
 - 任务详情已抽成驾驶舱组件，按概览、样本、Trace、Badcase、Attempts、参数组织，参数页可查看任务冻结参数、Skill 参数来源和 Secret 脱敏说明。
+- Workflow Inspector 已从纯 JSON 编辑升级为字段映射表格，字段路径可从 Dataset `field_paths`、字段 schema 和上游节点 `output_mapping` 自动推导，并保留 JSON 高级模式。
+- Workflow Inspector 已新增“参数预览”Tab，可选择 Dataset Version 调用 `/workflow-graphs/parameter-preview`，展示解析后配置和 default/workflow_config/task_override/expression/secret_ref 来源。
 
 ## 最近验证
 
 - `python -m pytest -q`：48 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v7`，Run `run-5a86aceede3f` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：4 个测试文件、33 个测试通过。
+- `cd frontend && npm test`：4 个测试文件、35 个测试通过。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：8 个 Playwright E2E 测试通过，覆盖任务主链路、任务报告进入 Trace Flow、参数来源查看、CI Gate 创建与阻断评估、Annotation Queue 领取/审核/回流 Golden，以及 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Playwright E2E 测试通过，覆盖 Workflow 画布新增节点、聚合策略、删除下游连线、新增 Join、撤销/重做、删除节点、保存草稿回放、试运行回填、校验、发布。
@@ -77,6 +79,37 @@
 - 后续建议优先进入 Trace Tree 独立页面、CI Gate 历史记录、Annotation Queue 批量审核、多 Judge 一致性视图、红队安全扫描和真实 MySQL/Redis/Celery Repository/Worker 接入。
 
 ## 最近改动
+
+### 2026-05-31 Workflow 字段映射与参数预览
+
+- 改动摘要：完成评测数据流升级计划阶段 4。Workflow 图模型新增 `buildAvailableFieldPaths`，可根据 Dataset 字段路径、字段 schema 和选中节点上游输出生成可选路径；Workflow Inspector 新增字段映射表格编辑器，减少手写 JSON 出错，同时保留输入/输出/配置 JSON 高级模式；Inspector 新增“参数预览”Tab，可选择 Dataset Version 调用后端参数预览接口，并展示解析后配置、参数来源、表达式路径和 Secret 脱敏状态。
+- 变更文件：
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/pages/workflowDesigner/graphModel.ts`
+  - `frontend/src/pages/workflowDesigner/FieldMappingEditor.tsx`
+  - `frontend/src/pages/workflowDesigner/ParameterPreviewPanel.tsx`
+  - `frontend/src/pages/workflowDesigner/graphModel.test.ts`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-evaluation-flow-productization.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/pages/workflowDesigner/graphModel.test.ts`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "字段路径选择和参数预览"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `python -m pytest -q`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 图模型定向测试：3 passed。
+  - Workflow Inspector 参数预览定向测试：1 passed。
+  - Typecheck：通过。
+  - 前端全量：4 个测试文件、35 passed。
+  - 后端全量：48 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - Build：通过。
+  - Playwright 全量 E2E：8 passed。
+- 下一步：进入阶段 5，新增任务报告分层分析与下一步建议。
 
 ### 2026-05-31 首页任务工作台与任务详情驾驶舱
 

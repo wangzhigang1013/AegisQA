@@ -106,6 +106,29 @@ const demoTraceFlow = {
   ],
 };
 
+const demoDataset = {
+  dataset_id: 'dataset-demo',
+  name: '问答回归集',
+  latest_version: 1,
+  latest_version_id: 'dataset-demo:v1',
+  row_count: 100,
+  golden: true,
+  versions: [
+    {
+      dataset_id: 'dataset-demo',
+      name: '问答回归集',
+      version: 1,
+      version_id: 'dataset-demo:v1',
+      row_count: 100,
+      field_schema: { question: 'string', reference: 'string', expected_label: 'string' },
+      field_paths: ['row.question', 'row.reference', 'row.expected_label'],
+      preview: [{ question: '什么是 AegisQA?', reference: 'AI 评测平台', expected_label: 'pass' }],
+      golden: true,
+      label_field: 'expected_label',
+    },
+  ],
+};
+
 const demoExperiments = [
   {
     experiment_id: 'exp-main',
@@ -275,7 +298,10 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/tasks/task-demo/trace-flow')) {
         return jsonResponse(demoTraceFlow);
       }
-      if (url.endsWith('/runs') || url.endsWith('/datasets') || url.endsWith('/judge-profiles') || url.endsWith('/judge-audits')) {
+      if (url.endsWith('/datasets')) {
+        return jsonResponse([demoDataset]);
+      }
+      if (url.endsWith('/runs') || url.endsWith('/judge-profiles') || url.endsWith('/judge-audits')) {
         return jsonResponse([]);
       }
       if (url.endsWith('/badcases') || url.endsWith('/audit-events')) {
@@ -293,6 +319,19 @@ describe('AegisQA 前端工作台', () => {
       }
       if (url.endsWith('/workflow-graphs/validate')) {
         return jsonResponse({ ok: true, errors: [], warnings: [], execution_levels: [['answer'], ['judge']], graph_tips: [], node_count: 2, edge_count: 1 });
+      }
+      if (url.endsWith('/workflow-graphs/parameter-preview')) {
+        return jsonResponse({
+          workflow_name: 'RAG 回归评测',
+          nodes: [
+            {
+              node_id: 'answer',
+              skill_ref: 'llm.call@0.1.0',
+              resolved_config: { model: 'mock-model' },
+              parameter_trace: { model: { source: 'workflow_config', value_preview: 'mock-model', redacted: false } },
+            },
+          ],
+        });
       }
       return jsonResponse({});
     });
@@ -457,6 +496,22 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(screen.getByText('均值'));
     expect(await screen.findByText(/聚合策略已更新：mean/)).toBeInTheDocument();
+  });
+
+  it('Workflow Inspector 支持字段路径选择和参数预览', async () => {
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    expect(await screen.findByText('字段映射')).toBeInTheDocument();
+    expect(screen.getByText('row.question')).toBeInTheDocument();
+    expect(screen.getByText('context.answer')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: '参数预览' }));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '选择参数预览数据集' }));
+    fireEvent.click(await screen.findByText('问答回归集 v1'));
+    fireEvent.click(screen.getByRole('button', { name: /预览参数/ }));
+
+    expect(await screen.findByText('mock-model')).toBeInTheDocument();
+    expect(screen.getAllByText(/workflow_config/).length).toBeGreaterThan(0);
   });
 
   it('执行中心默认展示任务列表并可以创建任务', async () => {

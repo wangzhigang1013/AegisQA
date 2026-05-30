@@ -32,7 +32,9 @@ import { ApiError, api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { demoSkills, demoWorkflowGraph } from '../data/demo';
 import type { DatasetVersion, GraphValidationResult, SkillManifest, WorkflowGraph, WorkflowGraphNode } from '../types';
+import { FieldMappingEditor } from './workflowDesigner/FieldMappingEditor';
 import {
+  buildAvailableFieldPaths,
   buildWorkflowGraph,
   edgeId,
   formatNodeLabel,
@@ -44,6 +46,7 @@ import {
   parseJsonObjectField,
   type FlowNode,
 } from './workflowDesigner/graphModel';
+import { ParameterPreviewPanel } from './workflowDesigner/ParameterPreviewPanel';
 
 export function WorkflowDesignerPage() {
   return (
@@ -110,6 +113,7 @@ function WorkflowDesignerContent() {
   const graph = useMemo(() => buildWorkflowGraph(workflowName, nodes, edges), [workflowName, nodes, edges]);
   const selectedNode = selectedNodeId ? nodes.find((node) => node.id === selectedNodeId) ?? null : null;
   const selectedGraphNode = selectedNode?.data.graphNode ?? null;
+  const fieldPathOptions = useMemo(() => buildAvailableFieldPaths(selectedDataset, graph, selectedGraphNode?.node_id), [selectedDataset, graph, selectedGraphNode?.node_id]);
   const selectedOutgoingEdges = selectedNodeId ? edges.filter((edge) => edge.source === selectedNodeId) : [];
   const connectableTargets = selectedNodeId
     ? nodes.filter((node) => node.id !== selectedNodeId && !selectedOutgoingEdges.some((edge) => edge.target === node.id))
@@ -457,120 +461,194 @@ function WorkflowDesignerContent() {
         <Col xs={24} xl={6}>
           <Card className="flat-card full-height" title="节点 Inspector">
             {selectedGraphNode ? (
-              <Space direction="vertical" className="drawer-stack">
-                <Typography.Text strong>节点工具栏</Typography.Text>
-                <Space wrap>
-                  <Button danger icon={<DeleteOutlined />} onClick={deleteSelected}>
-                    删除当前节点
-                  </Button>
-                  <Button icon={<ApiOutlined />} onClick={autoLayout}>
-                    自动布局
-                  </Button>
-                </Space>
-                <Divider />
-                <div>
-                  <Typography.Text type="secondary">节点 ID</Typography.Text>
-                  <Input value={selectedGraphNode.node_id} onChange={(event) => updateSelectedNode({ node_id: event.target.value })} />
-                </div>
-                <div>
-                  <Typography.Text type="secondary">名称</Typography.Text>
-                  <Input value={selectedGraphNode.label} onChange={(event) => updateSelectedNode({ label: event.target.value })} />
-                </div>
-                <div>
-                  <Typography.Text type="secondary">类型</Typography.Text>
-                  <Select
-                    value={selectedGraphNode.node_type}
-                    className="full-width-control"
-                    onChange={(node_type) => updateSelectedNode({ node_type })}
-                    options={['source', 'skill', 'branch', 'join', 'aggregator', 'output'].map((value) => ({ value, label: nodeTypeLabel[value as WorkflowGraphNode['node_type']] }))}
-                  />
-                </div>
-                <div>
-                  <Typography.Text type="secondary">Skill</Typography.Text>
-                  <Select
-                    allowClear
-                    disabled={selectedGraphNode.node_type !== 'skill'}
-                    value={selectedGraphNode.skill_ref}
-                    className="full-width-control"
-                    onChange={(skill_ref) => updateSelectedNode({ skill_ref })}
-                    options={skills.map((skill) => ({ value: skill.skill_id, label: skill.name }))}
-                  />
-                </div>
-                <div>
-                  <Typography.Text type="secondary">条件表达式</Typography.Text>
-                  <Input value={selectedGraphNode.condition} onChange={(event) => updateSelectedNode({ condition: event.target.value })} placeholder="例如 metrics.score > 0.6" />
-                </div>
-                {selectedGraphNode.node_type === 'aggregator' ? (
-                  <div>
-                    <Typography.Text type="secondary">聚合策略</Typography.Text>
-                    <Segmented
-                      block
-                      value={String(selectedGraphNode.config?.strategy ?? 'majority_vote')}
-                      onChange={(value) => updateAggregatorStrategy(String(value))}
-                      options={[
-                        { label: '多数投票', value: 'majority_vote' },
-                        { label: '均值', value: 'mean' },
-                        { label: '一致性', value: 'agreement' },
-                      ]}
-                    />
-                  </div>
-                ) : null}
-                <Form layout="vertical">
-                  <Form.Item label="输入映射 JSON">
-                    <Input.TextArea
-                      key={`${selectedGraphNode.node_id}-input`}
-                      rows={4}
-                      defaultValue={JSON.stringify(selectedGraphNode.input_mapping ?? {}, null, 2)}
-                      onBlur={(event) => updateJsonPatch('input_mapping', event.target.value, updateSelectedNode, setConsoleText)}
-                    />
-                  </Form.Item>
-                  <Form.Item label="输出映射 JSON">
-                    <Input.TextArea
-                      key={`${selectedGraphNode.node_id}-output`}
-                      rows={4}
-                      defaultValue={JSON.stringify(selectedGraphNode.output_mapping ?? {}, null, 2)}
-                      onBlur={(event) => updateJsonPatch('output_mapping', event.target.value, updateSelectedNode, setConsoleText)}
-                    />
-                  </Form.Item>
-                  <Form.Item label="配置 JSON">
-                    <Input.TextArea
-                      key={`${selectedGraphNode.node_id}-config`}
-                      rows={4}
-                      defaultValue={JSON.stringify(selectedGraphNode.config ?? {}, null, 2)}
-                      onBlur={(event) => updateJsonPatch('config', event.target.value, updateSelectedNode, setConsoleText)}
-                    />
-                  </Form.Item>
-                </Form>
-                <Divider />
-                <Typography.Text strong>下游连线</Typography.Text>
-                {selectedOutgoingEdges.length ? (
-                  <Space direction="vertical" className="drawer-stack">
-                    {selectedOutgoingEdges.map((edge) => {
-                      const id = edge.id || edgeId(edge.source, edge.target);
-                      return (
-                        <Button key={id} danger icon={<DeleteOutlined />} onClick={() => deleteEdgeById(id)}>
-                          删除连线 {edge.source} -&gt; {edge.target}
-                        </Button>
-                      );
-                    })}
-                  </Space>
-                ) : (
-                  <Typography.Text type="secondary">当前节点暂无下游连线。</Typography.Text>
-                )}
-                <Divider />
-                <Typography.Text strong>可连接目标</Typography.Text>
-                {connectableTargets.length ? (
-                  <Space direction="vertical" className="drawer-stack">
-                    {connectableTargets.map((node) => (
-                      <Button key={node.id} icon={<PlusOutlined />} onClick={() => connectSelectedNodeTo(node.id)}>
-                        连接到 {node.id}
-                      </Button>
-                    ))}
-                  </Space>
-                ) : (
-                  <Typography.Text type="secondary">没有更多可连接目标。</Typography.Text>
-                )}
-              </Space>
+              <Tabs
+                items={[
+                  {
+                    key: 'basic',
+                    label: '基础配置',
+                    children: (
+                      <Space direction="vertical" className="drawer-stack">
+                        <Typography.Text strong>节点工具栏</Typography.Text>
+                        <Space wrap>
+                          <Button danger icon={<DeleteOutlined />} onClick={deleteSelected}>
+                            删除当前节点
+                          </Button>
+                          <Button icon={<ApiOutlined />} onClick={autoLayout}>
+                            自动布局
+                          </Button>
+                        </Space>
+                        <Divider />
+                        <div>
+                          <Typography.Text type="secondary">节点 ID</Typography.Text>
+                          <Input value={selectedGraphNode.node_id} onChange={(event) => updateSelectedNode({ node_id: event.target.value })} />
+                        </div>
+                        <div>
+                          <Typography.Text type="secondary">名称</Typography.Text>
+                          <Input value={selectedGraphNode.label} onChange={(event) => updateSelectedNode({ label: event.target.value })} />
+                        </div>
+                        <div>
+                          <Typography.Text type="secondary">类型</Typography.Text>
+                          <Select
+                            value={selectedGraphNode.node_type}
+                            className="full-width-control"
+                            onChange={(node_type) => updateSelectedNode({ node_type })}
+                            options={['source', 'skill', 'branch', 'join', 'aggregator', 'output'].map((value) => ({ value, label: nodeTypeLabel[value as WorkflowGraphNode['node_type']] }))}
+                          />
+                        </div>
+                        <div>
+                          <Typography.Text type="secondary">Skill</Typography.Text>
+                          <Select
+                            allowClear
+                            disabled={selectedGraphNode.node_type !== 'skill'}
+                            value={selectedGraphNode.skill_ref}
+                            className="full-width-control"
+                            onChange={(skill_ref) => updateSelectedNode({ skill_ref })}
+                            options={skills.map((skill) => ({ value: skill.skill_id, label: skill.name }))}
+                          />
+                        </div>
+                        <div>
+                          <Typography.Text type="secondary">条件表达式</Typography.Text>
+                          <Input value={selectedGraphNode.condition} onChange={(event) => updateSelectedNode({ condition: event.target.value })} placeholder="例如 metrics.score > 0.6" />
+                        </div>
+                        {selectedGraphNode.node_type === 'aggregator' ? (
+                          <div>
+                            <Typography.Text type="secondary">聚合策略</Typography.Text>
+                            <Segmented
+                              block
+                              value={String(selectedGraphNode.config?.strategy ?? 'majority_vote')}
+                              onChange={(value) => updateAggregatorStrategy(String(value))}
+                              options={[
+                                { label: '多数投票', value: 'majority_vote' },
+                                { label: '均值', value: 'mean' },
+                                { label: '一致性', value: 'agreement' },
+                              ]}
+                            />
+                          </div>
+                        ) : null}
+                        <Divider />
+                        <Typography.Text strong>字段映射</Typography.Text>
+                        <FieldMappingEditor
+                          title="输入字段映射"
+                          value={selectedGraphNode.input_mapping ?? {}}
+                          pathOptions={fieldPathOptions}
+                          onChange={(input_mapping) => updateSelectedNode({ input_mapping })}
+                          addButtonLabel="新增输入映射"
+                        />
+                        <FieldMappingEditor
+                          title="输出字段映射"
+                          value={selectedGraphNode.output_mapping ?? {}}
+                          pathOptions={fieldPathOptions}
+                          onChange={(output_mapping) => updateSelectedNode({ output_mapping })}
+                          addButtonLabel="新增输出映射"
+                        />
+                        <Form layout="vertical">
+                          <Form.Item label="输入映射 JSON">
+                            <Input.TextArea
+                              key={`${selectedGraphNode.node_id}-input-${JSON.stringify(selectedGraphNode.input_mapping ?? {})}`}
+                              rows={4}
+                              defaultValue={JSON.stringify(selectedGraphNode.input_mapping ?? {}, null, 2)}
+                              onBlur={(event) => updateJsonPatch('input_mapping', event.target.value, updateSelectedNode, setConsoleText)}
+                            />
+                          </Form.Item>
+                          <Form.Item label="输出映射 JSON">
+                            <Input.TextArea
+                              key={`${selectedGraphNode.node_id}-output-${JSON.stringify(selectedGraphNode.output_mapping ?? {})}`}
+                              rows={4}
+                              defaultValue={JSON.stringify(selectedGraphNode.output_mapping ?? {}, null, 2)}
+                              onBlur={(event) => updateJsonPatch('output_mapping', event.target.value, updateSelectedNode, setConsoleText)}
+                            />
+                          </Form.Item>
+                          <Form.Item label="配置 JSON">
+                            <Input.TextArea
+                              key={`${selectedGraphNode.node_id}-config`}
+                              rows={4}
+                              defaultValue={JSON.stringify(selectedGraphNode.config ?? {}, null, 2)}
+                              onBlur={(event) => updateJsonPatch('config', event.target.value, updateSelectedNode, setConsoleText)}
+                            />
+                          </Form.Item>
+                        </Form>
+                        <Divider />
+                        <Typography.Text strong>下游连线</Typography.Text>
+                        {selectedOutgoingEdges.length ? (
+                          <Space direction="vertical" className="drawer-stack">
+                            {selectedOutgoingEdges.map((edge) => {
+                              const id = edge.id || edgeId(edge.source, edge.target);
+                              return (
+                                <Button key={id} danger icon={<DeleteOutlined />} onClick={() => deleteEdgeById(id)}>
+                                  删除连线 {edge.source} -&gt; {edge.target}
+                                </Button>
+                              );
+                            })}
+                          </Space>
+                        ) : (
+                          <Typography.Text type="secondary">当前节点暂无下游连线。</Typography.Text>
+                        )}
+                        <Divider />
+                        <Typography.Text strong>可连接目标</Typography.Text>
+                        {connectableTargets.length ? (
+                          <Space direction="vertical" className="drawer-stack">
+                            {connectableTargets.map((node) => (
+                              <Button key={node.id} icon={<PlusOutlined />} onClick={() => connectSelectedNodeTo(node.id)}>
+                                连接到 {node.id}
+                              </Button>
+                            ))}
+                          </Space>
+                        ) : (
+                          <Typography.Text type="secondary">没有更多可连接目标。</Typography.Text>
+                        )}
+                      </Space>
+                    ),
+                  },
+                  {
+                    key: 'edges',
+                    label: '连线',
+                    children: (
+                      <Space direction="vertical" className="drawer-stack">
+                        <Typography.Text strong>下游连线</Typography.Text>
+                        {selectedOutgoingEdges.length ? (
+                          <Space direction="vertical" className="drawer-stack">
+                            {selectedOutgoingEdges.map((edge) => {
+                              const id = edge.id || edgeId(edge.source, edge.target);
+                              return (
+                                <Button key={id} danger icon={<DeleteOutlined />} onClick={() => deleteEdgeById(id)}>
+                                  删除连线 {edge.source} -&gt; {edge.target}
+                                </Button>
+                              );
+                            })}
+                          </Space>
+                        ) : (
+                          <Typography.Text type="secondary">当前节点暂无下游连线。</Typography.Text>
+                        )}
+                        <Divider />
+                        <Typography.Text strong>可连接目标</Typography.Text>
+                        {connectableTargets.length ? (
+                          <Space direction="vertical" className="drawer-stack">
+                            {connectableTargets.map((node) => (
+                              <Button key={node.id} icon={<PlusOutlined />} onClick={() => connectSelectedNodeTo(node.id)}>
+                                连接到 {node.id}
+                              </Button>
+                            ))}
+                          </Space>
+                        ) : (
+                          <Typography.Text type="secondary">没有更多可连接目标。</Typography.Text>
+                        )}
+                      </Space>
+                    ),
+                  },
+                  {
+                    key: 'parameters',
+                    label: '参数预览',
+                    children: (
+                      <ParameterPreviewPanel
+                        graph={graph}
+                        datasetVersions={datasetVersions}
+                        selectedDatasetVersion={selectedDatasetVersion}
+                        onDatasetVersionChange={setSelectedDatasetVersion}
+                      />
+                    ),
+                  },
+                ]}
+              />
             ) : (
               <Alert type="info" showIcon message={selectedEdgeId ? `当前选中连线：${selectedEdgeId}` : '请选择节点后编辑配置。'} />
             )}

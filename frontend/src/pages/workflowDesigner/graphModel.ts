@@ -1,6 +1,6 @@
 import { MarkerType, type Edge, type Node } from '@xyflow/react';
 
-import type { WorkflowGraph, WorkflowGraphNode } from '../../types';
+import type { DatasetVersion, WorkflowGraph, WorkflowGraphNode } from '../../types';
 
 export type FlowNodeData = {
   label: string;
@@ -79,6 +79,48 @@ export function validateWorkflowGraphDraft(graph: WorkflowGraph): GraphDraftIssu
     }
   }
   return issues;
+}
+
+export function buildAvailableFieldPaths(dataset: DatasetVersion | null | undefined, graph: WorkflowGraph, selectedNodeId?: string | null): string[] {
+  const paths = new Set<string>();
+  for (const path of dataset?.field_paths ?? []) {
+    paths.add(path);
+  }
+
+  if (!dataset?.field_paths?.length && dataset?.field_schema) {
+    for (const fieldName of Object.keys(dataset.field_schema)) {
+      paths.add(`row.${fieldName}`);
+    }
+  }
+
+  const upstreamNodeIds = selectedNodeId ? collectUpstreamNodeIds(graph, selectedNodeId) : new Set(graph.nodes.map((node) => node.node_id));
+  for (const node of graph.nodes) {
+    if (selectedNodeId && !upstreamNodeIds.has(node.node_id)) continue;
+    for (const targetPath of Object.values(node.output_mapping ?? {})) {
+      if (typeof targetPath === 'string' && targetPath.trim()) {
+        paths.add(targetPath.trim());
+      }
+    }
+  }
+
+  return [...paths].sort((left, right) => left.localeCompare(right));
+}
+
+function collectUpstreamNodeIds(graph: WorkflowGraph, selectedNodeId: string): Set<string> {
+  const reverseEdges = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    reverseEdges.set(edge.target, [...(reverseEdges.get(edge.target) ?? []), edge.source]);
+  }
+
+  const visited = new Set<string>();
+  const queue = [...(reverseEdges.get(selectedNodeId) ?? [])];
+  while (queue.length) {
+    const nodeId = queue.shift();
+    if (!nodeId || visited.has(nodeId)) continue;
+    visited.add(nodeId);
+    queue.push(...(reverseEdges.get(nodeId) ?? []));
+  }
+  return visited;
 }
 
 export function parseJsonObjectField(value: string, field: string): { ok: true; value: Record<string, unknown> } | { ok: false; issue: GraphDraftIssue } {

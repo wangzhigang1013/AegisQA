@@ -9,7 +9,7 @@
 
 ## 最近一次交互验证
 
-- `npm test`：33 个前端交互/API client/图模型/任务创建向导/首页任务工作台/任务详情驾驶舱/Trace Flow/Experiment/CI Gate/Annotation Queue 测试通过。
+- `npm test`：35 个前端交互/API client/图模型/任务创建向导/首页任务工作台/任务详情驾驶舱/Trace Flow/Workflow 字段映射/参数预览/Experiment/CI Gate/Annotation Queue 测试通过。
 - `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - 最终验收确认：本轮 API 路由拆分和 JSON Store 文件锁不新增可见按钮，现有按钮矩阵仍覆盖全部用户可见主动作。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
@@ -40,7 +40,8 @@
 | Workflow 画布 | 连线 | 可用，React Flow `onConnect` 写入当前 edges；Inspector 同时提供“可连接目标”按钮，便于选择下游节点并创建依赖线 | 前端画布状态 | `npm test` 和 Playwright E2E 覆盖创建连线、删除下游连线 |
 | Workflow 画布 | 删除节点/连线 | 可用，删除选中节点、Inspector 删除当前节点、键盘 Delete/Backspace 删除，或通过 Inspector 删除选中节点的下游连线，并同步画布状态 | 前端画布状态 | `npm test` 覆盖删除节点、键盘删除和删除下游连线；Playwright E2E 覆盖节点工具栏、键盘删除、删除选中节点和 `answer -> judge_a` 下游连线 |
 | Workflow 画布 | 撤销/重做 | 可用，支持节点新增、删除、Inspector 编辑、自动布局、连线的历史回退与恢复 | 前端画布状态 | `npm test` 和 Playwright E2E 覆盖新增 Join 后撤销/重做 |
-| Workflow 画布 | Inspector 编辑 | 可用，支持名称、类型、Skill、条件、JSON 映射、配置和 Aggregator 聚合策略 | 前端画布状态 | `npm test` 覆盖 Aggregator 策略；类型检查覆盖 |
+| Workflow 画布 | Inspector 编辑 | 可用，支持名称、类型、Skill、条件、字段映射表格、JSON 高级映射、配置和 Aggregator 聚合策略；字段路径可从 Dataset 和上游输出自动推导 | 前端画布状态、`GET /datasets` | `npm test` 覆盖 Aggregator 策略、字段路径推导和 Inspector 字段映射展示；类型检查覆盖 |
+| Workflow 画布 | 参数预览 | 可用，Inspector 内选择 Dataset Version 后调用后端参数预览，展示解析后配置、参数来源、表达式路径和 Secret 脱敏状态 | `POST /workflow-graphs/parameter-preview`、`GET /datasets` | `npm test` 覆盖选择数据集、调用预览和展示 `workflow_config` 来源 |
 | Workflow 画布 | 保存草稿 | 可用，新建或更新草稿，保存后回到 Workflow 市场，再打开仍保留名称与节点配置 | `POST/PUT /workflow-drafts` | 后端契约测试与 Playwright E2E 覆盖 |
 | Workflow 画布 | 校验 | 可用，提交当前画布 graph；前端已抽出图模型转换，避免提交静态 demo graph | `POST /workflow-graphs/validate` | 前端图模型单测与 Playwright E2E 覆盖 |
 | Workflow 画布 | 试运行 | 可用，要求先选择 Dataset Version，会回填 step trace 并提示队列消息只携带 `item_id` | `POST /workflow-graphs/dry-run` | 后端契约测试与 Playwright E2E 覆盖 |
@@ -68,7 +69,7 @@
 
 ## 当前仍需增强
 
-- Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；后续需要进一步拆分组件，并补更复杂字段映射 UI。
+- Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；字段映射表格和参数预览已进入 Vitest，后续需要进一步拆分组件并补真实浏览器中的字段映射编辑 E2E。
 - Task 创建向导已加入必选校验、并发/重试/repeat 和成本预算，任务详情已升级为驾驶舱页签；后续需要继续接入 CI Gate、实验 baseline 对比和权限检查。
 - 报告中心、Trace Flow、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、样本级数据流、Experiment baseline 对比、质量门禁阻断评估和人工审核回流；后续需要增强批量审核和更复杂的跨任务 Score Analytics。
 - Judge 审计需要增加多 Judge 一致性和红队安全扫描视图。

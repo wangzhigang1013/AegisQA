@@ -148,15 +148,15 @@
 
 ### Task 4.1：字段路径选择器
 
-- [ ] 从 Dataset field_paths、上游 output_mapping、metrics、context 生成可选路径。
-- [ ] Inspector 字段映射从 JSON 文本升级为表格编辑。
-- [ ] 坏映射保留 JSON 高级模式，并显示校验错误。
+- [x] 从 Dataset field_paths、上游 output_mapping、metrics、context 生成可选路径。
+- [x] Inspector 字段映射从 JSON 文本升级为表格编辑。
+- [x] 坏映射保留 JSON 高级模式，并显示校验错误。
 
 ### Task 4.2：参数预览
 
-- [ ] Inspector 增加“参数预览”Tab。
-- [ ] 选择样本后调用 `/workflow-graphs/parameter-preview`。
-- [ ] 显示 default、workflow_config、task_override、expression、secret_ref 的来源。
+- [x] Inspector 增加“参数预览”Tab。
+- [x] 选择样本后调用 `/workflow-graphs/parameter-preview`。
+- [x] 显示 default、workflow_config、task_override、expression、secret_ref 的来源。
 
 ## 阶段 5：报告分层分析与闭环动作
 
