@@ -162,10 +162,10 @@
 
 ### Task 4.1：任务报告详情结构化
 
-- [ ] 新增测试：报告返回 Task 摘要、版本快照、指标、Step 分布、Badcase。
-- [ ] 前端报告详情拆成摘要、指标、耗时、分数、Badcase、Trace Tree。
-- [ ] 导出 HTML/CSV/JSON 按真实文件内容校验。
-- [ ] 运行报告相关测试。
+- [x] 新增测试：报告返回 Task 摘要、版本快照、指标、Step 分布、Badcase。
+- [x] 前端报告详情拆成摘要、指标、耗时、分数、Badcase、Trace Tree。
+- [x] 导出 HTML/CSV/JSON 按真实文件内容校验。
+- [x] 运行报告相关测试。
 
 ### Task 4.2：Badcase 状态流转
 

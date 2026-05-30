@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-产品严谨化阶段 3（Task 执行中心严谨化）Task 3.2 已完成；本批已新增 Run Attempt 历史执行记录，重新执行任务会创建新的 Run 并保留旧报告快照，任务详情可以展示当前 Attempt、历史 attempts、执行参数和 Trace Tree。下一步进入阶段 4：任务报告与 Badcase 工作流。
+产品严谨化阶段 4（任务报告与 Badcase 工作流）Task 4.1 已完成；本批已把 Task Report 从裸 RunReport 扩展为任务摘要、版本快照、Step 分布、Judge 分数分布、Badcase 和导出内容的结构化报告。下一步进入 Task 4.2：Badcase 状态流转与批量处理。
 
 ## 当前已完成
 
@@ -32,6 +32,8 @@
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
 - 前端任务详情已展示 Run Attempts、当前 Attempt、执行参数和 Trace Tree，并提供“新建 Attempt”动作。
+- Task Report API 已返回 `task_summary`、`version_snapshot`、`step_distribution`、`judge_score_distribution`、RunReport、Badcase 和导出链接。
+- 报告中心已拆出 `ReportSummary` 与 `BadcaseTable`，任务报告页面围绕版本快照、核心指标、Step 分布、Badcase 纠错和导出组织。
 
 ## 最近验证
 
@@ -59,11 +61,44 @@
 
 ## 下一阶段目标
 
-- 进入阶段 4：拆分任务报告详情结构，补任务摘要、版本快照、指标、Step 分布、Badcase、Trace Tree，并把 Badcase 状态流转做成更完整的工作流。
+- 进入阶段 4 Task 4.2：补 Badcase 加入 Golden、加入 Annotation Queue、标记误判、忽略、重开、批量动作，并让所有动作成功后刷新 Task Report。
 - 把 Experiment、Prompt/Skill 版本注册、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 从最小 API 能力继续扩展为完整页面与端到端操作流。
 - 把当前 JSON 文件仓储继续保留为本地 demo，同时规划 MySQL/Redis/Celery 的真实生产接入与部署验收。
 
 ## 最近改动
+
+### 2026-05-31 Task Report 结构化
+
+- 改动摘要：完成阶段 4 Task 4.1。`GET /tasks/{task_id}/report` 新增任务摘要、Dataset/Workflow 版本快照、执行参数、Step 分布、Judge 分数分布；导出 HTML/CSV/JSON 增加内容断言；前端报告页拆出 `ReportSummary` 和 `BadcaseTable`，展示任务上下文、版本快照、指标、Step 分布和 Badcase 纠错入口。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `tests/test_task_center_api.py`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/pages/report/ReportSummary.tsx`
+  - `frontend/src/pages/report/BadcaseTable.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-product-hardening-roadmap.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心"`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Task Center API：2 passed。
+  - 后端全量：36 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 报告中心前端测试：1 passed。
+  - 前端全量：4 个测试文件、25 passed。
+  - Typecheck：通过。
+  - Build：通过。
+  - Playwright 全量 E2E：6 passed。
+- 下一步：进入阶段 4 Task 4.2，补 Badcase 状态流转和批量处理交互。
 
 ### 2026-05-31 Task Run Attempt 历史执行记录
 

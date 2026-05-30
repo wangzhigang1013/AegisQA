@@ -52,7 +52,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-RP-01 | Run 指标聚合 | 已实现 | `aggregate_run_report` |
 | FR-RP-02 | Skill 输出指标入库 | 已实现 | Item metrics 与 report 聚合 |
 | FR-RP-03 | Badcase 明细筛选 | 已实现 | `BadcaseService.filter_badcases`，`GET /badcases` 支持状态、问题类型、原因、Skill、关键词、得分区间 |
-| FR-RP-04 | 单次任务报告 | 已实现基础 | API `/tasks/{task_id}/report` 包装 RunReport、Badcase、导出链接；React 报告中心围绕 Task 展示；Playwright E2E 覆盖任务报告查看、导出和 Badcase 加入 Golden |
+| FR-RP-04 | 单次任务报告 | 已实现基础 | API `/tasks/{task_id}/report` 包装任务摘要、版本快照、Step 分布、Judge 分数分布、RunReport、Badcase、导出链接；React 报告中心围绕 Task 展示摘要、版本、指标、Step 分布和 Badcase；Playwright E2E 覆盖任务报告查看、导出和 Badcase 加入 Golden |
 | FR-ME-01 | Judge Profile 管理 | 已实现基础 | `JudgeProfileService.create_profile/get_profile`，API 已挂载 |
 | FR-ME-02 | Golden Dataset 裁判评测 | 已实现 | `audit_judge_profile` 输出 Accuracy/Precision/Recall/F1/Kappa/混淆矩阵 |
 | FR-ME-03 | 审计结果入库 | 已实现 | `JudgeProfileService.audit_and_store` |

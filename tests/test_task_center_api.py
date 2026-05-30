@@ -157,8 +157,20 @@ def test_task_lifecycle_report_and_trace_tree(tmp_path: Path) -> None:
 
     report = client.get(f"/tasks/{task['task_id']}/report").json()
     assert report["task"]["task_id"] == task["task_id"]
+    assert report["task_summary"]["task_id"] == task["task_id"]
+    assert report["task_summary"]["sample_count"] == 4
+    assert report["version_snapshot"]["dataset"]["version_id"] == dataset["version_id"]
+    assert report["version_snapshot"]["workflow"]["version_id"] == workflow["version_id"]
+    assert report["step_distribution"][0]["step_id"] == "answer"
+    assert report["step_distribution"][0]["total_calls"] == 4
     assert report["report"]["run_id"] == executed["run_id"]
     assert report["export_links"]["html"].endswith("file_format=html")
+    html_export = client.get(f"/runs/{executed['run_id']}/report/export", params={"file_format": "html"}).json()
+    csv_export = client.get(f"/runs/{executed['run_id']}/report/export", params={"file_format": "csv"}).json()
+    json_export = client.get(f"/runs/{executed['run_id']}/report/export", params={"file_format": "json"}).json()
+    assert html_export["content"].startswith("<html>")
+    assert "pass_rate" in csv_export["content"]
+    assert json_export["content"]["run_id"] == executed["run_id"]
 
     next_attempt = client.post(f"/tasks/{task['task_id']}/attempts").json()
     assert next_attempt["run_id"] != executed["run_id"]

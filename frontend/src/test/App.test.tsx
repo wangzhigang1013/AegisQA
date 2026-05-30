@@ -119,6 +119,16 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/tasks/task-demo/report')) {
         return jsonResponse({
           task: { ...demoTask, status: 'completed', completed_items: 100, pass_rate: 0.8, badcase_count: 20 },
+          task_summary: { task_id: 'task-demo', task_name: 'RAG 任务', run_id: 'run-demo', status: 'completed', dataset_name: '问答回归集', workflow_name: 'RAG 回归评测', sample_count: 100, current_attempt: 1 },
+          version_snapshot: {
+            dataset: { dataset_id: 'dataset-demo', version: 1, version_id: 'dataset-demo:v1', name: '问答回归集' },
+            workflow: { workflow_id: 'wf-demo', version_id: 'wf-demo:v1', name: 'RAG 回归评测', step_count: 2 },
+            execution_config: demoTask.execution_config,
+          },
+          step_distribution: [
+            { step_id: 'answer', skill_ref: 'llm.call@0.1.0', total_calls: 100, succeeded: 100, failed: 0, cache_hits: 0, total_latency_ms: 100, average_latency_ms: 1 },
+          ],
+          judge_score_distribution: [{ bucket: '0.8-1.0', count: 80 }],
           report: { run_id: 'run-demo', pass_rate: 0.8, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [] },
           badcases: [],
           export_links: { html: '/runs/run-demo/report/export?file_format=html', csv: '/runs/run-demo/report/export?file_format=csv', json: '/runs/run-demo/report/export?file_format=json' },
@@ -370,6 +380,9 @@ describe('AegisQA 前端工作台', () => {
 
     expect(await screen.findByText('任务报告')).toBeInTheDocument();
     expect(screen.getByText('RAG 任务')).toBeInTheDocument();
+    expect(screen.getByText('任务摘要与版本快照')).toBeInTheDocument();
+    expect(screen.getByText('Step 分布与耗时')).toBeInTheDocument();
+    expect(screen.getByText('answer')).toBeInTheDocument();
     expect(screen.getByText('80')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /导出 HTML \/ CSV/ }));
     expect(await screen.findByText(/报告导出成功/)).toBeInTheDocument();

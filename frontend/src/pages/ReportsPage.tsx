@@ -1,4 +1,4 @@
-import { DownloadOutlined, PlusCircleOutlined } from '@ant-design/icons';
+import { DownloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, Empty, Row, Select, Space, Table, Tag, Typography } from 'antd';
 import ReactECharts from 'echarts-for-react';
@@ -8,6 +8,8 @@ import { api } from '../api/client';
 import { MetricTile } from '../components/MetricTile';
 import { PageHeader } from '../components/PageHeader';
 import type { TaskRecord } from '../types';
+import { BadcaseTable } from './report/BadcaseTable';
+import { ReportSummary } from './report/ReportSummary';
 
 export function ReportsPage() {
   const queryClient = useQueryClient();
@@ -58,11 +60,15 @@ export function ReportsPage() {
   const report = reportQuery.data?.report;
   const task = reportQuery.data?.task ?? selectedTask;
   const badcases = reportQuery.data?.badcases ?? [];
+  const stepDistribution = reportQuery.data?.step_distribution ?? [];
   const latencyData = useMemo(() => {
+    if (stepDistribution.length) {
+      return Object.fromEntries(stepDistribution.map((step) => [step.step_id, step.average_latency_ms]));
+    }
     const metrics = report?.metrics ?? {};
     const stepMetrics = Object.entries(metrics).filter(([key]) => key.includes('latency') || key.includes('耗时'));
     return stepMetrics.length ? Object.fromEntries(stepMetrics) : { Source: 8, Skill: report?.average_latency_ms ?? 0, Judge: report?.p95_latency_ms ?? 0 };
-  }, [report]);
+  }, [report, stepDistribution]);
   const chartOption = {
     tooltip: {},
     grid: { left: 36, right: 20, top: 24, bottom: 32 },
@@ -110,22 +116,7 @@ export function ReportsPage() {
 
       {task ? (
         <>
-          <Card className="flat-card" title="任务摘要">
-            <Table
-              rowKey="task_id"
-              pagination={false}
-              dataSource={[task]}
-              columns={[
-                { title: '任务', dataIndex: 'name' },
-                { title: '数据源', dataIndex: 'dataset_name' },
-                { title: 'Workflow', dataIndex: 'workflow_name' },
-                { title: '样本量', dataIndex: 'total_items' },
-                { title: '已执行', dataIndex: 'completed_items' },
-                { title: '失败', dataIndex: 'failed_items' },
-                { title: 'Badcase', dataIndex: 'badcase_count' },
-              ]}
-            />
-          </Card>
+          <ReportSummary task={task} summary={reportQuery.data?.task_summary} versionSnapshot={reportQuery.data?.version_snapshot} />
 
           <Row gutter={[16, 16]}>
             <Col xs={24} sm={12} xl={6}>
@@ -142,38 +133,29 @@ export function ReportsPage() {
             </Col>
           </Row>
 
-          <Card className="flat-card" title="Step 耗时分布">
+          <Card className="flat-card" title="Step 分布与耗时">
+            {stepDistribution.length ? (
+              <Table
+                rowKey="step_id"
+                size="small"
+                pagination={false}
+                dataSource={stepDistribution}
+                columns={[
+                  { title: 'Step', dataIndex: 'step_id' },
+                  { title: 'Skill', dataIndex: 'skill_ref' },
+                  { title: '调用', dataIndex: 'total_calls' },
+                  { title: '成功', dataIndex: 'succeeded' },
+                  { title: '失败', dataIndex: 'failed' },
+                  { title: '缓存命中', dataIndex: 'cache_hits' },
+                  { title: '平均耗时', dataIndex: 'average_latency_ms', render: (value) => `${Math.round(Number(value ?? 0))} ms` },
+                ]}
+              />
+            ) : null}
             <ReactECharts option={chartOption} style={{ height: 280 }} />
           </Card>
 
           <Card className="flat-card" title="Badcase 明细">
-            {badcases.length ? (
-              <Table
-                rowKey={(record) => String(record.badcase_id ?? record.item_id)}
-                pagination={{ pageSize: 5 }}
-                dataSource={badcases}
-                columns={[
-                  { title: 'Item', dataIndex: 'item_id', render: (value) => value ?? '-' },
-                  { title: '原因', dataIndex: 'reason', render: (value) => String(value ?? '-') },
-                  { title: '状态', dataIndex: 'status', render: (value) => <Tag color="orange">{String(value ?? 'open')}</Tag> },
-                  {
-                    title: '推荐动作',
-                    render: (_, record) => (
-                      <Button
-                        icon={<PlusCircleOutlined />}
-                        loading={correctBadcaseMutation.isPending}
-                        disabled={!canCorrectBadcase(record, task)}
-                        onClick={() => correctBadcaseMutation.mutate(record)}
-                      >
-                        加入 Golden
-                      </Button>
-                    ),
-                  },
-                ]}
-              />
-            ) : (
-              <Empty description="当前任务没有 Badcase。低分、失败或抽样样本会在这里进入人工纠错和 Golden 沉淀。" />
-            )}
+            <BadcaseTable badcases={badcases} task={task} loading={correctBadcaseMutation.isPending} onAddGolden={(badcase) => correctBadcaseMutation.mutate(badcase)} />
           </Card>
         </>
       ) : (
@@ -199,10 +181,6 @@ async function ensureBadcaseId(badcase: Record<string, unknown>, task: TaskRecor
     payload: asRecord(badcase.payload) ?? badcase,
   });
   return created.badcase_id;
-}
-
-function canCorrectBadcase(badcase: Record<string, unknown>, task: TaskRecord | null | undefined): boolean {
-  return Boolean(badcase.badcase_id || (task?.run_id && badcase.item_id));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

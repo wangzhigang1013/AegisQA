@@ -266,6 +266,34 @@ export type TaskRecord = {
 
 export type TaskReport = {
   task: TaskRecord;
+  task_summary?: {
+    task_id: string;
+    task_name: string;
+    run_id: string;
+    status: string;
+    dataset_name?: string;
+    workflow_name?: string;
+    sample_count: number;
+    current_attempt?: number;
+    created_at?: string;
+    updated_at?: string;
+  };
+  version_snapshot?: {
+    dataset: Record<string, unknown>;
+    workflow: Record<string, unknown>;
+    execution_config?: Record<string, unknown>;
+  };
+  step_distribution?: {
+    step_id: string;
+    skill_ref: string;
+    total_calls: number;
+    succeeded: number;
+    failed: number;
+    cache_hits: number;
+    total_latency_ms: number;
+    average_latency_ms: number;
+  }[];
+  judge_score_distribution?: { bucket: string; count: number }[];
   report: RunReport;
   badcases: Record<string, unknown>[];
   export_links: {

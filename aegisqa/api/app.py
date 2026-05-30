@@ -656,9 +656,14 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
     @app.get("/tasks/{task_id}/report")
     def get_task_report(task_id: str) -> dict[str, Any]:
         task = _get_record(store, "tasks", task_id)
-        report = aggregate_run_report(runner.get_run(task["run_id"]))
+        run = runner.get_run(task["run_id"])
+        report = aggregate_run_report(run)
         return {
             "task": task,
+            "task_summary": _build_task_report_summary(task, run),
+            "version_snapshot": _build_task_report_version_snapshot(task, run),
+            "step_distribution": _build_step_distribution(run),
+            "judge_score_distribution": _build_judge_score_distribution(run),
             "report": report.model_dump(mode="json"),
             "badcases": [badcase.model_dump(mode="json") for badcase in report.badcases],
             "export_links": {
@@ -1222,6 +1227,91 @@ def _ensure_task_can_create_attempt(task: dict[str, Any]) -> None:
             status_code=409,
             details={"task_id": task.get("task_id"), "current_status": status},
         )
+
+
+def _build_task_report_summary(task: dict[str, Any], run: RunRecord) -> dict[str, Any]:
+    return {
+        "task_id": task["task_id"],
+        "task_name": task["name"],
+        "run_id": run.run_id,
+        "status": task["status"],
+        "dataset_name": task.get("dataset_name"),
+        "workflow_name": task.get("workflow_name"),
+        "sample_count": run.total_items,
+        "current_attempt": task.get("current_attempt", 1),
+        "created_at": task.get("created_at"),
+        "updated_at": task.get("updated_at"),
+    }
+
+
+def _build_task_report_version_snapshot(task: dict[str, Any], run: RunRecord) -> dict[str, Any]:
+    return {
+        "dataset": {
+            "dataset_id": task["dataset_id"],
+            "version": task["dataset_version"],
+            "version_id": task.get("dataset_version_id") or f"{task['dataset_id']}:v{task['dataset_version']}",
+            "name": task.get("dataset_name"),
+        },
+        "workflow": {
+            "workflow_id": task["workflow_id"],
+            "version_id": task["workflow_version_id"],
+            "name": task.get("workflow_name"),
+            "step_count": len(run.workflow.steps),
+        },
+        "execution_config": task.get("execution_config", {}),
+    }
+
+
+def _build_step_distribution(run: RunRecord) -> list[dict[str, Any]]:
+    by_step: dict[str, dict[str, Any]] = {}
+    for item in run.items:
+        for step in item.steps:
+            bucket = by_step.setdefault(
+                step.step_id,
+                {
+                    "step_id": step.step_id,
+                    "skill_ref": step.skill_ref,
+                    "total_calls": 0,
+                    "succeeded": 0,
+                    "failed": 0,
+                    "cache_hits": 0,
+                    "total_latency_ms": 0.0,
+                },
+            )
+            bucket["total_calls"] += 1
+            if step.status == "succeeded":
+                bucket["succeeded"] += 1
+            if step.status == "failed":
+                bucket["failed"] += 1
+            if step.cache_hit:
+                bucket["cache_hits"] += 1
+            bucket["total_latency_ms"] += step.latency_ms
+
+    result = []
+    for bucket in by_step.values():
+        total_calls = bucket["total_calls"] or 1
+        result.append(
+            {
+                **bucket,
+                "average_latency_ms": bucket["total_latency_ms"] / total_calls,
+            }
+        )
+    return sorted(result, key=lambda item: item["step_id"])
+
+
+def _build_judge_score_distribution(run: RunRecord) -> list[dict[str, Any]]:
+    buckets = {"0-0.6": 0, "0.6-0.8": 0, "0.8-1.0": 0}
+    for item in run.items:
+        score = item.metrics.get("judge_score")
+        if not isinstance(score, (int, float)):
+            continue
+        if score < 0.6:
+            buckets["0-0.6"] += 1
+        elif score < 0.8:
+            buckets["0.6-0.8"] += 1
+        else:
+            buckets["0.8-1.0"] += 1
+    return [{"bucket": bucket, "count": count} for bucket, count in buckets.items()]
 
 
 def _ensure_task_action_allowed(task: dict[str, Any], action: str) -> None:
