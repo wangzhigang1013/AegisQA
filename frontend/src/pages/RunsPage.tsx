@@ -4,17 +4,10 @@ import {
   Alert,
   Button,
   Card,
-  Col,
   Descriptions,
   Drawer,
   Empty,
-  Form,
-  Input,
-  InputNumber,
-  Modal,
   Progress,
-  Row,
-  Select,
   Space,
   Table,
   Tag,
@@ -27,15 +20,7 @@ import { useMemo, useState } from 'react';
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import type { TaskRecord } from '../types';
-
-type TaskFormValues = {
-  name: string;
-  workflow_version_id: string;
-  dataset_version_id: string;
-  chunk_size?: number;
-  concurrency?: number;
-  sample_repeat_times?: number;
-};
+import { TaskCreateWizard, type TaskCreateFormValues } from './task/TaskCreateWizard';
 
 type TaskAction = 'execute' | 'pause' | 'resume' | 'cancel' | 'retry';
 
@@ -44,9 +29,6 @@ export function RunsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [detailTask, setDetailTask] = useState<TaskRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [form] = Form.useForm<TaskFormValues>();
-  const watchedWorkflow = Form.useWatch('workflow_version_id', form);
-  const watchedDataset = Form.useWatch('dataset_version_id', form);
 
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks, refetchOnMount: 'always' });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
@@ -59,7 +41,7 @@ export function RunsPage() {
   const tasks = tasksQuery.data ?? [];
 
   const createTaskMutation = useMutation({
-    mutationFn: (values: TaskFormValues) => {
+    mutationFn: (values: TaskCreateFormValues) => {
       const datasetVersion = datasetVersions.find((item) => item.version.version_id === values.dataset_version_id)?.version;
       if (!datasetVersion || !values.workflow_version_id) {
         throw new Error('创建任务前必须选择 Dataset Version 和 Workflow Version。');
@@ -72,13 +54,15 @@ export function RunsPage() {
         chunk_size: values.chunk_size,
         concurrency: values.concurrency,
         sample_repeat_times: values.sample_repeat_times,
+        max_retries: values.max_retries,
+        retry_backoff_seconds: values.retry_backoff_seconds,
+        cost_budget: values.cost_budget,
       });
     },
     onSuccess: async (task) => {
       setCreateOpen(false);
       setDetailTask(task);
       setNotice(`任务已创建：${task.name}`);
-      form.resetFields();
       await queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
     onError: (error) => setNotice(`创建失败：${formatApiError(error)}`),
@@ -163,63 +147,14 @@ export function RunsPage() {
         />
       </Card>
 
-      <Modal
-        title="创建任务向导"
+      <TaskCreateWizard
         open={createOpen}
-        forceRender
+        loading={createTaskMutation.isPending}
+        datasets={datasetsQuery.data ?? []}
+        workflows={workflowsQuery.data ?? []}
         onCancel={() => setCreateOpen(false)}
-        footer={[
-          <Button key="cancel" onClick={() => setCreateOpen(false)}>取消</Button>,
-          <Button
-            key="create"
-            type="primary"
-            loading={createTaskMutation.isPending}
-            disabled={!watchedWorkflow || !watchedDataset}
-            onClick={() => form.submit()}
-          >
-            确认创建任务
-          </Button>,
-        ]}
-      >
-        <Form form={form} layout="vertical" onFinish={(values) => createTaskMutation.mutate(values)}>
-          <Form.Item name="name" label="任务名称" rules={[{ required: true, message: '请填写任务名称' }]}>
-            <Input placeholder="例如：RAG 回归评测 2026-05-31" />
-          </Form.Item>
-          <Form.Item name="dataset_version_id" label="Dataset Version" rules={[{ required: true, message: '请选择 Dataset' }]}>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择数据版本"
-              options={datasetVersions.map(({ version }) => ({ value: version.version_id, label: `${version.name} v${version.version} / ${version.row_count} 条` }))}
-            />
-          </Form.Item>
-          <Form.Item name="workflow_version_id" label="Workflow Version" rules={[{ required: true, message: '请选择 Workflow' }]}>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择已发布 Workflow"
-              options={(workflowsQuery.data ?? []).map((workflow) => ({ value: workflow.version_id, label: `${workflow.name} v${workflow.version}` }))}
-            />
-          </Form.Item>
-          <Row gutter={12}>
-            <Col span={8}>
-              <Form.Item name="chunk_size" label="分片大小">
-                <InputNumber min={1} className="full-width-control" placeholder="100" />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="concurrency" label="并发">
-                <InputNumber min={1} className="full-width-control" placeholder="1" />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="sample_repeat_times" label="重复次数">
-                <InputNumber min={1} className="full-width-control" placeholder="1" />
-              </Form.Item>
-            </Col>
-          </Row>
-        </Form>
-      </Modal>
+        onSubmit={(values) => createTaskMutation.mutate(values)}
+      />
 
       <TaskDetailDrawer
         task={detailTask}
@@ -265,6 +200,7 @@ function TaskDetailDrawer({
             <Descriptions.Item label="Run">{task.run_id}</Descriptions.Item>
             <Descriptions.Item label="进度">{task.completed_items} / {task.total_items}</Descriptions.Item>
             <Descriptions.Item label="Badcase">{task.badcase_count}</Descriptions.Item>
+            <Descriptions.Item label="执行参数">{formatExecutionConfig(task)}</Descriptions.Item>
           </Descriptions>
           <Card size="small" title="Trace Tree">
             {traceQuery.data?.items?.length ? (
@@ -328,6 +264,19 @@ function taskActionDisabledReason(task: TaskRecord, action: TaskAction): string 
 function taskProgress(task: TaskRecord): number {
   if (!task.total_items) return 0;
   return Math.round((task.completed_items / task.total_items) * 100);
+}
+
+function formatExecutionConfig(task: TaskRecord): string {
+  const config = task.execution_config;
+  if (!config) return '-';
+  const retry = config.retry ?? {};
+  return [
+    `并发 ${config.concurrency ?? '-'}`,
+    `repeat ${config.sample_repeat_times ?? '-'}`,
+    `重试 ${retry.max_retries ?? '-'}`,
+    `退避 ${retry.backoff_seconds ?? '-'}s`,
+    `预算 ${config.cost_budget ?? '-'}`,
+  ].join(' / ');
 }
 
 function statusColor(status: string): string {

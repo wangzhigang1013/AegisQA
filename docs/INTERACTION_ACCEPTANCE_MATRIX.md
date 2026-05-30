@@ -9,7 +9,7 @@
 
 ## 最近一次交互验证
 
-- `npm test`：22 个前端交互/API client/图模型测试通过。
+- `npm test`：24 个前端交互/API client/图模型/任务创建向导测试通过。
 - `npm run e2e`：6 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务报告 -> 纠错 Badcase”主链路，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Headless Chrome CDP：概览页额外验证真实 Dashboard 指标，以及 Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 产品化入口。
@@ -42,7 +42,7 @@
 | Workflow 画布 | 校验 | 可用，提交当前画布 graph；前端已抽出图模型转换，避免提交静态 demo graph | `POST /workflow-graphs/validate` | 前端图模型单测与 Playwright E2E 覆盖 |
 | Workflow 画布 | 试运行 | 可用，要求先选择 Dataset Version，会回填 step trace 并提示队列消息只携带 `item_id` | `POST /workflow-graphs/dry-run` | 后端契约测试与 Playwright E2E 覆盖 |
 | Workflow 画布 | 发布 | 可用，提交当前画布 graph；后端发布阻断错误会回填到 Console“错误与建议” | `POST /workflow-graphs/publish` | 后端发布阻断测试、前端发布失败测试与 Playwright E2E 覆盖 |
-| 执行中心 | 创建任务 | 可用，弹窗选择 Workflow/Dataset；Select 支持搜索并在进入页面时刷新，避免历史数据过多时无法选择新版本 | `POST /tasks`、`GET /workflows`、`GET /datasets` | `npm test` 覆盖创建向导；Playwright E2E 覆盖真实创建 |
+| 执行中心 | 创建任务 | 可用，独立向导选择 Dataset Version 和 Workflow Version；未选择时禁用创建；支持分片大小、并发、repeat、最大重试、重试退避、成本预算并保存到任务快照 | `POST /tasks`、`GET /workflows`、`GET /datasets` | `TaskCreateWizard` 单测覆盖必选校验和参数提交；后端测试覆盖 `execution_config` 落库；Playwright E2E 覆盖真实创建 |
 | 执行中心 | 执行/暂停/恢复/取消/重试 | 可用，动作绑定任务并刷新列表；completed/running/canceled 等非法状态会被后端拒绝，前端按钮按状态禁用并显示原因 | `POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed` | `npm test` 覆盖执行状态刷新和完成态禁用；Playwright E2E 覆盖真实执行；P0 后端测试覆盖状态机 |
 | 执行中心 | 任务详情/Trace Tree | 可用，按选中 Task 展示基础信息和 Trace Tree | `GET /tasks`、`GET /tasks/{task_id}/trace-tree` | 类型检查和后端测试覆盖 |
 | 报告中心 | 导出 HTML/CSV | 可用，围绕选中任务导出底层 Run 报告 | `GET /tasks/{task_id}/report`、`GET /runs/{run_id}/report/export` | `npm test` 覆盖导出成功反馈 |
@@ -57,6 +57,6 @@
 ## 当前仍需增强
 
 - Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；后续需要进一步拆分组件，并补更复杂字段映射 UI。
-- Task 创建向导需要进一步加入必选校验、并发/重试/repeat、成本预算、CI Gate 和实验 baseline 对比。
+- Task 创建向导已加入必选校验、并发/重试/repeat 和成本预算；后续需要继续接入 CI Gate、实验 baseline 对比和权限检查。
 - 报告中心需要把已实现的 Experiment/CI Gate/Annotation Queue/Trace Tree API 进一步做成独立可操作视图。
 - Judge 审计需要增加多 Judge 一致性和红队安全扫描视图。

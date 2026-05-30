@@ -175,7 +175,18 @@ export const api = {
     }),
   runs: () => request<RunRecord[]>('/runs'),
   tasks: () => request<TaskRecord[]>('/tasks'),
-  createTask: (body: { name: string; dataset_id: string; dataset_version: number; workflow_version_id: string; chunk_size?: number; concurrency?: number; sample_repeat_times?: number }) =>
+  createTask: (body: {
+    name: string;
+    dataset_id: string;
+    dataset_version: number;
+    workflow_version_id: string;
+    chunk_size?: number;
+    concurrency?: number;
+    sample_repeat_times?: number;
+    max_retries?: number;
+    retry_backoff_seconds?: number;
+    cost_budget?: number;
+  }) =>
     request<TaskRecord>('/tasks', {
       method: 'POST',
       body: JSON.stringify(body),

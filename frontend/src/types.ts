@@ -235,6 +235,16 @@ export type TaskRecord = {
   failed_items: number;
   pass_rate: number;
   badcase_count: number;
+  execution_config?: {
+    chunk_size?: number | null;
+    concurrency?: number | null;
+    sample_repeat_times?: number | null;
+    retry?: {
+      max_retries?: number | null;
+      backoff_seconds?: number | null;
+    };
+    cost_budget?: number | null;
+  };
   created_at: string;
   updated_at: string;
 };

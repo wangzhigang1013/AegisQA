@@ -127,18 +127,28 @@ def test_task_lifecycle_report_and_trace_tree(tmp_path: Path) -> None:
             "dataset_id": dataset["dataset_id"],
             "dataset_version": dataset["version"],
             "workflow_version_id": workflow["version_id"],
+            "concurrency": 3,
+            "sample_repeat_times": 2,
+            "max_retries": 4,
+            "retry_backoff_seconds": 5,
+            "cost_budget": 12.5,
         },
     ).json()
     assert task["status"] == "queued"
-    assert task["total_items"] == 2
+    assert task["total_items"] == 4
     assert task["completed_items"] == 0
     assert task["workflow_version_id"] == workflow["version_id"]
+    assert task["execution_config"]["concurrency"] == 3
+    assert task["execution_config"]["sample_repeat_times"] == 2
+    assert task["execution_config"]["retry"]["max_retries"] == 4
+    assert task["execution_config"]["retry"]["backoff_seconds"] == 5
+    assert task["execution_config"]["cost_budget"] == 12.5
 
     executed = client.post(f"/tasks/{task['task_id']}/execute").json()
     assert executed["status"] == "completed"
-    assert executed["completed_items"] == 2
+    assert executed["completed_items"] == 4
     assert executed["pass_rate"] == 0.5
-    assert executed["badcase_count"] == 1
+    assert executed["badcase_count"] == 2
 
     tasks = client.get("/tasks").json()
     assert tasks[0]["task_id"] == task["task_id"]

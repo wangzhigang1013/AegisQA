@@ -133,11 +133,11 @@
 
 ### Task 3.1：任务创建向导
 
-- [ ] 新增前端测试：必须选择 Dataset Version 和 Workflow Version 才能创建。
-- [ ] 新增前端测试：创建参数包含并发、重试、repeat、成本预算。
-- [ ] 抽出 `TaskCreateWizard.tsx`。
-- [ ] 列表页只负责展示和打开详情。
-- [ ] 运行 `cd frontend && npm test`。
+- [x] 新增前端测试：必须选择 Dataset Version 和 Workflow Version 才能创建。
+- [x] 新增前端测试：创建参数包含并发、重试、repeat、成本预算。
+- [x] 抽出 `TaskCreateWizard.tsx`。
+- [x] 列表页只负责展示和打开详情。
+- [x] 运行 `cd frontend && npm test`。
 
 ### Task 3.2：任务详情与 Run Attempt
 

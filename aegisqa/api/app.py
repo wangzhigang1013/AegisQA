@@ -175,6 +175,9 @@ class TaskCreateRequest(BaseModel):
     chunk_size: int | None = None
     concurrency: int | None = None
     sample_repeat_times: int | None = None
+    max_retries: int | None = None
+    retry_backoff_seconds: int | None = None
+    cost_budget: float | None = None
 
 
 class ExperimentFromRunRequest(BaseModel):
@@ -560,7 +563,17 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
                 sample_repeat_times=request.sample_repeat_times,
             )
         )
-        task = _build_task_record(request.name, dataset.model_dump(mode="json"), workflow, run)
+        execution_config = {
+            "chunk_size": request.chunk_size,
+            "concurrency": request.concurrency,
+            "sample_repeat_times": request.sample_repeat_times,
+            "retry": {
+                "max_retries": request.max_retries,
+                "backoff_seconds": request.retry_backoff_seconds,
+            },
+            "cost_budget": request.cost_budget,
+        }
+        task = _build_task_record(request.name, dataset.model_dump(mode="json"), workflow, run, execution_config=execution_config)
         _save_record(store, "tasks", "task_id", task)
         audit_service.record(actor="api", action="task.create", target=task["task_id"], detail={"run_id": run.run_id})
         return task
@@ -1075,7 +1088,7 @@ def _first_existing(root: Path, names: list[str]) -> Path | None:
     return None
 
 
-def _build_task_record(name: str, dataset: dict[str, Any], workflow: WorkflowVersion, run: RunRecord) -> dict[str, Any]:
+def _build_task_record(name: str, dataset: dict[str, Any], workflow: WorkflowVersion, run: RunRecord, *, execution_config: dict[str, Any] | None = None) -> dict[str, Any]:
     now = _now()
     return {
         "task_id": f"task-{uuid4().hex[:12]}",
@@ -1094,6 +1107,7 @@ def _build_task_record(name: str, dataset: dict[str, Any], workflow: WorkflowVer
         "failed_items": 0,
         "pass_rate": 0.0,
         "badcase_count": 0,
+        "execution_config": execution_config or {},
         "created_at": now,
         "updated_at": now,
     }
