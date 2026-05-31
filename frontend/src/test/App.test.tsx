@@ -97,7 +97,8 @@ const demoRepairTask = {
   affected_items: 12,
   evidence: ['scene=payment 通过率 40%，Badcase 12 条。'],
   recommendation: '优先复核 payment 场景的失败样本，补充 Golden 后再调整 Workflow。',
-  next_actions: ['open_trace_flow', 'seed_annotation_queue'],
+  next_actions: ['open_trace_flow', 'seed_annotation_queue', 'evaluate_ci_gate', 'open_parameter_governance'],
+  action_history: [],
   owner: null,
   created_at: '2026-05-31T00:00:00Z',
   updated_at: '2026-05-31T00:00:00Z',
@@ -536,6 +537,21 @@ describe('AegisQA 前端工作台', () => {
       }
       if (url.endsWith('/repair-tasks/repair-demo/reopen')) {
         return jsonResponse({ ...demoRepairTask, status: 'open', reopen_reason: '复测仍未通过。', reopened_at: '2026-05-31T03:00:00Z' });
+      }
+      if (url.endsWith('/repair-tasks/repair-demo/actions')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { action?: string };
+        if (body.action === 'seed_annotation_queue') {
+          return jsonResponse({
+            action: 'seed_annotation_queue',
+            result: { status: 'created', created_count: 2, annotation_task_ids: ['anno-1', 'anno-2'] },
+            repair_task: { ...demoRepairTask, action_history: [{ action: 'seed_annotation_queue', status: 'created', result_summary: '已创建 2 个审核样本。' }] },
+          });
+        }
+        return jsonResponse({
+          action: 'evaluate_ci_gate',
+          result: { status: 'blocked', blocking_failures: 1, target: { kind: 'task', id: 'task-demo' } },
+          repair_task: { ...demoRepairTask, action_history: [{ action: 'evaluate_ci_gate', status: 'blocked', result_summary: 'CI Gate 复测结果：blocked。' }] },
+        });
       }
       if (url.endsWith('/repair-tasks')) {
         return jsonResponse([demoRepairTask]);
@@ -1276,6 +1292,19 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.change(screen.getByPlaceholderText('说明本次修复做了什么、如何验证'), { target: { value: '已补充 Golden 并调整 Prompt。' } });
     fireEvent.click(screen.getByRole('button', { name: /确认完成/ }));
     expect(await screen.findByText(/修复任务已完成/)).toBeInTheDocument();
+  });
+
+  it('修复任务工作台支持发起人工审核和 CI Gate 复测动作', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    fireEvent.click(await screen.findByRole('button', { name: /发起人工审核/ }));
+    expect(await screen.findByText(/已创建 2 个审核样本/)).toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /CI Gate 复测/ })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: /CI Gate 复测/ }));
+    expect(await screen.findByText(/CI Gate 复测结果：blocked/)).toBeInTheDocument();
+    expect(screen.getByText('seed_annotation_queue')).toBeInTheDocument();
+    expect(screen.getByText('evaluate_ci_gate')).toBeInTheDocument();
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {

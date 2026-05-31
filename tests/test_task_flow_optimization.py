@@ -138,3 +138,43 @@ def test_repair_task_status_flow_is_traceable(tmp_path: Path) -> None:
     assert reopened["status"] == "open"
     assert reopened["reopen_reason"] == "复测仍未通过。"
     assert reopened["reopened_at"]
+
+
+def test_repair_task_actions_create_traceable_follow_up_work(tmp_path: Path) -> None:
+    client, dataset, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "修复动作任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"][0]
+
+    annotation_result = client.post(
+        f"/repair-tasks/{repair['repair_task_id']}/actions",
+        json={"action": "seed_annotation_queue", "assignee": "qa_owner", "limit": 10},
+    ).json()
+
+    assert annotation_result["action"] == "seed_annotation_queue"
+    assert annotation_result["result"]["created_count"] >= 1
+    assert annotation_result["repair_task"]["action_history"][0]["action"] == "seed_annotation_queue"
+    annotation_tasks = client.get(f"/annotation-queue?source_task_id={executed['task_id']}").json()
+    assert annotation_tasks
+    assert annotation_tasks[0]["assignee"] == "qa_owner"
+
+    gate_result = client.post(
+        f"/repair-tasks/{repair['repair_task_id']}/actions",
+        json={"action": "evaluate_ci_gate"},
+    ).json()
+
+    assert gate_result["action"] == "evaluate_ci_gate"
+    assert gate_result["result"]["target"] == {"kind": "task", "id": executed["task_id"]}
+    assert gate_result["repair_task"]["action_history"][-1]["action"] == "evaluate_ci_gate"
+    evaluations = client.get(f"/ci-gates/evaluations?task_id={executed['task_id']}").json()
+    assert evaluations

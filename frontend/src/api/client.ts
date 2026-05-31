@@ -304,6 +304,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  runRepairTaskAction: (repairTaskId: string, body: { action: string; assignee?: string | null; limit?: number }) =>
+    request<{ action: string; result: Record<string, unknown>; repair_task: RepairTaskRecord }>(`/repair-tasks/${encodeURIComponent(repairTaskId)}/actions`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   executeTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/execute`, { method: 'POST' }),
   createTaskAttempt: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/attempts`, { method: 'POST' }),
   pauseTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/pause`, { method: 'POST' }),

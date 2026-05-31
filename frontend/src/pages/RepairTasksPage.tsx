@@ -1,4 +1,4 @@
-import { CheckOutlined, ReloadOutlined, RollbackOutlined, UserAddOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, CheckOutlined, FileSearchOutlined, ReloadOutlined, RollbackOutlined, UserAddOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { useMemo, useState } from 'react';
@@ -79,6 +79,20 @@ export function RepairTasksPage() {
     onError: (error) => setNotice(`重开失败：${formatApiError(error)}`),
   });
 
+  const actionMutation = useMutation({
+    mutationFn: ({ record, action }: { record: RepairTaskRecord; action: string }) =>
+      api.runRepairTaskAction(record.repair_task_id, { action, assignee: 'qa_owner', limit: 20 }),
+    onSuccess: (payload) => {
+      mergeRepairTask(payload.repair_task);
+      const history = payload.repair_task.action_history ?? [];
+      const summary = history[history.length - 1]?.result_summary ?? `${payload.action} 已执行。`;
+      setNotice(summary);
+      void queryClient.invalidateQueries({ queryKey: ['annotation-queue'] });
+      void queryClient.invalidateQueries({ queryKey: ['ci-gates'] });
+    },
+    onError: (error) => setNotice(`动作执行失败：${formatApiError(error)}`),
+  });
+
   function openResolve(record: RepairTaskRecord) {
     setResolveTask(record);
     resolveForm.setFieldsValue({ resolution_note: record.resolution_note ?? '' });
@@ -87,6 +101,27 @@ export function RepairTasksPage() {
   function openReopen(record: RepairTaskRecord) {
     setReopenTask(record);
     reopenForm.setFieldsValue({ reason: record.reopen_reason ?? '' });
+  }
+
+  function mergeRepairTask(updated: RepairTaskRecord) {
+    queryClient.setQueriesData<RepairTaskRecord[]>({ queryKey: ['repair-tasks'] }, (current) => {
+      if (!current) return current;
+      return current.map((item) => {
+        if (item.repair_task_id !== updated.repair_task_id) return item;
+        const seen = new Set<string>();
+        const actionHistory = [...(item.action_history ?? []), ...(updated.action_history ?? [])].filter((entry) => {
+          const key = `${entry.action}:${entry.created_at ?? ''}:${entry.result_summary ?? ''}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        return { ...item, ...updated, action_history: actionHistory };
+      });
+    });
+  }
+
+  function runAction(record: RepairTaskRecord, action: string) {
+    actionMutation.mutate({ record, action });
   }
 
   return (
@@ -164,6 +199,16 @@ export function RepairTasksPage() {
               render: (items: string[]) => <Typography.Text>{items?.[0] ?? '-'}</Typography.Text>,
             },
             {
+              title: '动作历史',
+              dataIndex: 'action_history',
+              width: 180,
+              render: (items: RepairTaskRecord['action_history']) => (
+                <Space direction="vertical" size={2}>
+                  {items?.length ? items.map((item) => <Tag key={`${item.action}-${item.created_at ?? item.result_summary}`} color="blue">{item.action}</Tag>) : <Typography.Text type="secondary">未触发</Typography.Text>}
+                </Space>
+              ),
+            },
+            {
               title: '来源任务',
               dataIndex: 'source_task_id',
               width: 160,
@@ -186,6 +231,25 @@ export function RepairTasksPage() {
                   </Button>
                   <Button size="small" href={`/tasks/${record.source_task_id}/trace`}>
                     Trace
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<FileSearchOutlined />}
+                    loading={actionMutation.isPending}
+                    onClick={() => runAction(record, 'seed_annotation_queue')}
+                  >
+                    发起人工审核
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<CheckCircleOutlined />}
+                    loading={actionMutation.isPending}
+                    onClick={() => runAction(record, 'evaluate_ci_gate')}
+                  >
+                    CI Gate 复测
+                  </Button>
+                  <Button size="small" href={`/reports?task_id=${record.source_task_id}&panel=parameter-governance`}>
+                    参数治理
                   </Button>
                   <Button
                     size="small"

@@ -221,6 +221,12 @@ class RepairTaskReopenRequest(BaseModel):
     reason: str
 
 
+class RepairTaskActionRequest(BaseModel):
+    action: str
+    assignee: str | None = None
+    limit: int = 20
+
+
 class ExperimentFromRunRequest(BaseModel):
     run_id: str
     name: str

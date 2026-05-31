@@ -6,9 +6,12 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 
 from aegisqa.api.app import (
+    CIGateRuleRequest,
+    RepairTaskActionRequest,
     RepairTaskReopenRequest,
     RepairTaskResolveRequest,
     RepairTaskStartRequest,
+    _build_annotation_task,
     RunCreateRequest,
     TaskCreateRequest,
     TaskPreflightRequest,
@@ -20,12 +23,15 @@ from aegisqa.api.app import (
     _build_task_record,
     _build_task_report_summary,
     _build_task_report_version_snapshot,
+    _ci_gate_metrics_from_task,
     _build_trace_tree,
     _build_quality_decision,
     _ensure_task_action_allowed,
     _ensure_task_can_create_attempt,
     _get_record,
+    _evaluate_gate,
     _list_records,
+    _needs_annotation,
     _now,
     _refresh_task_from_run,
     _save_record,
@@ -161,6 +167,26 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             audit_action="repair_task.reopen",
         )
         return record
+
+    @app.post("/repair-tasks/{repair_task_id}/actions")
+    def run_repair_task_action(repair_task_id: str, request: RepairTaskActionRequest) -> dict[str, Any]:
+        record = _get_record(ctx.store, "repair_tasks", repair_task_id)
+        action = request.action
+        if action == "seed_annotation_queue":
+            result = _repair_action_seed_annotation_queue(ctx, record, request)
+        elif action == "evaluate_ci_gate":
+            result = _repair_action_evaluate_ci_gate(ctx, record)
+        elif action in {"open_trace_flow", "open_parameter_governance", "open_dataset_lineage"}:
+            result = _repair_action_link_target(record, action)
+        else:
+            raise AegisQAError(
+                "REPAIR_TASK_ACTION_UNSUPPORTED",
+                "当前修复任务动作暂不支持。",
+                status_code=400,
+                details={"action": action, "supported_actions": ["seed_annotation_queue", "evaluate_ci_gate", "open_trace_flow", "open_parameter_governance", "open_dataset_lineage"]},
+            )
+        updated_record = _append_repair_task_action(ctx, record, action, result)
+        return {"action": action, "result": result, "repair_task": updated_record}
 
     @app.get("/tasks/{task_id}")
     def get_task(task_id: str) -> dict[str, Any]:
@@ -596,6 +622,107 @@ def _transition_repair_task(
     return record
 
 
+def _repair_action_seed_annotation_queue(ctx: RouteContext, repair_task: dict[str, Any], request: RepairTaskActionRequest) -> dict[str, Any]:
+    """从修复任务直接创建人工审核样本，避免报告、工单和审核队列三处割裂。"""
+
+    task = _get_record(ctx.store, "tasks", str(repair_task.get("source_task_id")))
+    run = ctx.runner.get_run(str(repair_task.get("source_run_id") or task["run_id"]))
+    existing = {item.get("item_id") for item in _list_records(ctx.store, "annotation_tasks") if item.get("run_id") == run.run_id}
+    created: list[dict[str, Any]] = []
+    limit = max(1, request.limit)
+    for item in run.items:
+        if len(created) >= limit:
+            break
+        item_payload = item.model_dump(mode="json")
+        if item.item_id in existing or not _needs_annotation(item_payload, strategy="failed_or_low_score"):
+            continue
+        annotation_task = _build_annotation_task(run.run_id, item_payload, assignee=request.assignee, source_task=task)
+        _save_record(ctx.store, "annotation_tasks", "task_id", annotation_task)
+        created.append(annotation_task)
+    return {
+        "status": "created" if created else "reused",
+        "run_id": run.run_id,
+        "source_task_id": task["task_id"],
+        "created_count": len(created),
+        "annotation_task_ids": [item["task_id"] for item in created],
+    }
+
+
+def _repair_action_evaluate_ci_gate(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+    task = _get_record(ctx.store, "tasks", str(repair_task.get("source_task_id")))
+    run = ctx.runner.get_run(str(repair_task.get("source_run_id") or task["run_id"]))
+    quality_gate = task.get("quality_gate") or task.get("execution_config", {}).get("quality_gate") or {}
+    gates: list[CIGateRuleRequest] = []
+    if "pass_rate" in quality_gate:
+        gates.append(CIGateRuleRequest(gate_id="repair_pass_rate", metric="pass_rate", operator=">=", threshold=float(quality_gate["pass_rate"]), blocking=True))
+    if "max_badcase_count" in quality_gate:
+        gates.append(CIGateRuleRequest(gate_id="repair_badcase_count", metric="badcase_count", operator="<=", threshold=float(quality_gate["max_badcase_count"]), blocking=True))
+    if not gates:
+        raise AegisQAError(
+            "REPAIR_TASK_GATE_REQUIRED",
+            "来源任务没有质量门槛，无法执行 CI Gate 复测。",
+            status_code=400,
+            details={"source_task_id": task["task_id"]},
+        )
+
+    metrics = _ci_gate_metrics_from_task(task, run)
+    results = [_evaluate_gate(metrics, gate) for gate in gates]
+    blocking_failures = [item for item in results if item["status"] == "failed" and item["blocking"]]
+    evaluation = {
+        "evaluation_id": f"gateeval-{uuid4().hex[:12]}",
+        "config_id": None,
+        "status": "blocked" if blocking_failures else "passed",
+        "blocking_failures": len(blocking_failures),
+        "target": {"kind": "task", "id": task["task_id"]},
+        "metrics": metrics,
+        "results": results,
+        "source_repair_task_id": repair_task["repair_task_id"],
+        "created_at": _now(),
+    }
+    _save_record(ctx.store, "ci_gate_evaluations", "evaluation_id", evaluation)
+    return evaluation
+
+
+def _repair_action_link_target(repair_task: dict[str, Any], action: str) -> dict[str, Any]:
+    task_id = str(repair_task.get("source_task_id"))
+    link_map = {
+        "open_trace_flow": f"/tasks/{task_id}/trace",
+        "open_parameter_governance": f"/reports?task_id={task_id}&panel=parameter-governance",
+        "open_dataset_lineage": f"/datasets?source_task_id={task_id}",
+    }
+    return {"status": "linked", "url": link_map[action], "source_task_id": task_id}
+
+
+def _append_repair_task_action(ctx: RouteContext, repair_task: dict[str, Any], action: str, result: dict[str, Any]) -> dict[str, Any]:
+    # action_history 是修复闭环的审计骨架，只保存摘要，完整结果仍由对应业务表承载。
+    action_time = _now()
+    history = list(repair_task.get("action_history") or [])
+    history.append(
+        {
+            "action": action,
+            "status": result.get("status", "completed"),
+            "result_summary": _repair_action_summary(action, result),
+            "created_at": action_time,
+        }
+    )
+    repair_task["action_history"] = history
+    repair_task["last_action_result"] = {"action": action, "result": result, "created_at": action_time}
+    repair_task["updated_at"] = action_time
+    _save_record(ctx.store, "repair_tasks", "repair_task_id", repair_task)
+    ctx.audit_service.record(actor="api", action=f"repair_task.action.{action}", target=repair_task["repair_task_id"], detail={"status": result.get("status")})
+    return repair_task
+
+
+def _repair_action_summary(action: str, result: dict[str, Any]) -> str:
+    if action == "seed_annotation_queue":
+        return f"已创建 {result.get('created_count', 0)} 个审核样本。"
+    if action == "evaluate_ci_gate":
+        return f"CI Gate 复测结果：{result.get('status', 'unknown')}。"
+    if result.get("url"):
+        return f"已打开证据入口：{result['url']}"
+    return "动作已记录。"
+
+
 def _build_repair_task_record(task: dict[str, Any], cause: dict[str, Any]) -> dict[str, Any]:
     cause_type = str(cause.get("cause_type") or "unknown")
     severity = str(cause.get("severity") or "info")
@@ -612,6 +739,7 @@ def _build_repair_task_record(task: dict[str, Any], cause: dict[str, Any]) -> di
         "evidence": cause.get("evidence", []),
         "recommendation": cause.get("recommendation", ""),
         "next_actions": cause.get("next_actions", []),
+        "action_history": [],
         "owner": None,
         "created_at": now,
         "updated_at": now,

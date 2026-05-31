@@ -9,7 +9,7 @@
 
 ## 最近一次交互验证
 
-- `npm test`：41 个前端交互/API client/图模型/任务创建向导/Preflight/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/参数预览/报告评测结论/报告根因诊断/Repair Task 生成与工作台/报告风险治理/Experiment/CI Gate/Annotation Queue/Judge 偏差趋势/治理边界测试通过。
+- `npm test`：42 个前端交互/API client/图模型/任务创建向导/Preflight/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/参数预览/报告评测结论/报告根因诊断/Repair Task 生成、工作台与动作闭环/报告风险治理/Experiment/CI Gate/Annotation Queue/Judge 偏差趋势/治理边界测试通过。
 - `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、删除后重连、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - `npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Workflow 画布 E2E 通过；曾发现草稿深链加载覆盖用户本地删除边状态，已通过加载态和单草稿缓存修复。
 - SQLite 轻量仓储后端已通过 `tests/test_sqlite_store_adapter.py`，前端交互仍通过完整 Playwright；报告页 E2E 定位已收紧到任务摘要行，避免任务名同时出现在摘要和跨任务表格时触发严格模式误判。
@@ -62,6 +62,7 @@
 | 报告中心 | 生成 Repair Task | 可用，把当前任务诊断根因沉淀成可追踪修复任务，并展示创建数量；重复根因会复用已有修复任务，避免同一任务反复生成重复工单 | `POST /tasks/{task_id}/repair-tasks/from-diagnostics`、`GET /repair-tasks?source_task_id=` | `tests/test_task_flow_optimization.py` 覆盖后端创建与查询；目标前端测试覆盖按钮调用和成功反馈 |
 | 修复任务 | 修复任务工作台 | 可用，默认展示修复任务列表，支持按状态和来源任务筛选，展示根因、级别、影响样本、证据、负责人，并可跳回报告和 Trace | `GET /repair-tasks?source_task_id=`、`GET /tasks` | `npm test` 覆盖 `/repair-tasks` 页面、证据展示和来源任务入口 |
 | 修复任务 | 领取/完成/重开 | 可用，领取写入负责人和开始时间；完成必须填写修复说明；已完成任务可填写原因后重开；非法状态由后端返回结构化错误 | `POST /repair-tasks/{repair_task_id}/start|resolve|reopen` | `tests/test_task_flow_optimization.py` 覆盖状态流转；`npm test` 覆盖领取和完成弹窗 |
+| 修复任务 | 发起后续动作 | 可用，可从修复任务直接发起人工审核、执行 CI Gate 复测，并跳转参数治理；动作结果写入 `action_history` 与 `last_action_result`，工作台展示动作历史，避免重复处理同一根因 | `POST /repair-tasks/{repair_task_id}/actions`、`GET /annotation-queue`、`GET /ci-gates/evaluations` | `tests/test_task_flow_optimization.py` 覆盖 Annotation Queue 和 CI Gate 复测动作；`npm test -- src/test/App.test.tsx -t "修复任务工作台"` 覆盖按钮反馈和动作历史 |
 | 报告中心 | 跨任务 Score Analytics | 可用，报告页展示跨任务任务数、平均通过率、Badcase 总数、退化任务、任务趋势表和退化告警 | `GET /score-analytics` | `tests/test_risk_analytics_hardening.py` 和 `npm test` 覆盖 |
 | 报告中心 | 成本预算状态 | 可用，围绕当前 Task 展示预算、已用估算成本、剩余预算、ok/warning/exceeded 状态和修复建议 | `GET /tasks/{task_id}/report` 中的 `budget_status` | `tests/test_risk_analytics_hardening.py` 和 `npm test` 覆盖 |
 | 报告中心 | 红队安全扫描 | 可用，点击“运行红队扫描”会扫描当前 Task，并展示风险类型、级别、字段、证据和下一步建议 | `POST /red-team/scans` | `tests/test_risk_analytics_hardening.py` 和 `npm test` 覆盖 |
@@ -94,5 +95,5 @@
 
 - Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；字段映射表格和参数预览已进入 Vitest，后续需要进一步拆分组件并补真实浏览器中的字段映射编辑 E2E。
 - Task 创建向导已加入必选校验、评测目的、质量门槛、Preflight、并发/重试/repeat 和成本预算，任务详情已升级为驾驶舱页签；后续需要继续接入实验 baseline 对比、权限检查和更细粒度执行参数模板。
-- 报告中心、Trace Flow、修复任务、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、评测结论、根因诊断、Repair Task 生成与领取/完成/重开、样本级数据流、跨任务 Score Analytics、红队扫描、成本预算、Experiment baseline/A-B 对比、质量门禁阻断评估与历史趋势、人工审核回流和批量审核候选资产沉淀；后续需要接入真实成本账单、更复杂的趋势筛选，并把 Repair Task 与 Annotation Queue/CI Gate/Dataset 修复做双向联动。
+- 报告中心、Trace Flow、修复任务、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、评测结论、根因诊断、Repair Task 生成、领取/完成/重开、发起人工审核、CI Gate 复测、样本级数据流、跨任务 Score Analytics、红队扫描、成本预算、Experiment baseline/A-B 对比、质量门禁阻断评估与历史趋势、人工审核回流和批量审核候选资产沉淀；后续需要接入真实成本账单、更复杂的趋势筛选，并把 Repair Task 与 Dataset 字段修复、Workflow 参数审查和修复后自动复跑 Attempt 做更深联动。
 - Judge 审计已补齐多 Judge 一致性和偏差趋势最小闭环；后续需要按业务标签、模型版本和时间窗口继续细分偏差归因。

@@ -345,6 +345,17 @@ export type RepairTaskRecord = {
   evidence: string[];
   recommendation: string;
   next_actions: string[];
+  action_history?: {
+    action: string;
+    status: string;
+    result_summary?: string;
+    created_at?: string;
+  }[];
+  last_action_result?: {
+    action: string;
+    result: Record<string, unknown>;
+    created_at?: string;
+  } | null;
   owner?: string | null;
   started_at?: string | null;
   resolved_at?: string | null;
