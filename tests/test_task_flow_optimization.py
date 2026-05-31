@@ -667,7 +667,18 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
     assert retest["scorecard"]["current"]["task_id"] == executed["task_id"]
     assert retest["scorecard"]["candidate"]["task_id"] == retest["task"]["task_id"]
     assert "pass_rate_delta" in retest["comparisons"]["current_to_candidate"]
+    recommendation = retest["promotion_recommendation"]
+    assert recommendation["decision"] == "hold"
+    assert recommendation["thresholds"]["pass_rate"] == 0.95
+    assert recommendation["thresholds"]["max_badcase_count"] == 0
+    assert any(check["check_id"] == "pass_rate_gate" and check["status"] == "failed" for check in recommendation["checks"])
+    assert any(check["check_id"] == "current_improvement" and check["status"] == "warning" for check in recommendation["checks"])
+    assert recommendation["next_actions"][0]["action"] == "open_candidate_report"
     updated_candidate = retest["candidate"]
     assert updated_candidate["status"] == "retested"
     assert updated_candidate["retest_task_id"] == retest["task"]["task_id"]
     assert updated_candidate["candidate_experiment_id"] == retest["candidate_experiment"]["experiment_id"]
+    assert updated_candidate["promotion_recommendation"]["decision"] == "hold"
+
+    cached = client.post(f"/prompt-skill-candidates/{candidate['candidate_id']}/retest").json()
+    assert cached["promotion_recommendation"]["decision"] == "hold"

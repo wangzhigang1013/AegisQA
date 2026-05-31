@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard } from '../types';
+import type { PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation } from '../types';
 
 export function CandidateAssetsPage() {
   const queryClient = useQueryClient();
@@ -206,6 +206,7 @@ export function CandidateAssetsPage() {
                 ，badcase_delta={formatUnknown(lastRetest.comparisons.baseline_to_candidate?.badcase_delta)}
               </Descriptions.Item>
             </Descriptions>
+            {lastRetest.promotion_recommendation ? renderPromotionRecommendation(lastRetest.promotion_recommendation) : null}
             <Button type="primary" href={lastRetest.target_url}>
               查看候选任务报告
             </Button>
@@ -229,6 +230,7 @@ function statusLabel(status: string) {
     approved: '已审批',
     rejected: '已拒绝',
     draft_created: '已生成草稿',
+    retested: '已复跑',
   };
   return labels[status] ?? status;
 }
@@ -256,4 +258,60 @@ function renderMetricCard(label: string, card?: PromptSkillMetricCard) {
       </Space>
     </Card>
   );
+}
+
+function renderPromotionRecommendation(recommendation: PromptSkillPromotionRecommendation) {
+  return (
+    <Alert
+      showIcon
+      type={recommendation.decision === 'promote' ? 'success' : recommendation.decision === 'review' ? 'warning' : 'error'}
+      message={
+        <Space wrap>
+          <Typography.Text strong>晋升建议</Typography.Text>
+          <Tag color={promotionDecisionColor(recommendation.decision)}>{promotionDecisionLabel(recommendation.decision)}</Tag>
+        </Space>
+      }
+      description={
+        <Space direction="vertical" size={8}>
+          <Typography.Text>{recommendation.summary}</Typography.Text>
+          <Space wrap>
+            {recommendation.checks.map((check) => (
+              <Tag key={check.check_id} color={checkStatusColor(check.status)}>
+                {check.message}
+              </Tag>
+            ))}
+          </Space>
+          <Space wrap>
+            {recommendation.next_actions.map((action) => (
+              <Tag key={action.action} color="blue">
+                {action.label}
+              </Tag>
+            ))}
+          </Space>
+        </Space>
+      }
+    />
+  );
+}
+
+function promotionDecisionColor(decision: string) {
+  if (decision === 'promote') return 'green';
+  if (decision === 'review') return 'gold';
+  return 'red';
+}
+
+function promotionDecisionLabel(decision: string) {
+  const labels: Record<string, string> = {
+    promote: '建议晋升',
+    review: '建议复核',
+    hold: '暂不晋升',
+  };
+  return labels[decision] ?? decision;
+}
+
+function checkStatusColor(status: string) {
+  if (status === 'passed') return 'green';
+  if (status === 'warning') return 'gold';
+  if (status === 'failed') return 'red';
+  return 'default';
 }

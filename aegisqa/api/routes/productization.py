@@ -251,6 +251,11 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             candidate_task=task,
             candidate_run=executed_run,
         )
+        promotion_recommendation = _prompt_skill_candidate_promotion_recommendation(
+            scorecard=scorecard,
+            comparisons=comparisons,
+            source_task=source_task,
+        )
         now = _now()
         candidate["status"] = "retested"
         candidate["retest_task_id"] = task["task_id"]
@@ -258,6 +263,7 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         candidate["candidate_experiment_id"] = candidate_experiment["experiment_id"]
         candidate["scorecard"] = scorecard
         candidate["comparisons"] = comparisons
+        candidate["promotion_recommendation"] = promotion_recommendation
         candidate["retested_at"] = now
         candidate["updated_at"] = now
         _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
@@ -274,6 +280,7 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             "candidate_experiment": candidate_experiment,
             "scorecard": scorecard,
             "comparisons": comparisons,
+            "promotion_recommendation": promotion_recommendation,
             "target_url": f"/reports?task_id={task['task_id']}",
         }
 
@@ -611,6 +618,11 @@ def _prompt_skill_candidate_retest_payload(ctx: RouteContext, candidate: dict[st
         candidate_task=task,
         candidate_run=candidate_run,
     )
+    promotion_recommendation = candidate.get("promotion_recommendation") or _prompt_skill_candidate_promotion_recommendation(
+        scorecard=scorecard,
+        comparisons=comparisons,
+        source_task=source_task,
+    )
     return {
         "status": "retested",
         "candidate": candidate,
@@ -618,6 +630,7 @@ def _prompt_skill_candidate_retest_payload(ctx: RouteContext, candidate: dict[st
         "candidate_experiment": candidate_experiment,
         "scorecard": scorecard,
         "comparisons": comparisons,
+        "promotion_recommendation": promotion_recommendation,
         "target_url": f"/reports?task_id={task['task_id']}",
     }
 
@@ -678,3 +691,150 @@ def _prompt_skill_candidate_metric_card(
         "badcase_count": len(report.badcases),
         "p95_latency_ms": report.p95_latency_ms,
     }
+
+
+def _prompt_skill_candidate_promotion_recommendation(
+    *,
+    scorecard: dict[str, Any],
+    comparisons: dict[str, Any],
+    source_task: dict[str, Any],
+) -> dict[str, Any]:
+    """把候选复跑指标转换为可解释的版本晋升建议。"""
+
+    quality_gate = source_task.get("quality_gate") if isinstance(source_task.get("quality_gate"), dict) else {}
+    pass_rate_threshold = _optional_float(quality_gate.get("pass_rate") if isinstance(quality_gate, dict) else None)
+    max_badcase_count = _optional_int(quality_gate.get("max_badcase_count") if isinstance(quality_gate, dict) else None)
+    candidate = scorecard.get("candidate") if isinstance(scorecard.get("candidate"), dict) else {}
+    current_delta = comparisons.get("current_to_candidate") if isinstance(comparisons.get("current_to_candidate"), dict) else {}
+    baseline_delta = comparisons.get("baseline_to_candidate") if isinstance(comparisons.get("baseline_to_candidate"), dict) else None
+
+    checks: list[dict[str, Any]] = [
+        _promotion_pass_rate_check(candidate, pass_rate_threshold),
+        _promotion_badcase_check(candidate, max_badcase_count),
+        _promotion_current_delta_check(current_delta),
+        _promotion_baseline_delta_check(baseline_delta),
+    ]
+    blocking_failed = any(check["status"] == "failed" for check in checks)
+    has_warning = any(check["status"] == "warning" for check in checks)
+    if blocking_failed:
+        decision = "hold"
+        summary = "暂不建议晋升：候选版本没有同时满足质量门槛和对比改善要求。"
+        next_actions = [
+            {"action": "open_candidate_report", "label": "查看候选任务报告"},
+            {"action": "continue_repair", "label": "继续在修复任务中优化 Prompt/Skill"},
+        ]
+    elif has_warning:
+        decision = "review"
+        summary = "建议人工复核：候选版本达到硬性门槛，但改善幅度或 baseline 对比证据还不充分。"
+        next_actions = [
+            {"action": "inspect_candidate_report", "label": "复核候选任务报告"},
+            {"action": "rerun_with_more_samples", "label": "扩大样本后再次复跑"},
+        ]
+    else:
+        decision = "promote"
+        summary = "建议晋升：候选版本已达到质量门槛，并且相对当前版本有明确改善。"
+        next_actions = [
+            {"action": "create_promotion_review", "label": "创建 Workflow 晋升审批"},
+            {"action": "snapshot_candidate_as_baseline", "label": "将候选实验设为新 baseline"},
+        ]
+    return {
+        "decision": decision,
+        "summary": summary,
+        "thresholds": {"pass_rate": pass_rate_threshold, "max_badcase_count": max_badcase_count},
+        "checks": checks,
+        "next_actions": next_actions,
+    }
+
+
+def _promotion_pass_rate_check(candidate: dict[str, Any], threshold: float | None) -> dict[str, Any]:
+    pass_rate = _optional_float(candidate.get("pass_rate"))
+    if threshold is None:
+        return {"check_id": "pass_rate_gate", "status": "skipped", "message": "来源任务未设置通过率门槛。", "details": {"candidate_pass_rate": pass_rate}}
+    if pass_rate is not None and pass_rate >= threshold:
+        return {
+            "check_id": "pass_rate_gate",
+            "status": "passed",
+            "message": f"候选通过率 {_format_percent(pass_rate)}，已达到 {_format_percent(threshold)} 门槛。",
+            "details": {"candidate_pass_rate": pass_rate, "threshold": threshold},
+        }
+    return {
+        "check_id": "pass_rate_gate",
+        "status": "failed",
+        "message": f"候选通过率 {_format_percent(pass_rate)}，低于 {_format_percent(threshold)} 门槛。",
+        "details": {"candidate_pass_rate": pass_rate, "threshold": threshold},
+    }
+
+
+def _promotion_badcase_check(candidate: dict[str, Any], threshold: int | None) -> dict[str, Any]:
+    badcase_count = _optional_int(candidate.get("badcase_count"))
+    if threshold is None:
+        return {"check_id": "badcase_gate", "status": "skipped", "message": "来源任务未设置 Badcase 数量门槛。", "details": {"candidate_badcase_count": badcase_count}}
+    if badcase_count is not None and badcase_count <= threshold:
+        return {
+            "check_id": "badcase_gate",
+            "status": "passed",
+            "message": f"候选 Badcase {badcase_count} 条，未超过 {threshold} 条门槛。",
+            "details": {"candidate_badcase_count": badcase_count, "threshold": threshold},
+        }
+    return {
+        "check_id": "badcase_gate",
+        "status": "failed",
+        "message": f"候选 Badcase {badcase_count if badcase_count is not None else '-'} 条，超过 {threshold} 条门槛。",
+        "details": {"candidate_badcase_count": badcase_count, "threshold": threshold},
+    }
+
+
+def _promotion_current_delta_check(current_delta: dict[str, Any]) -> dict[str, Any]:
+    pass_rate_delta = _optional_float(current_delta.get("pass_rate_delta"))
+    badcase_delta = _optional_int(current_delta.get("badcase_delta"))
+    details = {"pass_rate_delta": pass_rate_delta, "badcase_delta": badcase_delta}
+    if (pass_rate_delta is not None and pass_rate_delta < 0) or (badcase_delta is not None and badcase_delta > 0):
+        return {"check_id": "current_improvement", "status": "failed", "message": "候选版本相对当前版本出现退化。", "details": details}
+    if (pass_rate_delta is not None and pass_rate_delta > 0) or (badcase_delta is not None and badcase_delta < 0):
+        return {
+            "check_id": "current_improvement",
+            "status": "passed",
+            "message": f"相对当前版本通过率变化 {_format_signed_percent(pass_rate_delta)}，Badcase 变化 {badcase_delta if badcase_delta is not None else '-'} 条。",
+            "details": details,
+        }
+    return {"check_id": "current_improvement", "status": "warning", "message": "候选版本相对当前版本没有明显改善。", "details": details}
+
+
+def _promotion_baseline_delta_check(baseline_delta: dict[str, Any] | None) -> dict[str, Any]:
+    if baseline_delta is None:
+        return {"check_id": "baseline_regression", "status": "skipped", "message": "候选资产没有 baseline 实验，跳过 baseline 退化检查。", "details": {}}
+    pass_rate_delta = _optional_float(baseline_delta.get("pass_rate_delta"))
+    badcase_delta = _optional_int(baseline_delta.get("badcase_delta"))
+    details = {"pass_rate_delta": pass_rate_delta, "badcase_delta": badcase_delta}
+    if (pass_rate_delta is not None and pass_rate_delta < 0) or (badcase_delta is not None and badcase_delta > 0):
+        return {"check_id": "baseline_regression", "status": "failed", "message": "候选版本相对 baseline 出现退化。", "details": details}
+    return {"check_id": "baseline_regression", "status": "passed", "message": "候选版本未低于 baseline 指标。", "details": details}
+
+
+def _optional_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _optional_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
+
+
+def _format_percent(value: float | None) -> str:
+    return "-" if value is None else f"{value * 100:.1f}%"
+
+
+def _format_signed_percent(value: float | None) -> str:
+    if value is None:
+        return "-"
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value * 100:.1f}%"

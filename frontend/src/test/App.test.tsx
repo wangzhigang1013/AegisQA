@@ -480,6 +480,17 @@ const demoPromptSkillRetestPayload = {
     current_to_candidate: { pass_rate_delta: 0.15, error_rate_delta: 0, badcase_delta: -4 },
     baseline_to_candidate: { pass_rate_delta: 0.05, error_rate_delta: 0, badcase_delta: -2 },
   },
+  promotion_recommendation: {
+    decision: 'promote',
+    summary: '建议晋升：候选版本已达到质量门槛，并且相对当前版本有明确改善。',
+    thresholds: { pass_rate: 0.9, max_badcase_count: 2 },
+    checks: [
+      { check_id: 'pass_rate_gate', status: 'passed', message: '候选通过率 95.0%，已达到 90.0% 门槛。' },
+      { check_id: 'badcase_gate', status: 'passed', message: '候选 Badcase 1 条，未超过 2 条门槛。' },
+      { check_id: 'current_improvement', status: 'passed', message: '相对当前版本通过率提升 15.0%，Badcase 减少 4 条。' },
+    ],
+    next_actions: [{ action: 'create_promotion_review', label: '创建 Workflow 晋升审批' }],
+  },
   target_url: '/reports?task_id=task-candidate-demo',
 };
 
@@ -1655,6 +1666,9 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('Current：80.0%')).toBeInTheDocument();
     expect(screen.getByText('Candidate：95.0%')).toBeInTheDocument();
     expect(screen.getByText(/current_to_candidate pass_rate_delta=0.15/)).toBeInTheDocument();
+    expect(screen.getByText('晋升建议')).toBeInTheDocument();
+    expect(screen.getByText(/建议晋升：候选版本已达到质量门槛/)).toBeInTheDocument();
+    expect(screen.getByText(/创建 Workflow 晋升审批/)).toBeInTheDocument();
   });
 
   it('报告中心围绕任务展示报告、质量决策和导出入口', async () => {

@@ -771,6 +771,7 @@ export type PromptSkillCandidate = {
   candidate_experiment_id?: string | null;
   scorecard?: PromptSkillCandidateScorecard;
   comparisons?: PromptSkillCandidateComparisons;
+  promotion_recommendation?: PromptSkillPromotionRecommendation;
   created_at: string;
   updated_at?: string;
 };
@@ -804,6 +805,21 @@ export type PromptSkillCandidateComparisons = {
   baseline_to_candidate?: Record<string, unknown> | null;
 };
 
+export type PromptSkillPromotionCheck = {
+  check_id: string;
+  status: 'passed' | 'warning' | 'failed' | 'skipped' | string;
+  message: string;
+  details?: Record<string, unknown>;
+};
+
+export type PromptSkillPromotionRecommendation = {
+  decision: 'promote' | 'review' | 'hold' | string;
+  summary: string;
+  thresholds: Record<string, unknown>;
+  checks: PromptSkillPromotionCheck[];
+  next_actions: Array<{ action: string; label: string }>;
+};
+
 export type PromptSkillCandidateRetestResult = {
   status: string;
   candidate: PromptSkillCandidate;
@@ -811,6 +827,7 @@ export type PromptSkillCandidateRetestResult = {
   candidate_experiment: ExperimentRecord;
   scorecard: PromptSkillCandidateScorecard;
   comparisons: PromptSkillCandidateComparisons;
+  promotion_recommendation?: PromptSkillPromotionRecommendation;
   target_url: string;
 };
 
