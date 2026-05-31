@@ -103,6 +103,17 @@ pre {
   font-size: 14px;
 }
 
+.chart-loading {
+  display: grid;
+  min-height: 260px;
+  place-items: center;
+  border: 1px dashed #c9d7ec;
+  border-radius: 8px;
+  background: #fbfcff;
+  color: #667085;
+  font-size: 13px;
+}
+
 .page-stack {
   display: flex;
   flex-direction: column;

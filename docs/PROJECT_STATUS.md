@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Route-Level Lazy Loading”已完成并通过全量验证。本批次继续优化全流程使用体验的性能和稳定性：`AppShell` 不再静态导入全部业务页面，改为按路由懒加载，报告中心和 Judge 审计等图表页不会在概览首屏提前加载；同时修复懒加载后前端测试的异步等待边界，并把报告页 E2E 任务选择器改成点击 Ant Design Select 外层控件，避免已选中文本遮挡 input 导致主链路偶发超时。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Chart Component Lazy Loading”已完成并通过全量验证。本批次继续优化全流程使用体验的性能和稳定性：在路由级懒加载基础上，报告中心和 Judge 审计页面不再静态导入 `echarts-for-react`，统一改用 `LazyECharts` 组件异步加载图表库，页面框架、任务选择器和关键结论可以先渲染，图表区域有中文加载态。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -58,6 +58,7 @@
 - 前端 `AppShell` 的 TanStack QueryClient 已改为实例内创建，避免测试和嵌入式渲染场景复用旧缓存导致页面数据串扰。
 - Skill 插件受控子进程已增加 stdout 输出体积上限、stdout/stderr 截断标记和本地绝对路径脱敏，避免恶意或异常插件把大响应、本地路径泄露到 API 与前端。
 - 前端主路由已改为 `React.lazy + Suspense` 页面级懒加载，概览页不会提前加载报告中心和 Judge 审计图表页面；构建产物已生成 `OverviewPage`、`ReportsPage`、`JudgeAuditPage` 等页面级 chunk。
+- 报告中心和 Judge 审计图表已改用 `LazyECharts` 组件级懒加载，导入页面模块不会同步加载 `echarts-for-react`，图表区域显示“正在加载图表...”中文状态。
 - 新增 Experiment 实验中心页面，主导航可进入，页面围绕 Run 不可变快照展示 baseline 对比、指标变化、失败样本变化、成本变化，并支持从已完成 Run 生成实验快照。
 - 新增 CI Gate 质量门禁页面，主导航可进入，页面围绕发布门槛展示门禁配置列表、创建弹窗、Task/Run 评估控制台和阻断原因；后端新增 `GET/POST /ci-gates`，`POST /ci-gates/evaluate` 支持直接按 Task/Run 抽取指标。
 - 新增 Annotation Queue 人工审核页面，主导航可进入，页面围绕审核队列展示状态/负责人/来源任务筛选、领取、分派、审核和回流 Golden；后端队列记录已回填 `source_task_id` 与 `source_task_name`，支持按来源任务筛选。
@@ -113,6 +114,12 @@
 
 ## 最近验证
 
+- `cd frontend && npm test -- src/test/lazyCharts.test.tsx`：先 RED 后 GREEN，最终 2 passed；确认导入报告中心和 Judge 审计页面时不会同步加载 `echarts-for-react`。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：6 个测试文件、73 passed；报告中心和 Judge 审计现有交互测试通过。
+- `cd frontend && npm run build`：通过；产物新增约 0.51 kB 的 `LazyECharts` chunk，`charts` chunk 仍单独拆分。
+- `cd frontend && npm run e2e`：8 passed。
+- `python -m pytest -q`：94 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm test -- src/test/lazyRoutes.test.tsx`：先 RED 后 GREEN，最终 2 passed；确认概览路由不会预加载报告中心和 Judge 审计页面模块，进入报告路由时才加载报告页面模块。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：5 个测试文件、71 passed；懒加载后已修复旧测试对页面加载和异步数据的立即断言。
@@ -332,6 +339,33 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Chart Component Lazy Loading
+
+- 改动摘要：在路由级懒加载基础上继续降低图表页进入成本。新增 `LazyECharts` 组件，用 `React.lazy` 动态导入 `echarts-for-react`；报告中心和 Judge 审计页面改用组件级懒加载；新增图表加载态样式；新增懒加载测试锁定“导入页面模块不立即加载 ECharts”。
+- 变更文件：
+  - `frontend/src/components/LazyECharts.tsx`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/pages/JudgeAuditPage.tsx`
+  - `frontend/src/styles.css`
+  - `frontend/src/test/lazyCharts.test.tsx`
+  - `docs/superpowers/plans/2026-06-01-chart-component-lazy-loading.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/lazyCharts.test.tsx`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `python -m pytest -q`
+- 测试结果：
+  - 图表懒加载测试：先 RED 后 GREEN，最终 2 passed。
+  - 前端 typecheck：通过。
+  - 前端全量：6 个测试文件、73 passed。
+  - 前端构建：通过，产物新增 `LazyECharts` chunk，`charts` chunk 继续独立拆分。
+  - Playwright 全量：8 passed。
+  - 后端全量：94 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- 下一步：继续评估真正影响用户全流程的深层优化，包括 Ant Design 组件按需拆分、报告页大表格分页/虚拟化、任务详情样本与 Trace 懒渲染、后端列表查询分页和 SQLite 索引。
 
 ### 2026-06-01 Route-Level Lazy Loading
 

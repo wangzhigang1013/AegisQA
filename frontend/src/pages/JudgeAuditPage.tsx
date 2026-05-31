@@ -1,10 +1,10 @@
 import { AuditOutlined, PartitionOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography } from 'antd';
-import ReactECharts from 'echarts-for-react';
 import { useMemo, useState } from 'react';
 
 import { api } from '../api/client';
+import { LazyECharts } from '../components/LazyECharts';
 import { MetricTile } from '../components/MetricTile';
 import { PageHeader } from '../components/PageHeader';
 
@@ -157,7 +157,7 @@ export function JudgeAuditPage() {
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
           <Card className="flat-card" title="混淆矩阵">
-            <ReactECharts option={matrixOption} style={{ height: 300 }} />
+            <LazyECharts option={matrixOption} style={{ height: 300 }} />
           </Card>
         </Col>
         <Col xs={24} lg={12}>
@@ -185,7 +185,7 @@ export function JudgeAuditPage() {
               <Tag>Profile {trendsQuery.data?.summary.profile_count ?? 0}</Tag>
               <Tag color={(trendsQuery.data?.summary.low_consistency_count ?? 0) > 0 ? 'orange' : 'green'}>低一致性 {trendsQuery.data?.summary.low_consistency_count ?? 0}</Tag>
             </Space>
-            <ReactECharts option={trendsOption} style={{ height: 280 }} />
+            <LazyECharts option={trendsOption} style={{ height: 280 }} />
           </Col>
           <Col xs={24} lg={12}>
             <Typography.Title level={5}>低一致性 Profile</Typography.Title>

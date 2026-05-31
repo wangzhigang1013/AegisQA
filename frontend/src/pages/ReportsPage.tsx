@@ -1,12 +1,12 @@
 import { DownloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, Empty, Row, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
-import ReactECharts from 'echarts-for-react';
 import { useEffect, useMemo, useState, type Key } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSearchParams } from 'react-router-dom';
 
 import { api } from '../api/client';
+import { LazyECharts } from '../components/LazyECharts';
 import { MetricTile } from '../components/MetricTile';
 import { PageHeader } from '../components/PageHeader';
 import type { AuditEvent, ReportExportRequest, TaskRecord } from '../types';
@@ -793,7 +793,7 @@ export function ReportsPage() {
                 ]}
               />
             ) : null}
-            <ReactECharts option={chartOption} style={{ height: 280 }} />
+            <LazyECharts option={chartOption} style={{ height: 280 }} />
           </Card>
 
           <ReportSegmentAnalysis segments={reportQuery.data?.segments} recommendations={reportQuery.data?.recommendations} />
