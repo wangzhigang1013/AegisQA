@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+from html import escape
 from typing import Any
 from uuid import uuid4
 
@@ -41,6 +42,7 @@ from aegisqa.api.app import (
     _save_record,
     _save_workflow_draft,
     _task_attempts,
+    json_dumps,
 )
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
@@ -397,33 +399,38 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.get("/tasks/{task_id}/report")
     def get_task_report(task_id: str) -> dict[str, Any]:
-        task = _get_record(ctx.store, "tasks", task_id)
-        run = ctx.runner.get_run(task["run_id"])
-        report = aggregate_run_report(run)
-        segments = build_report_segments(run)
-        parameter_governance = _build_parameter_governance(task, run)
-        diagnostics = build_task_diagnostics(task, run, report, segments, parameter_governance)
-        return {
-            "task": task,
-            "task_summary": _build_task_report_summary(task, run),
-            "version_snapshot": _build_task_report_version_snapshot(task, run),
-            "preflight_evidence": task.get("preflight_result"),
-            "step_distribution": _build_step_distribution(run),
-            "judge_score_distribution": _build_judge_score_distribution(run),
-            "segments": [segment.model_dump(mode="json") for segment in segments],
-            "recommendations": [recommendation.model_dump(mode="json") for recommendation in build_report_recommendations(segments)],
-            "quality_decision": _build_quality_decision(task, run, report, segments),
-            "parameter_governance": parameter_governance,
-            "budget_status": _build_budget_status(task, report),
-            "diagnostics": diagnostics,
-            "report": report.model_dump(mode="json"),
-            "badcases": [badcase.model_dump(mode="json") for badcase in report.badcases],
-            "export_links": {
-                "json": f"/runs/{task['run_id']}/report/export?file_format=json",
-                "csv": f"/runs/{task['run_id']}/report/export?file_format=csv",
-                "html": f"/runs/{task['run_id']}/report/export?file_format=html",
-            },
-        }
+        return _build_task_report_payload(ctx, task_id)
+
+    @app.get("/tasks/{task_id}/report/export")
+    def export_task_report(task_id: str, file_format: str = "json") -> dict[str, Any]:
+        payload = _build_task_report_payload(ctx, task_id)
+        task = payload["task"]
+        preflight = payload.get("preflight_evidence") or {}
+        if file_format == "json":
+            return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": "json", "content": payload}
+        if file_format == "csv":
+            rows = [
+                "metric,value",
+                f"task_id,{task_id}",
+                f"run_id,{task.get('run_id')}",
+                f"pass_rate,{payload['report'].get('pass_rate')}",
+                f"badcase_count,{len(payload.get('badcases') or [])}",
+                f"preflight_id,{preflight.get('preflight_id') or ''}",
+                f"preflight_status,{preflight.get('status') or ''}",
+            ]
+            return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": "csv", "content": "\n".join(rows)}
+        if file_format == "html":
+            # HTML 导出可能被浏览器直接打开，所有动态内容都必须转义，避免报告名称或 JSON 内容注入脚本。
+            task_name = escape(str(task.get("name") or task_id))
+            preflight_json = escape(json_dumps(preflight))
+            report_json = escape(json_dumps(payload["report"]))
+            content = (
+                f"<html><body><h1>{task_name}</h1>"
+                f"<h2>Preflight</h2><pre>{preflight_json}</pre>"
+                f"<h2>Report</h2><pre>{report_json}</pre></body></html>"
+            )
+            return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": "html", "content": content}
+        raise HTTPException(status_code=400, detail={"message": "file_format 仅支持 json/csv/html"})
 
     @app.get("/tasks/{task_id}/diagnostics")
     def get_task_diagnostics(task_id: str) -> dict[str, Any]:
@@ -561,6 +568,36 @@ def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> d
         "skill_overrides": request.skill_overrides,
         "checks": checks,
         "created_at": _now(),
+    }
+
+
+def _build_task_report_payload(ctx: RouteContext, task_id: str) -> dict[str, Any]:
+    task = _get_record(ctx.store, "tasks", task_id)
+    run = ctx.runner.get_run(task["run_id"])
+    report = aggregate_run_report(run)
+    segments = build_report_segments(run)
+    parameter_governance = _build_parameter_governance(task, run)
+    diagnostics = build_task_diagnostics(task, run, report, segments, parameter_governance)
+    return {
+        "task": task,
+        "task_summary": _build_task_report_summary(task, run),
+        "version_snapshot": _build_task_report_version_snapshot(task, run),
+        "preflight_evidence": task.get("preflight_result"),
+        "step_distribution": _build_step_distribution(run),
+        "judge_score_distribution": _build_judge_score_distribution(run),
+        "segments": [segment.model_dump(mode="json") for segment in segments],
+        "recommendations": [recommendation.model_dump(mode="json") for recommendation in build_report_recommendations(segments)],
+        "quality_decision": _build_quality_decision(task, run, report, segments),
+        "parameter_governance": parameter_governance,
+        "budget_status": _build_budget_status(task, report),
+        "diagnostics": diagnostics,
+        "report": report.model_dump(mode="json"),
+        "badcases": [badcase.model_dump(mode="json") for badcase in report.badcases],
+        "export_links": {
+            "json": f"/tasks/{task['task_id']}/report/export?file_format=json",
+            "csv": f"/tasks/{task['task_id']}/report/export?file_format=csv",
+            "html": f"/tasks/{task['task_id']}/report/export?file_format=html",
+        },
     }
 
 

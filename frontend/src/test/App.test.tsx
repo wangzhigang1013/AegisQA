@@ -1353,6 +1353,9 @@ describe('AegisQA 前端工作台', () => {
           export_links: { html: '/runs/run-demo/report/export?file_format=html', csv: '/runs/run-demo/report/export?file_format=csv', json: '/runs/run-demo/report/export?file_format=json' },
         });
       }
+      if (url.endsWith('/tasks/task-demo/report/export?file_format=html')) {
+        return jsonResponse({ task_id: 'task-demo', file_format: 'html', content: '<html>preflight-demo</html>' });
+      }
       if (url.endsWith('/tasks/task-demo/trace-flow')) {
         return jsonResponse(demoTraceFlow);
       }
@@ -2173,6 +2176,7 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /导出 HTML \/ CSV/ }));
     expect(await screen.findByText(/报告导出成功/)).toBeInTheDocument();
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/report/export?file_format=html'), expect.anything());
 
     fireEvent.click(screen.getByRole('button', { name: /忽略/ }));
     expect(await screen.findByText(/Badcase 已忽略/)).toBeInTheDocument();

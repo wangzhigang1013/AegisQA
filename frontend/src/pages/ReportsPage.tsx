@@ -52,7 +52,7 @@ export function ReportsPage() {
       if (!selectedTask) {
         throw new Error('请先选择任务，再导出报告。');
       }
-      return api.exportReport(selectedTask.run_id, 'html');
+      return api.exportTaskReport(selectedTask.task_id, 'html');
     },
     onSuccess: () => setNotice('报告导出成功：HTML 内容已由后端生成。'),
     onError: (error) => setNotice(error instanceof Error ? error.message : '报告导出失败'),

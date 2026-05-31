@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Task Report Preflight Evidence”已完成目标实现和全量验证。本批次把已持久化的 Preflight 证据接入 Task Report：`GET /tasks/{task_id}/report` 返回 `preflight_evidence`，报告中心的任务摘要与版本快照展示 Preflight 状态、ID 和摘要，让报告复盘也能追踪创建前检查结果。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Task Report Export Preflight Evidence”已完成目标实现和全量验证。本批次把已持久化的 Preflight 证据从在线报告继续下沉到离线导出：新增 `GET /tasks/{task_id}/report/export?file_format=json|csv|html`，导出内容围绕 Task 聚合 Task Summary、Run Report、Badcase 和创建前 Preflight 证据；报告中心导出按钮已从 Run 级导出切换为 Task 级导出，避免离线报告丢失任务和预检上下文。HTML 导出已对任务名和 JSON 内容做转义，避免报告被浏览器打开时出现脚本注入风险。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -36,6 +36,7 @@
 - Task Preflight 已支持持久化证据：每次 `POST /tasks/preflight` 会保存 `preflight_id`，任务创建可引用该 ID，后续报告和审计能追踪用户创建前实际看过哪次预检。
 - 任务详情参数页已展示创建前 Preflight 证据，包括 Preflight ID、状态、生成时间、摘要和逐项检查结果，让预检从后端审计能力进入用户可见闭环。
 - Task Report API 和报告中心摘要已展示创建前 Preflight 证据，报告复盘时可以直接看到本次任务创建前的预检状态、ID 和摘要。
+- Task Report 已新增任务级导出接口，JSON/CSV/HTML 导出都带创建前 Preflight 证据；报告中心导出按钮已改为调用 Task 级导出，避免 Run 级导出缺少任务、预检、Badcase 等业务上下文。
 - Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
@@ -101,8 +102,14 @@
 
 ## 最近验证
 
-- `python -m pytest tests\test_task_center_api.py -q -k preflight_is_persisted`：先 RED 后 GREEN，最终 1 passed，覆盖 Task Report 返回 `preflight_evidence`。
-- `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：先 RED 后 GREEN，最终 1 passed，覆盖报告中心摘要展示 Preflight 证据。
+- `python -m pytest tests\test_task_center_api.py -q -k preflight_is_persisted`：先 RED 后 GREEN，最终 1 passed，覆盖 Task Report 返回 `preflight_evidence`，Task Report Export 的 JSON/CSV/HTML 都包含 `preflight_id`，以及 HTML 导出会转义任务名中的脚本片段。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：先 RED 后 GREEN，最终 1 passed，覆盖报告中心摘要展示 Preflight 证据，并确认导出按钮调用 `/tasks/{task_id}/report/export`。
+- `python -m pytest -q`：92 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：4 个测试文件、62 passed。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
+- `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
 - `python -m pytest -q`：92 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、62 passed。
@@ -248,6 +255,38 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Task Report Export Preflight Evidence
+
+- 改动摘要：新增任务级报告导出接口 `GET /tasks/{task_id}/report/export?file_format=json|csv|html`，导出内容使用 Task Report 聚合结果，包含 Task、Run Report、Badcase、导出链接和创建前 Preflight 证据；报告中心导出按钮已从 Run 级导出切换到 Task 级导出；HTML 导出会转义任务名和 JSON 内容，避免导出报告被浏览器打开时出现脚本注入风险。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_center_api.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/superpowers/plans/2026-05-31-task-report-export-preflight-evidence.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q -k preflight_is_persisted`（RED 后 GREEN）
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`（RED 后 GREEN）
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 后端目标测试：1 passed。
+  - 前端目标测试：1 passed。
+  - 后端全量：92 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：4 个测试文件、62 passed。
+  - TypeScript 与生产构建：通过。
+  - Playwright E2E：8 passed。
+  - 差异检查：通过，仅有 Windows LF/CRLF 换行提示。
+- 下一步：继续检查任务报告导出的用户可下载体验，例如导出文件命名、浏览器下载触发、CSV 明细行、HTML 可读性和报告导出权限。
 
 ### 2026-05-31 Task Report Preflight Evidence
 
