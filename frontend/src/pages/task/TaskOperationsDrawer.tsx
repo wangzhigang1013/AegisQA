@@ -27,7 +27,7 @@ export function TaskOperationsDrawer({
   });
   const reportQuery = useQuery({
     queryKey: ['task-report', task?.task_id],
-    queryFn: () => api.taskReport(task?.task_id ?? ''),
+    queryFn: () => api.taskReport(task?.task_id ?? '', { badcasePage: 1, badcasePageSize: 8 }),
     enabled: Boolean(task?.task_id),
   });
   const traceFlowQuery = useQuery({

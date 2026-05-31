@@ -5,6 +5,7 @@ import io
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from html import escape
+from math import ceil
 from typing import Any
 from uuid import uuid4
 
@@ -406,8 +407,12 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         return _refresh_task_from_run(ctx.store, task, run)
 
     @app.get("/tasks/{task_id}/report")
-    def get_task_report(task_id: str) -> dict[str, Any]:
-        return _build_task_report_payload(ctx, task_id)
+    def get_task_report(
+        task_id: str,
+        badcase_page: int = Query(1, ge=1),
+        badcase_page_size: int = Query(20, ge=1, le=100),
+    ) -> dict[str, Any]:
+        return _build_task_report_payload(ctx, task_id, badcase_page=badcase_page, badcase_page_size=badcase_page_size)
 
     @app.post("/tasks/{task_id}/report/export-requests")
     def create_report_export_request(task_id: str, request: ReportExportRequestCreate) -> dict[str, Any]:
@@ -440,7 +445,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         approval_request: dict[str, Any] | None = None
         if not ctx.access_control.can(role, "report:export"):
             approval_request = _ensure_report_export_approval(ctx, task_id, file_format, role, approval_request_id)
-        payload = _build_task_report_payload(ctx, task_id)
+        payload = _build_task_report_payload(ctx, task_id, include_all_badcases=True)
         task = payload["task"]
         preflight = payload.get("preflight_evidence") or {}
         if file_format == "json":
@@ -894,13 +899,31 @@ def _ensure_report_export_format(file_format: str) -> None:
         )
 
 
-def _build_task_report_payload(ctx: RouteContext, task_id: str) -> dict[str, Any]:
+def _build_task_report_payload(
+    ctx: RouteContext,
+    task_id: str,
+    *,
+    badcase_page: int = 1,
+    badcase_page_size: int = 20,
+    include_all_badcases: bool = False,
+) -> dict[str, Any]:
     task = _get_record(ctx.store, "tasks", task_id)
     run = ctx.runner.get_run(task["run_id"])
     report = aggregate_run_report(run)
     segments = build_report_segments(run)
     parameter_governance = _build_parameter_governance(task, run)
     diagnostics = build_task_diagnostics(task, run, report, segments, parameter_governance)
+    all_badcases = [badcase.model_dump(mode="json") for badcase in report.badcases]
+    page_badcases, badcase_pagination = _paginate_badcases(
+        all_badcases,
+        page=badcase_page,
+        page_size=badcase_page_size,
+        include_all=include_all_badcases,
+    )
+    report_payload = report.model_dump(mode="json")
+    # 页面报告只需要当前页坏例明细；聚合指标仍来自完整 RunReport。
+    # 导出报告会显式 include_all_badcases=True，确保离线报告不被分页截断。
+    report_payload["badcases"] = page_badcases
     return {
         "task": task,
         "task_summary": _build_task_report_summary(task, run),
@@ -914,13 +937,40 @@ def _build_task_report_payload(ctx: RouteContext, task_id: str) -> dict[str, Any
         "parameter_governance": parameter_governance,
         "budget_status": _build_budget_status(task, report),
         "diagnostics": diagnostics,
-        "report": report.model_dump(mode="json"),
-        "badcases": [badcase.model_dump(mode="json") for badcase in report.badcases],
+        "report": report_payload,
+        "badcases": page_badcases,
+        "badcase_pagination": badcase_pagination,
         "export_links": {
             "json": f"/tasks/{task['task_id']}/report/export?file_format=json",
             "csv": f"/tasks/{task['task_id']}/report/export?file_format=csv",
             "html": f"/tasks/{task['task_id']}/report/export?file_format=html",
         },
+    }
+
+
+def _paginate_badcases(
+    badcases: list[dict[str, Any]],
+    *,
+    page: int,
+    page_size: int,
+    include_all: bool,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    total_items = len(badcases)
+    if include_all:
+        return badcases, {
+            "page": 1,
+            "page_size": total_items,
+            "total_items": total_items,
+            "total_pages": 1 if total_items else 0,
+        }
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 1), 100)
+    start = (safe_page - 1) * safe_page_size
+    return badcases[start : start + safe_page_size], {
+        "page": safe_page,
+        "page_size": safe_page_size,
+        "total_items": total_items,
+        "total_pages": ceil(total_items / safe_page_size) if total_items else 0,
     }
 
 

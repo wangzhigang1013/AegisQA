@@ -499,6 +499,12 @@ export type TaskReport = {
   diagnostics?: TaskDiagnostics;
   report: RunReport;
   badcases: Record<string, unknown>[];
+  badcase_pagination?: {
+    page: number;
+    page_size: number;
+    total_items: number;
+    total_pages: number;
+  };
   export_links: {
     json: string;
     csv: string;

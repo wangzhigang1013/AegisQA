@@ -6,6 +6,11 @@ import type { TaskRecord } from '../../types';
 
 type BadcaseTableProps = {
   badcases: Record<string, unknown>[];
+  pagination?: {
+    page: number;
+    page_size: number;
+    total_items: number;
+  };
   task: TaskRecord | null | undefined;
   loading: boolean;
   onAddGolden: (badcase: Record<string, unknown>) => void;
@@ -14,10 +19,12 @@ type BadcaseTableProps = {
   onAddAnnotation: (badcase: Record<string, unknown>) => void;
   selectedRowKeys: Key[];
   onSelectionChange: (keys: Key[]) => void;
+  onPageChange?: (page: number) => void;
 };
 
 export function BadcaseTable({
   badcases,
+  pagination,
   task,
   loading,
   onAddGolden,
@@ -26,6 +33,7 @@ export function BadcaseTable({
   onAddAnnotation,
   selectedRowKeys,
   onSelectionChange,
+  onPageChange,
 }: BadcaseTableProps) {
   if (!badcases.length) {
     return <Empty description="当前任务没有 Badcase。低分、失败或抽样样本会在这里进入人工纠错和 Golden 沉淀。" />;
@@ -35,7 +43,13 @@ export function BadcaseTable({
     <Table
       rowKey={(record) => String(record.badcase_id ?? record.item_id)}
       rowSelection={{ selectedRowKeys, onChange: onSelectionChange }}
-      pagination={{ pageSize: 5 }}
+      pagination={{
+        current: pagination?.page ?? 1,
+        pageSize: pagination?.page_size ?? 5,
+        total: pagination?.total_items ?? badcases.length,
+        showSizeChanger: false,
+        onChange: onPageChange,
+      }}
       dataSource={badcases}
       columns={[
         { title: 'Item', dataIndex: 'item_id', render: (value) => value ?? '-' },

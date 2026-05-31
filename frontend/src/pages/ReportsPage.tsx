@@ -40,12 +40,14 @@ export function ReportsPage() {
   const [exportRole, setExportRole] = useState<ReportExportRole>('Evaluator');
   const [pendingDiagnosticAction, setPendingDiagnosticAction] = useState<string | null>(null);
   const [selectedBadcaseKeys, setSelectedBadcaseKeys] = useState<Key[]>([]);
+  const [badcasePage, setBadcasePage] = useState(1);
+  const badcasePageSize = 5;
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
   const scoreAnalyticsQuery = useQuery({ queryKey: ['score-analytics'], queryFn: api.scoreAnalytics });
   const selectedTask = tasksQuery.data?.find((task) => task.task_id === selectedTaskId) ?? tasksQuery.data?.[0] ?? null;
   const reportQuery = useQuery({
-    queryKey: ['task-report', selectedTask?.task_id],
-    queryFn: () => api.taskReport(selectedTask?.task_id ?? ''),
+    queryKey: ['task-report', selectedTask?.task_id, badcasePage, badcasePageSize],
+    queryFn: () => api.taskReport(selectedTask?.task_id ?? '', { badcasePage, badcasePageSize }),
     enabled: Boolean(selectedTask?.task_id),
   });
   const exportHistoryQuery = useQuery({
@@ -71,6 +73,8 @@ export function ReportsPage() {
 
   function changeSelectedTask(nextTaskId: string) {
     setSelectedTaskId(nextTaskId);
+    setBadcasePage(1);
+    setSelectedBadcaseKeys([]);
     setSearchParams(nextTaskId ? { task_id: nextTaskId } : {});
   }
 
@@ -805,10 +809,15 @@ export function ReportsPage() {
               </Button>
               <BadcaseTable
                 badcases={badcases}
+                pagination={reportQuery.data?.badcase_pagination}
                 task={task}
                 loading={badcaseActionMutation.isPending}
                 selectedRowKeys={selectedBadcaseKeys}
                 onSelectionChange={setSelectedBadcaseKeys}
+                onPageChange={(page) => {
+                  setSelectedBadcaseKeys([]);
+                  setBadcasePage(page);
+                }}
                 onAddGolden={(badcase) => badcaseActionMutation.mutate({ action: 'golden', badcase })}
                 onIgnore={(badcase) => badcaseActionMutation.mutate({ action: 'ignore', badcase })}
                 onReopen={(badcase) => badcaseActionMutation.mutate({ action: 'reopen', badcase })}

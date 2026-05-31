@@ -1313,7 +1313,7 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/repair-tasks')) {
         return jsonResponse([demoRepairTask]);
       }
-      if (url.endsWith('/tasks/task-demo/report')) {
+      if (url.endsWith('/tasks/task-demo/report') || url.includes('/tasks/task-demo/report?')) {
         return jsonResponse({
           task: { ...demoTask, status: 'completed', completed_items: 100, pass_rate: 0.8, badcase_count: 20 },
           task_summary: { task_id: 'task-demo', task_name: 'RAG 任务', run_id: 'run-demo', status: 'completed', dataset_name: '问答回归集', workflow_name: 'RAG 回归评测', sample_count: 100, current_attempt: 1 },
@@ -1389,6 +1389,7 @@ describe('AegisQA 前端工作台', () => {
           },
           report: { run_id: 'run-demo', pass_rate: 0.8, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [demoBadcase] },
           badcases: [demoBadcase],
+          badcase_pagination: { page: 1, page_size: 5, total_items: 1, total_pages: 1 },
           export_links: { html: '/runs/run-demo/report/export?file_format=html', csv: '/runs/run-demo/report/export?file_format=csv', json: '/runs/run-demo/report/export?file_format=json' },
         });
       }
@@ -1966,7 +1967,7 @@ describe('AegisQA 前端工作台', () => {
     const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
     vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
       const url = String(input);
-      if (url.endsWith('/tasks/task-demo/report')) {
+      if (url.endsWith('/tasks/task-demo/report') || url.includes('/tasks/task-demo/report?')) {
         return jsonResponse({ badcases: manyBadcases });
       }
       return defaultFetch?.(input, init) ?? jsonResponse([]);
@@ -2443,7 +2444,7 @@ describe('AegisQA 前端工作台', () => {
 
     expect(await screen.findByText('任务报告')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /忽略/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /忽略/ }));
     expect(await screen.findByText(/Badcase 已忽略/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /重开/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /加入审阅队列/ })).toBeInTheDocument();
@@ -2451,6 +2452,52 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看参数治理' }));
     expect(await screen.findByText('Trace Flow')).toBeInTheDocument();
     expect(await screen.findByText('问答回归集')).toBeInTheDocument();
+  });
+
+  it('报告中心 Badcase 明细使用服务端分页，导出不受页面分页影响', async () => {
+    const manyBadcases = Array.from({ length: 12 }, (_, index) => ({
+      ...demoBadcase,
+      badcase_id: `badcase-page-${index}`,
+      item_id: `badcase-item-${index}`,
+      reason: `judge_label=fail-${index}`,
+    }));
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const reportRequests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/tasks/task-demo/report') && !url.includes('/export')) {
+        reportRequests.push(url);
+        const parsed = new URL(url, 'http://localhost');
+        const page = Number(parsed.searchParams.get('badcase_page') ?? 1);
+        const pageSize = Number(parsed.searchParams.get('badcase_page_size') ?? 12);
+        const start = (page - 1) * pageSize;
+        const pageBadcases = manyBadcases.slice(start, start + pageSize);
+        return jsonResponse({
+          task: { ...demoTask, status: 'completed', pass_rate: 0.2, badcase_count: manyBadcases.length },
+          task_summary: { task_id: 'task-demo', task_name: 'RAG 任务', run_id: 'run-demo', status: 'completed', sample_count: 12 },
+          version_snapshot: { dataset: {}, workflow: {}, execution_config: {} },
+          report: { run_id: 'run-demo', pass_rate: 0.2, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: pageBadcases },
+          badcases: pageBadcases,
+          badcase_pagination: { page, page_size: pageSize, total_items: manyBadcases.length, total_pages: Math.ceil(manyBadcases.length / pageSize) },
+          export_links: { html: '', csv: '', json: '' },
+        });
+      }
+      if (url.includes('/tasks/task-demo/report/export?file_format=json')) {
+        return jsonResponse({ task_id: 'task-demo', file_format: 'json', content: { badcases: manyBadcases, badcase_pagination: { total_items: manyBadcases.length } } });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/reports?task_id=task-demo');
+
+    expect(await screen.findByText('badcase-item-0')).toBeInTheDocument();
+    expect(screen.getByText('badcase-item-4')).toBeInTheDocument();
+    expect(screen.queryByText('badcase-item-5')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('2'));
+    await waitFor(() => {
+      expect(reportRequests.some((request) => request.includes('badcase_page=2') && request.includes('badcase_page_size=5'))).toBe(true);
+    });
+    expect(await screen.findByText('badcase-item-5')).toBeInTheDocument();
   });
 
   it('报告中心展示 Score Analytics、成本预算和红队扫描入口', async () => {

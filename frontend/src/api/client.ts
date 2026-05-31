@@ -451,7 +451,13 @@ export const api = {
   resumeTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/resume`, { method: 'POST' }),
   cancelTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/cancel`, { method: 'POST' }),
   retryFailedTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/retry-failed`, { method: 'POST' }),
-  taskReport: (taskId: string) => request<TaskReport>(`/tasks/${taskId}/report`),
+  taskReport: (taskId: string, pagination: { badcasePage?: number; badcasePageSize?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (pagination.badcasePage) query.set('badcase_page', String(pagination.badcasePage));
+    if (pagination.badcasePageSize) query.set('badcase_page_size', String(pagination.badcasePageSize));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<TaskReport>(`/tasks/${taskId}/report${suffix}`);
+  },
   exportTaskReport: (taskId: string, file_format: 'json' | 'csv' | 'html', role = 'Evaluator', approvalRequestId?: string) => {
     const query = new URLSearchParams({ file_format, role });
     if (approvalRequestId) query.set('approval_request_id', approvalRequestId);
