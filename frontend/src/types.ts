@@ -831,6 +831,34 @@ export type PromptSkillCandidateRetestResult = {
   target_url: string;
 };
 
+export type WorkflowPromotionReview = {
+  review_id: string;
+  candidate_id: string;
+  status: string;
+  source_task_id?: string | null;
+  retest_task_id?: string | null;
+  candidate_run_id?: string | null;
+  candidate_experiment_id?: string | null;
+  candidate_workflow_version_id?: string | null;
+  current_workflow_version_id?: string | null;
+  baseline_experiment_id?: string | null;
+  requester?: string;
+  reviewer?: string;
+  note?: string;
+  review_note?: string;
+  promotion_recommendation?: PromptSkillPromotionRecommendation;
+  target_url?: string;
+  created_at: string;
+  updated_at?: string;
+};
+
+export type WorkflowPromotionReviewResult = {
+  status: string;
+  candidate: PromptSkillCandidate;
+  review: WorkflowPromotionReview;
+  target_url?: string;
+};
+
 export type AssertionEvaluationResult = {
   ok: boolean;
   summary: { passed: number; failed: number };

@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Prompt/Skill Candidate Promotion Gate”已完成全量验证。本批次在候选资产复跑后新增晋升建议：后端根据来源 Task 的质量门槛、candidate 指标、current_to_candidate 与 baseline_to_candidate delta 自动生成 promote/review/hold 决策、检查项和下一步动作；前端 `/candidate-assets` 在三方指标对比下方展示“晋升建议”，让用户知道复跑之后该晋升、复核还是继续修复。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Workflow Promotion Review Loop”已完成全量验证。本批次把候选资产晋升建议里的 `create_promotion_review` 从静态下一步动作接成真实治理流：后端新增 Workflow 晋升审批记录、列表、审批通过/拒绝状态流转；前端候选资产中心可从晋升建议直接创建审批单并展示候选版本、当前版本和审批状态。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -73,6 +73,7 @@
 - Prompt/Skill 候选资产已新增独立治理入口：`GET /prompt-skill-candidates` 支持列表和筛选，`POST /prompt-skill-candidates/{candidate_id}/review` 支持审批/拒绝，`POST /prompt-skill-candidates/{candidate_id}/workflow-draft` 支持审批后创建 Workflow 草稿；React `/candidate-assets` 页面可查看版本差异、审批候选、拒绝候选和生成草稿。
 - Prompt/Skill 候选资产已支持复跑对比：`POST /prompt-skill-candidates/{candidate_id}/retest` 要求候选草稿先发布，随后复用来源 Task 的 Dataset Version 和执行配置创建候选 Task、自动执行、生成候选 Experiment，并返回 baseline/current/candidate 三方指标和 current_to_candidate、baseline_to_candidate 差异。
 - Prompt/Skill 候选资产复跑后已支持晋升建议：后端返回 `promotion_recommendation`，包含 promote/review/hold 决策、通过率门槛、Badcase 门槛、相对当前版本改善、baseline 退化检查和下一步动作；前端候选资产中心展示“晋升建议”和检查项。
+- Workflow 晋升审批已支持真实流转：`POST /prompt-skill-candidates/{candidate_id}/promotion-review` 可把 promote/review 候选资产转为审批单，hold 候选会被结构化阻断；`GET /workflow-promotion-reviews` 支持查询；`POST /workflow-promotion-reviews/{review_id}/approve|reject` 支持审批结论并回写候选资产状态。
 - Workflow 市场进入画布时会把当前草稿写入 `['workflow-draft', draft_id]` 单草稿缓存；画布深链在草稿未加载时显示加载态，异常 graph 结构会给出中文错误提示而不是白屏。
 - Judge 审计已新增多 Judge 一致性 API 与前端弹窗，支持输入多个 Judge 输出并展示两两一致率。
 - 报告中心已新增跨任务 Score Analytics，按 Task 聚合任务数、平均通过率、Badcase、P95、估算成本和退化任务，避免只看单次任务报告。
@@ -95,6 +96,8 @@
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`：1 passed，覆盖候选资产中心审批、生成草稿、复跑对比和三方指标展示。
 - `python -m pytest tests\test_task_flow_optimization.py -q -k "candidate_retest"`：1 passed，覆盖候选资产复跑后的晋升建议、门禁检查、持久化和幂等返回。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`：1 passed，覆盖复跑对比后的“晋升建议”和下一步动作展示。
+- `python -m pytest tests\test_task_flow_optimization.py -q -k "candidate_retest"`：1 passed，覆盖 Workflow 晋升审批创建、hold 阻断、列表查询、幂等返回和审批通过回写候选资产。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`：1 passed，覆盖候选资产中心从晋升建议创建 Workflow 晋升审批并展示审批卡片。
 - `python -m pytest tests\test_task_flow_optimization.py -q`：15 passed。
 - `cd frontend && npm test`：4 个测试文件、54 passed。
 - `cd frontend && npm run build`：通过。
@@ -115,13 +118,13 @@
 - Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；Run Attempt、CI Gate、Experiment baseline/A-B 对比和任务报告均已接入基础闭环。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
 - Experiment 快照、CI Gate、Annotation Queue 和 Trace Tree 已有独立产品页；跨任务 Score Analytics 和成本预算状态已接入报告中心，后续需要继续补真实成本账单、更多趋势筛选维度和跨任务对比可视化。
-- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势、修复任务状态流转、Annotation Queue 发起、CI Gate 复测、修复后复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、候选资产审批、Workflow 草稿创建、候选草稿发布后自动复跑、三方指标对比和晋升建议已有最小闭环；后续需要把候选资产批量治理、负责人 SLA 和真实晋升审批动作继续接起来。
+- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势、修复任务状态流转、Annotation Queue 发起、CI Gate 复测、修复后复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、候选资产审批、Workflow 草稿创建、候选草稿发布后自动复跑、三方指标对比、晋升建议和晋升审批已有最小闭环；后续需要把候选资产批量治理、负责人 SLA 和晋升通过后的 baseline/CI 发布记录继续接起来。
 - SQLite 轻量仓储已接入元数据路径；后续如果要进入多用户生产环境，仍需要正式 Repository 层、数据库迁移、索引治理、权限隔离和 Worker 队列接入。
 - 本地服务曾出现旧 FastAPI 进程未重启导致新增路由 404 的问题；已重启后端并完成浏览器复测。后续修改后端 API 时必须确认 8000 端口加载的是最新代码。
 
 ## 下一阶段目标
 
-- Repair Task 深水区：为 Prompt/Skill 候选资产增加批量审批、负责人工作量视图、逾期升级策略，并把 `create_promotion_review` 从建议动作接成真实 Workflow 晋升审批。
+- Repair Task 深水区：为 Prompt/Skill 候选资产增加批量审批、负责人工作量视图、逾期升级策略，并在晋升通过后自动生成 Experiment baseline 替换建议和 CI Gate 发布记录。
 - 红队规则配置化：把当前内置规则升级为可管理规则集，支持按业务线启用、禁用、阈值和严重级别调整。
 - 成本治理生产化：接入真实 token/cost 账单、模型价格表、预算门禁和成本异常告警。
 - 趋势分析增强：为 Score Analytics 增加 Dataset、Workflow、模型版本、Prompt 版本、时间窗口和标签过滤，并补趋势可视化对比。
@@ -129,6 +132,42 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Workflow Promotion Review Loop
+
+- 改动摘要：把 `create_promotion_review` 从候选资产晋升建议里的静态动作接成真实治理闭环。后端新增 Workflow 晋升审批创建、查询、审批通过/拒绝接口；hold 候选资产创建审批会返回结构化阻断，promote/review 候选资产会生成审批单并支持幂等返回；审批通过后候选资产状态变为 `promoted` 并写入 `promoted_workflow_version_id`。前端候选资产中心新增真实“创建 Workflow 晋升审批”按钮和最近审批卡片。
+- 变更文件：
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/CandidateAssetsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/superpowers/plans/2026-05-31-workflow-promotion-review-loop.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "candidate_retest"`（RED，确认 `/promotion-review` 尚未存在；GREEN 后 1 passed）
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`（RED，确认“创建 Workflow 晋升审批”不是可点击按钮；GREEN 后 1 passed）
+  - `git diff --check`
+  - `python -m pytest tests\test_task_flow_optimization.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 当前测试结果：
+  - 后端目标测试：1 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端目标测试：1 passed。
+  - `git diff --check`：通过，仅有 Windows 换行提示。
+  - 后端定向：15 passed。
+  - 后端全量：80 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端全量测试：4 个测试文件、54 passed。
+  - 前端 build：通过。
+  - Playwright E2E：8 passed。
+- 下一步：进入候选资产批量治理、晋升通过后的 Experiment baseline 替换建议和 CI Gate 发布记录。
 
 ### 2026-05-31 Prompt/Skill Candidate Promotion Gate
 

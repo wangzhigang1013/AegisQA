@@ -18,6 +18,7 @@ import type {
   JudgeAuditTrends,
   PromptSkillCandidate,
   PromptSkillCandidateRetestResult,
+  WorkflowPromotionReviewResult,
   RedTeamScanResult,
   RepairTaskRecord,
   RepairTaskTree,
@@ -196,6 +197,11 @@ export const api = {
   retestPromptSkillCandidate: (candidateId: string) =>
     request<PromptSkillCandidateRetestResult>(`/prompt-skill-candidates/${encodeURIComponent(candidateId)}/retest`, {
       method: 'POST',
+    }),
+  createWorkflowPromotionReview: (candidateId: string, body: { requester?: string; note?: string } = {}) =>
+    request<WorkflowPromotionReviewResult>(`/prompt-skill-candidates/${encodeURIComponent(candidateId)}/promotion-review`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
   skills: () => request<SkillManifest[]>('/skills'),
   skillPackages: () => request<SkillPackageRecord[]>('/skills/packages'),

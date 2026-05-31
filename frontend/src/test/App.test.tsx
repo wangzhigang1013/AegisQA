@@ -494,6 +494,28 @@ const demoPromptSkillRetestPayload = {
   target_url: '/reports?task_id=task-candidate-demo',
 };
 
+const demoWorkflowPromotionReviewPayload = {
+  status: 'pending_review',
+  candidate: {
+    ...demoPromptSkillRetestPayload.candidate,
+    status: 'promotion_review_pending',
+    promotion_review_id: 'promotion-review-demo',
+  },
+  review: {
+    review_id: 'promotion-review-demo',
+    candidate_id: 'prompt-skill-candidate-demo',
+    status: 'pending_review',
+    candidate_workflow_version_id: 'wf-demo:v2',
+    current_workflow_version_id: 'wf-demo:v1',
+    requester: 'qa_owner',
+    note: '候选指标达标，提交晋升审批。',
+    promotion_recommendation: demoPromptSkillRetestPayload.promotion_recommendation,
+    target_url: '/workflows?workflow_version_id=wf-demo:v2',
+    created_at: '2026-05-31T02:00:00Z',
+    updated_at: '2026-05-31T02:00:00Z',
+  },
+};
+
 const pendingPackageSkill = {
   ...demoSkills[0],
   skill_id: 'plugin.echo@0.1.0',
@@ -1111,6 +1133,9 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/prompt-skill-candidates/prompt-skill-candidate-demo/retest')) {
         return jsonResponse(demoPromptSkillRetestPayload);
       }
+      if (url.endsWith('/prompt-skill-candidates/prompt-skill-candidate-demo/promotion-review')) {
+        return jsonResponse(demoWorkflowPromotionReviewPayload);
+      }
       if (url.includes('/prompt-skill-candidates')) {
         return jsonResponse([demoPromptSkillCandidate]);
       }
@@ -1669,6 +1694,11 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('晋升建议')).toBeInTheDocument();
     expect(screen.getByText(/建议晋升：候选版本已达到质量门槛/)).toBeInTheDocument();
     expect(screen.getByText(/创建 Workflow 晋升审批/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /创建 Workflow 晋升审批/ }));
+    expect(await screen.findByText(/晋升审批已创建：promotion-review-demo/)).toBeInTheDocument();
+    expect(screen.getByText('Workflow 晋升审批')).toBeInTheDocument();
+    expect(screen.getByText(/候选版本：wf-demo:v2/)).toBeInTheDocument();
   });
 
   it('报告中心围绕任务展示报告、质量决策和导出入口', async () => {

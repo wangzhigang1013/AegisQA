@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from aegisqa.api.app import create_app
+from aegisqa.api.app import _save_record, create_app
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
@@ -682,3 +682,43 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
 
     cached = client.post(f"/prompt-skill-candidates/{candidate['candidate_id']}/retest").json()
     assert cached["promotion_recommendation"]["decision"] == "hold"
+
+    blocked_review = client.post(
+        f"/prompt-skill-candidates/{candidate['candidate_id']}/promotion-review",
+        json={"requester": "qa_owner", "note": "尝试创建晋升审批。"},
+    )
+    assert blocked_review.status_code == 400
+    assert blocked_review.json()["code"] == "PROMPT_SKILL_CANDIDATE_PROMOTION_NOT_RECOMMENDED"
+
+    promotable_candidate = cached["candidate"]
+    promotable_candidate["promotion_recommendation"] = {
+        **cached["promotion_recommendation"],
+        "decision": "promote",
+        "summary": "建议晋升：候选版本已达到质量门槛，并且相对当前版本有明确改善。",
+        "next_actions": [{"action": "create_promotion_review", "label": "创建 Workflow 晋升审批"}],
+    }
+    _save_record(client.app.state.store, "prompt_skill_candidates", "candidate_id", promotable_candidate)
+    promotion_review_payload = client.post(
+        f"/prompt-skill-candidates/{candidate['candidate_id']}/promotion-review",
+        json={"requester": "qa_owner", "note": "候选指标达标，提交晋升审批。"},
+    ).json()
+    promotion_review = promotion_review_payload["review"]
+    assert promotion_review_payload["candidate"]["status"] == "promotion_review_pending"
+    assert promotion_review["status"] == "pending_review"
+    assert promotion_review["candidate_id"] == candidate["candidate_id"]
+    assert promotion_review["candidate_workflow_version_id"] == retest["scorecard"]["candidate"]["workflow_version_id"]
+    assert promotion_review["promotion_recommendation"]["decision"] == "promote"
+    assert promotion_review["target_url"] == f"/workflows?workflow_version_id={promotion_review['candidate_workflow_version_id']}"
+    listed_reviews = client.get(f"/workflow-promotion-reviews?candidate_id={candidate['candidate_id']}").json()
+    assert listed_reviews[0]["review_id"] == promotion_review["review_id"]
+
+    cached_review = client.post(f"/prompt-skill-candidates/{candidate['candidate_id']}/promotion-review").json()["review"]
+    assert cached_review["review_id"] == promotion_review["review_id"]
+
+    approved_review = client.post(
+        f"/workflow-promotion-reviews/{promotion_review['review_id']}/approve",
+        json={"reviewer": "release_owner", "note": "同意晋升为推荐 Workflow 版本。"},
+    ).json()
+    assert approved_review["review"]["status"] == "approved"
+    assert approved_review["candidate"]["status"] == "promoted"
+    assert approved_review["candidate"]["promoted_workflow_version_id"] == promotion_review["candidate_workflow_version_id"]

@@ -52,6 +52,16 @@ class PromptSkillCandidateReviewRequest(BaseModel):
     note: str = ""
 
 
+class WorkflowPromotionReviewRequest(BaseModel):
+    requester: str = "api"
+    note: str = ""
+
+
+class WorkflowPromotionReviewDecisionRequest(BaseModel):
+    reviewer: str = "api"
+    note: str = ""
+
+
 def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
     """注册围绕产品化闭环的独立功能接口。"""
 
@@ -117,6 +127,18 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         if baseline_experiment_id:
             candidates = [candidate for candidate in candidates if candidate.get("baseline_experiment_id") == baseline_experiment_id]
         return sorted(candidates, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+
+    @app.get("/workflow-promotion-reviews")
+    def list_workflow_promotion_reviews(
+        candidate_id: str | None = Query(default=None),
+        status: str | None = Query(default=None),
+    ) -> list[dict[str, Any]]:
+        reviews = _list_records(ctx.store, "workflow_promotion_reviews")
+        if candidate_id:
+            reviews = [review for review in reviews if review.get("candidate_id") == candidate_id]
+        if status:
+            reviews = [review for review in reviews if review.get("status") == status]
+        return sorted(reviews, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
 
     @app.post("/prompt-skill-candidates/{candidate_id}/review")
     def review_prompt_skill_candidate(candidate_id: str, request: PromptSkillCandidateReviewRequest) -> dict[str, Any]:
@@ -283,6 +305,52 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             "promotion_recommendation": promotion_recommendation,
             "target_url": f"/reports?task_id={task['task_id']}",
         }
+
+    @app.post("/prompt-skill-candidates/{candidate_id}/promotion-review")
+    def create_workflow_promotion_review(candidate_id: str, request: WorkflowPromotionReviewRequest | None = None) -> dict[str, Any]:
+        candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
+        if candidate.get("promotion_review_id"):
+            review = _get_record(ctx.store, "workflow_promotion_reviews", str(candidate["promotion_review_id"]))
+            return {"status": review["status"], "candidate": candidate, "review": review, "target_url": review.get("target_url")}
+
+        recommendation = candidate.get("promotion_recommendation") if isinstance(candidate.get("promotion_recommendation"), dict) else None
+        if not recommendation:
+            raise AegisQAError(
+                "PROMPT_SKILL_CANDIDATE_PROMOTION_MISSING",
+                "候选资产还没有晋升建议，请先完成候选复跑。",
+                status_code=400,
+                details={"candidate_id": candidate_id},
+            )
+        if recommendation.get("decision") not in {"promote", "review"}:
+            raise AegisQAError(
+                "PROMPT_SKILL_CANDIDATE_PROMOTION_NOT_RECOMMENDED",
+                "当前候选资产暂不建议晋升，请先继续修复或扩大样本复跑。",
+                status_code=400,
+                details={"candidate_id": candidate_id, "decision": recommendation.get("decision")},
+            )
+
+        request = request or WorkflowPromotionReviewRequest()
+        review = _build_workflow_promotion_review(candidate, request)
+        candidate["status"] = "promotion_review_pending"
+        candidate["promotion_review_id"] = review["review_id"]
+        candidate["updated_at"] = review["updated_at"]
+        _save_record(ctx.store, "workflow_promotion_reviews", "review_id", review)
+        _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
+        ctx.audit_service.record(
+            actor=request.requester or "api",
+            action="workflow_promotion_review.create",
+            target=review["review_id"],
+            detail={"candidate_id": candidate_id, "workflow_version_id": review.get("candidate_workflow_version_id")},
+        )
+        return {"status": review["status"], "candidate": candidate, "review": review, "target_url": review["target_url"]}
+
+    @app.post("/workflow-promotion-reviews/{review_id}/approve")
+    def approve_workflow_promotion_review(review_id: str, request: WorkflowPromotionReviewDecisionRequest) -> dict[str, Any]:
+        return _decide_workflow_promotion_review(ctx, review_id, decision="approved", request=request)
+
+    @app.post("/workflow-promotion-reviews/{review_id}/reject")
+    def reject_workflow_promotion_review(review_id: str, request: WorkflowPromotionReviewDecisionRequest) -> dict[str, Any]:
+        return _decide_workflow_promotion_review(ctx, review_id, decision="rejected", request=request)
 
     @app.post("/assertions/evaluate")
     def evaluate_assertions(request: AssertionEvaluateRequest) -> dict[str, Any]:
@@ -744,6 +812,83 @@ def _prompt_skill_candidate_promotion_recommendation(
         "checks": checks,
         "next_actions": next_actions,
     }
+
+
+def _build_workflow_promotion_review(candidate: dict[str, Any], request: WorkflowPromotionReviewRequest) -> dict[str, Any]:
+    scorecard = candidate.get("scorecard") if isinstance(candidate.get("scorecard"), dict) else {}
+    candidate_card = scorecard.get("candidate") if isinstance(scorecard.get("candidate"), dict) else {}
+    current_card = scorecard.get("current") if isinstance(scorecard.get("current"), dict) else {}
+    workflow_version_id = candidate_card.get("workflow_version_id")
+    if not workflow_version_id:
+        raise AegisQAError(
+            "WORKFLOW_PROMOTION_VERSION_MISSING",
+            "候选复跑结果缺少候选 Workflow 版本，无法创建晋升审批。",
+            status_code=400,
+            details={"candidate_id": candidate.get("candidate_id")},
+        )
+    now = _now()
+    review_id = f"promotion-review-{uuid4().hex[:12]}"
+    return {
+        "review_id": review_id,
+        "candidate_id": candidate["candidate_id"],
+        "status": "pending_review",
+        "source_task_id": candidate.get("source_task_id"),
+        "retest_task_id": candidate.get("retest_task_id"),
+        "candidate_run_id": candidate.get("candidate_run_id"),
+        "candidate_experiment_id": candidate.get("candidate_experiment_id"),
+        "candidate_workflow_version_id": workflow_version_id,
+        "current_workflow_version_id": current_card.get("workflow_version_id"),
+        "baseline_experiment_id": candidate.get("baseline_experiment_id"),
+        "promotion_recommendation": candidate.get("promotion_recommendation", {}),
+        "scorecard": scorecard,
+        "comparisons": candidate.get("comparisons", {}),
+        "requester": request.requester,
+        "note": request.note,
+        "target_url": f"/workflows?workflow_version_id={workflow_version_id}",
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _decide_workflow_promotion_review(
+    ctx: RouteContext,
+    review_id: str,
+    *,
+    decision: str,
+    request: WorkflowPromotionReviewDecisionRequest,
+) -> dict[str, Any]:
+    review = _get_record(ctx.store, "workflow_promotion_reviews", review_id)
+    if review.get("status") not in {"pending_review", decision}:
+        raise AegisQAError(
+            "WORKFLOW_PROMOTION_REVIEW_ALREADY_DECIDED",
+            "该 Workflow 晋升审批已经处理，不能重复变更结论。",
+            status_code=400,
+            details={"review_id": review_id, "status": review.get("status")},
+        )
+    candidate = _get_record(ctx.store, "prompt_skill_candidates", str(review["candidate_id"]))
+    now = _now()
+    review["status"] = decision
+    review["reviewer"] = request.reviewer
+    review["review_note"] = request.note
+    review["reviewed_at"] = now
+    review["updated_at"] = now
+    if decision == "approved":
+        candidate["status"] = "promoted"
+        candidate["promoted_workflow_version_id"] = review.get("candidate_workflow_version_id")
+        candidate["promoted_at"] = now
+    else:
+        candidate["status"] = "promotion_rejected"
+        candidate["promotion_rejected_at"] = now
+    candidate["updated_at"] = now
+    _save_record(ctx.store, "workflow_promotion_reviews", "review_id", review)
+    _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
+    ctx.audit_service.record(
+        actor=request.reviewer or "api",
+        action=f"workflow_promotion_review.{decision}",
+        target=review_id,
+        detail={"candidate_id": candidate.get("candidate_id"), "workflow_version_id": review.get("candidate_workflow_version_id")},
+    )
+    return {"status": decision, "candidate": candidate, "review": review, "target_url": review.get("target_url")}
 
 
 def _promotion_pass_rate_check(candidate: dict[str, Any], threshold: float | None) -> dict[str, Any]:

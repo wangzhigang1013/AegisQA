@@ -5,13 +5,14 @@ import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation } from '../types';
+import type { PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReview } from '../types';
 
 export function CandidateAssetsPage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [lastRetest, setLastRetest] = useState<PromptSkillCandidateRetestResult | null>(null);
+  const [lastPromotionReview, setLastPromotionReview] = useState<WorkflowPromotionReview | null>(null);
   const queryKey = ['prompt-skill-candidates', statusFilter] as const;
   const candidatesQuery = useQuery({
     queryKey,
@@ -77,6 +78,22 @@ export function CandidateAssetsPage() {
       setNotice(`候选复跑已完成：${payload.task.task_id}`);
     },
     onError: (error) => setNotice(`候选复跑失败：${formatApiError(error)}`),
+  });
+
+  const promotionReviewMutation = useMutation({
+    mutationFn: () => {
+      if (!lastRetest?.candidate.candidate_id) throw new Error('请先完成候选复跑。');
+      return api.createWorkflowPromotionReview(lastRetest.candidate.candidate_id, {
+        requester: 'qa_owner',
+        note: '候选指标达标，提交晋升审批。',
+      });
+    },
+    onSuccess: (payload) => {
+      mergeCandidate(payload.candidate);
+      setLastPromotionReview(payload.review);
+      setNotice(`晋升审批已创建：${payload.review.review_id}`);
+    },
+    onError: (error) => setNotice(`晋升审批创建失败：${formatApiError(error)}`),
   });
 
   return (
@@ -206,10 +223,26 @@ export function CandidateAssetsPage() {
                 ，badcase_delta={formatUnknown(lastRetest.comparisons.baseline_to_candidate?.badcase_delta)}
               </Descriptions.Item>
             </Descriptions>
-            {lastRetest.promotion_recommendation ? renderPromotionRecommendation(lastRetest.promotion_recommendation) : null}
+            {lastRetest.promotion_recommendation
+              ? renderPromotionRecommendation(lastRetest.promotion_recommendation, () => promotionReviewMutation.mutate(), promotionReviewMutation.isPending)
+              : null}
             <Button type="primary" href={lastRetest.target_url}>
               查看候选任务报告
             </Button>
+          </Space>
+        </Card>
+      ) : null}
+
+      {lastPromotionReview ? (
+        <Card className="flat-card" title="Workflow 晋升审批">
+          <Space direction="vertical" size={8}>
+            <Space wrap>
+              <Typography.Text strong>{lastPromotionReview.review_id}</Typography.Text>
+              <Tag color={promotionReviewStatusColor(lastPromotionReview.status)}>{promotionReviewStatusLabel(lastPromotionReview.status)}</Tag>
+            </Space>
+            <Typography.Text>候选版本：{lastPromotionReview.candidate_workflow_version_id ?? '-'}</Typography.Text>
+            <Typography.Text type="secondary">当前版本：{lastPromotionReview.current_workflow_version_id ?? '-'}</Typography.Text>
+            {lastPromotionReview.target_url ? <Button href={lastPromotionReview.target_url}>打开 Workflow 市场</Button> : null}
           </Space>
         </Card>
       ) : null}
@@ -260,7 +293,7 @@ function renderMetricCard(label: string, card?: PromptSkillMetricCard) {
   );
 }
 
-function renderPromotionRecommendation(recommendation: PromptSkillPromotionRecommendation) {
+function renderPromotionRecommendation(recommendation: PromptSkillPromotionRecommendation, onCreateReview: () => void, loading: boolean) {
   return (
     <Alert
       showIcon
@@ -283,9 +316,22 @@ function renderPromotionRecommendation(recommendation: PromptSkillPromotionRecom
           </Space>
           <Space wrap>
             {recommendation.next_actions.map((action) => (
-              <Tag key={action.action} color="blue">
-                {action.label}
-              </Tag>
+              action.action === 'create_promotion_review' ? (
+                <Button
+                  key={action.action}
+                  size="small"
+                  type="primary"
+                  loading={loading}
+                  disabled={recommendation.decision === 'hold'}
+                  onClick={onCreateReview}
+                >
+                  {action.label}
+                </Button>
+              ) : (
+                <Tag key={action.action} color="blue">
+                  {action.label}
+                </Tag>
+              )
             ))}
           </Space>
         </Space>
@@ -314,4 +360,19 @@ function checkStatusColor(status: string) {
   if (status === 'warning') return 'gold';
   if (status === 'failed') return 'red';
   return 'default';
+}
+
+function promotionReviewStatusColor(status: string) {
+  if (status === 'approved') return 'green';
+  if (status === 'rejected') return 'red';
+  return 'gold';
+}
+
+function promotionReviewStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending_review: '待审批',
+    approved: '已通过',
+    rejected: '已拒绝',
+  };
+  return labels[status] ?? status;
 }
