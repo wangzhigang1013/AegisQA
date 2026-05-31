@@ -809,6 +809,18 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
     assert applied_baseline["baseline"]["current_experiment_id"] == retest["candidate_experiment"]["experiment_id"]
     assert applied_baseline["baseline"]["previous_experiment_id"] == baseline_experiment["experiment_id"]
     assert applied_baseline["baseline"]["history"][-1]["action"] == "apply"
+    assert applied_baseline["notifications"][0]["action"] == "apply"
+    assert applied_baseline["notifications"][0]["status"] == "unread"
+    assert "release_owner" in applied_baseline["notifications"][0]["recipients"]
+    assert applied_baseline["notifications"][0]["summary"]["affected_tasks"] >= 1
+    listed_notifications = client.get(f"/baseline-change-notifications?suggestion_id={baseline_suggestion['suggestion_id']}").json()
+    assert listed_notifications[0]["notification_id"] == applied_baseline["notifications"][0]["notification_id"]
+    acknowledged_notification = client.post(
+        f"/baseline-change-notifications/{listed_notifications[0]['notification_id']}/ack",
+        json={"actor": "qa_owner", "note": "已同步给评测负责人。"},
+    ).json()
+    assert acknowledged_notification["status"] == "acknowledged"
+    assert acknowledged_notification["acknowledged_by"] == "qa_owner"
     listed_baselines = client.get(f"/experiment-baselines?workflow_id={applied_baseline['baseline']['scope']['workflow_id']}").json()
     assert listed_baselines[0]["baseline_id"] == applied_baseline["baseline"]["baseline_id"]
     impact = client.get(f"/experiment-baseline-suggestions/{baseline_suggestion['suggestion_id']}/impact").json()
@@ -829,3 +841,9 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
     assert rolled_back_baseline["baseline"]["history"][-1]["action"] == "rollback"
     assert rolled_back_baseline["rollback_guard"]["status"] == "passed"
     assert rolled_back_baseline["rollback_guard"]["ci_gate_evaluations"][0]["source"] == "experiment_baseline_rollback"
+    assert rolled_back_baseline["notifications"][0]["action"] == "rollback"
+    assert rolled_back_baseline["notifications"][0]["summary"]["rollback_guard_status"] == "passed"
+    rollback_notifications = client.get(
+        f"/baseline-change-notifications?baseline_id={rolled_back_baseline['baseline']['baseline_id']}&status=unread"
+    ).json()
+    assert rollback_notifications[0]["action"] == "rollback"

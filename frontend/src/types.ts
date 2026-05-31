@@ -941,10 +941,40 @@ export type ExperimentBaselineRecord = {
   updated_at?: string;
 };
 
+export type BaselineChangeNotification = {
+  notification_id: string;
+  baseline_id: string;
+  suggestion_id: string;
+  action: 'apply' | 'rollback' | string;
+  status: 'unread' | 'acknowledged' | string;
+  actor?: string;
+  note?: string;
+  scope?: { dataset_id?: string | null; workflow_id?: string | null };
+  from_experiment_id?: string | null;
+  to_experiment_id?: string | null;
+  recipients?: string[];
+  affected_task_ids?: string[];
+  summary?: {
+    affected_tasks?: number;
+    affected_reports?: number;
+    ci_gate_configs?: number;
+    rollback_guard_status?: string;
+    rollback_blocking_failures?: number;
+    metric_delta?: Record<string, unknown>;
+  };
+  message?: string;
+  acknowledged_by?: string;
+  acknowledged_at?: string;
+  ack_note?: string;
+  created_at: string;
+  updated_at?: string;
+};
+
 export type ExperimentBaselineActionResult = {
   status: string;
   suggestion: ExperimentBaselineSuggestion;
   baseline: ExperimentBaselineRecord;
+  notifications?: BaselineChangeNotification[];
   rollback_guard?: {
     status: string;
     ci_gate_evaluations: CIGateEvaluationRecord[];

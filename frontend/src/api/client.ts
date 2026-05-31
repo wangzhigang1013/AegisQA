@@ -11,6 +11,7 @@ import type {
   DatasetLineage,
   DatasetSummary,
   DatasetVersion,
+  BaselineChangeNotification,
   ExperimentBaselineActionResult,
   ExperimentBaselineImpact,
   ExperimentRecord,
@@ -244,6 +245,19 @@ export const api = {
     request<ExperimentBaselineImpact>(`/experiment-baseline-suggestions/${encodeURIComponent(suggestionId)}/impact`),
   rollbackExperimentBaselineSuggestion: (suggestionId: string, body: { actor?: string; note?: string; force?: boolean } = {}) =>
     request<ExperimentBaselineActionResult>(`/experiment-baseline-suggestions/${encodeURIComponent(suggestionId)}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  baselineChangeNotifications: (filters: { suggestion_id?: string; baseline_id?: string; workflow_id?: string; status?: string } = {}) => {
+    const search = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) search.set(key, value);
+    });
+    const suffix = search.toString();
+    return request<BaselineChangeNotification[]>(`/baseline-change-notifications${suffix ? `?${suffix}` : ''}`);
+  },
+  acknowledgeBaselineChangeNotification: (notificationId: string, body: { actor?: string; note?: string } = {}) =>
+    request<BaselineChangeNotification>(`/baseline-change-notifications/${encodeURIComponent(notificationId)}/ack`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

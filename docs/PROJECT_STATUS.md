@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Prompt/Skill Candidate Bulk SLA”已完成实现和全量验证。本批次把候选资产中心从单条处理推进到团队协作治理：后端新增候选资产批量指派、批量审批、负责人工作量和逾期升级接口；前端候选资产中心新增负责人工作量卡片、当前列表批量指派、批量审批和升级逾期候选动作。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Baseline Change Notifications”已完成目标实现和全量验证。本批次把 baseline 应用/回滚从“操作有记录”推进到“团队可感知”：后端新增 baseline 变更提醒列表和确认已读接口，apply/rollback 自动生成提醒并带上影响任务、指标 delta、接收人和回滚门禁状态；前端候选资产中心新增“Baseline 变更提醒”卡片和确认已读动作。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -77,6 +77,7 @@
 - Workflow 晋升审批已支持真实流转：`POST /prompt-skill-candidates/{candidate_id}/promotion-review` 可把 promote/review 候选资产转为审批单，hold 候选会被结构化阻断；`GET /workflow-promotion-reviews` 支持查询；`POST /workflow-promotion-reviews/{review_id}/approve|reject` 支持审批结论并回写候选资产状态；审批通过后会生成 Experiment baseline 替换建议、Workflow 发布记录和 CI Gate 发布评估历史。
 - Experiment baseline 替换建议已支持应用与回滚：`GET /experiment-baselines` 可按 Dataset/Workflow 查询当前 baseline，`POST /experiment-baseline-suggestions/{suggestion_id}/apply|rollback` 会更新当前 baseline 并写入 history。
 - Experiment baseline 替换建议已支持影响分析和回滚前门禁复测：`GET /experiment-baseline-suggestions/{suggestion_id}/impact` 返回受影响任务、报告、CI Gate 数量和 baseline/candidate 指标差异；回滚前会基于原 baseline Run 生成来源为 `experiment_baseline_rollback` 的 CI Gate evaluation，并在阻断时要求显式 `force=true`。
+- Baseline 变更已支持订阅式提醒：`GET /baseline-change-notifications` 可按 suggestion、baseline、workflow、status 查询，`POST /baseline-change-notifications/{notification_id}/ack` 可确认已读；baseline apply/rollback 响应返回 `notifications`，提醒包含接收人、影响任务、指标 delta 和回滚门禁状态；候选资产中心展示提醒卡片。
 - Workflow 市场进入画布时会把当前草稿写入 `['workflow-draft', draft_id]` 单草稿缓存；画布深链在草稿未加载时显示加载态，异常 graph 结构会给出中文错误提示而不是白屏。
 - Judge 审计已新增多 Judge 一致性 API 与前端弹窗，支持输入多个 Judge 输出并展示两两一致率。
 - 报告中心已新增跨任务 Score Analytics，按 Task 聚合任务数、平均通过率、Badcase、P95、估算成本和退化任务，避免只看单次任务报告。
@@ -109,6 +110,8 @@
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`：1 passed，覆盖候选资产中心查看 baseline 影响、展示 `pass_rate_delta`、回滚 baseline 和回滚门禁状态。
 - `python -m pytest tests\test_task_flow_optimization.py -q -k "bulk_governance"`：1 passed，覆盖候选资产批量指派、逾期判断、负责人工作量、逾期升级和批量审批。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`：2 passed，覆盖候选资产中心负责人工作量、批量指派、逾期升级、批量审批和既有单条治理链路。
+- `python -m pytest tests\test_task_flow_optimization.py -q -k "candidate_retest"`：1 passed，覆盖 baseline apply 生成提醒、提醒列表查询、确认已读、rollback 生成提醒和回滚门禁状态入提醒。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`：1 passed，覆盖应用 baseline 后展示变更提醒、确认已读反馈和回滚门禁提醒。
 - `python -m pytest tests\test_task_flow_optimization.py -q`：16 passed。
 - `python -m pytest -q`：81 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
@@ -150,6 +153,35 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Baseline Change Notifications
+
+- 改动摘要：把 baseline 应用/回滚继续补成团队协作闭环。后端新增 baseline 变更提醒记录、列表查询和确认已读接口，baseline apply/rollback 会自动生成提醒，携带影响任务、报告数、指标 delta、接收人和回滚门禁状态；前端候选资产中心新增“Baseline 变更提醒”卡片，可展示提醒并确认已读。
+- 变更文件：
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/CandidateAssetsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/superpowers/plans/2026-05-31-baseline-change-notifications.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "candidate_retest"`（RED，确认 apply 响应缺少 `notifications`；GREEN 后 1 passed）
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`（RED，确认页面缺少“Baseline 变更提醒”；GREEN 后 1 passed）
+- 当前测试结果：
+  - 后端目标测试：1 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端目标测试：1 passed。
+  - 后端定向任务流测试：16 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 后端全量测试：81 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端全量测试：4 个测试文件、55 passed。
+  - 前端构建：通过。
+  - Playwright E2E：8 passed。
+  - `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
+- 下一步：继续推进候选资产批量复跑排序、提醒分派策略、真实成本账单和外部审批流集成。
 
 ### 2026-05-31 Prompt/Skill Candidate Bulk SLA
 

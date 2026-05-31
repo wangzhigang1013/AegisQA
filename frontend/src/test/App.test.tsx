@@ -582,6 +582,25 @@ const demoBaselineApplyPayload = {
     created_at: '2026-05-31T04:00:00Z',
     updated_at: '2026-05-31T04:00:00Z',
   },
+  notifications: [
+    {
+      notification_id: 'baseline-notification-demo',
+      baseline_id: 'baseline-demo',
+      suggestion_id: 'baseline-suggestion-demo',
+      action: 'apply',
+      status: 'unread',
+      actor: 'release_owner',
+      scope: { dataset_id: 'dataset-demo', workflow_id: 'wf-demo' },
+      from_experiment_id: 'exp-baseline',
+      to_experiment_id: 'exp-candidate-demo',
+      recipients: ['release_owner', 'qa_owner'],
+      affected_task_ids: ['task-demo'],
+      summary: { affected_tasks: 1, affected_reports: 1, ci_gate_configs: 1, metric_delta: { pass_rate_delta: 0.05 } },
+      message: 'Baseline 已从 exp-baseline 切换到 exp-candidate-demo，影响 1 个任务，请复核任务报告与 CI Gate。',
+      created_at: '2026-05-31T04:00:00Z',
+      updated_at: '2026-05-31T04:00:00Z',
+    },
+  ],
 };
 
 const demoBaselineImpactPayload = {
@@ -616,6 +635,32 @@ const demoBaselineRollbackPayload = {
     status: 'passed',
     ci_gate_evaluations: [{ ...demoCIGateEvaluations[0], evaluation_id: 'gateeval-rollback-demo', status: 'passed', blocking_failures: 0, source: 'experiment_baseline_rollback' }],
   },
+  notifications: [
+    {
+      notification_id: 'baseline-notification-rollback-demo',
+      baseline_id: 'baseline-demo',
+      suggestion_id: 'baseline-suggestion-demo',
+      action: 'rollback',
+      status: 'unread',
+      actor: 'release_owner',
+      scope: { dataset_id: 'dataset-demo', workflow_id: 'wf-demo' },
+      from_experiment_id: 'exp-candidate-demo',
+      to_experiment_id: 'exp-baseline',
+      recipients: ['release_owner', 'qa_owner'],
+      affected_task_ids: ['task-demo'],
+      summary: { affected_tasks: 1, affected_reports: 1, ci_gate_configs: 1, rollback_guard_status: 'passed' },
+      message: 'Baseline 已从 exp-candidate-demo 回滚到 exp-baseline，回滚门禁状态 passed，影响 1 个任务。',
+      created_at: '2026-05-31T05:00:00Z',
+      updated_at: '2026-05-31T05:00:00Z',
+    },
+  ],
+};
+
+const demoBaselineNotificationAckPayload = {
+  ...demoBaselineApplyPayload.notifications[0],
+  status: 'acknowledged',
+  acknowledged_by: 'qa_owner',
+  acknowledged_at: '2026-05-31T04:30:00Z',
 };
 
 const demoCandidateWorkloadPayload = {
@@ -1272,6 +1317,12 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/experiment-baseline-suggestions/baseline-suggestion-demo/rollback')) {
         return jsonResponse(demoBaselineRollbackPayload);
       }
+      if (url.endsWith('/baseline-change-notifications/baseline-notification-demo/ack')) {
+        return jsonResponse(demoBaselineNotificationAckPayload);
+      }
+      if (url.includes('/baseline-change-notifications')) {
+        return jsonResponse([]);
+      }
       if (url.endsWith('/prompt-skill-candidates/workload')) {
         return jsonResponse(demoCandidateWorkloadPayload);
       }
@@ -1869,6 +1920,10 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /应用 baseline/ }));
     expect(await screen.findByText(/Baseline 已应用：exp-candidate-demo/)).toBeInTheDocument();
     expect(screen.getByText(/当前 baseline：exp-candidate-demo/)).toBeInTheDocument();
+    expect(screen.getByText('Baseline 变更提醒')).toBeInTheDocument();
+    expect(screen.getByText(/Baseline 已从 exp-baseline 切换到 exp-candidate-demo/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /确认已读/ }));
+    expect(await screen.findByText(/Baseline 提醒已确认：qa_owner/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /查看影响/ }));
     expect(await screen.findByText(/影响任务：1/)).toBeInTheDocument();
@@ -1876,7 +1931,7 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /回滚 baseline/ }));
     expect(await screen.findByText(/Baseline 已回滚：exp-baseline/)).toBeInTheDocument();
-    expect(screen.getByText(/回滚门禁：passed/)).toBeInTheDocument();
+    expect(screen.getAllByText(/回滚门禁：passed/).length).toBeGreaterThan(0);
   });
 
   it('候选资产中心支持批量审批当前列表', async () => {

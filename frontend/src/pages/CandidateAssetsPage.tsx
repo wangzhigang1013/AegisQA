@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { ExperimentBaselineActionResult, ExperimentBaselineImpact, PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
+import type { BaselineChangeNotification, ExperimentBaselineActionResult, ExperimentBaselineImpact, PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
 
 export function CandidateAssetsPage() {
   const queryClient = useQueryClient();
@@ -17,6 +17,7 @@ export function CandidateAssetsPage() {
   const [lastBaselineApplication, setLastBaselineApplication] = useState<ExperimentBaselineActionResult | null>(null);
   const [lastBaselineImpact, setLastBaselineImpact] = useState<ExperimentBaselineImpact | null>(null);
   const [lastBaselineRollback, setLastBaselineRollback] = useState<ExperimentBaselineActionResult | null>(null);
+  const [lastBaselineNotifications, setLastBaselineNotifications] = useState<BaselineChangeNotification[]>([]);
   const queryKey = ['prompt-skill-candidates', statusFilter] as const;
   const candidatesQuery = useQuery({
     queryKey,
@@ -26,8 +27,13 @@ export function CandidateAssetsPage() {
     queryKey: ['prompt-skill-candidate-workload'],
     queryFn: () => api.promptSkillCandidateWorkload(),
   });
+  const baselineNotificationsQuery = useQuery({
+    queryKey: ['baseline-change-notifications', 'unread'],
+    queryFn: () => api.baselineChangeNotifications({ status: 'unread' }),
+  });
   const candidates = candidatesQuery.data ?? [];
   const currentCandidateIds = candidates.map((candidate) => candidate.candidate_id);
+  const baselineNotifications = mergeBaselineNotifications(lastBaselineNotifications, baselineNotificationsQuery.data ?? []);
 
   function mergeCandidate(candidate: PromptSkillCandidate) {
     queryClient.setQueryData<PromptSkillCandidate[]>(queryKey, (current = []) => {
@@ -181,8 +187,10 @@ export function CandidateAssetsPage() {
     onSuccess: (payload) => {
       setLastBaselineApplication(payload);
       setLastBaselineRollback(null);
+      setLastBaselineNotifications(payload.notifications ?? []);
       setLastReleaseArtifacts((current) => (current ? { ...current, baseline_suggestion: payload.suggestion } : current));
       void queryClient.invalidateQueries({ queryKey: ['experiments'] });
+      void queryClient.invalidateQueries({ queryKey: ['baseline-change-notifications'] });
       setNotice(`Baseline 已应用：${payload.baseline.current_experiment_id}`);
     },
     onError: (error) => setNotice(`Baseline 应用失败：${formatApiError(error)}`),
@@ -213,11 +221,27 @@ export function CandidateAssetsPage() {
     onSuccess: (payload) => {
       setLastBaselineApplication(payload);
       setLastBaselineRollback(payload);
+      setLastBaselineNotifications(payload.notifications ?? []);
       setLastReleaseArtifacts((current) => (current ? { ...current, baseline_suggestion: payload.suggestion } : current));
       void queryClient.invalidateQueries({ queryKey: ['experiments'] });
+      void queryClient.invalidateQueries({ queryKey: ['baseline-change-notifications'] });
       setNotice(`Baseline 已回滚：${payload.baseline.current_experiment_id}`);
     },
     onError: (error) => setNotice(`Baseline 回滚失败：${formatApiError(error)}`),
+  });
+
+  const acknowledgeBaselineNotificationMutation = useMutation({
+    mutationFn: (notification: BaselineChangeNotification) =>
+      api.acknowledgeBaselineChangeNotification(notification.notification_id, {
+        actor: 'qa_owner',
+        note: '已确认收到 baseline 变更提醒，并会复核受影响任务。',
+      }),
+    onSuccess: (payload) => {
+      setLastBaselineNotifications((current) => mergeBaselineNotifications(current, [payload]));
+      void queryClient.invalidateQueries({ queryKey: ['baseline-change-notifications'] });
+      setNotice(`Baseline 提醒已确认：${payload.acknowledged_by ?? 'qa_owner'}`);
+    },
+    onError: (error) => setNotice(`Baseline 提醒确认失败：${formatApiError(error)}`),
   });
 
   return (
@@ -230,6 +254,55 @@ export function CandidateAssetsPage() {
       />
 
       {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
+
+      {baselineNotifications.length ? (
+        <Card className="flat-card" title="Baseline 变更提醒" loading={baselineNotificationsQuery.isLoading}>
+          <Table
+            rowKey="notification_id"
+            size="small"
+            pagination={false}
+            dataSource={baselineNotifications}
+            columns={[
+              {
+                title: '变更',
+                render: (_, record) => (
+                  <Space direction="vertical" size={2}>
+                    <Space wrap size={4}>
+                      <Tag color={record.action === 'rollback' ? 'volcano' : 'blue'}>{record.action === 'rollback' ? '回滚' : '应用'}</Tag>
+                      <Tag color={record.status === 'acknowledged' ? 'green' : 'gold'}>{record.status === 'acknowledged' ? '已确认' : '未读'}</Tag>
+                    </Space>
+                    <Typography.Text>{record.message ?? `${record.from_experiment_id ?? '-'} -> ${record.to_experiment_id ?? '-'}`}</Typography.Text>
+                    <Typography.Text type="secondary">接收人：{(record.recipients ?? []).join('、') || '-'}</Typography.Text>
+                  </Space>
+                ),
+              },
+              {
+                title: '影响',
+                render: (_, record) => (
+                  <Space direction="vertical" size={2}>
+                    <Typography.Text>任务：{record.summary?.affected_tasks ?? record.affected_task_ids?.length ?? 0}</Typography.Text>
+                    <Typography.Text type="secondary">报告：{record.summary?.affected_reports ?? 0}</Typography.Text>
+                    {record.summary?.rollback_guard_status ? <Typography.Text type="secondary">回滚门禁：{record.summary.rollback_guard_status}</Typography.Text> : null}
+                  </Space>
+                ),
+              },
+              {
+                title: '操作',
+                render: (_, record) => (
+                  <Button
+                    size="small"
+                    disabled={record.status === 'acknowledged'}
+                    loading={acknowledgeBaselineNotificationMutation.isPending}
+                    onClick={() => acknowledgeBaselineNotificationMutation.mutate(record)}
+                  >
+                    确认已读
+                  </Button>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      ) : null}
 
       <Card className="flat-card" title="负责人工作量" loading={workloadQuery.isLoading}>
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -525,6 +598,14 @@ function formatDateTime(value: string) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString('zh-CN', { hour12: false });
+}
+
+function mergeBaselineNotifications(...groups: BaselineChangeNotification[][]) {
+  const byId = new Map<string, BaselineChangeNotification>();
+  groups.flat().filter((notification) => notification?.notification_id).forEach((notification) => {
+    byId.set(notification.notification_id, notification);
+  });
+  return Array.from(byId.values()).sort((left, right) => String(right.created_at ?? '').localeCompare(String(left.created_at ?? '')));
 }
 
 function renderMetricCard(label: string, card?: PromptSkillMetricCard) {

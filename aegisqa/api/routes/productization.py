@@ -88,6 +88,11 @@ class ExperimentBaselineActionRequest(BaseModel):
     force: bool = False
 
 
+class BaselineChangeNotificationAckRequest(BaseModel):
+    actor: str = "api"
+    note: str = ""
+
+
 def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
     """注册围绕产品化闭环的独立功能接口。"""
 
@@ -220,6 +225,29 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.post("/experiment-baseline-suggestions/{suggestion_id}/rollback")
     def rollback_experiment_baseline_suggestion(suggestion_id: str, request: ExperimentBaselineActionRequest) -> dict[str, Any]:
         return _rollback_experiment_baseline_suggestion(ctx, suggestion_id, request)
+
+    @app.get("/baseline-change-notifications")
+    def list_baseline_change_notifications(
+        suggestion_id: str | None = Query(default=None),
+        baseline_id: str | None = Query(default=None),
+        workflow_id: str | None = Query(default=None),
+        status: str | None = Query(default=None),
+    ) -> list[dict[str, Any]]:
+        return _list_baseline_change_notifications(ctx, suggestion_id=suggestion_id, baseline_id=baseline_id, workflow_id=workflow_id, status=status)
+
+    @app.post("/baseline-change-notifications/{notification_id}/ack")
+    def acknowledge_baseline_change_notification(notification_id: str, request: BaselineChangeNotificationAckRequest) -> dict[str, Any]:
+        notification = _get_record(ctx.store, "baseline_change_notifications", notification_id)
+        if notification.get("status") != "acknowledged":
+            now = _now()
+            notification["status"] = "acknowledged"
+            notification["acknowledged_by"] = request.actor
+            notification["acknowledged_at"] = now
+            notification["ack_note"] = request.note
+            notification["updated_at"] = now
+            _save_record(ctx.store, "baseline_change_notifications", "notification_id", notification)
+            ctx.audit_service.record(actor=request.actor, action="baseline_change_notification.ack", target=notification_id, detail={"suggestion_id": notification.get("suggestion_id")})
+        return notification
 
     @app.get("/workflow-release-records")
     def list_workflow_release_records(
@@ -1470,7 +1498,8 @@ def _apply_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: str,
     suggested_experiment = _get_record(ctx.store, "experiments", str(suggestion["suggested_experiment_id"]))
     baseline = _get_or_create_experiment_baseline(ctx, suggested_experiment, now=_now())
     if suggestion.get("status") == "applied" and baseline.get("current_experiment_id") == suggestion.get("suggested_experiment_id"):
-        return {"status": "applied", "suggestion": suggestion, "baseline": baseline}
+        notifications = _list_baseline_change_notifications(ctx, suggestion_id=suggestion_id, baseline_id=str(baseline["baseline_id"]))
+        return {"status": "applied", "suggestion": suggestion, "baseline": baseline, "notifications": notifications}
     now = _now()
     previous_experiment_id = baseline.get("current_experiment_id") or suggestion.get("previous_baseline_experiment_id")
     baseline["current_experiment_id"] = suggestion["suggested_experiment_id"]
@@ -1495,8 +1524,9 @@ def _apply_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: str,
     suggestion["updated_at"] = now
     _save_record(ctx.store, "experiment_baselines", "baseline_id", baseline)
     _save_record(ctx.store, "experiment_baseline_suggestions", "suggestion_id", suggestion)
+    notifications = _create_baseline_change_notification(ctx, baseline, suggestion, action="apply", actor=request.actor, note=request.note, now=now)
     ctx.audit_service.record(actor=request.actor, action="experiment_baseline.apply", target=baseline["baseline_id"], detail={"suggestion_id": suggestion_id, "current_experiment_id": baseline["current_experiment_id"]})
-    return {"status": "applied", "suggestion": suggestion, "baseline": baseline}
+    return {"status": "applied", "suggestion": suggestion, "baseline": baseline, "notifications": notifications}
 
 
 def _rollback_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: str, request: ExperimentBaselineActionRequest) -> dict[str, Any]:
@@ -1549,8 +1579,128 @@ def _rollback_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: s
     suggestion["updated_at"] = now
     _save_record(ctx.store, "experiment_baselines", "baseline_id", baseline)
     _save_record(ctx.store, "experiment_baseline_suggestions", "suggestion_id", suggestion)
+    notifications = _create_baseline_change_notification(
+        ctx,
+        baseline,
+        suggestion,
+        action="rollback",
+        actor=request.actor,
+        note=request.note,
+        now=now,
+        rollback_guard=rollback_guard,
+    )
     ctx.audit_service.record(actor=request.actor, action="experiment_baseline.rollback", target=baseline["baseline_id"], detail={"suggestion_id": suggestion_id, "current_experiment_id": baseline["current_experiment_id"], "rollback_guard_status": rollback_guard.get("status")})
-    return {"status": "rolled_back", "suggestion": suggestion, "baseline": baseline, "rollback_guard": rollback_guard}
+    return {"status": "rolled_back", "suggestion": suggestion, "baseline": baseline, "rollback_guard": rollback_guard, "notifications": notifications}
+
+
+def _list_baseline_change_notifications(
+    ctx: RouteContext,
+    *,
+    suggestion_id: str | None = None,
+    baseline_id: str | None = None,
+    workflow_id: str | None = None,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
+    notifications = _list_records(ctx.store, "baseline_change_notifications")
+    if suggestion_id:
+        notifications = [item for item in notifications if item.get("suggestion_id") == suggestion_id]
+    if baseline_id:
+        notifications = [item for item in notifications if item.get("baseline_id") == baseline_id]
+    if workflow_id:
+        notifications = [item for item in notifications if item.get("scope", {}).get("workflow_id") == workflow_id]
+    if status:
+        notifications = [item for item in notifications if item.get("status") == status]
+    return sorted(notifications, key=lambda item: str(item.get("created_at") or ""), reverse=True)
+
+
+def _create_baseline_change_notification(
+    ctx: RouteContext,
+    baseline: dict[str, Any],
+    suggestion: dict[str, Any],
+    *,
+    action: str,
+    actor: str,
+    note: str,
+    now: str,
+    rollback_guard: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    impact = _build_experiment_baseline_impact(ctx, str(suggestion["suggestion_id"]))
+    affected_tasks = impact.get("affected_tasks", []) if isinstance(impact.get("affected_tasks"), list) else []
+    recipients = _baseline_notification_recipients(ctx, suggestion, affected_tasks, actor=actor)
+    from_experiment = baseline.get("previous_experiment_id")
+    to_experiment = baseline.get("current_experiment_id")
+    summary = {
+        "affected_tasks": impact.get("summary", {}).get("affected_tasks", 0),
+        "affected_reports": impact.get("summary", {}).get("affected_reports", 0),
+        "ci_gate_configs": impact.get("summary", {}).get("ci_gate_configs", 0),
+        "metric_delta": impact.get("metric_delta", {}),
+    }
+    if rollback_guard:
+        summary["rollback_guard_status"] = rollback_guard.get("status")
+        summary["rollback_blocking_failures"] = rollback_guard.get("blocking_failures", 0)
+    notification = {
+        "notification_id": f"baseline-notification-{uuid4().hex[:12]}",
+        "baseline_id": baseline["baseline_id"],
+        "suggestion_id": suggestion["suggestion_id"],
+        "action": action,
+        "status": "unread",
+        "actor": actor,
+        "note": note,
+        "scope": baseline.get("scope", {}),
+        "from_experiment_id": from_experiment,
+        "to_experiment_id": to_experiment,
+        "recipients": recipients,
+        "affected_task_ids": [task.get("task_id") for task in affected_tasks if task.get("task_id")],
+        "summary": summary,
+        "message": _baseline_change_message(action, from_experiment, to_experiment, summary),
+        "created_at": now,
+        "updated_at": now,
+    }
+    _save_record(ctx.store, "baseline_change_notifications", "notification_id", notification)
+    ctx.audit_service.record(
+        actor=actor,
+        action=f"baseline_change_notification.create.{action}",
+        target=notification["notification_id"],
+        detail={"suggestion_id": suggestion.get("suggestion_id"), "baseline_id": baseline.get("baseline_id"), "recipient_count": len(recipients)},
+    )
+    return [notification]
+
+
+def _baseline_notification_recipients(ctx: RouteContext, suggestion: dict[str, Any], affected_tasks: list[Any], *, actor: str) -> list[str]:
+    recipients: list[str] = []
+
+    def add(value: Any) -> None:
+        if value is None:
+            return
+        text = str(value).strip()
+        if text and text not in recipients:
+            recipients.append(text)
+
+    add(actor)
+    candidate_id = suggestion.get("candidate_id")
+    if candidate_id:
+        try:
+            candidate = _get_record(ctx.store, "prompt_skill_candidates", str(candidate_id))
+            add(candidate.get("owner"))
+            add(candidate.get("assigned_by"))
+            add(candidate.get("escalated_by"))
+            review = candidate.get("review") if isinstance(candidate.get("review"), dict) else {}
+            add(review.get("reviewer"))
+        except KeyError:
+            pass
+    for task in affected_tasks:
+        if isinstance(task, dict):
+            add(task.get("owner"))
+            add(task.get("created_by"))
+    return recipients
+
+
+def _baseline_change_message(action: str, from_experiment: Any, to_experiment: Any, summary: dict[str, Any]) -> str:
+    affected = summary.get("affected_tasks", 0)
+    if action == "rollback":
+        guard_status = summary.get("rollback_guard_status", "unknown")
+        return f"Baseline 已从 {from_experiment or '-'} 回滚到 {to_experiment or '-'}，回滚门禁状态 {guard_status}，影响 {affected} 个任务。"
+    return f"Baseline 已从 {from_experiment or '-'} 切换到 {to_experiment or '-'}，影响 {affected} 个任务，请复核任务报告与 CI Gate。"
 
 
 def _get_or_create_experiment_baseline(ctx: RouteContext, experiment: dict[str, Any], *, now: str) -> dict[str, Any]:
