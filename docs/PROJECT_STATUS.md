@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Task Execution Templates”已完成目标实现和全量验证。本批次把任务创建参数从“每次手填”升级为“可复用执行策略”：后端新增 `GET/POST /task-execution-templates`，提供上线门禁、Prompt 实验、稳定性重复采样三类内置模板，并支持自定义模板；创建 Task 可携带 `execution_template_id`，该 ID 会进入 Task/Run 执行快照。前端任务创建向导新增“执行参数模板”下拉，选择后自动填充评测目的、质量门槛、并发、repeat、重试和成本预算，同时继续受 Preflight 创建门禁保护。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Task Preflight Signature Freshness”已完成目标实现和全量验证。本批次把任务创建 Preflight 从“只匹配 Dataset/Workflow”升级为“匹配完整关键参数签名”：执行模板、评测目的、质量门槛、repeat 和成本预算变化后，前端会要求重新运行 Preflight，后端 Preflight 响应也返回这些签名字段，避免旧预检结果放行新配置。E2E 已改为使用独立后端端口 `8010` 和 Vite `/api` 代理，避免本地 8000 旧服务污染全流程验证；审计日志接口已支持按 actor/action 过滤并补回归测试。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -30,6 +30,7 @@
 - Workflow 草稿保存后可从 Workflow 市场重新打开并保留流程名称、节点名称等配置；试运行会使用当前选择的数据集并回填 step trace 与队列消息提示。
 - 执行中心已抽出 `TaskCreateWizard`，创建任务前必须选择 Dataset Version 和 Workflow Version；任务参数支持分片大小、并发、repeat、最大重试、重试退避和成本预算。
 - Task Preflight 已升级为创建门禁：后端阻断 blocked Preflight，前端要求先运行匹配当前 Dataset/Workflow 的 Preflight；确需创建坏数据诊断任务时必须显式确认风险，并把 `allow_blocked_preflight` 写入 Run/Task 快照。
+- Task Preflight 已增加关键参数签名新鲜度校验：`execution_template_id`、`evaluation_goal`、`quality_gate`、`sample_repeat_times`、`cost_budget` 变化都会让创建按钮重新进入“需重跑 Preflight”状态，避免模板或质量门槛被修改后沿用旧预检结果。
 - Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
@@ -95,6 +96,15 @@
 
 ## 最近验证
 
+- `python -m pytest tests\test_api.py -q -k audit_events`：先失败后通过，确认 `/audit-events?actor=&action=` 不再因服务签名不匹配返回 500，并能按 actor/action 过滤审计事件。
+- `python -m pytest tests\test_task_center_api.py -q -k "execution_templates"`：1 passed，覆盖 Task Preflight 返回执行模板、repeat 和成本预算签名字段。
+- `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`：7 passed，覆盖执行模板填充、Preflight 创建门禁、阻断风险确认、关键参数变更要求重跑 Preflight、完整默认执行参数提交和任务参数提交。
+- `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`：1 passed，覆盖主链路通过独立 E2E 后端端口和 `/api` 代理完成上传、审批、发布、Preflight、创建任务、执行、报告和 Trace Flow。
+- `python -m pytest -q`：88 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：4 个测试文件、60 passed。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
 - `python -m pytest tests\test_task_flow_optimization.py -q -k "owner_capacity"`：1 passed，覆盖候选资产批量指派 `max_open_per_owner`、容量跳过、`capacity` 摘要和负责人工作量更新。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`：1 passed，覆盖候选资产中心批量指派容量跳过提示。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`：1 passed，覆盖候选资产中心批量指派负责人和开放候选容量输入值进入请求体。
@@ -194,6 +204,43 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Task Preflight Signature Freshness
+
+- 改动摘要：补齐任务创建 Preflight 的关键参数签名，参数变化后必须重新预检；修复审计日志 actor/action 过滤 500；E2E 改为通过独立 8010 后端和 Vite `/api` 代理，清除测试硬编码 8000 带来的旧服务污染。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/audit/service.py`
+  - `tests/test_api.py`
+  - `tests/test_task_center_api.py`
+  - `frontend/src/pages/task/TaskCreateWizard.tsx`
+  - `frontend/src/pages/task/TaskCreateWizard.test.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `frontend/vite.config.ts`
+  - `frontend/playwright.config.ts`
+  - `frontend/e2e/task-flow.spec.ts`
+  - `frontend/e2e/productization.spec.ts`
+  - `frontend/e2e/workflow-designer.spec.ts`
+  - `docs/superpowers/plans/2026-05-31-task-preflight-signature.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_api.py -q -k audit_events`
+  - `python -m pytest tests\test_task_center_api.py -q -k "execution_templates"`
+  - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端全量：88 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：4 个测试文件、60 passed。
+  - TypeScript 与生产构建：通过。
+  - Playwright E2E：8 passed。
+- 下一步：继续把 Task Preflight 与实验 baseline、权限策略、模板审批和共享范围打通，减少多人协作下的误创建风险。
 
 ### 2026-05-31 Task Execution Templates
 

@@ -37,18 +37,38 @@ export function TaskCreateWizard({ open, loading, preflightLoading, preflightRes
   const [form] = Form.useForm<TaskCreateFormValues>();
   const watchedWorkflow = Form.useWatch('workflow_version_id', form);
   const watchedDataset = Form.useWatch('dataset_version_id', form);
+  const watchedTemplate = Form.useWatch('execution_template_id', form);
+  const watchedEvaluationGoal = Form.useWatch('evaluation_goal', form);
+  const watchedPassRate = Form.useWatch('pass_rate_threshold', form);
+  const watchedMaxBadcase = Form.useWatch('max_badcase_count', form);
+  const watchedRepeat = Form.useWatch('sample_repeat_times', form);
+  const watchedCostBudget = Form.useWatch('cost_budget', form);
   const allowBlockedPreflight = Form.useWatch('allow_blocked_preflight', form);
   const datasetVersions = useMemo(
     () => datasets.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))),
     [datasets],
   );
   const selectedDatasetVersion = datasetVersions.find((item) => item.version.version_id === watchedDataset)?.version;
+  const currentExecutionTemplate = watchedTemplate ?? form.getFieldValue('execution_template_id');
+  const currentEvaluationGoal = watchedEvaluationGoal ?? form.getFieldValue('evaluation_goal');
+  const currentPassRate = watchedPassRate ?? form.getFieldValue('pass_rate_threshold');
+  const currentMaxBadcase = watchedMaxBadcase ?? form.getFieldValue('max_badcase_count');
+  const currentRepeat = watchedRepeat ?? form.getFieldValue('sample_repeat_times');
+  const currentCostBudget = watchedCostBudget ?? form.getFieldValue('cost_budget');
   const preflightMatchesSelection = Boolean(
     preflightResult
       && selectedDatasetVersion
       && preflightResult.workflow_version_id === watchedWorkflow
       && preflightResult.dataset_id === selectedDatasetVersion.dataset_id
-      && preflightResult.dataset_version === selectedDatasetVersion.version,
+      && preflightResult.dataset_version === selectedDatasetVersion.version
+      && preflightSignatureMatches(preflightResult, {
+        executionTemplateId: currentExecutionTemplate,
+        evaluationGoal: currentEvaluationGoal,
+        passRate: currentPassRate,
+        maxBadcaseCount: currentMaxBadcase,
+        sampleRepeatTimes: currentRepeat,
+        costBudget: currentCostBudget,
+      }),
   );
   const preflightCanContinue = Boolean(
     preflightMatchesSelection
@@ -95,7 +115,7 @@ export function TaskCreateWizard({ open, loading, preflightLoading, preflightRes
           key="preflight"
           loading={preflightLoading}
           disabled={!watchedWorkflow || !watchedDataset}
-          onClick={() => onPreflight(form.getFieldsValue())}
+          onClick={() => onPreflight(form.getFieldsValue(true) as TaskCreateFormValues)}
         >
           运行 Preflight
         </Button>,
@@ -244,7 +264,7 @@ export function TaskCreateWizard({ open, loading, preflightLoading, preflightRes
               showIcon
               type="warning"
               message="Preflight 结果已过期"
-              description="Dataset Version 或 Workflow Version 已变化，请重新运行 Preflight。"
+              description="Dataset、Workflow、执行模板、质量门槛、重复次数或成本预算已变化，请重新运行 Preflight。"
             />
           ) : null}
           {preflightResult && preflightMatchesSelection ? (
@@ -294,4 +314,36 @@ function preflightColor(status: string) {
 
 function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function preflightSignatureMatches(
+  result: TaskPreflightResult,
+  current: {
+    executionTemplateId?: string | null;
+    evaluationGoal?: string | null;
+    passRate?: number | null;
+    maxBadcaseCount?: number | null;
+    sampleRepeatTimes?: number | null;
+    costBudget?: number | null;
+  },
+) {
+  const qualityGate = result.quality_gate ?? {};
+  return (
+    textSignature(result.execution_template_id) === textSignature(current.executionTemplateId)
+    && textSignature(result.evaluation_goal) === textSignature(current.evaluationGoal)
+    && numberSignature(qualityGate.pass_rate) === numberSignature(current.passRate)
+    && numberSignature(qualityGate.max_badcase_count) === numberSignature(current.maxBadcaseCount)
+    && numberSignature(result.sample_repeat_times) === numberSignature(current.sampleRepeatTimes)
+    && numberSignature(result.cost_budget) === numberSignature(current.costBudget)
+  );
+}
+
+function textSignature(value: unknown): string {
+  return value === undefined || value === null || value === '' ? '' : String(value);
+}
+
+function numberSignature(value: unknown): string {
+  if (value === undefined || value === null || value === '') return '';
+  const numberValue = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numberValue) ? String(numberValue) : '';
 }

@@ -10,7 +10,7 @@ test('CI Gate 可以创建配置并阻断低通过率任务', async ({ page, req
   const dataset = await createDataset(request, datasetName);
   const workflow = await publishWorkflow(request, workflowName);
   const task = await createTask(request, taskName, dataset.dataset_id, dataset.version, workflow.version_id);
-  await request.post(`http://127.0.0.1:8000/tasks/${task.task_id}/execute`);
+  await request.post(apiPath(`/tasks/${task.task_id}/execute`));
 
   await page.goto('/ci-gates');
   await page.getByRole('button', { name: /创建质量门禁/ }).click();
@@ -35,11 +35,11 @@ test('Annotation Queue 可以领取、审核并回流 Golden', async ({ page, re
   const dataset = await createDataset(request, datasetName);
   const workflow = await publishWorkflow(request, workflowName);
   const task = await createTask(request, taskName, dataset.dataset_id, dataset.version, workflow.version_id);
-  const executedTaskResponse = await request.post(`http://127.0.0.1:8000/tasks/${task.task_id}/execute`);
+  const executedTaskResponse = await request.post(apiPath(`/tasks/${task.task_id}/execute`));
   expect(executedTaskResponse.ok()).toBeTruthy();
   const executedTask = await executedTaskResponse.json();
 
-  const seedResponse = await request.post('http://127.0.0.1:8000/annotation-queue/seed-from-run', {
+  const seedResponse = await request.post(apiPath('/annotation-queue/seed-from-run'), {
     data: { run_id: executedTask.run_id, strategy: 'all', limit: 5 },
   });
   expect(seedResponse.ok()).toBeTruthy();
@@ -61,10 +61,10 @@ test('Annotation Queue 可以领取、审核并回流 Golden', async ({ page, re
 
   const bulkTaskName = `${taskName} 批量`;
   const bulkTask = await createTask(request, bulkTaskName, dataset.dataset_id, dataset.version, workflow.version_id);
-  const executedBulkTaskResponse = await request.post(`http://127.0.0.1:8000/tasks/${bulkTask.task_id}/execute`);
+  const executedBulkTaskResponse = await request.post(apiPath(`/tasks/${bulkTask.task_id}/execute`));
   expect(executedBulkTaskResponse.ok()).toBeTruthy();
   const executedBulkTask = await executedBulkTaskResponse.json();
-  const bulkSeedResponse = await request.post('http://127.0.0.1:8000/annotation-queue/seed-from-run', {
+  const bulkSeedResponse = await request.post(apiPath('/annotation-queue/seed-from-run'), {
     data: { run_id: executedBulkTask.run_id, strategy: 'all', limit: 5 },
   });
   expect(bulkSeedResponse.ok()).toBeTruthy();
@@ -84,7 +84,7 @@ test('Annotation Queue 可以领取、审核并回流 Golden', async ({ page, re
 });
 
 async function createDataset(request: import('@playwright/test').APIRequestContext, datasetName: string) {
-  const response = await request.post('http://127.0.0.1:8000/datasets/source-materialize', {
+  const response = await request.post(apiPath('/datasets/source-materialize'), {
     data: {
       name: datasetName,
       rows: [
@@ -100,7 +100,7 @@ async function createDataset(request: import('@playwright/test').APIRequestConte
 }
 
 async function publishWorkflow(request: import('@playwright/test').APIRequestContext, workflowName: string) {
-  const response = await request.post('http://127.0.0.1:8000/workflow-graphs/publish', {
+  const response = await request.post(apiPath('/workflow-graphs/publish'), {
     data: {
       graph: {
         name: workflowName,
@@ -138,7 +138,7 @@ async function publishWorkflow(request: import('@playwright/test').APIRequestCon
 }
 
 async function createTask(request: import('@playwright/test').APIRequestContext, taskName: string, datasetId: string, datasetVersion: number, workflowVersionId: string) {
-  const response = await request.post('http://127.0.0.1:8000/tasks', {
+  const response = await request.post(apiPath('/tasks'), {
     data: {
       name: taskName,
       dataset_id: datasetId,
@@ -161,4 +161,8 @@ async function selectTask(page: import('@playwright/test').Page, taskName: strin
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function apiPath(pathname: string) {
+  return `/api${pathname}`;
 }

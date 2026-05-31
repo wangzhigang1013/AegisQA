@@ -70,7 +70,7 @@ async function uploadAndApproveSkill(page: Page, skillPackagePath: string, skill
 }
 
 async function publishPluginWorkflow(request: import('@playwright/test').APIRequestContext, workflowName: string, skillId: string) {
-  const response = await request.post('http://127.0.0.1:8000/workflow-graphs/publish', {
+  const response = await request.post(apiPath('/workflow-graphs/publish'), {
     data: {
       graph: {
         name: workflowName,
@@ -214,4 +214,8 @@ with zipfile.ZipFile(file_path, "w") as archive:
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function apiPath(pathname: string) {
+  return `/api${pathname}`;
 }

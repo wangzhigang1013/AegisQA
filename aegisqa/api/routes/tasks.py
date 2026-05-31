@@ -531,6 +531,8 @@ def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> d
         "execution_template_id": request.execution_template_id,
         "evaluation_goal": request.evaluation_goal,
         "quality_gate": request.quality_gate,
+        "sample_repeat_times": request.sample_repeat_times,
+        "cost_budget": request.cost_budget,
         "checks": checks,
         "created_at": _now(),
     }

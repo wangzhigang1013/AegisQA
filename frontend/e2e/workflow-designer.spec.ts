@@ -85,7 +85,7 @@ test('Workflow 草稿保存后可以从市场重新打开并保留配置', async
 
 test('Workflow 试运行会使用所选数据集并回填结果', async ({ page }) => {
   const datasetName = `aaa_e2e_dryrun_${Date.now()}`;
-  await page.request.post('http://127.0.0.1:8000/datasets/source-materialize', {
+  await page.request.post(apiPath('/datasets/source-materialize'), {
     data: {
       name: datasetName,
       rows: [{ question: '什么是 AegisQA?', reference: 'AI 评测平台', expected_label: 'pass' }],
@@ -108,3 +108,7 @@ test('Workflow 试运行会使用所选数据集并回填结果', async ({ page 
   await expect(page.getByText(/试运行完成/)).toBeVisible();
   await expect(page.getByText(/队列消息只携带 item_id/)).toBeVisible();
 });
+
+function apiPath(pathname: string) {
+  return `/api${pathname}`;
+}

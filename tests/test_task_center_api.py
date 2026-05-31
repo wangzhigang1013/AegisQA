@@ -256,6 +256,23 @@ def test_task_execution_templates_can_be_listed_created_and_snapshotted(tmp_path
     assert created_template["template_id"].startswith("tasktpl-")
     assert created_template["execution_config"]["sample_repeat_times"] == 3
 
+    preflight = client.post(
+        "/tasks/preflight",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "execution_template_id": created_template["template_id"],
+            "evaluation_goal": created_template["evaluation_goal"],
+            "quality_gate": created_template["quality_gate"],
+            "sample_repeat_times": created_template["execution_config"]["sample_repeat_times"],
+            "cost_budget": created_template["execution_config"]["cost_budget"],
+        },
+    ).json()
+    assert preflight["execution_template_id"] == created_template["template_id"]
+    assert preflight["sample_repeat_times"] == 3
+    assert preflight["cost_budget"] == 30
+
     templates = client.get("/task-execution-templates").json()
     assert created_template["template_id"] in {template["template_id"] for template in templates}
 

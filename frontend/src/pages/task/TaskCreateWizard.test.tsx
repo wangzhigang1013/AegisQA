@@ -44,6 +44,11 @@ const passedPreflight = {
   dataset_id: 'dataset-demo',
   dataset_version: 1,
   workflow_version_id: 'wf-demo:v1',
+  execution_template_id: undefined,
+  evaluation_goal: 'release_gate',
+  quality_gate: { pass_rate: 0.9, max_badcase_count: 0 },
+  sample_repeat_times: 1,
+  cost_budget: undefined,
   checks: [],
 };
 
@@ -53,6 +58,11 @@ const blockedPreflight = {
   dataset_id: 'dataset-demo',
   dataset_version: 1,
   workflow_version_id: 'wf-demo:v1',
+  execution_template_id: undefined,
+  evaluation_goal: 'release_gate',
+  quality_gate: { pass_rate: 0.9, max_badcase_count: 0 },
+  sample_repeat_times: 1,
+  cost_budget: undefined,
   checks: [
     {
       check_id: 'field_mapping',
@@ -85,6 +95,21 @@ const executionTemplates = [
     updated_at: '2026-05-31T00:00:00Z',
   },
 ];
+
+const strictTemplatePreflight = {
+  ...passedPreflight,
+  execution_template_id: 'tasktpl-strict',
+  evaluation_goal: 'regression',
+  quality_gate: { pass_rate: 0.96, max_badcase_count: 1 },
+  sample_repeat_times: 3,
+  cost_budget: 30,
+};
+
+const customParamPreflight = {
+  ...passedPreflight,
+  sample_repeat_times: 2,
+  cost_budget: 12.5,
+};
 
 describe('TaskCreateWizard', () => {
   it('必须选择 Dataset、Workflow 并完成可继续的 Preflight 后才能创建', async () => {
@@ -151,7 +176,7 @@ describe('TaskCreateWizard', () => {
 
   it('选择执行参数模板后会填充质量门槛和执行参数', async () => {
     const onSubmit = vi.fn();
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} executionTemplates={executionTemplates} loading={false} preflightLoading={false} preflightResult={passedPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} executionTemplates={executionTemplates} loading={false} preflightLoading={false} preflightResult={strictTemplatePreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
 
     fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '模板任务' } });
     await chooseSelectOption('执行参数模板', '高严谨回归模板');
@@ -176,9 +201,42 @@ describe('TaskCreateWizard', () => {
     );
   });
 
+  it('Preflight 后修改关键参数会要求重新运行预检', async () => {
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={passedPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={vi.fn()} />);
+
+    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    expect(screen.getByRole('button', { name: '确认创建任务' })).not.toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText('例如：20.00'), { target: { value: '12.5' } });
+
+    expect(screen.getByRole('button', { name: '确认创建任务' })).toBeDisabled();
+    expect(screen.getByText('Preflight 结果已过期')).toBeInTheDocument();
+  });
+
+  it('运行 Preflight 会提交完整默认执行参数', async () => {
+    const onPreflight = vi.fn();
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={onPreflight} onSubmit={vi.fn()} />);
+
+    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
+
+    expect(onPreflight).toHaveBeenCalledWith(
+      expect.objectContaining<Partial<TaskCreateFormValues>>({
+        evaluation_goal: 'release_gate',
+        pass_rate_threshold: 0.9,
+        max_badcase_count: 0,
+        sample_repeat_times: 1,
+        max_retries: 1,
+        retry_backoff_seconds: 0,
+      }),
+    );
+  });
+
   it('提交任务参数时包含并发、重试、repeat 和成本预算', async () => {
     const onSubmit = vi.fn();
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={passedPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={customParamPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
 
     fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '严谨化任务' } });
     await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');

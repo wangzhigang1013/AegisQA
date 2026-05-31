@@ -38,6 +38,11 @@ class AuditService:
         self.store.append_jsonl(["audit", "events.jsonl"], event.model_dump(mode="json"))
         return event
 
-    def list_events(self) -> list[AuditEvent]:
-        return [AuditEvent(**payload) for payload in self.store.iter_jsonl(["audit", "events.jsonl"])]
-
+    def list_events(self, *, actor: str | None = None, action: str | None = None) -> list[AuditEvent]:
+        events = [AuditEvent(**payload) for payload in self.store.iter_jsonl(["audit", "events.jsonl"])]
+        # 过滤能力放在审计服务层，避免多个 API 入口各自实现一份筛选逻辑。
+        if actor is not None:
+            events = [event for event in events if event.actor == actor]
+        if action is not None:
+            events = [event for event in events if event.action == action]
+        return events

@@ -352,8 +352,11 @@ export type TaskPreflightResult = {
   dataset_id: string;
   dataset_version: number;
   workflow_version_id: string;
+  execution_template_id?: string | null;
   evaluation_goal?: string | null;
   quality_gate?: Record<string, unknown>;
+  sample_repeat_times?: number | null;
+  cost_budget?: number | null;
   checks: TaskPreflightCheck[];
   created_at?: string;
 };

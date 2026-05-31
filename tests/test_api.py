@@ -143,3 +143,17 @@ def test_api_runs_full_mvp_flow(tmp_path: Path) -> None:
 
     access = client.get("/access/check", params={"role": "Viewer", "permission": "workflow:publish"}).json()
     assert access["allowed"] is False
+
+
+def test_audit_events_can_be_filtered_by_actor_and_action(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    client.app.state.audit_service.record(actor="api", action="task.create", target="task-a")
+    client.app.state.audit_service.record(actor="operator", action="skill.approve", target="skill-a")
+
+    response = client.get("/audit-events", params={"actor": "api", "action": "task.create"})
+
+    assert response.status_code == 200
+    events = response.json()
+    assert [event["target"] for event in events] == ["task-a"]

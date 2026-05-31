@@ -65,8 +65,11 @@ const demoPreflightResult = {
   dataset_id: 'dataset-demo',
   dataset_version: 1,
   workflow_version_id: 'wf-demo:v1',
+  execution_template_id: undefined,
   evaluation_goal: 'release_gate',
   quality_gate: { pass_rate: 0.9, max_badcase_count: 0 },
+  sample_repeat_times: 1,
+  cost_budget: undefined,
   checks: [
     { check_id: 'dataset_non_empty', title: '数据集非空', status: 'passed', message: '当前数据集包含 100 条样本。', details: {}, recommendation: '' },
     { check_id: 'field_mapping', title: 'Workflow 字段映射', status: 'passed', message: 'Workflow 需要的 row 字段均存在。', details: {}, recommendation: '' },
