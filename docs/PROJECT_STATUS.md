@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Candidate Owner Capacity”已完成目标实现和全量验证。本批次把候选资产批量指派从“能设置负责人/SLA”继续推进到“有容量保护”：后端 `POST /prompt-skill-candidates/bulk-assign` 新增 `max_open_per_owner`，会根据负责人当前开放候选数跳过超容量候选并返回 `capacity` 摘要；前端候选资产中心会展示开放候选容量上限，并在成功提示中说明容量跳过数量。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Candidate Assign Controls”已完成目标实现和验证。本批次把候选资产批量指派从“固定指派给 qa_owner / 固定容量 5”升级为页面可配置：候选资产中心新增“批量指派负责人”和“负责人开放候选容量”控件，按钮文案和 `POST /prompt-skill-candidates/bulk-assign` 请求体都会使用当前输入值。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -81,6 +81,7 @@
 - Prompt/Skill 候选资产已支持复跑优先级计划：`GET /prompt-skill-candidates/retest-plan` 会按草稿状态、发布状态、复跑结果、逾期、升级和晋升建议计算下一步动作与优先级；候选资产中心展示“复跑优先级”卡片，用户能直接看到应先复跑、先发布、先建草稿或查看复跑报告的候选。
 - Prompt/Skill 候选资产已支持真实批量复跑执行：`POST /prompt-skill-candidates/bulk-retest` 会根据复跑计划只执行 `retest_candidate` 候选，并把待发布、待建草稿、已复跑或错误候选放入 skipped 明细；复跑结果写入任务、实验、审计和候选 `action_history`；前端候选资产中心可一键批量复跑 ready 候选。
 - Prompt/Skill 候选资产已支持负责人容量限制：`POST /prompt-skill-candidates/bulk-assign` 可传 `max_open_per_owner`，超过负责人开放候选容量时跳过候选并返回 `capacity`、`skipped_count` 与跳过原因；前端候选资产中心展示容量上限和容量跳过反馈。
+- Prompt/Skill 候选资产中心的批量指派负责人和开放候选容量已改为页面可配置，避免固定 `qa_owner` 和固定容量导致误指派。
 - Workflow 市场进入画布时会把当前草稿写入 `['workflow-draft', draft_id]` 单草稿缓存；画布深链在草稿未加载时显示加载态，异常 graph 结构会给出中文错误提示而不是白屏。
 - Judge 审计已新增多 Judge 一致性 API 与前端弹窗，支持输入多个 Judge 输出并展示两两一致率。
 - 报告中心已新增跨任务 Score Analytics，按 Task 聚合任务数、平均通过率、Badcase、P95、估算成本和退化任务，避免只看单次任务报告。
@@ -93,6 +94,12 @@
 
 - `python -m pytest tests\test_task_flow_optimization.py -q -k "owner_capacity"`：1 passed，覆盖候选资产批量指派 `max_open_per_owner`、容量跳过、`capacity` 摘要和负责人工作量更新。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`：1 passed，覆盖候选资产中心批量指派容量跳过提示。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`：1 passed，覆盖候选资产中心批量指派负责人和开放候选容量输入值进入请求体。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：4 个测试文件、55 passed。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
+- `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
 - `python -m pytest tests\test_sqlite_store_adapter.py -q`：3 passed，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
 - `python -m pytest tests\test_task_flow_optimization.py -q`：19 passed，覆盖 Task Preflight、Repair Task 生成查询、领取/完成/重开状态流转、Repair Task 发起 Annotation Queue / CI Gate 复测、修复后复跑 Attempt 与报告对比、上下文修复建议生成、修复建议拆分为二级任务、修复树进度聚合、负责人指派、截止时间、逾期聚合、完成后清除逾期、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比计划、版本差异沉淀候选资产、创建 Workflow 草稿、候选资产审批后创建草稿、候选资产批量指派、负责人容量限制、工作量聚合、逾期升级、批量审批、复跑优先级计划、批量复跑执行，以及候选草稿发布后的自动复跑和三方指标对比。
 - `python -m pytest -q`：84 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
@@ -169,6 +176,27 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Candidate Assign Controls
+
+- 改动摘要：把候选资产中心的批量指派从固定 `qa_owner` / 固定容量 5 改为页面可配置。负责人输入框会控制按钮文案和请求体 `owner`，容量输入框会控制请求体 `max_open_per_owner`；负责人为空时禁用批量指派，避免提交无效 owner。
+- 变更文件：
+  - `frontend/src/pages/CandidateAssetsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/superpowers/plans/2026-05-31-candidate-assign-controls.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`（RED，确认缺少“批量指派负责人”控件；GREEN 后 1 passed）
+- 当前测试结果：
+  - 前端目标测试：1 passed。
+  - 前端 typecheck：通过。
+  - 前端全量测试：4 个测试文件、55 passed。
+  - 前端构建：通过。
+  - Playwright E2E：8 passed。
+  - `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
+- 下一步：提交本批次 Git 变更；后续继续推进候选资产自动归档策略、批量复跑并发控制、外部审批/IM 通知和真实成本账单。
 
 ### 2026-05-31 Candidate Owner Capacity
 

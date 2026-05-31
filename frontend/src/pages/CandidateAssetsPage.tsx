@@ -1,6 +1,6 @@
 import { CheckCircleOutlined, FileSearchOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Descriptions, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Descriptions, Input, InputNumber, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
@@ -21,6 +21,8 @@ export function CandidateAssetsPage() {
   const [lastBaselineImpact, setLastBaselineImpact] = useState<ExperimentBaselineImpact | null>(null);
   const [lastBaselineRollback, setLastBaselineRollback] = useState<ExperimentBaselineActionResult | null>(null);
   const [lastBaselineNotifications, setLastBaselineNotifications] = useState<BaselineChangeNotification[]>([]);
+  const [batchAssignOwner, setBatchAssignOwner] = useState('qa_owner');
+  const [batchAssignCapacity, setBatchAssignCapacity] = useState<number | null>(CANDIDATE_OWNER_CAPACITY_LIMIT);
   const queryKey = ['prompt-skill-candidates', statusFilter] as const;
   const candidatesQuery = useQuery({
     queryKey,
@@ -44,6 +46,7 @@ export function CandidateAssetsPage() {
   const retestPlanItems = retestPlanQuery.data?.items ?? [];
   const retestPlanCandidateIds = retestPlanItems.map((item) => item.candidate_id);
   const readyRetestCount = retestPlanQuery.data?.summary.ready_for_retest ?? 0;
+  const normalizedBatchAssignOwner = batchAssignOwner.trim();
 
   function invalidateCandidateSummaries() {
     void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidate-workload'] });
@@ -114,10 +117,10 @@ export function CandidateAssetsPage() {
     mutationFn: () =>
       api.bulkAssignPromptSkillCandidates({
         candidate_ids: currentCandidateIds,
-        owner: 'qa_owner',
+        owner: normalizedBatchAssignOwner,
         due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         actor: 'lead',
-        max_open_per_owner: CANDIDATE_OWNER_CAPACITY_LIMIT,
+        max_open_per_owner: batchAssignCapacity,
       }),
     onSuccess: (payload) => {
       mergeCandidates(payload.candidates);
@@ -362,10 +365,27 @@ export function CandidateAssetsPage() {
             ))}
           </Space>
           <Space wrap>
-            <Button disabled={!currentCandidateIds.length} loading={bulkAssignMutation.isPending} onClick={() => bulkAssignMutation.mutate()}>
-              指派当前列表给 qa_owner
+            <Input
+              aria-label="批量指派负责人"
+              placeholder="负责人，例如 qa_owner"
+              value={batchAssignOwner}
+              onChange={(event) => setBatchAssignOwner(event.target.value)}
+              style={{ width: 200 }}
+            />
+            <InputNumber
+              aria-label="负责人开放候选容量"
+              min={1}
+              precision={0}
+              value={batchAssignCapacity}
+              onChange={(value) => setBatchAssignCapacity(typeof value === 'number' ? value : null)}
+              style={{ width: 150 }}
+            />
+            <Button disabled={!currentCandidateIds.length || !normalizedBatchAssignOwner} loading={bulkAssignMutation.isPending} onClick={() => bulkAssignMutation.mutate()}>
+              指派当前列表给 {normalizedBatchAssignOwner || '负责人'}
             </Button>
-            <Typography.Text type="secondary">开放候选容量上限：{CANDIDATE_OWNER_CAPACITY_LIMIT} 个</Typography.Text>
+            <Typography.Text type="secondary">
+              {batchAssignCapacity ? `开放候选容量上限：${batchAssignCapacity} 个` : '开放候选容量上限：不限制'}
+            </Typography.Text>
             <Button disabled={!currentCandidateIds.length} loading={bulkReviewMutation.isPending} onClick={() => bulkReviewMutation.mutate()}>
               批量审批当前列表
             </Button>

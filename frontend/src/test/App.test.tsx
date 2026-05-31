@@ -1953,8 +1953,17 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('prompt-flow-v0')).toBeInTheDocument();
     expect(screen.getByText('prompt-flow-v1')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /指派当前列表给 qa_owner/ }));
+    fireEvent.change(screen.getByLabelText('批量指派负责人'), { target: { value: 'prompt_owner' } });
+    fireEvent.change(screen.getByLabelText('负责人开放候选容量'), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: /指派当前列表给 prompt_owner/ }));
     expect(await screen.findByText(/候选资产已指派：1 个，容量跳过 1 个/)).toBeInTheDocument();
+    const bulkAssignCall = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.find(([input]) => String(input).endsWith('/prompt-skill-candidates/bulk-assign'));
+    expect(JSON.parse(String(bulkAssignCall?.[1]?.body ?? '{}'))).toMatchObject({
+      owner: 'prompt_owner',
+      max_open_per_owner: 3,
+    });
     expect(screen.getAllByText(/qa_owner/).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: /升级逾期候选/ }));
