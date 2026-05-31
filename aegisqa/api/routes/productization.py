@@ -65,6 +65,7 @@ class WorkflowPromotionReviewDecisionRequest(BaseModel):
 class ExperimentBaselineActionRequest(BaseModel):
     actor: str = "api"
     note: str = ""
+    force: bool = False
 
 
 def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -171,6 +172,10 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         if workflow_id:
             baselines = [baseline for baseline in baselines if baseline.get("scope", {}).get("workflow_id") == workflow_id]
         return sorted(baselines, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+
+    @app.get("/experiment-baseline-suggestions/{suggestion_id}/impact")
+    def get_experiment_baseline_suggestion_impact(suggestion_id: str) -> dict[str, Any]:
+        return _build_experiment_baseline_impact(ctx, suggestion_id)
 
     @app.post("/experiment-baseline-suggestions/{suggestion_id}/apply")
     def apply_experiment_baseline_suggestion(suggestion_id: str, request: ExperimentBaselineActionRequest) -> dict[str, Any]:
@@ -1113,6 +1118,167 @@ def _record_ci_gate_evaluation(
     return evaluation
 
 
+def _build_experiment_baseline_impact(ctx: RouteContext, suggestion_id: str) -> dict[str, Any]:
+    suggestion = _get_record(ctx.store, "experiment_baseline_suggestions", suggestion_id)
+    suggested_experiment = _get_record(ctx.store, "experiments", str(suggestion["suggested_experiment_id"]))
+    previous_experiment = (
+        _get_record(ctx.store, "experiments", str(suggestion["previous_baseline_experiment_id"]))
+        if suggestion.get("previous_baseline_experiment_id")
+        else None
+    )
+    scope = {
+        "dataset_id": suggested_experiment.get("dataset_id"),
+        "workflow_id": suggested_experiment.get("workflow_id"),
+    }
+    affected_tasks = [
+        _baseline_impact_task_summary(task)
+        for task in _list_records(ctx.store, "tasks")
+        if _task_matches_baseline_scope(task, scope)
+    ]
+    ci_gate_configs = [config for config in _list_records(ctx.store, "ci_gate_configs") if config.get("status", "active") in {"active", "enabled"}]
+    return {
+        "suggestion_id": suggestion_id,
+        "status": suggestion.get("status"),
+        "scope": scope,
+        "suggested_experiment_id": suggested_experiment.get("experiment_id"),
+        "previous_baseline_experiment_id": previous_experiment.get("experiment_id") if previous_experiment else None,
+        "metric_delta": _experiment_baseline_metric_delta(ctx, suggested_experiment, previous_experiment),
+        "summary": {
+            "affected_tasks": len(affected_tasks),
+            "affected_reports": sum(1 for task in affected_tasks if task.get("run_id")),
+            "ci_gate_configs": len(ci_gate_configs),
+        },
+        "affected_tasks": affected_tasks,
+        "recommendations": _baseline_impact_recommendations(suggestion, ci_gate_configs),
+        "generated_at": _now(),
+    }
+
+
+def _task_matches_baseline_scope(task: dict[str, Any], scope: dict[str, Any]) -> bool:
+    if task.get("dataset_id") != scope.get("dataset_id"):
+        return False
+    workflow_id = scope.get("workflow_id")
+    if not workflow_id:
+        return True
+    workflow_version_id = str(task.get("workflow_version_id") or "")
+    return task.get("workflow_id") == workflow_id or workflow_version_id == workflow_id or workflow_version_id.startswith(f"{workflow_id}:")
+
+
+def _baseline_impact_task_summary(task: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "task_id": task.get("task_id"),
+        "name": task.get("name"),
+        "status": task.get("status"),
+        "dataset_id": task.get("dataset_id"),
+        "workflow_id": task.get("workflow_id"),
+        "workflow_version_id": task.get("workflow_version_id"),
+        "run_id": task.get("run_id"),
+        "total_items": task.get("total_items", 0),
+        "completed_items": task.get("completed_items", 0),
+        "failed_items": task.get("failed_items", 0),
+        "pass_rate": task.get("pass_rate"),
+        "badcase_count": task.get("badcase_count"),
+    }
+
+
+def _experiment_baseline_metric_delta(
+    ctx: RouteContext,
+    suggested_experiment: dict[str, Any],
+    previous_experiment: dict[str, Any] | None,
+) -> dict[str, Any]:
+    suggested_run = ctx.runner.get_run(str(suggested_experiment["run_id"])) if suggested_experiment.get("run_id") else None
+    previous_run = ctx.runner.get_run(str(previous_experiment["run_id"])) if previous_experiment and previous_experiment.get("run_id") else None
+    if suggested_run and previous_run:
+        comparison = compare_reports(aggregate_run_report(previous_run), aggregate_run_report(suggested_run))
+        return {
+            "pass_rate_delta": comparison.get("pass_rate_delta"),
+            "error_rate_delta": comparison.get("error_rate_delta"),
+            "badcase_delta": comparison.get("badcase_delta"),
+            "p95_latency_ms_delta": comparison.get("metric_delta", {}).get("p95_latency_ms_delta"),
+            "cost_delta": comparison.get("metric_delta", {}).get("cost_delta"),
+        }
+
+    metrics = suggested_experiment.get("metrics", {}) if isinstance(suggested_experiment.get("metrics"), dict) else {}
+    baseline_metrics = previous_experiment.get("metrics", {}) if previous_experiment and isinstance(previous_experiment.get("metrics"), dict) else {}
+    return {
+        "pass_rate_delta": _numeric_delta(metrics, baseline_metrics, "pass_rate"),
+        "error_rate_delta": _numeric_delta(metrics, baseline_metrics, "error_rate"),
+        "badcase_delta": _numeric_delta(metrics, baseline_metrics, "badcase_count"),
+        "p95_latency_ms_delta": _numeric_delta(metrics, baseline_metrics, "p95_latency_ms"),
+        "cost_delta": _numeric_delta(metrics, baseline_metrics, "cost"),
+    }
+
+
+def _numeric_delta(metrics: dict[str, Any], baseline_metrics: dict[str, Any], key: str) -> float | None:
+    left = baseline_metrics.get(key)
+    right = metrics.get(key)
+    if not isinstance(left, (int, float)) or not isinstance(right, (int, float)):
+        return None
+    return round(float(right) - float(left), 6)
+
+
+def _baseline_impact_recommendations(suggestion: dict[str, Any], ci_gate_configs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    recommendations = [
+        {
+            "action": "apply_baseline",
+            "label": "应用或确认当前 baseline",
+            "message": "先确认影响任务和指标 delta，再把候选实验登记为当前 baseline。",
+        }
+    ]
+    if suggestion.get("status") == "applied":
+        recommendations.append(
+            {
+                "action": "rollback_baseline",
+                "label": "必要时回滚 baseline",
+                "message": "如果后续发现候选版本不稳定，回滚前会自动用原 baseline 重新执行 CI Gate。",
+            }
+        )
+    if not ci_gate_configs:
+        recommendations.append(
+            {
+                "action": "create_ci_gate",
+                "label": "补充 CI Gate",
+                "message": "当前没有 active/enabled 门禁，baseline 变更缺少自动阻断标准。",
+            }
+        )
+    return recommendations
+
+
+def _build_baseline_rollback_guard(ctx: RouteContext, suggestion: dict[str, Any], *, now: str) -> dict[str, Any]:
+    previous_experiment_id = suggestion.get("previous_baseline_experiment_id")
+    if not previous_experiment_id:
+        return {"status": "pending_rollback_target", "ci_gate_evaluations": [], "blocking_failures": 0}
+    previous_experiment = _get_record(ctx.store, "experiments", str(previous_experiment_id))
+    previous_run_id = previous_experiment.get("run_id")
+    if not previous_run_id:
+        return {"status": "pending_rollback_target", "ci_gate_evaluations": [], "blocking_failures": 0}
+    ci_gate_configs = [config for config in _list_records(ctx.store, "ci_gate_configs") if config.get("status", "active") in {"active", "enabled"}]
+    if not ci_gate_configs:
+        return {"status": "pending_ci_gate_config", "ci_gate_evaluations": [], "blocking_failures": 0}
+
+    run = ctx.runner.get_run(str(previous_run_id))
+    metrics = _ci_gate_metrics_from_run(run)
+    evaluations = [
+        _record_ci_gate_evaluation(
+            ctx,
+            config=config,
+            metrics=metrics,
+            target={"kind": "run", "id": str(previous_run_id)},
+            source="experiment_baseline_rollback",
+            review_id=str(suggestion["suggestion_id"]),
+            now=now,
+        )
+        for config in ci_gate_configs
+    ]
+    blocking_failures = sum(int(item.get("blocking_failures", 0)) for item in evaluations)
+    # 回滚也可能把 baseline 带回一个不满足当前质量门禁的旧版本，必须把复测证据和回滚动作绑定。
+    return {
+        "status": "blocked" if blocking_failures else "passed",
+        "ci_gate_evaluations": evaluations,
+        "blocking_failures": blocking_failures,
+    }
+
+
 def _apply_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: str, request: ExperimentBaselineActionRequest) -> dict[str, Any]:
     suggestion = _get_record(ctx.store, "experiment_baseline_suggestions", suggestion_id)
     if suggestion.get("status") not in {"pending_apply", "rolled_back", "applied"}:
@@ -1174,6 +1340,14 @@ def _rollback_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: s
             details={"suggestion_id": suggestion_id},
         )
     now = _now()
+    rollback_guard = _build_baseline_rollback_guard(ctx, suggestion, now=now)
+    if rollback_guard.get("status") == "blocked" and not request.force:
+        raise AegisQAError(
+            "BASELINE_ROLLBACK_CI_GATE_BLOCKED",
+            "回滚目标未通过当前 CI Gate，请先处理阻断项，或明确使用 force 执行人工兜底回滚。",
+            status_code=409,
+            details={"suggestion_id": suggestion_id, "rollback_guard": rollback_guard},
+        )
     baseline["current_experiment_id"] = previous_experiment_id
     baseline["previous_experiment_id"] = suggestion.get("suggested_experiment_id")
     baseline["status"] = "active"
@@ -1196,8 +1370,8 @@ def _rollback_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: s
     suggestion["updated_at"] = now
     _save_record(ctx.store, "experiment_baselines", "baseline_id", baseline)
     _save_record(ctx.store, "experiment_baseline_suggestions", "suggestion_id", suggestion)
-    ctx.audit_service.record(actor=request.actor, action="experiment_baseline.rollback", target=baseline["baseline_id"], detail={"suggestion_id": suggestion_id, "current_experiment_id": baseline["current_experiment_id"]})
-    return {"status": "rolled_back", "suggestion": suggestion, "baseline": baseline}
+    ctx.audit_service.record(actor=request.actor, action="experiment_baseline.rollback", target=baseline["baseline_id"], detail={"suggestion_id": suggestion_id, "current_experiment_id": baseline["current_experiment_id"], "rollback_guard_status": rollback_guard.get("status")})
+    return {"status": "rolled_back", "suggestion": suggestion, "baseline": baseline, "rollback_guard": rollback_guard}
 
 
 def _get_or_create_experiment_baseline(ctx: RouteContext, experiment: dict[str, Any], *, now: str) -> dict[str, Any]:

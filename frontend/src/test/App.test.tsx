@@ -584,6 +584,40 @@ const demoBaselineApplyPayload = {
   },
 };
 
+const demoBaselineImpactPayload = {
+  suggestion_id: 'baseline-suggestion-demo',
+  scope: { dataset_id: 'dataset-demo', workflow_id: 'wf-demo' },
+  suggested_experiment_id: 'exp-candidate-demo',
+  previous_baseline_experiment_id: 'exp-baseline',
+  metric_delta: { pass_rate_delta: 0.05, badcase_delta: -2 },
+  summary: { affected_tasks: 1, affected_reports: 1, ci_gate_configs: 1 },
+  affected_tasks: [{ task_id: 'task-demo', name: 'RAG 任务', status: 'completed', pass_rate: 0.8 }],
+  recommendations: [{ action: 'apply_baseline', label: '可以应用 baseline' }],
+};
+
+const demoBaselineRollbackPayload = {
+  status: 'rolled_back',
+  suggestion: {
+    ...demoWorkflowPromotionApprovedPayload.release_artifacts.baseline_suggestion,
+    status: 'rolled_back',
+    rolled_back_by: 'release_owner',
+    rolled_back_at: '2026-05-31T05:00:00Z',
+  },
+  baseline: {
+    ...demoBaselineApplyPayload.baseline,
+    current_experiment_id: 'exp-baseline',
+    previous_experiment_id: 'exp-candidate-demo',
+    history: [
+      ...demoBaselineApplyPayload.baseline.history,
+      { action: 'rollback', suggestion_id: 'baseline-suggestion-demo', from_experiment_id: 'exp-candidate-demo', to_experiment_id: 'exp-baseline', actor: 'release_owner', note: '回滚到原 baseline。' },
+    ],
+  },
+  rollback_guard: {
+    status: 'passed',
+    ci_gate_evaluations: [{ ...demoCIGateEvaluations[0], evaluation_id: 'gateeval-rollback-demo', status: 'passed', blocking_failures: 0, source: 'experiment_baseline_rollback' }],
+  },
+};
+
 const pendingPackageSkill = {
   ...demoSkills[0],
   skill_id: 'plugin.echo@0.1.0',
@@ -1210,6 +1244,12 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/experiment-baseline-suggestions/baseline-suggestion-demo/apply')) {
         return jsonResponse(demoBaselineApplyPayload);
       }
+      if (url.endsWith('/experiment-baseline-suggestions/baseline-suggestion-demo/impact')) {
+        return jsonResponse(demoBaselineImpactPayload);
+      }
+      if (url.endsWith('/experiment-baseline-suggestions/baseline-suggestion-demo/rollback')) {
+        return jsonResponse(demoBaselineRollbackPayload);
+      }
       if (url.includes('/prompt-skill-candidates')) {
         return jsonResponse([demoPromptSkillCandidate]);
       }
@@ -1784,6 +1824,14 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /应用 baseline/ }));
     expect(await screen.findByText(/Baseline 已应用：exp-candidate-demo/)).toBeInTheDocument();
     expect(screen.getByText(/当前 baseline：exp-candidate-demo/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /查看影响/ }));
+    expect(await screen.findByText(/影响任务：1/)).toBeInTheDocument();
+    expect(screen.getByText(/pass_rate_delta=0.05/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /回滚 baseline/ }));
+    expect(await screen.findByText(/Baseline 已回滚：exp-baseline/)).toBeInTheDocument();
+    expect(screen.getByText(/回滚门禁：passed/)).toBeInTheDocument();
   });
 
   it('报告中心围绕任务展示报告、质量决策和导出入口', async () => {

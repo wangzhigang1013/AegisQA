@@ -759,6 +759,14 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
     assert applied_baseline["baseline"]["history"][-1]["action"] == "apply"
     listed_baselines = client.get(f"/experiment-baselines?workflow_id={applied_baseline['baseline']['scope']['workflow_id']}").json()
     assert listed_baselines[0]["baseline_id"] == applied_baseline["baseline"]["baseline_id"]
+    impact = client.get(f"/experiment-baseline-suggestions/{baseline_suggestion['suggestion_id']}/impact").json()
+    assert impact["suggestion_id"] == baseline_suggestion["suggestion_id"]
+    assert impact["scope"]["dataset_id"] == dataset["dataset_id"]
+    assert impact["suggested_experiment_id"] == retest["candidate_experiment"]["experiment_id"]
+    assert impact["previous_baseline_experiment_id"] == baseline_experiment["experiment_id"]
+    assert impact["metric_delta"]["pass_rate_delta"] == retest["comparisons"]["baseline_to_candidate"]["pass_rate_delta"]
+    assert impact["summary"]["affected_tasks"] >= 1
+    assert impact["recommendations"][0]["action"] == "apply_baseline"
 
     rolled_back_baseline = client.post(
         f"/experiment-baseline-suggestions/{baseline_suggestion['suggestion_id']}/rollback",
@@ -767,3 +775,5 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
     assert rolled_back_baseline["suggestion"]["status"] == "rolled_back"
     assert rolled_back_baseline["baseline"]["current_experiment_id"] == baseline_experiment["experiment_id"]
     assert rolled_back_baseline["baseline"]["history"][-1]["action"] == "rollback"
+    assert rolled_back_baseline["rollback_guard"]["status"] == "passed"
+    assert rolled_back_baseline["rollback_guard"]["ci_gate_evaluations"][0]["source"] == "experiment_baseline_rollback"

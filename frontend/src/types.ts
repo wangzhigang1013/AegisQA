@@ -899,6 +899,28 @@ export type ExperimentBaselineActionResult = {
   status: string;
   suggestion: ExperimentBaselineSuggestion;
   baseline: ExperimentBaselineRecord;
+  rollback_guard?: {
+    status: string;
+    ci_gate_evaluations: CIGateEvaluationRecord[];
+    blocking_failures?: number;
+  };
+};
+
+export type ExperimentBaselineImpact = {
+  suggestion_id: string;
+  status?: string;
+  scope: { dataset_id?: string | null; workflow_id?: string | null };
+  suggested_experiment_id?: string | null;
+  previous_baseline_experiment_id?: string | null;
+  metric_delta: Record<string, unknown>;
+  summary: {
+    affected_tasks: number;
+    affected_reports: number;
+    ci_gate_configs: number;
+  };
+  affected_tasks: Partial<TaskRecord>[];
+  recommendations: Array<{ action: string; label: string; message?: string }>;
+  generated_at?: string;
 };
 
 export type WorkflowReleaseRecord = {

@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { ExperimentBaselineActionResult, PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
+import type { ExperimentBaselineActionResult, ExperimentBaselineImpact, PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
 
 export function CandidateAssetsPage() {
   const queryClient = useQueryClient();
@@ -15,6 +15,8 @@ export function CandidateAssetsPage() {
   const [lastPromotionReview, setLastPromotionReview] = useState<WorkflowPromotionReview | null>(null);
   const [lastReleaseArtifacts, setLastReleaseArtifacts] = useState<WorkflowPromotionReleaseArtifacts | null>(null);
   const [lastBaselineApplication, setLastBaselineApplication] = useState<ExperimentBaselineActionResult | null>(null);
+  const [lastBaselineImpact, setLastBaselineImpact] = useState<ExperimentBaselineImpact | null>(null);
+  const [lastBaselineRollback, setLastBaselineRollback] = useState<ExperimentBaselineActionResult | null>(null);
   const queryKey = ['prompt-skill-candidates', statusFilter] as const;
   const candidatesQuery = useQuery({
     queryKey,
@@ -127,11 +129,44 @@ export function CandidateAssetsPage() {
     },
     onSuccess: (payload) => {
       setLastBaselineApplication(payload);
+      setLastBaselineRollback(null);
       setLastReleaseArtifacts((current) => (current ? { ...current, baseline_suggestion: payload.suggestion } : current));
       void queryClient.invalidateQueries({ queryKey: ['experiments'] });
       setNotice(`Baseline 已应用：${payload.baseline.current_experiment_id}`);
     },
     onError: (error) => setNotice(`Baseline 应用失败：${formatApiError(error)}`),
+  });
+
+  const baselineImpactMutation = useMutation({
+    mutationFn: () => {
+      const suggestionId = lastReleaseArtifacts?.baseline_suggestion?.suggestion_id;
+      if (!suggestionId) throw new Error('缺少 baseline 替换建议。');
+      return api.experimentBaselineImpact(suggestionId);
+    },
+    onSuccess: (payload) => {
+      setLastBaselineImpact(payload);
+      setNotice(`Baseline 影响分析已生成：影响任务 ${payload.summary.affected_tasks} 个`);
+    },
+    onError: (error) => setNotice(`Baseline 影响分析失败：${formatApiError(error)}`),
+  });
+
+  const rollbackBaselineMutation = useMutation({
+    mutationFn: () => {
+      const suggestionId = lastReleaseArtifacts?.baseline_suggestion?.suggestion_id;
+      if (!suggestionId) throw new Error('缺少 baseline 替换建议。');
+      return api.rollbackExperimentBaselineSuggestion(suggestionId, {
+        actor: 'release_owner',
+        note: '回滚到原 baseline。',
+      });
+    },
+    onSuccess: (payload) => {
+      setLastBaselineApplication(payload);
+      setLastBaselineRollback(payload);
+      setLastReleaseArtifacts((current) => (current ? { ...current, baseline_suggestion: payload.suggestion } : current));
+      void queryClient.invalidateQueries({ queryKey: ['experiments'] });
+      setNotice(`Baseline 已回滚：${payload.baseline.current_experiment_id}`);
+    },
+    onError: (error) => setNotice(`Baseline 回滚失败：${formatApiError(error)}`),
   });
 
   return (
@@ -257,7 +292,7 @@ export function CandidateAssetsPage() {
                 ，badcase_delta={formatUnknown(lastRetest.comparisons.current_to_candidate?.badcase_delta)}
               </Descriptions.Item>
               <Descriptions.Item label="baseline_to_candidate">
-                baseline_to_candidate pass_rate_delta={formatDelta(lastRetest.comparisons.baseline_to_candidate?.pass_rate_delta)}
+                baseline_to_candidate 通过率变化 {formatDelta(lastRetest.comparisons.baseline_to_candidate?.pass_rate_delta)}
                 ，badcase_delta={formatUnknown(lastRetest.comparisons.baseline_to_candidate?.badcase_delta)}
               </Descriptions.Item>
             </Descriptions>
@@ -305,8 +340,23 @@ export function CandidateAssetsPage() {
                 <Typography.Text type="secondary">原 baseline：{lastReleaseArtifacts.baseline_suggestion.previous_baseline_experiment_id ?? '-'}</Typography.Text>
                 <Typography.Text type="secondary">{lastReleaseArtifacts.baseline_suggestion.reason ?? '审批通过后生成的 baseline 候选。'}</Typography.Text>
                 {lastBaselineApplication ? <Typography.Text>当前 baseline：{lastBaselineApplication.baseline.current_experiment_id ?? '-'}</Typography.Text> : null}
+                {lastBaselineImpact ? (
+                  <Descriptions size="small" column={1} bordered>
+                    <Descriptions.Item label="影响范围">影响任务：{lastBaselineImpact.summary.affected_tasks}，报告：{lastBaselineImpact.summary.affected_reports}</Descriptions.Item>
+                    <Descriptions.Item label="指标变化">pass_rate_delta={formatDelta(lastBaselineImpact.metric_delta.pass_rate_delta)}，badcase_delta={formatUnknown(lastBaselineImpact.metric_delta.badcase_delta)}</Descriptions.Item>
+                  </Descriptions>
+                ) : null}
+                {lastBaselineRollback?.rollback_guard ? (
+                  <Typography.Text>回滚门禁：{lastBaselineRollback.rollback_guard.status}</Typography.Text>
+                ) : null}
                 <Space wrap>
                   {lastReleaseArtifacts.baseline_suggestion.target_url ? <Button href={lastReleaseArtifacts.baseline_suggestion.target_url}>打开实验中心</Button> : null}
+                  <Button
+                    loading={baselineImpactMutation.isPending}
+                    onClick={() => baselineImpactMutation.mutate()}
+                  >
+                    查看影响
+                  </Button>
                   <Button
                     type="primary"
                     disabled={lastReleaseArtifacts.baseline_suggestion.status === 'applied'}
@@ -314,6 +364,14 @@ export function CandidateAssetsPage() {
                     onClick={() => applyBaselineMutation.mutate()}
                   >
                     应用 baseline
+                  </Button>
+                  <Button
+                    danger
+                    disabled={!lastBaselineApplication || lastBaselineApplication.suggestion.status !== 'applied'}
+                    loading={rollbackBaselineMutation.isPending}
+                    onClick={() => rollbackBaselineMutation.mutate()}
+                  >
+                    回滚 baseline
                   </Button>
                 </Space>
               </Space>

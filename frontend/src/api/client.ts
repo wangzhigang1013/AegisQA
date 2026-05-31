@@ -12,6 +12,7 @@ import type {
   DatasetSummary,
   DatasetVersion,
   ExperimentBaselineActionResult,
+  ExperimentBaselineImpact,
   ExperimentRecord,
   GraphValidationResult,
   JudgeProfile,
@@ -216,6 +217,13 @@ export const api = {
     }),
   applyExperimentBaselineSuggestion: (suggestionId: string, body: { actor?: string; note?: string } = {}) =>
     request<ExperimentBaselineActionResult>(`/experiment-baseline-suggestions/${encodeURIComponent(suggestionId)}/apply`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  experimentBaselineImpact: (suggestionId: string) =>
+    request<ExperimentBaselineImpact>(`/experiment-baseline-suggestions/${encodeURIComponent(suggestionId)}/impact`),
+  rollbackExperimentBaselineSuggestion: (suggestionId: string, body: { actor?: string; note?: string; force?: boolean } = {}) =>
+    request<ExperimentBaselineActionResult>(`/experiment-baseline-suggestions/${encodeURIComponent(suggestionId)}/rollback`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
