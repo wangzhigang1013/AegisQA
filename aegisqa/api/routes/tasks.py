@@ -52,12 +52,14 @@ from aegisqa.api.app import (
 )
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
+from aegisqa.core.mapper import MappingPathError, TypeMismatchError
 from aegisqa.core.security import redact_secrets
 from aegisqa.engine.runner import RunRecord, RunRequest
 from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments, compare_reports
 from aegisqa.reports.diagnostics import build_task_diagnostics
 from aegisqa.reports.trace_flow import build_task_trace_flow
-from aegisqa.workflows.validation import validate_workflow_step_contracts
+from aegisqa.skills.parameters import SkillParameterResolver
+from aegisqa.workflows.validation import config_issue_from_exception, validate_workflow_step_contracts
 
 
 REPORT_EXPORT_FORMATS = {"json", "csv", "html"}
@@ -638,6 +640,7 @@ def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> d
             "请修正数据集字段，或在 Workflow 画布中调整 input_mapping。",
         ),
         _workflow_schema_mapping_check(ctx, workflow),
+        _workflow_skill_config_check(ctx, workflow, request, dataset.preview),
         _golden_coverage_check(request.evaluation_goal, dataset.model_dump(mode="json")),
         _skill_approval_check(ctx, workflow),
         _quality_gate_check(request.quality_gate),
@@ -1275,6 +1278,56 @@ def _workflow_schema_mapping_check(ctx: RouteContext, workflow: Any) -> dict[str
         {"issues": mapping_issues},
         "请在 Workflow 画布中选中对应节点，补齐字段映射或输出写入路径后重新发布。",
     )
+
+
+def _workflow_skill_config_check(ctx: RouteContext, workflow: Any, request: TaskPreflightRequest, preview_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    issues: list[dict[str, Any]] = []
+    seen_issue_keys: set[tuple[str, str, str, str]] = set()
+    rows_to_check = preview_rows or [{}]
+    task_overrides = request.skill_overrides or {}
+    for step in workflow.steps:
+        try:
+            skill = ctx.registry.get(step.skill_ref)
+        except KeyError:
+            # Skill 缺失由 skill_approval 检查给出更明确的治理建议，这里避免重复噪音。
+            continue
+        for row_index, sample_row in enumerate(rows_to_check):
+            runtime_context = {"row": sample_row, "context": {}, "metrics": {}, "artifacts": {}, "errors": [], "steps": {}}
+            try:
+                SkillParameterResolver(skill.manifest.config_schema).resolve(
+                    workflow_config=step.config,
+                    task_override=task_overrides.get(step.step_id, {}),
+                    runtime_context=runtime_context,
+                    secret_values={},
+                )
+            except (TypeMismatchError, MappingPathError) as exc:
+                issue = config_issue_from_exception(step.step_id, step.skill_ref, exc)
+                _append_unique_skill_config_issue(issues, seen_issue_keys, issue, row_index)
+            except Exception as exc:  # noqa: BLE001 - 预检必须把异常转成结构化问题，不能让用户只看到 500。
+                issue = config_issue_from_exception(step.step_id, step.skill_ref, exc)
+                _append_unique_skill_config_issue(issues, seen_issue_keys, issue, row_index)
+    return _preflight_check(
+        "skill_config",
+        "Skill 参数配置",
+        "blocked" if issues else "passed",
+        "Workflow 与任务级参数覆盖均满足 Skill config_schema。" if not issues else "Workflow 或任务级参数覆盖不满足 Skill config_schema。",
+        {"issues": issues},
+        "请在 Workflow 画布参数表单或任务执行参数中修正类型、必填项、表达式路径和 Secret 引用。",
+    )
+
+
+def _append_unique_skill_config_issue(issues: list[dict[str, Any]], seen_issue_keys: set[tuple[str, str, str, str]], issue: dict[str, Any], row_index: int) -> None:
+    key = (
+        str(issue.get("code") or ""),
+        str(issue.get("step_id") or ""),
+        str(issue.get("field_path") or issue.get("missing_fields") or ""),
+        str(issue.get("message") or ""),
+    )
+    if key in seen_issue_keys:
+        return
+    seen_issue_keys.add(key)
+    issue["row_index"] = row_index
+    issues.append(issue)
 
 
 def _golden_coverage_check(evaluation_goal: str | None, dataset: dict[str, Any]) -> dict[str, Any]:

@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Workflow 线性兼容入口与 Task Preflight 深度门禁”已完成并通过全量验证。本阶段聚焦全流程稳定性：React Flow 图发布、线性兼容发布入口、历史已发布 Workflow 和 Task 创建前预检都必须能发现 Skill 必填映射缺失，不能把配置错误拖到 Task 执行期才失败。
+新一轮“Skill 参数门禁与 Task Preflight 参数校验”正在收口。本阶段聚焦全流程稳定性与可解释性：React Flow 图发布、线性兼容发布入口和 Task 创建前预检不仅要发现 Skill 输入映射缺失，也要提前发现 Skill `config_schema` 必填参数缺失、固定值类型错误、任务级 override 类型错误、表达式路径和 Secret 引用声明错误，避免用户把参数问题拖到执行期才发现。
 
 ## 当前已完成
 
@@ -26,6 +26,7 @@
 - Workflow Palette 的 Source、Skill、Join、Output 新增路径已进入 Playwright 自动化，避免后续回归成“按钮能看不能用”。
 - Workflow 发布前校验已用后端测试锁定：未知 Skill、未审批或禁用 Skill 不能发布，多对一输入必须使用 Join/Aggregator，Branch 必须配置条件表达式，Skill `input_schema.required` 必填字段必须配置非空输入映射。
 - 线性兼容发布入口 `/workflows/publish` 已复用 Step 合约校验，缺少 Skill 必填输入映射的 WorkflowDraft 不能再直接发布。
+- Workflow 发布前已新增 Skill 参数静态校验：会阻断 `config_schema.required` 必填参数缺失、固定参数类型不匹配、空表达式路径和空 Secret 引用；动态表达式允许在绑定 Dataset 后由 Task Preflight 做样本级解析。
 - 内置 Skill manifest 已在 `BaseSkill` 初始化时深拷贝，Skill 禁用/审批状态不会在不同 `SkillRegistry.with_builtin_skills()` 实例之间共享，避免测试和多 app 实例串扰治理状态。
 - Workflow 发布失败时，前端会把后端 `details.errors` 回填到 Console 的“错误与建议”页签，用户能看到错误码、节点和修复方向。
 - Workflow Inspector 已支持 Aggregator 聚合策略配置，当前覆盖多数投票、均值和一致性三类策略。
@@ -33,6 +34,7 @@
 - 执行中心已抽出 `TaskCreateWizard`，创建任务前必须选择 Dataset Version 和 Workflow Version；任务参数支持分片大小、并发、repeat、最大重试、重试退避和成本预算。
 - Task Preflight 已升级为创建门禁：后端阻断 blocked Preflight，前端要求先运行匹配当前 Dataset/Workflow 的 Preflight；确需创建坏数据诊断任务时必须显式确认风险，并把 `allow_blocked_preflight` 写入 Run/Task 快照。
 - Task Preflight 已新增 `workflow_schema_mapping` 检查项，会对历史坏 Workflow 或兼容入口发布的 Workflow 重新校验 Skill 必填入参、空输入映射和空输出写入路径，避免任务创建后才在执行期失败。
+- Task Preflight 已新增 `skill_config` 检查项，会结合 Dataset 预览样本、Workflow config 和任务级 `skill_overrides` 解析最终 Skill 参数，阻断必填参数缺失、override 类型错误、表达式路径缺失和 Secret 引用声明错误；表达式参数会扫描预览样本并返回出错 `row_index`，避免只看第一条样本导致后续样本执行期失败。
 - Task Preflight 已增加关键参数签名新鲜度校验：`execution_template_id`、`evaluation_goal`、`quality_gate`、`sample_repeat_times`、`cost_budget` 变化都会让创建按钮重新进入“需重跑 Preflight”状态，避免模板或质量门槛被修改后沿用旧预检结果。
 - Task 创建 API 已增加服务端 Preflight 过期校验：传入旧 `preflight_result` 时会按 Dataset、Workflow、执行模板、评测目的、质量门槛、repeat、成本预算和 Skill 覆盖逐项比对，不一致时返回 `TASK_PREFLIGHT_STALE`。
 - Task 创建 API 已改为服务端重算 Preflight 作为事实源：客户端提交的 `preflight_result` 即使伪造为 passed，也不能绕过真实字段映射、Skill 审批、Golden 覆盖、质量门槛和预算检查。
@@ -140,9 +142,13 @@
 
 - `python -m pytest tests\test_workflow_graph_hardening.py -q -k linear_workflow_publish`：先 RED 后 GREEN，确认 `/workflows/publish` 不再允许发布缺少 Skill 必填输入映射的线性 Workflow。
 - `python -m pytest tests\test_task_center_api.py -q -k historical_workflow_missing_required_skill_mapping`：先 RED 后 GREEN，确认 Task Preflight 会通过 `workflow_schema_mapping` 阻断历史坏 Workflow，并让任务创建返回 `TASK_PREFLIGHT_BLOCKED`。
-- `python -m pytest tests\test_workflow_graph_hardening.py -q`：6 passed，覆盖图发布、未知 Skill、必填映射和线性发布入口门禁。
-- `python -m pytest tests\test_task_center_api.py -q`：12 passed，覆盖 Task 创建、Preflight、导出审批、插件包、任务分页和历史坏 Workflow 阻断。
-- `python -m pytest -q`：109 个后端测试通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest tests\test_workflow_graph_hardening.py -q -k required_skill_config`：先 RED 后 GREEN，确认 Workflow Graph 发布会按 Skill `config_schema.required` 阻断缺失必填参数。
+- `python -m pytest tests\test_task_center_api.py -q -k invalid_skill_override_config`：先 RED 后 GREEN，确认 Task Preflight 会通过 `skill_config` 阻断任务级参数覆盖类型错误，并让任务创建返回 `TASK_PREFLIGHT_BLOCKED`。
+- `python -m pytest tests\test_task_center_api.py -q -k expression_config_against_preview_rows`：先 RED 后 GREEN，确认 Task Preflight 会扫描 Dataset 预览样本中的表达式参数路径，并返回出错样本索引。
+- `python -m pytest tests\test_workflow_graph_hardening.py -q`：7 passed，覆盖图发布、未知 Skill、必填映射、Skill 参数必填和线性发布入口门禁。
+- `python -m pytest tests\test_task_center_api.py -q`：14 passed，覆盖 Task 创建、Preflight、Skill 参数覆盖、表达式参数预览样本扫描、导出审批、插件包、任务分页和历史坏 Workflow 阻断。
+- `python -m pytest tests\test_skill_parameter_resolution.py -q`：3 passed，确认参数解析优先级、参数追踪和参数预览仍正常。
+- `python -m pytest -q`：112 个后端测试通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：9 个测试文件、89 passed。
 - `cd frontend && npm run build`：通过。
@@ -3995,3 +4001,35 @@
   - Playwright 全量：8 passed。
   - 调试过程：首次全量 E2E 为 7 passed、1 failed，失败在“删除 `answer -> judge_a` 后重连”步骤；根因为草稿深链加载晚于用户编辑并覆盖本地边状态。加载态与单草稿缓存修复后，Workflow 定向和全量 E2E 均通过。
 - 下一步：把 Repair Task 与 Annotation Queue、CI Gate、Dataset 修复和 Workflow 参数审查做双向联动，并拆分超长报告页测试与超大的 WorkflowDesigner 页面组件。
+
+### 2026-06-01 Skill 参数门禁与 Task Preflight 参数校验
+
+- 改动摘要：继续围绕全流程稳定性和可解释性优化，把 Skill `config_schema` 从运行期校验前移到 Workflow 发布和 Task 创建前。Workflow 图发布现在会阻断缺失必填 Skill 参数、固定参数类型错误、空表达式路径和空 Secret 引用；Task Preflight 新增 `skill_config` 检查，会结合 Dataset 预览样本、Workflow config 和任务级 `skill_overrides` 解析最终参数，提前发现 override 类型错误、表达式路径缺失等问题；表达式参数会扫描预览样本并返回出错 `row_index`。
+- 变更文件：
+  - `aegisqa/workflows/validation.py`
+  - `aegisqa/workflows/graph.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_workflow_graph_hardening.py`
+  - `tests/test_task_center_api.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q -k required_skill_config`
+  - `python -m pytest tests\test_task_center_api.py -q -k invalid_skill_override_config`
+  - `python -m pytest tests\test_task_center_api.py -q -k expression_config_against_preview_rows`
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q`
+  - `python -m pytest tests\test_task_center_api.py -q`
+  - `python -m pytest tests\test_skill_parameter_resolution.py -q`
+- 测试结果：
+  - RED：新增 Workflow 发布参数必填测试最初失败，确认缺少 `model` 参数的 Workflow Graph 仍会发布成功。
+  - RED：新增 Task Preflight 参数 override 测试最初失败，确认 `skill_config` 检查不存在，错误类型 override 不能提前阻断。
+  - RED：新增表达式参数预览样本扫描测试最初失败，确认只看第一条预览样本会漏掉后续样本缺字段问题。
+  - GREEN：Workflow Graph hardening 7 passed。
+  - GREEN：Task Center API 14 passed。
+  - GREEN：Skill 参数解析 3 passed。
+  - 后端全量：112 个测试通过。
+  - 前端：`npm run typecheck` 通过，`npm test` 9 个测试文件、89 passed，`npm run build` 通过。
+  - Playwright E2E：9 passed，主链路、CI Gate、Annotation Queue 和 Workflow 画布均通过。
+  - 仍有 Windows `.pytest_cache` 创建警告，不影响测试结果。
+- 下一步：继续把参数门禁错误码接入 Workflow Console 的更细修复建议，并评估是否需要在任务创建向导里暴露任务级 Skill override 编辑入口。

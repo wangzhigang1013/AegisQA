@@ -154,3 +154,38 @@ def test_linear_workflow_publish_rejects_missing_required_skill_input_mapping(tm
     payload = response.json()
     assert payload["code"] == "BAD_REQUEST"
     assert "Skill 必填输入未配置字段映射" in payload["message"]
+
+
+def test_workflow_graph_publish_rejects_missing_required_skill_config(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    llm_manifest = app.state.registry.get_manifest("llm.call@0.1.0")
+    llm_manifest.config_schema["required"] = ["model"]
+
+    response = client.post(
+        "/workflow-graphs/publish",
+        json={
+            "graph": {
+                "name": "缺少模型参数 Workflow",
+                "nodes": [
+                    {
+                        "node_id": "answer",
+                        "node_type": "skill",
+                        "label": "生成回答",
+                        "skill_ref": "llm.call@0.1.0",
+                        "input_mapping": {"prompt": "row.question"},
+                        "output_mapping": {"answer": "context.answer"},
+                        "config": {"temperature": 0},
+                    },
+                    {"node_id": "report", "node_type": "output", "label": "报告"},
+                ],
+                "edges": [{"source": "answer", "target": "report"}],
+            }
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    error_codes = {error["code"] for error in payload["details"]["errors"]}
+    assert "CONFIG_REQUIRED_MISSING" in error_codes
+    assert payload["details"]["errors"][0]["details"]["missing_fields"] == ["model"]

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from aegisqa.core.mapper import MappingPathError, TypeMismatchError, resolve_input_mapping, set_by_path
 from aegisqa.skills.registry import SkillRegistry
 from aegisqa.workflows.models import RuntimeConfig, WorkflowDraft, WorkflowStep
+from aegisqa.workflows.validation import validate_static_skill_config
 
 
 STRUCTURAL_NODE_TYPES = {"source", "branch", "join", "aggregator", "output"}
@@ -216,6 +217,8 @@ class WorkflowGraphService:
                 continue
             if not manifest.enabled or manifest.status != "approved":
                 continue
+            for issue in validate_static_skill_config(manifest, node.node_id, node.skill_ref, node.config):
+                errors.append(GraphIssue(code=str(issue["code"]), message=str(issue["message"]), node_id=node.node_id, details=issue))
             required_inputs = _string_list(manifest.input_schema.get("required", []))
             missing_inputs = [field for field in required_inputs if not _mapping_path(node.input_mapping.get(field))]
             if missing_inputs:

@@ -309,6 +309,80 @@ def test_task_preflight_blocks_historical_workflow_missing_required_skill_mappin
     assert blocked.json()["details"]["blocked_checks"][0]["check_id"] == "workflow_schema_mapping"
 
 
+def test_task_preflight_blocks_invalid_skill_override_config(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "task_dataset.jsonl"
+    _write_jsonl(data_path)
+    dataset = client.post("/datasets/from-path", json={"name": "task_dataset", "path": str(data_path)}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+
+    preflight = client.post(
+        "/tasks/preflight",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+            "skill_overrides": {"answer": {"temperature": "hot"}},
+        },
+    ).json()
+    config_check = next(check for check in preflight["checks"] if check["check_id"] == "skill_config")
+
+    assert preflight["status"] == "blocked"
+    assert config_check["status"] == "blocked"
+    assert config_check["details"]["issues"][0]["code"] == "CONFIG_VALUE_INVALID"
+    assert config_check["details"]["issues"][0]["field_path"] == "temperature"
+
+    blocked = client.post(
+        "/tasks",
+        json={
+            "name": "坏参数覆盖任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+            "skill_overrides": {"answer": {"temperature": "hot"}},
+        },
+    )
+
+    assert blocked.status_code == 409
+    assert blocked.json()["details"]["blocked_checks"][0]["check_id"] == "skill_config"
+
+
+def test_task_preflight_checks_skill_expression_config_against_preview_rows(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "task_dataset.jsonl"
+    with data_path.open("w", encoding="utf-8") as handle:
+        handle.write(json.dumps({"question": "第一条有温度", "reference": "AegisQA", "temperature": 0.2}, ensure_ascii=False) + "\n")
+        handle.write(json.dumps({"question": "第二条缺温度", "reference": "AegisQA"}, ensure_ascii=False) + "\n")
+    dataset = client.post("/datasets/from-path", json={"name": "task_dataset", "path": str(data_path)}).json()
+    graph = _graph_payload()
+    graph["nodes"][0]["config"]["temperature"] = {"type": "expression", "path": "row.temperature"}
+    workflow = client.post("/workflow-graphs/publish", json={"graph": graph}).json()
+
+    preflight = client.post(
+        "/tasks/preflight",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+        },
+    ).json()
+    config_check = next(check for check in preflight["checks"] if check["check_id"] == "skill_config")
+
+    assert preflight["status"] == "blocked"
+    assert config_check["status"] == "blocked"
+    assert config_check["details"]["issues"][0]["code"] == "CONFIG_EXPRESSION_PATH_MISSING"
+    assert config_check["details"]["issues"][0]["row_index"] == 1
+    assert "row.temperature" in config_check["details"]["issues"][0]["message"]
+
+
 def test_task_creation_rejects_stale_preflight_signature(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)
