@@ -486,7 +486,13 @@ export const api = {
     }),
   taskDiagnostics: (taskId: string) => request<TaskDiagnostics>(`/tasks/${taskId}/diagnostics`),
   taskParameterGovernance: (taskId: string) => request<TaskParameterGovernance>(`/tasks/${taskId}/parameter-governance`),
-  taskTraceTree: (taskId: string) => request<TraceTree>(`/tasks/${taskId}/trace-tree`),
+  taskTraceTree: (taskId: string, pagination: { page?: number; pageSize?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (pagination.page) query.set('page', String(pagination.page));
+    if (pagination.pageSize) query.set('page_size', String(pagination.pageSize));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<TraceTree>(`/tasks/${taskId}/trace-tree${suffix}`);
+  },
   taskTraceFlow: (taskId: string, pagination: { page?: number; pageSize?: number } = {}) => {
     const query = new URLSearchParams();
     if (pagination.page) query.set('page', String(pagination.page));
@@ -500,7 +506,13 @@ export const api = {
   cancelRun: (runId: string) => request<RunRecord>(`/runs/${runId}/cancel`, { method: 'POST' }),
   retryFailedRun: (runId: string) => request<RunRecord>(`/runs/${runId}/retry-failed`, { method: 'POST' }),
   runTrace: (runId: string) => request<Record<string, unknown>>(`/runs/${runId}/trace`),
-  traceTree: (runId: string) => request<TraceTree>(`/runs/${runId}/trace-tree`),
+  traceTree: (runId: string, pagination: { page?: number; pageSize?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (pagination.page) query.set('page', String(pagination.page));
+    if (pagination.pageSize) query.set('page_size', String(pagination.pageSize));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<TraceTree>(`/runs/${runId}/trace-tree${suffix}`);
+  },
   report: (runId: string) => request<RunReport>(`/runs/${runId}/report`),
   exportReport: (runId: string, file_format: 'json' | 'csv' | 'html') => request<Record<string, unknown>>(`/runs/${runId}/report/export?file_format=${file_format}`),
   badcases: (query = '') => request<BadcaseRecord[]>(`/badcases${query}`),

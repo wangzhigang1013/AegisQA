@@ -1,6 +1,7 @@
 import { BranchesOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Card, Col, Descriptions, Empty, Row, Space, Table, Tag, Typography } from 'antd';
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import { api } from '../api/client';
@@ -8,9 +9,11 @@ import { PageHeader } from '../components/PageHeader';
 
 export function TraceTreePage() {
   const { taskId } = useParams();
+  const [tracePage, setTracePage] = useState(1);
+  const tracePageSize = 8;
   const traceQuery = useQuery({
-    queryKey: ['task-trace-tree', taskId],
-    queryFn: () => api.taskTraceTree(taskId ?? ''),
+    queryKey: ['task-trace-tree', taskId, tracePage, tracePageSize],
+    queryFn: () => api.taskTraceTree(taskId ?? '', { page: tracePage, pageSize: tracePageSize }),
     enabled: Boolean(taskId),
   });
   const traceTree = traceQuery.data;
@@ -57,7 +60,13 @@ export function TraceTreePage() {
               rowKey="item_id"
               loading={traceQuery.isLoading}
               dataSource={traceTree.items.map(({ children, ...item }) => ({ ...item, step_nodes: children }))}
-              pagination={{ pageSize: 8 }}
+              pagination={{
+                current: traceTree.pagination?.page ?? tracePage,
+                pageSize: traceTree.pagination?.page_size ?? tracePageSize,
+                total: traceTree.pagination?.total_items ?? traceTree.items.length,
+                showSizeChanger: false,
+                onChange: setTracePage,
+              }}
               expandable={{
                 defaultExpandAllRows: true,
                 expandedRowRender: (item) => <StepTable steps={(item.step_nodes as Record<string, unknown>[]) ?? []} />,

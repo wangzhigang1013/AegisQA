@@ -213,6 +213,7 @@ const demoTraceTree = {
   status: 'completed',
   workflow_version: 'wf-demo:v1',
   dataset_version: 'dataset-demo:v1',
+  pagination: { page: 1, page_size: 8, total_items: 1, total_pages: 1 },
   items: [
     {
       item_id: 'item-demo',
@@ -1421,7 +1422,7 @@ describe('AegisQA 前端工作台', () => {
       if (url.includes('/tasks/task-demo/trace-flow')) {
         return jsonResponse(demoTraceFlow);
       }
-      if (url.endsWith('/tasks/task-demo/trace-tree')) {
+      if (url.includes('/tasks/task-demo/trace-tree')) {
         return jsonResponse(demoTraceTree);
       }
       if (url.endsWith('/tasks/task-demo/parameter-governance')) {
@@ -1861,6 +1862,44 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('run-demo')).toBeInTheDocument();
     expect(screen.getAllByText('answer').length).toBeGreaterThan(0);
     expect(screen.getByText('llm.call@0.1.0')).toBeInTheDocument();
+  });
+
+  it('Trace Tree 调用树使用服务端分页，避免一次性传输全部调用明细', async () => {
+    const manyTraceTreeItems = Array.from({ length: 12 }, (_, index) => ({
+      ...demoTraceTree.items[0],
+      item_id: `tree-item-${index}`,
+      row_id: `row-${index}`,
+      metrics: { judge_score: index / 10 },
+    }));
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const traceTreeRequests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/tasks/task-demo/trace-tree')) {
+        traceTreeRequests.push(url);
+        const parsed = new URL(url, 'http://localhost');
+        const page = Number(parsed.searchParams.get('page') ?? 1);
+        const pageSize = Number(parsed.searchParams.get('page_size') ?? 12);
+        const start = (page - 1) * pageSize;
+        return jsonResponse({
+          ...demoTraceTree,
+          items: manyTraceTreeItems.slice(start, start + pageSize),
+          pagination: { page, page_size: pageSize, total_items: manyTraceTreeItems.length, total_pages: Math.ceil(manyTraceTreeItems.length / pageSize) },
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/tasks/task-demo/trace-tree');
+
+    expect(await screen.findByText('tree-item-0')).toBeInTheDocument();
+    expect(screen.getByText('tree-item-7')).toBeInTheDocument();
+    expect(screen.queryByText('tree-item-8')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('2'));
+    await waitFor(() => {
+      expect(traceTreeRequests.some((request) => request.includes('page=2') && request.includes('page_size=8'))).toBe(true);
+    });
+    expect(await screen.findByText('tree-item-8')).toBeInTheDocument();
   });
 
   it('任务列表执行按钮会刷新任务状态', async () => {

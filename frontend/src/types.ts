@@ -1241,6 +1241,12 @@ export type TraceTree = {
   status: string;
   workflow_version: string;
   dataset_version?: string;
+  pagination?: {
+    page: number;
+    page_size: number;
+    total_items: number;
+    total_pages: number;
+  };
   items: {
     item_id: string;
     row_id: string;

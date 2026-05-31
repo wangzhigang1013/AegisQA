@@ -64,8 +64,12 @@ def register_report_routes(app: FastAPI, ctx: RouteContext) -> None:
         }
 
     @app.get("/runs/{run_id}/trace-tree")
-    def get_run_trace_tree(run_id: str) -> dict[str, Any]:
-        return _build_trace_tree(ctx.runner.get_run(run_id))
+    def get_run_trace_tree(
+        run_id: str,
+        page: int = Query(1, ge=1),
+        page_size: int = Query(50, ge=1, le=100),
+    ) -> dict[str, Any]:
+        return _build_trace_tree(ctx.runner.get_run(run_id), page=page, page_size=page_size)
 
     @app.post("/badcases")
     def create_badcase(request: BadcaseCreateRequest) -> dict[str, Any]:

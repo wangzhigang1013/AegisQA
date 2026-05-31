@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Trace Flow Server Pagination”已完成并通过全量验证。本批次继续优化大任务下的数据流转解释体验：Trace Flow API 已支持 `page/page_size` 服务端分页，前端翻页会重新请求对应页，避免一次性传输和解析全部 Dataset Row、Skill Input、参数来源、Output、Metrics 与 Badcase 明细。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Trace Tree Server Pagination”已完成并通过全量验证。本批次继续优化大任务下的调用树查看体验：Trace Tree 的 Run/Task API 已支持 `page/page_size` 服务端分页，独立页面翻页会重新请求对应页，任务详情抽屉只请求前 5 条摘要，避免打开任务详情或调用树页面时一次性传输全部 Step 输入输出。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -68,6 +68,7 @@
 - Trace Flow 已从 Trace Tree 中独立出来，支持按 Task 查看 Dataset Row、Skill Input、参数来源、Output、Metrics、Badcase 和队列消息形状，帮助解释评测过程中的数据流转。
 - Trace Flow 样本列表已增加分页，默认每页 8 条，避免大任务一次性渲染全部样本。
 - Trace Flow API 已支持服务端分页，返回 `pagination` 元数据；页面翻页会请求对应页，避免大任务一次性传输和解析全部样本级数据流。
+- Trace Tree API 已支持服务端分页，Run/Task 两个入口都返回 `pagination` 元数据；独立页面翻页请求对应页，任务详情抽屉只请求前 5 条 Trace 摘要。
 - 首页已从产品能力展示调整为任务工作台，优先展示最近任务、待审批 Skill、待审核样本、失败任务和 CI Gate 阻断，并固定“上传数据 -> 选择 Workflow -> 创建任务 -> 查看报告”主流程入口。
 - 任务详情已抽成驾驶舱组件，按概览、样本、Trace、Badcase、Attempts、参数组织，参数页可查看任务冻结参数、Skill 参数来源和 Secret 脱敏说明。
 - 任务详情 Badcase 页签已增加分页，默认每页 8 条，避免大任务在执行中心详情抽屉中一次性渲染全部坏例。
@@ -120,6 +121,14 @@
 - `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Flow 样本列表分页"`：先 RED 后 GREEN，最终 1 passed，确认 12 条 Trace Flow 样本只渲染当前页前 8 条。
 - `python -m pytest tests\test_trace_flow_api.py -q`：先 RED 后 GREEN，最终 2 passed，确认 `/tasks/{task_id}/trace-flow?page=2&page_size=5` 只返回 row_index 5 到 9，并返回分页元数据。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Flow 样本列表使用服务端分页"`：先 RED 后 GREEN，最终 1 passed，确认点击第 2 页会请求 `page=2&page_size=8` 并展示第 9 条样本。
+- `python -m pytest tests\test_trace_tree_pagination.py -q`：先 RED 后 GREEN，最终 2 passed，确认 Run/Task Trace Tree 服务端分页和分页元数据。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Tree 调用树使用服务端分页"`：先 RED 后 GREEN，最终 1 passed，确认点击第 2 页会请求 `page=2&page_size=8` 并展示第 9 条调用树 item。
+- `python -m pytest -q`：97 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：6 个测试文件，76 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
+- `cd frontend && npm run build`：通过，TraceTreePage chunk 正常生成。
+- `cd frontend && npm run e2e`：8 passed，主链路和 Workflow 画布 E2E 均通过。
+- `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - `python -m pytest -q`：95 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：6 个测试文件，75 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
@@ -361,6 +370,41 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Trace Tree Server Pagination
+
+- 改动摘要：Trace Tree 从前端本地分页升级为服务端分页；Run/Task 两个入口都支持 `page/page_size` 和 `pagination` 元数据；独立 Trace Tree 页面翻页会重新请求后端，任务详情抽屉只请求前 5 条 Trace 摘要。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/reports.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_trace_tree_pagination.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/TraceTreePage.tsx`
+  - `frontend/src/pages/task/TaskOperationsDrawer.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/superpowers/plans/2026-06-01-trace-tree-server-pagination.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_trace_tree_pagination.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Tree 调用树使用服务端分页"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 后端分页测试先 RED 后 GREEN，最终 2 passed。
+  - 前端服务端分页测试先 RED 后 GREEN，最终 1 passed。
+  - 后端全量：97 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - TypeScript：通过。
+  - 前端全量：6 个测试文件，76 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
+  - 前端构建：通过。
+  - Playwright E2E：8 passed。
+  - 空白检查：仅有 CRLF 换行转换 warning。
+- 下一步：继续审查 Task Report、Repair Task、Candidate Assets 等长列表/明细页面是否需要服务端筛选或分页。
 
 ### 2026-06-01 Trace Flow Server Pagination
 

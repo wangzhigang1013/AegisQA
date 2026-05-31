@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timezone
 import json
+from math import ceil
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -1361,12 +1362,23 @@ def _ci_gate_metrics_from_task(task: dict[str, Any], run: RunRecord) -> dict[str
     return metrics
 
 
-def _build_trace_tree(run: RunRecord) -> dict[str, Any]:
+def _build_trace_tree(run: RunRecord, *, page: int = 1, page_size: int = 50) -> dict[str, Any]:
+    total_items = len(run.items)
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 1), 100)
+    start = (safe_page - 1) * safe_page_size
+    page_items = run.items[start : start + safe_page_size]
     return {
         "run_id": run.run_id,
         "status": run.status,
         "workflow_version": run.workflow.version_id,
         "dataset_version": run.snapshot.get("dataset_version"),
+        "pagination": {
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "total_items": total_items,
+            "total_pages": ceil(total_items / safe_page_size) if total_items else 0,
+        },
         "items": [
             {
                 "item_id": item.item_id,
@@ -1390,7 +1402,7 @@ def _build_trace_tree(run: RunRecord) -> dict[str, Any]:
                     for step in item.steps
                 ],
             }
-            for item in run.items
+            for item in page_items
         ],
     }
 

@@ -22,7 +22,7 @@ export function TaskOperationsDrawer({
 }) {
   const traceQuery = useQuery({
     queryKey: ['task-trace-tree', task?.task_id],
-    queryFn: () => api.taskTraceTree(task?.task_id ?? ''),
+    queryFn: () => api.taskTraceTree(task?.task_id ?? '', { page: 1, pageSize: 5 }),
     enabled: Boolean(task?.task_id),
   });
   const reportQuery = useQuery({
