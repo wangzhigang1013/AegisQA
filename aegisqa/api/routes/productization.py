@@ -23,6 +23,7 @@ from aegisqa.api.app import (
     _build_annotation_task,
     _build_ci_gate_config,
     _build_experiment_snapshot,
+    _build_task_record,
     _build_red_team_scan,
     _build_score_analytics,
     _ci_gate_metrics_from_run,
@@ -35,11 +36,14 @@ from aegisqa.api.app import (
     _list_records,
     _needs_annotation,
     _now,
+    _refresh_task_from_run,
     _save_record,
     _save_workflow_draft,
 )
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
+from aegisqa.engine.runner import RunRecord, RunRequest
+from aegisqa.reports.aggregator import RunReport, aggregate_run_report, compare_reports
 
 
 class PromptSkillCandidateReviewRequest(BaseModel):
@@ -176,6 +180,102 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
         ctx.audit_service.record(actor="api", action="prompt_skill_candidate.create_workflow_draft", target=candidate_id, detail={"draft_id": draft["draft_id"]})
         return {"status": "draft_created", "candidate": candidate, "draft": draft, "target_url": f"/workflows/designer/{draft['draft_id']}"}
+
+    @app.post("/prompt-skill-candidates/{candidate_id}/retest")
+    def retest_prompt_skill_candidate(candidate_id: str) -> dict[str, Any]:
+        candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
+        if candidate.get("retest_task_id"):
+            return _prompt_skill_candidate_retest_payload(ctx, candidate)
+
+        draft = _prompt_skill_candidate_published_draft(ctx, candidate)
+        source_task_id = candidate.get("source_task_id")
+        if not source_task_id:
+            raise AegisQAError(
+                "PROMPT_SKILL_CANDIDATE_SOURCE_TASK_MISSING",
+                "候选资产缺少来源 Task，无法复用同一数据集进行候选复跑。",
+                status_code=400,
+                details={"candidate_id": candidate_id},
+            )
+        source_task = _get_record(ctx.store, "tasks", str(source_task_id))
+        workflow = ctx.workflow_service.get(str(draft["published_version_id"]))
+        dataset = ctx.dataset_service.get_version(str(source_task["dataset_id"]), int(source_task["dataset_version"]))
+        execution_config = dict(source_task.get("execution_config") or {})
+        run = ctx.runner.create_run(
+            RunRequest(
+                workflow=workflow,
+                dataset_id=dataset.dataset_id,
+                dataset_version=dataset.version,
+                chunk_size=execution_config.get("chunk_size"),
+                concurrency=execution_config.get("concurrency"),
+                sample_repeat_times=execution_config.get("sample_repeat_times"),
+                task_config_snapshot={
+                    "evaluation_goal": source_task.get("evaluation_goal"),
+                    "quality_gate": source_task.get("quality_gate", {}),
+                    "skill_overrides": execution_config.get("skill_overrides", {}),
+                    "candidate_id": candidate_id,
+                },
+            )
+        )
+        task = _build_task_record(
+            f"{source_task.get('name', '候选复跑任务')} - 候选复跑",
+            dataset.model_dump(mode="json"),
+            workflow,
+            run,
+            execution_config={**execution_config, "candidate_id": candidate_id, "source_task_id": source_task_id},
+            evaluation_goal=source_task.get("evaluation_goal"),
+            quality_gate=source_task.get("quality_gate", {}),
+            preflight_result=source_task.get("preflight_result"),
+        )
+        task["source_candidate_id"] = candidate_id
+        task["baseline_task_id"] = source_task_id
+        _save_record(ctx.store, "tasks", "task_id", task)
+        executed_run = ctx.runner.execute_run(run.run_id)
+        task = _refresh_task_from_run(ctx.store, task, executed_run)
+
+        baseline_experiment = _prompt_skill_candidate_baseline_experiment(ctx, candidate)
+        baseline_run = ctx.runner.get_run(str(baseline_experiment["run_id"])) if baseline_experiment else None
+        current_run = ctx.runner.get_run(str(source_task["run_id"]))
+        candidate_experiment = _build_experiment_snapshot(
+            executed_run,
+            name=f"候选复跑 {candidate_id}",
+            baseline_run=baseline_run,
+            tags=["prompt_skill_candidate", candidate_id],
+        )
+        _save_record(ctx.store, "experiments", "experiment_id", candidate_experiment)
+
+        scorecard, comparisons = _prompt_skill_candidate_scorecard(
+            baseline_experiment=baseline_experiment,
+            baseline_run=baseline_run,
+            current_task=source_task,
+            current_run=current_run,
+            candidate_task=task,
+            candidate_run=executed_run,
+        )
+        now = _now()
+        candidate["status"] = "retested"
+        candidate["retest_task_id"] = task["task_id"]
+        candidate["candidate_run_id"] = executed_run.run_id
+        candidate["candidate_experiment_id"] = candidate_experiment["experiment_id"]
+        candidate["scorecard"] = scorecard
+        candidate["comparisons"] = comparisons
+        candidate["retested_at"] = now
+        candidate["updated_at"] = now
+        _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
+        ctx.audit_service.record(
+            actor="api",
+            action="prompt_skill_candidate.retest",
+            target=candidate_id,
+            detail={"task_id": task["task_id"], "run_id": executed_run.run_id, "candidate_experiment_id": candidate_experiment["experiment_id"]},
+        )
+        return {
+            "status": "retested",
+            "candidate": candidate,
+            "task": task,
+            "candidate_experiment": candidate_experiment,
+            "scorecard": scorecard,
+            "comparisons": comparisons,
+            "target_url": f"/reports?task_id={task['task_id']}",
+        }
 
     @app.post("/assertions/evaluate")
     def evaluate_assertions(request: AssertionEvaluateRequest) -> dict[str, Any]:
@@ -466,3 +566,115 @@ def _apply_candidate_version_diffs(graph: dict[str, Any], version_diffs: list[di
             metadata = node.setdefault("metadata", {})
             if isinstance(metadata, dict):
                 metadata["baseline_skill_version"] = baseline_value
+
+
+def _prompt_skill_candidate_published_draft(ctx: RouteContext, candidate: dict[str, Any]) -> dict[str, Any]:
+    draft_id = candidate.get("workflow_draft_id")
+    if not draft_id:
+        raise AegisQAError(
+            "PROMPT_SKILL_CANDIDATE_DRAFT_MISSING",
+            "候选资产还没有生成 Workflow 草稿，请先审批并生成草稿。",
+            status_code=400,
+            details={"candidate_id": candidate.get("candidate_id")},
+        )
+    draft = _get_workflow_draft(ctx.store, str(draft_id))
+    if draft.get("status") != "published" or not draft.get("published_version_id"):
+        raise AegisQAError(
+            "PROMPT_SKILL_CANDIDATE_DRAFT_NOT_PUBLISHED",
+            "候选 Workflow 草稿需要先发布成版本，才能用同一数据集复跑并对比指标。",
+            status_code=400,
+            details={"candidate_id": candidate.get("candidate_id"), "draft_id": draft_id, "draft_status": draft.get("status")},
+        )
+    return draft
+
+
+def _prompt_skill_candidate_baseline_experiment(ctx: RouteContext, candidate: dict[str, Any]) -> dict[str, Any] | None:
+    experiment_id = candidate.get("baseline_experiment_id")
+    if not experiment_id:
+        return None
+    return _get_record(ctx.store, "experiments", str(experiment_id))
+
+
+def _prompt_skill_candidate_retest_payload(ctx: RouteContext, candidate: dict[str, Any]) -> dict[str, Any]:
+    task = _get_record(ctx.store, "tasks", str(candidate["retest_task_id"]))
+    candidate_run = ctx.runner.get_run(str(task["run_id"]))
+    source_task = _get_record(ctx.store, "tasks", str(candidate["source_task_id"]))
+    current_run = ctx.runner.get_run(str(source_task["run_id"]))
+    baseline_experiment = _prompt_skill_candidate_baseline_experiment(ctx, candidate)
+    baseline_run = ctx.runner.get_run(str(baseline_experiment["run_id"])) if baseline_experiment else None
+    candidate_experiment = _get_record(ctx.store, "experiments", str(candidate["candidate_experiment_id"])) if candidate.get("candidate_experiment_id") else {}
+    scorecard, comparisons = _prompt_skill_candidate_scorecard(
+        baseline_experiment=baseline_experiment,
+        baseline_run=baseline_run,
+        current_task=source_task,
+        current_run=current_run,
+        candidate_task=task,
+        candidate_run=candidate_run,
+    )
+    return {
+        "status": "retested",
+        "candidate": candidate,
+        "task": task,
+        "candidate_experiment": candidate_experiment,
+        "scorecard": scorecard,
+        "comparisons": comparisons,
+        "target_url": f"/reports?task_id={task['task_id']}",
+    }
+
+
+def _prompt_skill_candidate_scorecard(
+    *,
+    baseline_experiment: dict[str, Any] | None,
+    baseline_run: RunRecord | None,
+    current_task: dict[str, Any],
+    current_run: RunRecord,
+    candidate_task: dict[str, Any],
+    candidate_run: RunRecord,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    current_report = aggregate_run_report(current_run)
+    candidate_report = aggregate_run_report(candidate_run)
+    baseline_report = aggregate_run_report(baseline_run) if baseline_run else None
+    scorecard = {
+        "baseline": _prompt_skill_candidate_metric_card(
+            "baseline",
+            baseline_run,
+            baseline_report,
+            experiment_id=baseline_experiment.get("experiment_id") if baseline_experiment else None,
+        ),
+        "current": _prompt_skill_candidate_metric_card("current", current_run, current_report, task_id=current_task.get("task_id")),
+        "candidate": _prompt_skill_candidate_metric_card("candidate", candidate_run, candidate_report, task_id=candidate_task.get("task_id")),
+    }
+    comparisons = {
+        "current_to_candidate": compare_reports(current_report, candidate_report),
+        "baseline_to_candidate": compare_reports(baseline_report, candidate_report) if baseline_report else None,
+    }
+    return scorecard, comparisons
+
+
+def _prompt_skill_candidate_metric_card(
+    label: str,
+    run: RunRecord | None,
+    report: RunReport | None,
+    *,
+    task_id: str | None = None,
+    experiment_id: str | None = None,
+) -> dict[str, Any]:
+    if run is None or report is None:
+        return {"label": label, "task_id": task_id, "experiment_id": experiment_id, "status": "missing"}
+    return {
+        "label": label,
+        "task_id": task_id,
+        "experiment_id": experiment_id,
+        "run_id": run.run_id,
+        "workflow_version_id": run.workflow.version_id,
+        "dataset_id": run.dataset_id,
+        "dataset_version": run.dataset_version,
+        "status": run.status,
+        "total_items": report.total_items,
+        "completed_items": report.completed_items,
+        "failed_items": report.failed_items,
+        "pass_rate": report.pass_rate,
+        "error_rate": report.error_rate,
+        "badcase_count": len(report.badcases),
+        "p95_latency_ms": report.p95_latency_ms,
+    }

@@ -766,8 +766,52 @@ export type PromptSkillCandidate = {
   review?: Record<string, unknown> | null;
   review_history?: Record<string, unknown>[];
   workflow_draft_id?: string | null;
+  retest_task_id?: string | null;
+  candidate_run_id?: string | null;
+  candidate_experiment_id?: string | null;
+  scorecard?: PromptSkillCandidateScorecard;
+  comparisons?: PromptSkillCandidateComparisons;
   created_at: string;
   updated_at?: string;
+};
+
+export type PromptSkillMetricCard = {
+  label: string;
+  task_id?: string | null;
+  experiment_id?: string | null;
+  run_id?: string | null;
+  workflow_version_id?: string | null;
+  dataset_id?: string | null;
+  dataset_version?: number | null;
+  status?: string;
+  total_items?: number;
+  completed_items?: number;
+  failed_items?: number;
+  pass_rate?: number;
+  error_rate?: number;
+  badcase_count?: number;
+  p95_latency_ms?: number;
+};
+
+export type PromptSkillCandidateScorecard = {
+  baseline?: PromptSkillMetricCard;
+  current?: PromptSkillMetricCard;
+  candidate?: PromptSkillMetricCard;
+};
+
+export type PromptSkillCandidateComparisons = {
+  current_to_candidate?: Record<string, unknown>;
+  baseline_to_candidate?: Record<string, unknown> | null;
+};
+
+export type PromptSkillCandidateRetestResult = {
+  status: string;
+  candidate: PromptSkillCandidate;
+  task: TaskRecord;
+  candidate_experiment: ExperimentRecord;
+  scorecard: PromptSkillCandidateScorecard;
+  comparisons: PromptSkillCandidateComparisons;
+  target_url: string;
 };
 
 export type AssertionEvaluationResult = {

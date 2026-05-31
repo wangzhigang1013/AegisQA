@@ -621,3 +621,53 @@ def test_prompt_skill_candidates_are_reviewed_before_draft_creation(tmp_path: Pa
     updated_candidate = draft_payload["candidate"]
     assert updated_candidate["status"] == "draft_created"
     assert updated_candidate["workflow_draft_id"] == draft["draft_id"]
+
+
+def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_three_way_metrics(tmp_path: Path) -> None:
+    client, dataset, _ = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    baseline_workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload_with_answer_prompt("prompt-flow-v0")}).json()
+    baseline_run = client.post(
+        "/runs",
+        json={"workflow": baseline_workflow, "dataset_id": dataset["dataset_id"], "dataset_version": dataset["version"]},
+    ).json()
+    baseline_run = client.post(f"/runs/{baseline_run['run_id']}/execute").json()
+    baseline_experiment = client.post("/experiments/from-run", json={"run_id": baseline_run["run_id"], "name": "baseline prompt v0"}).json()
+    current_workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload_with_answer_prompt("prompt-flow-v1")}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "候选资产复跑任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": current_workflow["version_id"],
+            "evaluation_goal": "prompt_experiment",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"][0]
+    client.post(f"/repair-tasks/{repair['repair_task_id']}/actions", json={"action": "compare_prompt_skill_versions"})
+    candidate = client.post(f"/repair-tasks/{repair['repair_task_id']}/actions", json={"action": "create_prompt_skill_candidate"}).json()["result"]["candidates"][0]
+    client.post(f"/prompt-skill-candidates/{candidate['candidate_id']}/review", json={"decision": "approved", "reviewer": "qa_owner"})
+    draft = client.post(f"/prompt-skill-candidates/{candidate['candidate_id']}/workflow-draft").json()["draft"]
+
+    blocked = client.post(f"/prompt-skill-candidates/{candidate['candidate_id']}/retest")
+    assert blocked.status_code == 400
+    assert blocked.json()["code"] == "PROMPT_SKILL_CANDIDATE_DRAFT_NOT_PUBLISHED"
+
+    published = client.post(f"/workflow-drafts/{draft['draft_id']}/publish").json()
+    retest = client.post(f"/prompt-skill-candidates/{candidate['candidate_id']}/retest").json()
+
+    assert retest["status"] == "retested"
+    assert retest["task"]["dataset_id"] == dataset["dataset_id"]
+    assert retest["task"]["dataset_version"] == dataset["version"]
+    assert retest["task"]["workflow_version_id"] == published["version_id"]
+    assert retest["task"]["status"] == "completed"
+    assert retest["scorecard"]["baseline"]["experiment_id"] == baseline_experiment["experiment_id"]
+    assert retest["scorecard"]["current"]["task_id"] == executed["task_id"]
+    assert retest["scorecard"]["candidate"]["task_id"] == retest["task"]["task_id"]
+    assert "pass_rate_delta" in retest["comparisons"]["current_to_candidate"]
+    updated_candidate = retest["candidate"]
+    assert updated_candidate["status"] == "retested"
+    assert updated_candidate["retest_task_id"] == retest["task"]["task_id"]
+    assert updated_candidate["candidate_experiment_id"] == retest["candidate_experiment"]["experiment_id"]

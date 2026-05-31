@@ -1,16 +1,17 @@
-import { CheckCircleOutlined, FileSearchOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, FileSearchOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Descriptions, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { PromptSkillCandidate } from '../types';
+import type { PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard } from '../types';
 
 export function CandidateAssetsPage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
+  const [lastRetest, setLastRetest] = useState<PromptSkillCandidateRetestResult | null>(null);
   const queryKey = ['prompt-skill-candidates', statusFilter] as const;
   const candidatesQuery = useQuery({
     queryKey,
@@ -64,6 +65,18 @@ export function CandidateAssetsPage() {
       setNotice(`Workflow 草稿已创建：${payload.draft.draft_id}`);
     },
     onError: (error) => setNotice(`Workflow 草稿创建失败：${formatApiError(error)}`),
+  });
+
+  const retestMutation = useMutation({
+    mutationFn: (candidate: PromptSkillCandidate) => api.retestPromptSkillCandidate(candidate.candidate_id),
+    onSuccess: (payload) => {
+      mergeCandidate(payload.candidate);
+      setLastRetest(payload);
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      void queryClient.invalidateQueries({ queryKey: ['experiments'] });
+      setNotice(`候选复跑已完成：${payload.task.task_id}`);
+    },
+    onError: (error) => setNotice(`候选复跑失败：${formatApiError(error)}`),
   });
 
   return (
@@ -159,12 +172,46 @@ export function CandidateAssetsPage() {
                   >
                     生成草稿
                   </Button>
+                  <Button
+                    size="small"
+                    icon={<PlayCircleOutlined />}
+                    disabled={!record.workflow_draft_id}
+                    loading={retestMutation.isPending}
+                    onClick={() => retestMutation.mutate(record)}
+                  >
+                    复跑对比
+                  </Button>
                 </Space>
               ),
             },
           ]}
         />
       </Card>
+
+      {lastRetest ? (
+        <Card className="flat-card" title="三方指标对比">
+          <Space direction="vertical" size={12}>
+            <Space wrap>
+              {renderMetricCard('Baseline', lastRetest.scorecard.baseline)}
+              {renderMetricCard('Current', lastRetest.scorecard.current)}
+              {renderMetricCard('Candidate', lastRetest.scorecard.candidate)}
+            </Space>
+            <Descriptions size="small" column={1} bordered>
+              <Descriptions.Item label="current_to_candidate">
+                current_to_candidate pass_rate_delta={formatDelta(lastRetest.comparisons.current_to_candidate?.pass_rate_delta)}
+                ，badcase_delta={formatUnknown(lastRetest.comparisons.current_to_candidate?.badcase_delta)}
+              </Descriptions.Item>
+              <Descriptions.Item label="baseline_to_candidate">
+                baseline_to_candidate pass_rate_delta={formatDelta(lastRetest.comparisons.baseline_to_candidate?.pass_rate_delta)}
+                ，badcase_delta={formatUnknown(lastRetest.comparisons.baseline_to_candidate?.badcase_delta)}
+              </Descriptions.Item>
+            </Descriptions>
+            <Button type="primary" href={lastRetest.target_url}>
+              查看候选任务报告
+            </Button>
+          </Space>
+        </Card>
+      ) : null}
     </section>
   );
 }
@@ -190,4 +237,23 @@ function formatUnknown(value: unknown) {
   if (value === null || value === undefined) return '-';
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
   return JSON.stringify(value);
+}
+
+function formatPercent(value: unknown) {
+  return typeof value === 'number' ? `${(value * 100).toFixed(1)}%` : '-';
+}
+
+function formatDelta(value: unknown) {
+  return typeof value === 'number' ? Number(value.toFixed(4)).toString() : '-';
+}
+
+function renderMetricCard(label: string, card?: PromptSkillMetricCard) {
+  return (
+    <Card size="small">
+      <Space direction="vertical" size={2}>
+        <Typography.Text strong>{label}：{formatPercent(card?.pass_rate)}</Typography.Text>
+        <Typography.Text type="secondary">Badcase：{formatUnknown(card?.badcase_count)} / P95：{formatUnknown(card?.p95_latency_ms)}ms</Typography.Text>
+      </Space>
+    </Card>
+  );
 }

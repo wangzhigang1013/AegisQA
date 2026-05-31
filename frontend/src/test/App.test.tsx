@@ -460,6 +460,29 @@ const demoPromptSkillCandidate = {
   updated_at: '2026-05-31T00:00:00Z',
 };
 
+const demoPromptSkillRetestPayload = {
+  status: 'retested',
+  candidate: {
+    ...demoPromptSkillCandidate,
+    status: 'retested',
+    workflow_draft_id: 'draft-candidate-demo',
+    retest_task_id: 'task-candidate-demo',
+    candidate_experiment_id: 'exp-candidate-demo',
+  },
+  task: { ...demoTask, task_id: 'task-candidate-demo', name: '候选资产复跑任务', status: 'completed', workflow_version_id: 'wf-demo:v2', pass_rate: 0.95 },
+  candidate_experiment: { experiment_id: 'exp-candidate-demo', run_id: 'run-candidate-demo', name: '候选复跑' },
+  scorecard: {
+    baseline: { label: 'baseline', experiment_id: 'exp-baseline', run_id: 'run-baseline', pass_rate: 0.9, badcase_count: 3, p95_latency_ms: 120 },
+    current: { label: 'current', task_id: 'task-demo', run_id: 'run-demo', pass_rate: 0.8, badcase_count: 5, p95_latency_ms: 180 },
+    candidate: { label: 'candidate', task_id: 'task-candidate-demo', run_id: 'run-candidate-demo', pass_rate: 0.95, badcase_count: 1, p95_latency_ms: 100 },
+  },
+  comparisons: {
+    current_to_candidate: { pass_rate_delta: 0.15, error_rate_delta: 0, badcase_delta: -4 },
+    baseline_to_candidate: { pass_rate_delta: 0.05, error_rate_delta: 0, badcase_delta: -2 },
+  },
+  target_url: '/reports?task_id=task-candidate-demo',
+};
+
 const pendingPackageSkill = {
   ...demoSkills[0],
   skill_id: 'plugin.echo@0.1.0',
@@ -1074,6 +1097,9 @@ describe('AegisQA 前端工作台', () => {
           target_url: '/workflows/designer/draft-candidate-demo',
         });
       }
+      if (url.endsWith('/prompt-skill-candidates/prompt-skill-candidate-demo/retest')) {
+        return jsonResponse(demoPromptSkillRetestPayload);
+      }
       if (url.includes('/prompt-skill-candidates')) {
         return jsonResponse([demoPromptSkillCandidate]);
       }
@@ -1621,6 +1647,14 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /生成草稿/ }));
     expect(await screen.findByText(/Workflow 草稿已创建：draft-candidate-demo/)).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: /复跑对比/ }));
+    expect(await screen.findByText(/候选复跑已完成：task-candidate-demo/)).toBeInTheDocument();
+    expect(screen.getByText('三方指标对比')).toBeInTheDocument();
+    expect(screen.getByText('Baseline：90.0%')).toBeInTheDocument();
+    expect(screen.getByText('Current：80.0%')).toBeInTheDocument();
+    expect(screen.getByText('Candidate：95.0%')).toBeInTheDocument();
+    expect(screen.getByText(/current_to_candidate pass_rate_delta=0.15/)).toBeInTheDocument();
   });
 
   it('报告中心围绕任务展示报告、质量决策和导出入口', async () => {
