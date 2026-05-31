@@ -20,7 +20,15 @@ const demoTask = {
   name: 'RAG 任务',
   evaluation_goal: 'release_gate',
   quality_gate: { pass_rate: 0.9, max_badcase_count: 0 },
-  preflight_result: { status: 'passed', summary: '预检通过，可以创建并执行任务。', checks: [] },
+  preflight_result: {
+    preflight_id: 'preflight-demo',
+    status: 'passed',
+    summary: '预检通过，可以创建并执行任务。',
+    checks: [
+      { check_id: 'dataset_non_empty', title: '数据集非空', status: 'passed', message: '当前数据集包含 100 条样本。', details: {}, recommendation: '' },
+      { check_id: 'field_mapping', title: 'Workflow 字段映射', status: 'passed', message: 'Workflow 需要的 row 字段均存在。', details: {}, recommendation: '' },
+    ],
+  },
   dataset_id: 'dataset-demo',
   dataset_name: '问答回归集',
   dataset_version: 1,
@@ -36,6 +44,7 @@ const demoTask = {
   pass_rate: 0,
   badcase_count: 0,
   execution_config: {
+    preflight_id: 'preflight-demo',
     concurrency: 2,
     sample_repeat_times: 1,
     retry: { max_retries: 1, backoff_seconds: 0 },
@@ -1767,6 +1776,19 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/#1 \/ queued \/ run-demo/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '参数' }));
     expect(screen.getAllByText(/并发 2 \/ repeat 1 \/ 重试 1/).length).toBeGreaterThan(0);
+  });
+
+  it('任务详情参数页展示创建前 Preflight 证据', async () => {
+    await renderWorkbench('/runs');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'RAG 任务' }));
+    fireEvent.click(await screen.findByRole('tab', { name: '参数' }));
+
+    expect(await screen.findByText('创建前 Preflight 证据')).toBeInTheDocument();
+    expect(screen.getByText('preflight-demo')).toBeInTheDocument();
+    expect(screen.getByText('预检通过，可以创建并执行任务。')).toBeInTheDocument();
+    expect(screen.getByText('数据集非空')).toBeInTheDocument();
+    expect(screen.getByText('Workflow 字段映射')).toBeInTheDocument();
   });
 
   it('任务详情驾驶舱按概览、样本、Trace、Badcase、Attempts 和参数组织', async () => {

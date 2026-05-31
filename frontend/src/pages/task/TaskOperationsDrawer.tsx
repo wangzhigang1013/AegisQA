@@ -4,7 +4,7 @@ import { Alert, Button, Card, Descriptions, Drawer, Space, Table, Tabs, Tag, Tim
 import type { ReactNode } from 'react';
 
 import { api } from '../../api/client';
-import type { TaskRecord } from '../../types';
+import type { TaskPreflightResult, TaskRecord } from '../../types';
 import { TaskSnapshotPanel, formatExecutionConfig } from './TaskSnapshotPanel';
 
 export type TaskAction = 'execute' | 'pause' | 'resume' | 'cancel' | 'retry' | 'attempt';
@@ -134,6 +134,7 @@ export function TaskOperationsDrawer({
                   <Card size="small" title="任务冻结参数">
                     <Typography.Paragraph>{formatExecutionConfig(task)}</Typography.Paragraph>
                     <pre className="json-block">{JSON.stringify(task.execution_config ?? {}, null, 2)}</pre>
+                    <PreflightEvidenceCard task={task} />
                     <Typography.Title level={5}>Skill 参数来源</Typography.Title>
                     <Table
                       size="small"
@@ -159,6 +160,49 @@ export function TaskOperationsDrawer({
       ) : null}
     </Drawer>
   );
+}
+
+function PreflightEvidenceCard({ task }: { task: TaskRecord }) {
+  const preflight = task.preflight_result;
+  const preflightId = task.execution_config?.preflight_id ?? preflight?.preflight_id;
+  if (!preflight) {
+    return (
+      <Card size="small" title="创建前 Preflight 证据">
+        <Alert type="info" showIcon message="当前任务没有保存 Preflight 结果，可能来自旧版本任务或导入数据。" />
+      </Card>
+    );
+  }
+  return (
+    <Card size="small" title="创建前 Preflight 证据">
+      <Space direction="vertical" className="full-width-control">
+        <Descriptions bordered column={1} size="small">
+          <Descriptions.Item label="Preflight ID">{preflightId ? <Typography.Text code>{preflightId}</Typography.Text> : '未持久化'}</Descriptions.Item>
+          <Descriptions.Item label="状态"><Tag color={preflightColor(preflight.status)}>{preflight.status}</Tag></Descriptions.Item>
+          <Descriptions.Item label="生成时间">{preflight.created_at ?? '未记录'}</Descriptions.Item>
+          <Descriptions.Item label="摘要">{preflight.summary}</Descriptions.Item>
+        </Descriptions>
+        <Table
+          size="small"
+          rowKey="check_id"
+          pagination={false}
+          dataSource={preflight.checks ?? []}
+          columns={[
+            { title: '检查项', dataIndex: 'title' },
+            { title: '状态', dataIndex: 'status', render: (value) => <Tag color={preflightColor(String(value))}>{String(value)}</Tag> },
+            { title: '结果', dataIndex: 'message' },
+            { title: '修复建议', dataIndex: 'recommendation', render: (value) => String(value || '-') },
+          ]}
+        />
+      </Space>
+    </Card>
+  );
+}
+
+function preflightColor(status: TaskPreflightResult['status']) {
+  if (status === 'passed') return 'green';
+  if (status === 'warning') return 'gold';
+  if (status === 'blocked') return 'red';
+  return 'default';
 }
 
 export function TaskActionButton({

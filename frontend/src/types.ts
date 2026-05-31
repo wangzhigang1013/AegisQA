@@ -281,6 +281,7 @@ export type TaskRecord = {
   pass_rate: number;
   badcase_count: number;
   execution_config?: {
+    preflight_id?: string | null;
     execution_template_id?: string | null;
     evaluation_goal?: string | null;
     quality_gate?: Record<string, unknown>;
