@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Task Report Export Content Depth”已完成目标实现和全量验证。本批次继续补强任务报告交付物深度：Task 级 CSV 导出从少量 metric 行升级为包含任务指标、Preflight 证据、逐项 Preflight 检查、质量决策、分层分析和 Badcase 明细；HTML 导出从简单 JSON dump 升级为“任务摘要 / 质量决策 / Preflight 检查 / 分层分析 / Badcase 明细 / Report”章节化报告。上一批的报告中心 HTML/CSV/JSON 三个导出按钮仍分别调用对应 `file_format`，下载文件名按格式生成。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Task Report Export Content Depth”已完成目标实现和全量验证。本批次继续补强任务报告交付物深度：Task 级 CSV 导出从少量 metric 行升级为包含任务指标、Preflight 证据、逐项 Preflight 检查、质量决策、分层分析和 Badcase 明细；HTML 导出从简单 JSON dump 升级为“任务摘要 / 质量决策 / Preflight 检查 / 分层分析 / Badcase 明细 / Report”章节化报告。报告导出成功后会写入 `task.report.export` 审计事件，记录任务、Run、导出格式和 Preflight ID，方便治理页追踪报告外发。上一批的报告中心 HTML/CSV/JSON 三个导出按钮仍分别调用对应 `file_format`，下载文件名按格式生成。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -40,6 +40,7 @@
 - 报告中心导出已触发真实浏览器下载：前端会将导出内容写入 Blob、生成安全文件名、点击临时下载链接并释放 object URL，用户不再只看到“导出成功”的静态提示。
 - 报告中心导出格式已拆分为 HTML、CSV、JSON 三个按钮，按钮文案和实际 `file_format` 对齐，避免用户误以为一个按钮会同时导出多种文件。
 - Task Report 导出内容已加深：CSV 包含任务指标、Preflight 检查、质量决策、分层分析和 Badcase 明细；HTML 按章节展示任务摘要、质量决策、Preflight 检查、分层分析、Badcase 明细和完整 Report。
+- Task Report 导出成功后会记录 `task.report.export` 审计事件，事件 detail 包含 `run_id`、`file_format` 和 `preflight_id`。
 - Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
@@ -105,7 +106,7 @@
 
 ## 最近验证
 
-- `python -m pytest tests\test_task_center_api.py -q -k preflight_is_persisted`：先 RED 后 GREEN，最终 1 passed，覆盖 Task Report CSV/HTML 导出包含质量决策、Preflight 检查、分层分析和 Badcase 明细章节。
+- `python -m pytest tests\test_task_center_api.py -q -k preflight_is_persisted`：先 RED 后 GREEN，最终 1 passed，覆盖 Task Report CSV/HTML 导出包含质量决策、Preflight 检查、分层分析和 Badcase 明细章节，以及导出成功写入 `task.report.export` 审计事件。
 - `python -m pytest -q`：92 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、62 passed。
@@ -283,7 +284,7 @@
 
 ### 2026-05-31 Task Report Export Content Depth
 
-- 改动摘要：增强 Task Report Export 内容深度。CSV 导出新增 `section,field,value,details` 结构，覆盖任务指标、Preflight 证据、逐项 Preflight 检查、质量决策、分层分析和 Badcase 明细；HTML 导出新增任务摘要、质量决策、Preflight 检查、分层分析、Badcase 明细和 Report 章节，并继续转义动态内容。
+- 改动摘要：增强 Task Report Export 内容深度。CSV 导出新增 `section,field,value,details` 结构，覆盖任务指标、Preflight 证据、逐项 Preflight 检查、质量决策、分层分析和 Badcase 明细；HTML 导出新增任务摘要、质量决策、Preflight 检查、分层分析、Badcase 明细和 Report 章节，并继续转义动态内容；导出成功后写入 `task.report.export` 审计事件。
 - 变更文件：
   - `aegisqa/api/routes/tasks.py`
   - `tests/test_task_center_api.py`

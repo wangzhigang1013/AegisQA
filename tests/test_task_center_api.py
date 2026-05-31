@@ -377,6 +377,10 @@ def test_task_preflight_is_persisted_and_task_references_preflight_id(tmp_path: 
     assert "<h2>Preflight 检查</h2>" in html_export["content"]
     assert "<h2>分层分析</h2>" in html_export["content"]
     assert "<h2>Badcase 明细</h2>" in html_export["content"]
+    export_events = client.get("/audit-events", params={"action": "task.report.export"}).json()
+    assert export_events[-1]["target"] == task["task_id"]
+    assert export_events[-1]["detail"]["file_format"] == "html"
+    assert export_events[-1]["detail"]["preflight_id"] == preflight["preflight_id"]
 
 
 def test_task_creation_rejects_conflicting_preflight_ids(tmp_path: Path) -> None:

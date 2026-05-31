@@ -9,6 +9,7 @@
 - CSV 导出包含任务指标、Preflight 证据、逐项检查、质量决策、分层分析和 Badcase 明细。
 - HTML 导出按章节展示任务摘要、质量决策、Preflight 检查、分层分析、Badcase 明细和完整 Report。
 - HTML 动态内容继续转义，避免导出文件被浏览器打开时产生注入风险。
+- 导出成功写入 `task.report.export` 审计事件，记录任务、Run、导出格式和 Preflight ID。
 - 保持 JSON 导出返回完整 Task Report payload。
 
 ## 实施步骤
@@ -16,9 +17,10 @@
 1. 后端先写失败测试，断言 CSV/HTML 中存在质量决策、Preflight 检查、分层分析和 Badcase 明细。
 2. 将 CSV 构建抽为 `_build_task_report_export_csv`，使用标准库 `csv.writer` 生成结构化行。
 3. 将 HTML 构建抽为 `_build_task_report_export_html`，每个章节使用统一 JSON 渲染和 HTML 转义。
-4. 保留 `preflight_id` 等旧断言，避免破坏已有导出兼容。
-5. 同步项目状态和验收矩阵。
-6. 执行目标测试和全量验证。
+4. 在导出成功路径记录 `task.report.export` 审计事件，失败或非法格式不写入成功审计。
+5. 保留 `preflight_id` 等旧断言，避免破坏已有导出兼容。
+6. 同步项目状态和验收矩阵。
+7. 执行目标测试和全量验证。
 
 ## 验收标准
 

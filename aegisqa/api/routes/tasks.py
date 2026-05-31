@@ -409,12 +409,20 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         task = payload["task"]
         preflight = payload.get("preflight_evidence") or {}
         if file_format == "json":
-            return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": "json", "content": payload}
-        if file_format == "csv":
-            return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": "csv", "content": _build_task_report_export_csv(payload)}
-        if file_format == "html":
-            return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": "html", "content": _build_task_report_export_html(payload)}
-        raise HTTPException(status_code=400, detail={"message": "file_format 仅支持 json/csv/html"})
+            content = payload
+        elif file_format == "csv":
+            content = _build_task_report_export_csv(payload)
+        elif file_format == "html":
+            content = _build_task_report_export_html(payload)
+        else:
+            raise HTTPException(status_code=400, detail={"message": "file_format 仅支持 json/csv/html"})
+        ctx.audit_service.record(
+            actor="api",
+            action="task.report.export",
+            target=task_id,
+            detail={"run_id": task.get("run_id"), "file_format": file_format, "preflight_id": preflight.get("preflight_id")},
+        )
+        return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": file_format, "content": content}
 
     @app.get("/tasks/{task_id}/diagnostics")
     def get_task_diagnostics(task_id: str) -> dict[str, Any]:
