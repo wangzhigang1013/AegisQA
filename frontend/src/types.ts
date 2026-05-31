@@ -867,7 +867,19 @@ export type PromptSkillCandidateBulkAssignResult = {
   assigned_count: number;
   skipped_count?: number;
   candidates: PromptSkillCandidate[];
-  skipped?: { candidate_id: string; reason: string }[];
+  skipped?: {
+    candidate_id: string;
+    reason: string;
+    owner?: string;
+    open_count?: number;
+    max_open_per_owner?: number;
+  }[];
+  capacity?: {
+    owner: string;
+    max_open_per_owner?: number | null;
+    open_before: number;
+    open_after: number;
+  };
 };
 
 export type PromptSkillCandidateEscalationResult = {

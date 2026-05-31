@@ -7,6 +7,9 @@ import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import type { BaselineChangeNotification, ExperimentBaselineActionResult, ExperimentBaselineImpact, PromptSkillCandidate, PromptSkillCandidateRetestPlanItem, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
 
+// 批量指派先采用固定试点容量，避免一个负责人被一次性塞满过多开放候选。
+const CANDIDATE_OWNER_CAPACITY_LIMIT = 5;
+
 export function CandidateAssetsPage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
@@ -114,11 +117,17 @@ export function CandidateAssetsPage() {
         owner: 'qa_owner',
         due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         actor: 'lead',
+        max_open_per_owner: CANDIDATE_OWNER_CAPACITY_LIMIT,
       }),
     onSuccess: (payload) => {
       mergeCandidates(payload.candidates);
       invalidateCandidateSummaries();
-      setNotice(`候选资产已指派：${payload.assigned_count} 个`);
+      const skippedCount = payload.skipped_count ?? payload.skipped?.length ?? 0;
+      setNotice(
+        skippedCount > 0
+          ? `候选资产已指派：${payload.assigned_count} 个，容量跳过 ${skippedCount} 个`
+          : `候选资产已指派：${payload.assigned_count} 个`,
+      );
     },
     onError: (error) => setNotice(`候选资产指派失败：${formatApiError(error)}`),
   });
@@ -356,6 +365,7 @@ export function CandidateAssetsPage() {
             <Button disabled={!currentCandidateIds.length} loading={bulkAssignMutation.isPending} onClick={() => bulkAssignMutation.mutate()}>
               指派当前列表给 qa_owner
             </Button>
+            <Typography.Text type="secondary">开放候选容量上限：{CANDIDATE_OWNER_CAPACITY_LIMIT} 个</Typography.Text>
             <Button disabled={!currentCandidateIds.length} loading={bulkReviewMutation.isPending} onClick={() => bulkReviewMutation.mutate()}>
               批量审批当前列表
             </Button>

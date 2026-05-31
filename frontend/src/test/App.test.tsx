@@ -670,7 +670,10 @@ const demoCandidateWorkloadPayload = {
 
 const demoCandidateBulkAssignPayload = {
   assigned_count: 1,
+  skipped_count: 1,
   candidates: [{ ...demoPromptSkillCandidate, owner: 'qa_owner', due_at: '2000-01-01T00:00:00+00:00', overdue: true }],
+  skipped: [{ candidate_id: 'candidate-capacity-skipped', reason: 'owner_capacity_exceeded', owner: 'qa_owner', open_count: 5, max_open_per_owner: 5 }],
+  capacity: { owner: 'qa_owner', max_open_per_owner: 5, open_before: 4, open_after: 5 },
 };
 
 const demoCandidateEscalatePayload = {
@@ -1951,7 +1954,7 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('prompt-flow-v1')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /指派当前列表给 qa_owner/ }));
-    expect(await screen.findByText(/候选资产已指派：1 个/)).toBeInTheDocument();
+    expect(await screen.findByText(/候选资产已指派：1 个，容量跳过 1 个/)).toBeInTheDocument();
     expect(screen.getAllByText(/qa_owner/).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: /升级逾期候选/ }));

@@ -675,6 +675,69 @@ def test_prompt_skill_candidate_bulk_governance_and_sla_escalation(tmp_path: Pat
     assert reviewed["candidates"][0]["review_history"][-1]["decision"] == "approved"
 
 
+def test_prompt_skill_candidate_bulk_assign_respects_owner_capacity(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    store = client.app.state.store
+    for record in [
+        {
+            "candidate_id": "candidate-owned-open",
+            "kind": "prompt_skill_version_diff",
+            "status": "candidate",
+            "owner": "qa_owner",
+            "source_task_id": "task-capacity",
+            "current_versions": [],
+            "version_diffs": [],
+            "created_at": "2026-05-31T00:00:00Z",
+            "updated_at": "2026-05-31T00:00:00Z",
+        },
+        {
+            "candidate_id": "candidate-capacity-1",
+            "kind": "prompt_skill_version_diff",
+            "status": "candidate",
+            "source_task_id": "task-capacity",
+            "current_versions": [],
+            "version_diffs": [],
+            "created_at": "2026-05-31T00:00:00Z",
+            "updated_at": "2026-05-31T00:00:00Z",
+        },
+        {
+            "candidate_id": "candidate-capacity-2",
+            "kind": "prompt_skill_version_diff",
+            "status": "candidate",
+            "source_task_id": "task-capacity",
+            "current_versions": [],
+            "version_diffs": [],
+            "created_at": "2026-05-31T00:00:00Z",
+            "updated_at": "2026-05-31T00:00:00Z",
+        },
+    ]:
+        _save_record(store, "prompt_skill_candidates", "candidate_id", record)
+
+    assigned = client.post(
+        "/prompt-skill-candidates/bulk-assign",
+        json={
+            "candidate_ids": ["candidate-capacity-1", "candidate-capacity-2"],
+            "owner": "qa_owner",
+            "due_at": "2026-06-01T00:00:00+00:00",
+            "actor": "lead",
+            "max_open_per_owner": 2,
+        },
+    ).json()
+
+    assert assigned["assigned_count"] == 1
+    assert assigned["skipped_count"] == 1
+    assert assigned["capacity"]["owner"] == "qa_owner"
+    assert assigned["capacity"]["max_open_per_owner"] == 2
+    assert assigned["capacity"]["open_before"] == 1
+    assert assigned["capacity"]["open_after"] == 2
+    assert assigned["skipped"][0]["candidate_id"] == "candidate-capacity-2"
+    assert assigned["skipped"][0]["reason"] == "owner_capacity_exceeded"
+    workload = client.get("/prompt-skill-candidates/workload").json()
+    owner = next(item for item in workload["owners"] if item["owner"] == "qa_owner")
+    assert owner["open_count"] == 2
+
+
 def test_prompt_skill_candidate_retest_plan_prioritizes_ready_and_overdue_candidates(tmp_path: Path) -> None:
     client, _, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
     store = client.app.state.store

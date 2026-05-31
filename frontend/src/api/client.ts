@@ -217,7 +217,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  bulkAssignPromptSkillCandidates: (body: { candidate_ids: string[]; owner: string; due_at?: string | null; actor?: string }) =>
+  bulkAssignPromptSkillCandidates: (body: { candidate_ids: string[]; owner: string; due_at?: string | null; actor?: string; max_open_per_owner?: number | null }) =>
     request<PromptSkillCandidateBulkAssignResult>('/prompt-skill-candidates/bulk-assign', {
       method: 'POST',
       body: JSON.stringify(body),

@@ -71,6 +71,7 @@ class PromptSkillCandidateBulkAssignRequest(BaseModel):
     owner: str
     due_at: str | None = None
     actor: str = "api"
+    max_open_per_owner: int | None = None
 
 
 class PromptSkillCandidateEscalateRequest(BaseModel):
@@ -816,31 +817,76 @@ def _bulk_assign_prompt_skill_candidates(ctx: RouteContext, request: PromptSkill
     owner = request.owner.strip()
     if not owner:
         raise AegisQAError("PROMPT_SKILL_CANDIDATE_OWNER_REQUIRED", "请填写候选资产负责人。", status_code=400)
+    if request.max_open_per_owner is not None and request.max_open_per_owner <= 0:
+        raise AegisQAError(
+            "PROMPT_SKILL_CANDIDATE_OWNER_CAPACITY_INVALID",
+            "负责人开放候选容量必须大于 0。",
+            status_code=400,
+            details={"max_open_per_owner": request.max_open_per_owner},
+        )
     now = _now()
     assigned: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+    open_count = _prompt_skill_candidate_owner_open_count(ctx, owner, now=now)
+    open_before = open_count
     for candidate_id in request.candidate_ids:
         try:
             candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
         except KeyError:
             skipped.append({"candidate_id": candidate_id, "reason": "not_found"})
             continue
+        candidate = _with_candidate_sla_status(candidate, now=now)
+        contributes_new_open_item = _candidate_is_open(candidate) and candidate.get("owner") != owner
+        if request.max_open_per_owner is not None and contributes_new_open_item and open_count >= request.max_open_per_owner:
+            skipped.append(
+                {
+                    "candidate_id": candidate_id,
+                    "reason": "owner_capacity_exceeded",
+                    "owner": owner,
+                    "open_count": open_count,
+                    "max_open_per_owner": request.max_open_per_owner,
+                }
+            )
+            continue
         candidate["owner"] = owner
         candidate["due_at"] = request.due_at
         candidate["assigned_by"] = request.actor
         candidate["assigned_at"] = now
         candidate["updated_at"] = now
-        _append_candidate_action(candidate, action="assign", actor=request.actor, note=f"指派给 {owner}", now=now, extra={"owner": owner, "due_at": request.due_at})
+        _append_candidate_action(
+            candidate,
+            action="assign",
+            actor=request.actor,
+            note=f"指派给 {owner}",
+            now=now,
+            extra={"owner": owner, "due_at": request.due_at, "max_open_per_owner": request.max_open_per_owner},
+        )
         candidate = _with_candidate_sla_status(candidate, now=now)
         _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
         assigned.append(candidate)
+        if contributes_new_open_item:
+            open_count += 1
     ctx.audit_service.record(
         actor=request.actor,
         action="prompt_skill_candidate.bulk_assign",
         target="prompt_skill_candidates",
-        detail={"candidate_ids": request.candidate_ids, "owner": owner, "assigned_count": len(assigned), "skipped_count": len(skipped)},
+        detail={
+            "candidate_ids": request.candidate_ids,
+            "owner": owner,
+            "assigned_count": len(assigned),
+            "skipped_count": len(skipped),
+            "max_open_per_owner": request.max_open_per_owner,
+            "open_before": open_before,
+            "open_after": open_count,
+        },
     )
-    return {"assigned_count": len(assigned), "skipped_count": len(skipped), "candidates": assigned, "skipped": skipped}
+    return {
+        "assigned_count": len(assigned),
+        "skipped_count": len(skipped),
+        "candidates": assigned,
+        "skipped": skipped,
+        "capacity": {"owner": owner, "max_open_per_owner": request.max_open_per_owner, "open_before": open_before, "open_after": open_count},
+    }
 
 
 def _escalate_overdue_prompt_skill_candidates(ctx: RouteContext, request: PromptSkillCandidateEscalateRequest) -> dict[str, Any]:
@@ -886,6 +932,16 @@ def _build_prompt_skill_candidate_workload(ctx: RouteContext, *, now: str) -> di
         },
         "owners": owners,
     }
+
+
+def _prompt_skill_candidate_owner_open_count(ctx: RouteContext, owner: str, *, now: str) -> int:
+    """统计负责人当前开放候选数，用于批量指派容量保护。"""
+
+    return sum(
+        1
+        for candidate in (_with_candidate_sla_status(item, now=now) for item in _list_records(ctx.store, "prompt_skill_candidates"))
+        if candidate.get("owner") == owner and _candidate_is_open(candidate)
+    )
 
 
 def _build_prompt_skill_candidate_retest_plan(ctx: RouteContext, *, status: str | None, now: str) -> dict[str, Any]:
