@@ -1310,7 +1310,14 @@ describe('AegisQA 前端工作台', () => {
           repair_task: { ...demoRepairTask, action_history: [{ action: 'evaluate_ci_gate', status: 'blocked', result_summary: 'CI Gate 复测结果：blocked。' }] },
         });
       }
-      if (url.endsWith('/repair-tasks')) {
+      if (url.includes('/repair-tasks') && !url.includes('/repair-tasks/')) {
+        const parsed = new URL(url, 'http://localhost');
+        if (parsed.searchParams.has('page')) {
+          return jsonResponse({
+            items: [demoRepairTask],
+            pagination: { page: Number(parsed.searchParams.get('page') ?? 1), page_size: 8, total_items: 1, total_pages: 1 },
+          });
+        }
         return jsonResponse([demoRepairTask]);
       }
       if (url.endsWith('/tasks/task-demo/report') || url.includes('/tasks/task-demo/report?')) {
@@ -2705,6 +2712,56 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.change(screen.getByPlaceholderText('说明本次修复做了什么、如何验证'), { target: { value: '已补充 Golden 并调整 Prompt。' } });
     fireEvent.click(screen.getByRole('button', { name: /确认完成/ }));
     expect(await screen.findByText(/修复任务已完成/)).toBeInTheDocument();
+  });
+
+  it('修复任务工作台列表使用服务端分页和状态筛选', async () => {
+    const manyRepairTasks = Array.from({ length: 12 }, (_, index) => ({
+      ...demoRepairTask,
+      repair_task_id: `repair-page-${String(index).padStart(2, '0')}`,
+      title: `修复任务 ${index}`,
+      status: index % 3 === 0 ? 'resolved' : 'open',
+    }));
+    const repairRequests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/tasks')) {
+        return jsonResponse([demoTask]);
+      }
+      if (url.includes('/repair-tasks') && !url.includes('/repair-tasks/')) {
+        const parsed = new URL(url, 'http://localhost');
+        repairRequests.push(url);
+        const status = parsed.searchParams.get('status');
+        const filtered = status ? manyRepairTasks.filter((item) => item.status === status) : manyRepairTasks;
+        if (!parsed.searchParams.has('page')) {
+          return jsonResponse(filtered);
+        }
+        const page = Number(parsed.searchParams.get('page') ?? 1);
+        const pageSize = Number(parsed.searchParams.get('page_size') ?? 8);
+        const start = (page - 1) * pageSize;
+        return jsonResponse({
+          items: filtered.slice(start, start + pageSize),
+          pagination: { page, page_size: pageSize, total_items: filtered.length, total_pages: Math.ceil(filtered.length / pageSize) },
+        });
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/repair-tasks');
+
+    expect(await screen.findByText('修复任务 0')).toBeInTheDocument();
+    expect(screen.queryByText('修复任务 8')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('2'));
+    await waitFor(() => {
+      expect(repairRequests.some((request) => request.includes('page=2') && request.includes('page_size=8'))).toBe(true);
+    });
+    expect(await screen.findByText('修复任务 8')).toBeInTheDocument();
+
+    fireEvent.mouseDown(findComboboxByLabel('修复任务状态筛选'));
+    const resolvedOptions = await screen.findAllByText('已完成');
+    fireEvent.click(resolvedOptions[resolvedOptions.length - 1]);
+    await waitFor(() => {
+      expect(repairRequests.some((request) => request.includes('status=resolved') && request.includes('page=1'))).toBe(true);
+    });
   });
 
   it('修复任务工作台支持发起人工审核和 CI Gate 复测动作', async () => {

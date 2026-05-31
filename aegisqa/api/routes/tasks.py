@@ -189,11 +189,21 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         return _save_task_preflight(ctx, preflight)
 
     @app.get("/repair-tasks")
-    def list_repair_tasks(source_task_id: str | None = None) -> list[dict[str, Any]]:
+    def list_repair_tasks(
+        source_task_id: str | None = Query(default=None),
+        status: str | None = Query(default=None),
+        page: int | None = Query(default=None, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         records = _list_records(ctx.store, "repair_tasks")
         if source_task_id:
             records = [record for record in records if record.get("source_task_id") == source_task_id]
-        return sorted(records, key=lambda item: str(item.get("created_at", "")), reverse=True)
+        if status:
+            records = [record for record in records if record.get("status") == status]
+        records = sorted(records, key=lambda item: str(item.get("created_at", "")), reverse=True)
+        if page is not None:
+            return _paginate_records(records, page=page, page_size=page_size)
+        return records
 
     @app.get("/repair-tasks/{repair_task_id}/tree")
     def get_repair_task_tree(repair_task_id: str) -> dict[str, Any]:
@@ -971,6 +981,22 @@ def _paginate_badcases(
         "page_size": safe_page_size,
         "total_items": total_items,
         "total_pages": ceil(total_items / safe_page_size) if total_items else 0,
+    }
+
+
+def _paginate_records(records: list[dict[str, Any]], *, page: int, page_size: int) -> dict[str, Any]:
+    total_items = len(records)
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 1), 100)
+    start = (safe_page - 1) * safe_page_size
+    return {
+        "items": records[start : start + safe_page_size],
+        "pagination": {
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "total_items": total_items,
+            "total_pages": ceil(total_items / safe_page_size) if total_items else 0,
+        },
     }
 
 

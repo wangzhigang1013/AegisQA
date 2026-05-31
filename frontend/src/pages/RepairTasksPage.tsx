@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { RepairTaskRecord, RepairTaskTree } from '../types';
+import type { RepairTaskPageResult, RepairTaskRecord, RepairTaskTree } from '../types';
 
 type ResolveValues = {
   resolution_note: string;
@@ -29,6 +29,8 @@ export function RepairTasksPage() {
   const [assignTask, setAssignTask] = useState<RepairTaskRecord | null>(null);
   const [treeTask, setTreeTask] = useState<RepairTaskRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [repairPage, setRepairPage] = useState(1);
+  const repairPageSize = 8;
   const [resolveForm] = Form.useForm<ResolveValues>();
   const [reopenForm] = Form.useForm<ReopenValues>();
   const [assignForm] = Form.useForm<AssignValues>();
@@ -37,8 +39,8 @@ export function RepairTasksPage() {
   const assignOwner = Form.useWatch('owner', assignForm);
 
   const repairTasksQuery = useQuery({
-    queryKey: ['repair-tasks', sourceTaskId],
-    queryFn: () => api.repairTasks({ source_task_id: sourceTaskId }),
+    queryKey: ['repair-tasks', sourceTaskId, statusFilter, repairPage, repairPageSize],
+    queryFn: () => api.repairTasksPage({ source_task_id: sourceTaskId, status: statusFilter, page: repairPage, pageSize: repairPageSize }),
   });
   const repairTaskTreeQuery = useQuery({
     queryKey: ['repair-task-tree', treeTask?.repair_task_id],
@@ -47,10 +49,8 @@ export function RepairTasksPage() {
   });
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
 
-  const visibleRepairTasks = useMemo(() => {
-    const records = repairTasksQuery.data ?? [];
-    return statusFilter ? records.filter((record) => record.status === statusFilter) : records;
-  }, [repairTasksQuery.data, statusFilter]);
+  const visibleRepairTasks = repairTasksQuery.data?.items ?? [];
+  const repairPagination = repairTasksQuery.data?.pagination;
 
   const taskNameById = useMemo(() => {
     return Object.fromEntries((tasksQuery.data ?? []).map((task) => [task.task_id, task.name]));
@@ -146,10 +146,15 @@ export function RepairTasksPage() {
   }
 
   function mergeRepairTasks(updatedTasks: RepairTaskRecord[]) {
-    queryClient.setQueryData<RepairTaskRecord[]>(['repair-tasks', sourceTaskId], (current) => {
+    queryClient.setQueryData<RepairTaskPageResult>(['repair-tasks', sourceTaskId, statusFilter, repairPage, repairPageSize], (current) => {
       if (!current) return current;
-      const byId = new Map(current.map((item) => [item.repair_task_id, item]));
+      const byId = new Map(current.items.map((item) => [item.repair_task_id, item]));
       updatedTasks.forEach((updated) => {
+        const keepInCurrentList = (!sourceTaskId || updated.source_task_id === sourceTaskId) && (!statusFilter || updated.status === statusFilter);
+        if (!keepInCurrentList) {
+          byId.delete(updated.repair_task_id);
+          return;
+        }
         const existing = byId.get(updated.repair_task_id);
         if (!existing) {
           byId.set(updated.repair_task_id, updated);
@@ -164,7 +169,7 @@ export function RepairTasksPage() {
         });
         byId.set(updated.repair_task_id, { ...existing, ...updated, action_history: actionHistory });
       });
-      return Array.from(byId.values());
+      return { ...current, items: Array.from(byId.values()) };
     });
   }
 
@@ -195,9 +200,13 @@ export function RepairTasksPage() {
           <Select
             allowClear
             className="wide-search"
+            aria-label="修复任务状态筛选"
             placeholder="按状态筛选"
             value={statusFilter}
-            onChange={setStatusFilter}
+            onChange={(value) => {
+              setStatusFilter(value);
+              setRepairPage(1);
+            }}
             options={[
               { value: 'open', label: '待处理' },
               { value: 'in_progress', label: '处理中' },
@@ -209,13 +218,17 @@ export function RepairTasksPage() {
             showSearch
             optionFilterProp="label"
             className="wide-search"
+            aria-label="修复任务来源任务筛选"
             placeholder="按来源任务筛选"
             value={sourceTaskId}
-            onChange={setSourceTaskId}
+            onChange={(value) => {
+              setSourceTaskId(value);
+              setRepairPage(1);
+            }}
             options={(tasksQuery.data ?? []).map((task) => ({ value: task.task_id, label: `${task.name} / ${task.status}` }))}
           />
           <Typography.Text type="secondary">
-            当前展示 {visibleRepairTasks.length} 个修复工作项。
+            当前展示 {repairPagination?.total_items ?? visibleRepairTasks.length} 个修复工作项。
           </Typography.Text>
         </Space>
       </Card>
@@ -225,7 +238,13 @@ export function RepairTasksPage() {
           rowKey="repair_task_id"
           loading={repairTasksQuery.isLoading}
           dataSource={visibleRepairTasks}
-          pagination={{ pageSize: 8 }}
+          pagination={{
+            current: repairPagination?.page ?? repairPage,
+            pageSize: repairPagination?.page_size ?? repairPageSize,
+            total: repairPagination?.total_items ?? visibleRepairTasks.length,
+            showSizeChanger: false,
+            onChange: setRepairPage,
+          }}
           columns={[
             {
               title: '修复任务',

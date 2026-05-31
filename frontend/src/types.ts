@@ -411,6 +411,16 @@ export type RepairTaskRecord = {
   updated_at?: string;
 };
 
+export type RepairTaskPageResult = {
+  items: RepairTaskRecord[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total_items: number;
+    total_pages: number;
+  };
+};
+
 export type RepairTaskTreeNextAction = {
   repair_task_id: string;
   title: string;

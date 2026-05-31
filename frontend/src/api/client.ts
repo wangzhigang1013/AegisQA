@@ -35,6 +35,7 @@ import type {
   WorkflowPromotionReviewResult,
   RedTeamScanResult,
   RepairTaskRecord,
+  RepairTaskPageResult,
   RepairTaskTree,
   ReportExportRequest,
   RunRecord,
@@ -446,6 +447,15 @@ export const api = {
     });
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<RepairTaskRecord[]>(`/repair-tasks${suffix}`);
+  },
+  repairTasksPage: (filters: { source_task_id?: string; status?: string; page?: number; pageSize?: number } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (!value) return;
+      query.set(key === 'pageSize' ? 'page_size' : key, String(value));
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<RepairTaskPageResult>(`/repair-tasks${suffix}`);
   },
   repairTaskTree: (repairTaskId: string) => request<RepairTaskTree>(`/repair-tasks/${encodeURIComponent(repairTaskId)}/tree`),
   createRepairTasksFromDiagnostics: (taskId: string) =>

@@ -119,6 +119,44 @@ def test_task_stores_goal_gate_preflight_and_creates_repair_tasks(tmp_path: Path
     assert client.get(f"/repair-tasks?source_task_id={executed['task_id']}").json()[0]["source_task_id"] == executed["task_id"]
 
 
+def test_repair_tasks_support_server_side_status_filter_and_pagination_without_breaking_legacy_list(tmp_path: Path) -> None:
+    client, _, _ = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    store = client.app.state.store
+    for index in range(12):
+        _save_record(
+            store,
+            "repair_tasks",
+            "repair_task_id",
+            {
+                "repair_task_id": f"repair-page-{index:02d}",
+                "source_task_id": "task-page",
+                "source_run_id": "run-page",
+                "cause_type": "weak_segment",
+                "severity": "medium",
+                "title": f"修复任务 {index}",
+                "status": "resolved" if index % 3 == 0 else "open",
+                "affected_items": index,
+                "evidence": [f"证据 {index}"],
+                "recommendation": "补充人工审核。",
+                "next_actions": ["seed_annotation_queue"],
+                "created_at": f"2026-06-{index + 1:02d}T00:00:00+00:00",
+                "updated_at": f"2026-06-{index + 1:02d}T00:00:00+00:00",
+            },
+        )
+
+    legacy = client.get("/repair-tasks", params={"source_task_id": "task-page"}).json()
+    assert isinstance(legacy, list)
+    assert len(legacy) == 12
+
+    page = client.get("/repair-tasks", params={"source_task_id": "task-page", "page": 2, "page_size": 5}).json()
+    assert page["pagination"] == {"page": 2, "page_size": 5, "total_items": 12, "total_pages": 3}
+    assert [item["repair_task_id"] for item in page["items"]] == [item["repair_task_id"] for item in legacy[5:10]]
+
+    open_page = client.get("/repair-tasks", params={"source_task_id": "task-page", "status": "open", "page": 1, "page_size": 5}).json()
+    assert open_page["pagination"]["total_items"] == 8
+    assert {item["status"] for item in open_page["items"]} == {"open"}
+
+
 def test_repair_task_status_flow_is_traceable(tmp_path: Path) -> None:
     client, dataset, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
     task = client.post(

@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“CI Gate Evaluation Server Pagination”已完成并通过全量验证。本批次继续优化发布质量门禁历史入口：`GET /ci-gates/evaluations` 无分页参数时保持旧数组响应，带 `page/page_size` 时返回 `{ items, pagination, summary }`；CI Gate 页面评估历史表已改为服务端分页，历史趋势卡读取筛选后全量 summary，避免被当前页误导。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Repair Task Server Pagination”已完成并通过全量验证。本批次继续优化报告诊断后的修复闭环入口：`GET /repair-tasks` 无分页参数时保持旧数组响应，带 `page/page_size` 时返回 `{ items, pagination }`，并支持 `status` 与 `source_task_id` 过滤后分页；React 修复任务工作台主表已改为服务端分页，状态/来源任务筛选变化回到第 1 页。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -89,6 +89,7 @@
 - Trace Tree 已新增独立页面 `/tasks/:taskId/trace-tree`，从任务详情和报告中心可进入，按 Item 展开 Skill Step 输入、输出、耗时、缓存和错误。
 - Task Report 已新增 `quality_decision` 和 `parameter_governance`，报告中心展示质量决策中心，后端参数治理 API 展示 Skill/Prompt 版本、模型参数、任务覆盖和 Secret 脱敏策略。
 - Repair Task 已从“报告页生成结果”升级为可管理工作台：`POST /repair-tasks/{repair_task_id}/start|resolve|reopen` 支持领取、完成、重开状态流转；React `/repair-tasks` 页面支持状态/来源任务筛选、查看证据、领取、完成、重开，并可跳回来源报告和 Trace。
+- Repair Task 工作台已支持服务端分页和后端状态过滤，旧数组响应保持兼容；React 主表翻页和状态/来源任务筛选会请求后端。
 - Repair Task 已支持动作闭环：`POST /repair-tasks/{repair_task_id}/actions` 可执行 `seed_annotation_queue` 和 `evaluate_ci_gate`，动作结果写入 `action_history` 与 `last_action_result`；前端工作台可直接发起人工审核、CI Gate 复测并查看动作历史。
 - Repair Task 已支持复跑效果闭环：`retest_and_compare` 会基于来源任务创建新 Attempt、自动执行并对比前后报告，通过 `comparison_status` 标记 improved / mixed / unchanged / regressed；前端工作台新增“复跑对比”入口并刷新任务与报告缓存。
 - Repair Task 已支持上下文修复建议：`generate_remediation_plan` 会把复跑结果、诊断根因、弱分层、数据质量和参数来源风险转为可执行建议；前端工作台直接展示最近建议标题，减少用户在报告、Trace、参数治理和人工审核之间来回找入口。
@@ -122,6 +123,16 @@
 
 ## 最近验证
 
+- `python -m pytest tests\test_task_flow_optimization.py -q -k "repair_tasks_support_server_side_status_filter"`：先 RED 后 GREEN，最终 1 passed，确认 Repair Task 分页响应、legacy 数组响应和状态筛选后分页。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台列表使用服务端分页"`：先 RED 后 GREEN，最终 1 passed，确认点击第 2 页会请求 `page=2&page_size=8`，状态筛选会请求 `status=resolved&page=1`。
+- `python -m pytest tests\test_task_flow_optimization.py -q -k "repair_task"`：13 passed，确认修复任务创建、状态流转、动作闭环、修复树、指派、字段计划、参数 diff、版本对比、候选沉淀和新增分页兼容。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`：14 passed，确认修复任务工作台既有按钮动作与新增分页兼容。
+- `python -m pytest -q`：102 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：6 个测试文件，81 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
+- `cd frontend && npm run build`：通过，RepairTasksPage chunk 正常生成。
+- `cd frontend && npm run e2e`：8 passed，主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
+- `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - `python -m pytest tests\test_productization_api.py -q -k "ci_gate_evaluations_support_server_side_pagination"`：先 RED 后 GREEN，最终 1 passed，确认 CI Gate 历史分页响应、legacy 数组响应、筛选后分页和全量 summary。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "CI Gate 评估历史使用服务端分页"`：先 RED 后 GREEN，最终 1 passed，确认点击第 2 页会请求 `page=2&page_size=6`。
 - `python -m pytest tests\test_productization_api.py -q -k "ci_gate"`：4 passed，确认 CI Gate 断言、配置、Task/Run 评估、历史过滤与新增分页兼容。
@@ -415,6 +426,41 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Repair Task Server Pagination
+
+- 改动摘要：Repair Task 工作台从前端本地状态筛选和本地分页升级为后端状态过滤与服务端分页；旧 `GET /repair-tasks` 数组响应保持兼容，带 `page/page_size` 时返回 `items` 和 `pagination`；React `/repair-tasks` 主表使用受控分页，状态/来源任务筛选变化回到第 1 页。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/RepairTasksPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-06-01-repair-task-server-pagination.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "repair_tasks_support_server_side_status_filter"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台列表使用服务端分页"`
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "repair_task"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 后端分页测试先 RED 后 GREEN，最终 1 passed。
+  - 前端服务端分页测试先 RED 后 GREEN，最终 1 passed。
+  - Repair Task 后端相关回归 13 passed。
+  - Repair Task 前端相关回归 14 passed。
+  - 后端全量 102 passed，仍有 Windows `.pytest_cache` 创建警告。
+  - 前端类型检查通过；前端单测 81 passed，仍有既有 Ant Design `useForm` 测试环境 warning。
+  - 前端构建通过；Playwright E2E 8 passed；`git diff --check` 仅有 CRLF 换行转换 warning。
+- 下一步：继续审查 Score Analytics、成本账单和审计日志等长列表/重计算页面的分页、筛选与权限边界。
 
 ### 2026-06-01 CI Gate Evaluation Server Pagination
 
