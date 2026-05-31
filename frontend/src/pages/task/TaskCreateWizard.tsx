@@ -1,5 +1,5 @@
 import { Alert, Button, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography } from 'antd';
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 
 import type { DatasetSummary, TaskExecutionTemplate, TaskPreflightResult, WorkflowVersion } from '../../types';
 
@@ -33,7 +33,14 @@ type TaskCreateWizardProps = {
   onSubmit: (values: TaskCreateFormValues) => void;
 };
 
-export function TaskCreateWizard({ open, loading, preflightLoading, preflightResult, datasets, workflows, executionTemplates = [], onCancel, onPreflight, onSubmit }: TaskCreateWizardProps) {
+export function TaskCreateWizard(props: TaskCreateWizardProps) {
+  if (!props.open) {
+    return null;
+  }
+  return <TaskCreateWizardContent {...props} />;
+}
+
+function TaskCreateWizardContent({ open, loading, preflightLoading, preflightResult, datasets, workflows, executionTemplates = [], onCancel, onPreflight, onSubmit }: TaskCreateWizardProps) {
   const [form] = Form.useForm<TaskCreateFormValues>();
   const watchedWorkflow = Form.useWatch('workflow_version_id', form);
   const watchedDataset = Form.useWatch('dataset_version_id', form);
@@ -97,17 +104,10 @@ export function TaskCreateWizard({ open, loading, preflightLoading, preflightRes
     });
   }
 
-  useEffect(() => {
-    if (!open) {
-      form.resetFields();
-    }
-  }, [form, open]);
-
   return (
     <Modal
       title="创建任务向导"
       open={open}
-      forceRender
       onCancel={onCancel}
       footer={[
         <Button key="cancel" onClick={onCancel}>取消</Button>,

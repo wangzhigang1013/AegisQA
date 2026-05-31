@@ -1803,33 +1803,41 @@ describe('AegisQA 前端工作台', () => {
   });
 
   it('执行中心默认展示任务列表并可以创建任务', async () => {
-    await renderWorkbench('/runs');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    expect(await screen.findByText('任务列表')).toBeInTheDocument();
-    expect(screen.getByText('RAG 任务')).toBeInTheDocument();
-    expect(screen.getByText('问答回归集')).toBeInTheDocument();
-    expect(screen.getByText('100')).toBeInTheDocument();
+    try {
+      await renderWorkbench('/runs');
+      expect(await screen.findByText('任务列表')).toBeInTheDocument();
+      expect(screen.getByText('RAG 任务')).toBeInTheDocument();
+      expect(screen.getByText('问答回归集')).toBeInTheDocument();
+      expect(screen.getByText('100')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /创建任务/ }));
+      fireEvent.click(screen.getByRole('button', { name: /创建任务/ }));
 
-    expect(await screen.findByText('创建任务')).toBeInTheDocument();
-    expect(screen.getByText('评测目的')).toBeInTheDocument();
-    expect(screen.getByText('质量门槛')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /运行 Preflight/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '确认创建任务' })).toBeDisabled();
+      expect(await screen.findByText('创建任务')).toBeInTheDocument();
+      expect(screen.getByText('评测目的')).toBeInTheDocument();
+      expect(screen.getByText('质量门槛')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /运行 Preflight/ })).toBeDisabled();
+      expect(screen.getByRole('button', { name: '确认创建任务' })).toBeDisabled();
 
-    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '上线门禁任务' } });
-    fireEvent.mouseDown(screen.getAllByLabelText('Dataset Version')[0]);
-    fireEvent.click(await screen.findByText('问答回归集 v1 / 100 条'));
-    fireEvent.mouseDown(screen.getAllByLabelText('Workflow Version')[0]);
-    fireEvent.click(await screen.findByText('RAG 回归评测 v1'));
-    expect(screen.getByRole('button', { name: /运行 Preflight/ })).not.toBeDisabled();
+      fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '上线门禁任务' } });
+      fireEvent.mouseDown(screen.getAllByLabelText('Dataset Version')[0]);
+      fireEvent.click(await screen.findByText('问答回归集 v1 / 100 条'));
+      fireEvent.mouseDown(screen.getAllByLabelText('Workflow Version')[0]);
+      fireEvent.click(await screen.findByText('RAG 回归评测 v1'));
+      expect(screen.getByRole('button', { name: /运行 Preflight/ })).not.toBeDisabled();
 
-    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
-    expect((await screen.findAllByText(/Preflight 通过/)).length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: '确认创建任务' })).not.toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
-    expect(await screen.findByText(/任务已创建/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
+      expect((await screen.findAllByText(/Preflight 通过/)).length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: '确认创建任务' })).not.toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
+      expect(await screen.findByText(/任务已创建/)).toBeInTheDocument();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const errorText = consoleError.mock.calls.map((args) => args.join(' ')).join('\n');
+      expect(errorText).not.toContain('Instance created by `useForm` is not connected');
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('执行中心任务列表使用服务端分页和状态筛选', async () => {

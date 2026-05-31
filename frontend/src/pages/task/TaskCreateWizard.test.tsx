@@ -112,6 +112,21 @@ const customParamPreflight = {
 };
 
 describe('TaskCreateWizard', () => {
+  it('关闭弹窗时不会触发 useForm 未连接警告', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const { rerender } = render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={vi.fn()} />);
+      rerender(<TaskCreateWizard open={false} datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={vi.fn()} />);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      const errorText = consoleError.mock.calls.map((args) => args.join(' ')).join('\n');
+      expect(errorText).not.toContain('Instance created by `useForm` is not connected');
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it('必须选择 Dataset、Workflow 并完成可继续的 Preflight 后才能创建', async () => {
     const onSubmit = vi.fn();
     render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
