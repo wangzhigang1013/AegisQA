@@ -366,10 +366,17 @@ def test_task_preflight_is_persisted_and_task_references_preflight_id(tmp_path: 
     assert json_export["content"]["preflight_evidence"]["preflight_id"] == preflight["preflight_id"]
     csv_export = client.get(f"/tasks/{task['task_id']}/report/export", params={"file_format": "csv"}).json()
     assert f"preflight_id,{preflight['preflight_id']}" in csv_export["content"]
+    assert "quality_decision,status" in csv_export["content"]
+    assert "preflight_check,dataset_non_empty" in csv_export["content"]
+    assert "segment," in csv_export["content"]
     html_export = client.get(f"/tasks/{task['task_id']}/report/export", params={"file_format": "html"}).json()
     assert preflight["preflight_id"] in html_export["content"]
     assert "<script>alert(1)</script>" not in html_export["content"]
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html_export["content"]
+    assert "<h2>质量决策</h2>" in html_export["content"]
+    assert "<h2>Preflight 检查</h2>" in html_export["content"]
+    assert "<h2>分层分析</h2>" in html_export["content"]
+    assert "<h2>Badcase 明细</h2>" in html_export["content"]
 
 
 def test_task_creation_rejects_conflicting_preflight_ids(tmp_path: Path) -> None:

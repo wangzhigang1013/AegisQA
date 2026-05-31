@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 from copy import deepcopy
 from datetime import datetime, timezone
 from html import escape
@@ -409,27 +411,9 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         if file_format == "json":
             return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": "json", "content": payload}
         if file_format == "csv":
-            rows = [
-                "metric,value",
-                f"task_id,{task_id}",
-                f"run_id,{task.get('run_id')}",
-                f"pass_rate,{payload['report'].get('pass_rate')}",
-                f"badcase_count,{len(payload.get('badcases') or [])}",
-                f"preflight_id,{preflight.get('preflight_id') or ''}",
-                f"preflight_status,{preflight.get('status') or ''}",
-            ]
-            return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": "csv", "content": "\n".join(rows)}
+            return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": "csv", "content": _build_task_report_export_csv(payload)}
         if file_format == "html":
-            # HTML 导出可能被浏览器直接打开，所有动态内容都必须转义，避免报告名称或 JSON 内容注入脚本。
-            task_name = escape(str(task.get("name") or task_id))
-            preflight_json = escape(json_dumps(preflight))
-            report_json = escape(json_dumps(payload["report"]))
-            content = (
-                f"<html><body><h1>{task_name}</h1>"
-                f"<h2>Preflight</h2><pre>{preflight_json}</pre>"
-                f"<h2>Report</h2><pre>{report_json}</pre></body></html>"
-            )
-            return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": "html", "content": content}
+            return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": "html", "content": _build_task_report_export_html(payload)}
         raise HTTPException(status_code=400, detail={"message": "file_format 仅支持 json/csv/html"})
 
     @app.get("/tasks/{task_id}/diagnostics")
@@ -599,6 +583,61 @@ def _build_task_report_payload(ctx: RouteContext, task_id: str) -> dict[str, Any
             "html": f"/tasks/{task['task_id']}/report/export?file_format=html",
         },
     }
+
+
+def _build_task_report_export_csv(payload: dict[str, Any]) -> str:
+    task = payload["task"]
+    report = payload.get("report") or {}
+    preflight = payload.get("preflight_evidence") or {}
+    quality_decision = payload.get("quality_decision") or {}
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(["section", "field", "value", "details"])
+    writer.writerow(["metric", "task_id", task.get("task_id"), ""])
+    writer.writerow(["metric", "run_id", task.get("run_id"), ""])
+    writer.writerow(["metric", "pass_rate", report.get("pass_rate"), ""])
+    writer.writerow(["metric", "badcase_count", len(payload.get("badcases") or []), ""])
+    writer.writerow(["preflight", "preflight_id", preflight.get("preflight_id") or "", preflight.get("summary") or ""])
+    writer.writerow(["preflight", "preflight_status", preflight.get("status") or "", ""])
+    for check in preflight.get("checks") or []:
+        writer.writerow(["preflight_check", check.get("check_id"), check.get("status"), check.get("message")])
+    writer.writerow([
+        "quality_decision",
+        "status",
+        quality_decision.get("status") or quality_decision.get("decision") or "",
+        quality_decision.get("summary") or quality_decision.get("reason") or "",
+    ])
+    segments = payload.get("segments") or []
+    if segments:
+        for segment in segments:
+            segment_name = f"{segment.get('segment_key', 'segment')}={segment.get('segment_value', '')}"
+            details = f"sample_count={segment.get('sample_count', 0)};badcase_count={segment.get('badcase_count', 0)}"
+            writer.writerow(["segment", segment_name, segment.get("pass_rate"), details])
+    else:
+        writer.writerow(["segment", "all", report.get("pass_rate"), "sample_count=all"])
+    for badcase in payload.get("badcases") or []:
+        writer.writerow(["badcase", badcase.get("item_id") or badcase.get("badcase_id"), badcase.get("status"), badcase.get("reason")])
+    return output.getvalue().strip()
+
+
+def _build_task_report_export_html(payload: dict[str, Any]) -> str:
+    task = payload["task"]
+    # HTML 导出可能被浏览器直接打开，所有动态内容都必须转义，避免报告名称或 JSON 内容注入脚本。
+    task_name = escape(str(task.get("name") or task.get("task_id") or "任务报告"))
+    sections = [
+        f"<h1>{task_name}</h1>",
+        _html_json_section("任务摘要", payload.get("task_summary") or {}),
+        _html_json_section("质量决策", payload.get("quality_decision") or {}),
+        _html_json_section("Preflight 检查", payload.get("preflight_evidence") or {}),
+        _html_json_section("分层分析", payload.get("segments") or []),
+        _html_json_section("Badcase 明细", payload.get("badcases") or []),
+        _html_json_section("Report", payload.get("report") or {}),
+    ]
+    return "<html><body>" + "".join(sections) + "</body></html>"
+
+
+def _html_json_section(title: str, content: Any) -> str:
+    return f"<h2>{escape(title)}</h2><pre>{escape(json_dumps(content))}</pre>"
 
 
 def _save_task_preflight(ctx: RouteContext, preflight: dict[str, Any]) -> dict[str, Any]:
