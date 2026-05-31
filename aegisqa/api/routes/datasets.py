@@ -10,6 +10,7 @@ from aegisqa.api.app import (
     DatasetUploadRequest,
     FieldTypeCorrectionRequest,
     SourceMaterializeRequest,
+    _list_records,
 )
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
@@ -73,6 +74,12 @@ def register_dataset_routes(app: FastAPI, ctx: RouteContext) -> None:
         payload = dataset.model_dump(mode="json")
         payload["field_paths"] = [f"row.{field}" for field in sorted(dataset.field_schema)]
         return payload
+
+    @app.get("/datasets/{dataset_id}/versions/{version}/lineage")
+    def get_dataset_lineage(dataset_id: str, version: int) -> dict[str, Any]:
+        """返回 Dataset Version 的来源、字段和下游任务血缘。"""
+
+        return ctx.dataset_service.build_lineage(dataset_id, version, _list_records(ctx.store, "tasks"))
 
     @app.get("/datasets/{dataset_id}/versions/{version}")
     def get_dataset(dataset_id: str, version: int) -> dict[str, Any]:

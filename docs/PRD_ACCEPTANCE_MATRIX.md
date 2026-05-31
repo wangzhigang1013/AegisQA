@@ -17,9 +17,9 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 最近一次验证结果：
 
-- 单元/API/扩展测试：`52 passed`。
+- 单元/API/扩展测试：`56 passed`。
 - 端到端 Demo：最新 Dataset `rag_qa_1000:v8`、Run `run-b347762ba048`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
-- 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 35 个交互/API client/图模型/任务创建向导/Run Attempts/Experiment/CI Gate/Annotation Queue/治理边界测试，Playwright 覆盖 8 条 E2E。
+- 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 38 个交互/API client/图模型/任务创建向导/Run Attempts/Dataset Lineage/Trace Tree/Experiment/CI Gate/Annotation Queue/治理边界测试，Playwright 覆盖 8 条 E2E。
 - 浏览器交互：Headless Chrome CDP 验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden；同时覆盖 CI Gate 创建配置和阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核和候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行回填、校验、发布。
 - 产品化增强：Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 已有后端 API 测试；首页已展示真实 Dashboard 和产品化增强入口。
@@ -44,6 +44,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-DS-04 | Source Skill 机制 | 已实现基础 | `source.csv@0.1.0`、`source.jsonl@0.1.0` manifest，`POST /datasets/source-materialize` |
 | FR-DS-05 | Golden Dataset 与人工标签 | 已实现基础 | `golden`、`label_field`、Judge demo |
 | FR-DS-06 | rows 按需读取 | 已实现 | `iter_rows` / `iter_row_chunks`，队列消息仅 `item_id` |
+| FR-DS-09 | Dataset Lineage | 已实现基础 | `GET /datasets/{dataset_id}/versions/{version}/lineage` 返回来源类型、来源参数、字段路径、预览和下游 Task；React 数据集页提供“查看 Lineage”抽屉 |
 | FR-EX-01 | 分片创建 Run Items 与轻量队列 | 已实现 | `WorkflowRunner.create_run`，1000 样本测试；Task API 将 Dataset/Workflow/Run 绑定为一次业务任务；产品语义中 Task 是用户主对象，Run 是底层执行 Attempt |
 | FR-EX-02 | 并发控制与外部 API 限速 | 已实现基础 | `InMemoryRateLimiter` 记录等待与限速次数；Redis/Celery 适配待生产化 |
 | FR-EX-03 | 失败重试 | 已实现基础 | `retry_failed_items` |
@@ -82,7 +83,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-RP-07 | 报告导出 | 已实现基础 | `export_report_csv`、`export_report_html`，`GET /runs/{run_id}/report/export?file_format=json|csv|html` |
 | FR-ME-04 | 裁判偏差分析 | 已实现基础 | `JudgeProfileService.bias_analysis` |
 | FR-ME-05 | 人工纠错反哺候选池 | 已实现基础 | `PromptCandidateService` 可从 Badcase 创建 Prompt 优化候选并评审 |
-| FR-ME-06 | 多裁判交叉验证 | 已实现基础 | `JudgeProfileService.cross_validate` |
+| FR-ME-06 | 多裁判交叉验证 | 已实现基础页面 | `JudgeProfileService.cross_validate`，`POST /judge-cross-validation`，React Judge 审计页提供“多 Judge 一致性”弹窗并展示两两一致率 |
 | FR-HL-05 | Badcase 聚类 | 已实现 | `cluster_badcases(method="rule")` 与 `cluster_badcases(method="embedding")` |
 | FR-HL-06 | 批量处理与导出 | 已实现基础 | `bulk_correct`、`export_badcases`，`POST /badcases/bulk-correct`，`GET /badcases/export`；报告中心支持勾选多条后批量加入 Golden |
 | FR-AU-04 | 角色权限 | 已实现基础 | `AccessControl` |
@@ -98,7 +99,9 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | Assertion DSL | 已实现最小 API | `POST /assertions/evaluate` 支持 contains、regex、json_schema、similarity、latency、cost、safety 的基础断言 |
 | CI Gate | 已实现基础页面 | `GET/POST /ci-gates` 支持质量门禁配置保存和列表；`POST /ci-gates/evaluate` 支持按配置和指标阈值 blocking 发布，也支持直接对 Task/Run 抽取指标评估，并保存 `gateeval-*` 历史；`GET /ci-gates/evaluations` 支持按 config、task、run 过滤；React `/ci-gates` 页面支持创建门禁配置、选择 Task/Run 执行评估，并展示阻断原因、实际值、阈值、历史趋势和评估历史；Playwright 覆盖真实创建和阻断评估 |
 | Annotation Queue | 已实现基础页面 | `POST /annotation-queue/seed-from-run`、`GET /annotation-queue`、分派、review、`POST /annotation-queue/bulk-review`、`GET /annotation-candidates`；队列记录回填来源 Task，支持状态/负责人/来源任务筛选；React `/annotation-queue` 页面支持领取、分派、审核、批量审核、回流 Golden Dataset 和候选资产摘要；Playwright 覆盖真实领取、审核、批量审核和回流 |
-| Trace Tree | 已实现最小 API | `GET /runs/{run_id}/trace-tree` 与 `GET /tasks/{task_id}/trace-tree` 展示 Run Item -> Skill Step 输入、输出、耗时、错误、缓存命中 |
+| Trace Tree | 已实现独立页面 | `GET /runs/{run_id}/trace-tree` 与 `GET /tasks/{task_id}/trace-tree` 展示 Run Item -> Skill Step 输入、输出、耗时、错误、缓存命中；React `/tasks/:taskId/trace-tree` 独立页面展示 Item 调用树 |
+| Task 参数治理 | 已实现基础 | `GET /tasks/{task_id}/parameter-governance` 和 Task Report `parameter_governance` 展示 Skill/Prompt 版本、模型参数、任务覆盖和脱敏 Secret 策略 |
+| 质量决策中心 | 已实现基础 | Task Report `quality_decision` 把通过率、错误率、Badcase 和低分层转为 passed/warning/blocked 决策、风险摘要和下一步动作；React 报告中心展示“质量决策中心” |
 | 产品化入口 | 已实现基础 | React 首页读取真实 Dashboard；Workflow 先进入市场，执行与报告围绕 Task 组织 |
 
 ## 生产化边界说明

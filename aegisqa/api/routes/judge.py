@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from aegisqa.api.app import JudgeAuditRequest, JudgeProfileCreateRequest, ProfileAuditRequest
+from aegisqa.api.app import JudgeAuditRequest, JudgeCrossValidationRequest, JudgeProfileCreateRequest, ProfileAuditRequest
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.judge.audit import JudgeAuditResult, audit_judge_profile
 from aegisqa.judge.profiles import JudgeProfile, StoredJudgeAudit
@@ -67,3 +67,17 @@ def register_judge_routes(app: FastAPI, ctx: RouteContext) -> None:
         if profile_id:
             return ctx.judge_profiles.list_audits(profile_id)
         return ctx.judge_profiles.list_all_audits()
+
+    @app.post("/judge-cross-validation")
+    def cross_validate_judges(request: JudgeCrossValidationRequest) -> dict[str, object]:
+        """多 Judge 一致性分析。
+
+        单个 Judge 的 Accuracy 不能说明裁判体系是否稳定；交叉验证会计算两两一致率，
+        并同时返回每个 Judge 相对人工标签的审计指标。
+        """
+
+        return ctx.judge_profiles.cross_validate(
+            dataset_version_id=request.dataset_version_id,
+            human_labels=request.human_labels,
+            judge_outputs_by_profile=request.judge_outputs_by_profile,
+        )

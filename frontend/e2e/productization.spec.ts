@@ -23,7 +23,7 @@ test('CI Gate 可以创建配置并阻断低通过率任务', async ({ page, req
   await page.getByRole('button', { name: /执行 Gate 评估/ }).click();
 
   await expect(page.getByText('阻断原因')).toBeVisible();
-  await expect(page.getByText(/质量门禁未通过：pass_rate/)).toBeVisible();
+  await expect(page.locator('.ant-alert-message').filter({ hasText: /质量门禁未通过：pass_rate/ })).toBeVisible();
 });
 
 test('Annotation Queue 可以领取、审核并回流 Golden', async ({ page, request }) => {

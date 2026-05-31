@@ -48,6 +48,7 @@ export function TaskOperationsDrawer({
             <TaskActionButton task={task} action="retry" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="重试失败项" />
             <TaskActionButton task={task} action="attempt" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="新建 Attempt" />
             <Button href={`/tasks/${task.task_id}/trace`}>查看 Trace Flow</Button>
+            <Button href={`/tasks/${task.task_id}/trace-tree`}>查看 Trace Tree</Button>
           </Space>
 
           <Tabs

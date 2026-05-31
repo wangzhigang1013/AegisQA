@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“评测数据流与产品体验升级”已完成。阶段 1（Skill 参数解析与冻结）、阶段 2（Trace 数据流模型与独立页面）、阶段 3（UI 信息架构与任务驾驶舱）、阶段 4（Workflow 字段映射与参数预览升级）、阶段 5（报告分层分析与闭环动作）、阶段 6（Annotation / Golden 批量闭环）、阶段 7（Experiment 与 CI Gate 历史）和阶段 8（生产化边界与移除整理）均已完成：后端已提供 Task Trace Flow API，前端已新增独立 Trace Flow 页面，首页已改为任务工作台，任务详情已升级为概览、样本、Trace、Badcase、Attempts、参数页签，Workflow Inspector 已支持字段路径表格映射与参数预览，任务报告已支持按业务字段分层分析和下一步建议，Annotation Queue 已支持批量审核并沉淀 Golden / Assertion 候选资产，CI Gate 已保存评估历史，Experiment 已支持 Dataset/Workflow 过滤与 A/B 对比，README 与治理页已明确主入口、legacy Streamlit、生产边界和 Run Attempt 语义。
+新一轮“可信评测增强”已完成。本批次在已有任务中心化主链路上补齐 Dataset Lineage、Trace Tree 独立页面、Task 参数/Prompt 版本治理、报告质量决策中心和多 Judge 一致性视图，让评测结论不仅能跑出来，还能解释数据来源、参数来源、质量风险和裁判一致性。
 
 ## 当前已完成
 
@@ -56,13 +56,17 @@
 - Experiment 快照已补齐 Dataset/Workflow 元数据、延迟指标和失败分布；Experiment 页面支持 Dataset/Workflow 过滤，并新增 A/B 对比面板展示通过率、Badcase、P95 耗时、成本和失败分布差异。
 - README 已把主启动路径明确为 FastAPI + React，并将 Streamlit 保留为 legacy demo；文档明确 Task 是用户主对象，Run 是底层执行 Attempt。
 - 治理页已移除容易误导的 MySQL/Redis/Celery 状态清单，改为指向 README 和 PRD 验收矩阵的生产适配边界提示。
+- Dataset Version 已记录 `created_at`、`source_type`、`source_ref`，并提供 Lineage API 和前端抽屉，能解释数据来源、字段路径、预览和下游任务。
+- Trace Tree 已新增独立页面 `/tasks/:taskId/trace-tree`，从任务详情和报告中心可进入，按 Item 展开 Skill Step 输入、输出、耗时、缓存和错误。
+- Task Report 已新增 `quality_decision` 和 `parameter_governance`，报告中心展示质量决策中心，后端参数治理 API 展示 Skill/Prompt 版本、模型参数、任务覆盖和 Secret 脱敏策略。
+- Judge 审计已新增多 Judge 一致性 API 与前端弹窗，支持输入多个 Judge 输出并展示两两一致率。
 
 ## 最近验证
 
-- `python -m pytest -q`：52 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
-- `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v8`，Run `run-b347762ba048` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
+- `python -m pytest -q`：56 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v9`，Run `run-67359b417c65` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：4 个测试文件、35 个测试通过。
+- `cd frontend && npm test`：4 个测试文件、38 个测试通过。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：8 个 Playwright E2E 测试通过，覆盖任务主链路、任务报告进入 Trace Flow、参数来源查看、CI Gate 创建与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Playwright E2E 测试通过，覆盖 Workflow 画布新增节点、聚合策略、删除下游连线、新增 Join、撤销/重做、删除节点、保存草稿回放、试运行回填、校验、发布。
@@ -77,15 +81,65 @@
 - Workflow 画布的 Source/Skill/Join/Output/Aggregator 新增、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行、校验和发布已进入 Playwright；后续需要继续拆分 Palette/Inspector 组件，降低单文件维护成本。
 - Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；Run Attempt、CI Gate、Experiment baseline/A-B 对比和任务报告均已接入基础闭环。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
-- Experiment 快照、CI Gate 和 Annotation Queue 已有独立产品页；Trace Tree 仍需做成完整独立页面，并继续补更细的成本预算和 baseline 可视化趋势图。
-- 报告、Badcase、Judge 审计已经接入基础数据与动作，人工审阅队列已有后端最小闭环；仍需补齐多 Judge 一致性视图、红队安全扫描和跨任务 Score Analytics。
+- Experiment 快照、CI Gate、Annotation Queue 和 Trace Tree 已有独立产品页；后续需要继续补更细的成本预算、baseline 可视化趋势图和跨任务 Score Analytics。
+- 报告、Badcase、Judge 审计已经接入基础数据与动作，人工审阅队列和多 Judge 一致性已有最小闭环；仍需补齐红队安全扫描和更细的裁判偏差趋势分析。
 - 本地服务曾出现旧 FastAPI 进程未重启导致新增路由 404 的问题；已重启后端并完成浏览器复测。后续修改后端 API 时必须确认 8000 端口加载的是最新代码。
 
 ## 下一阶段目标
 
-- 后续建议优先进入 Trace Tree 独立页面、多 Judge 一致性视图、红队安全扫描、更细的成本预算/趋势图，以及真实 MySQL/Redis/Celery Repository/Worker 接入。
+- 后续建议优先进入红队安全扫描、更细的成本预算/趋势图、跨任务 Score Analytics、裁判偏差趋势分析，以及真实 MySQL/Redis/Celery Repository/Worker 接入。
 
 ## 最近改动
+
+### 2026-05-31 可信评测增强批次完成
+
+- 改动摘要：根据用户确认，完成上一轮专家优化建议中的“可信评测增强”批次；新增正式实施计划，并按 TDD 完成 Dataset Lineage、Trace Tree 独立页、Task 参数治理、Task Report 质量决策中心和多 Judge 一致性视图。
+- 变更文件：
+  - `docs/superpowers/plans/2026-05-31-trustworthy-evaluation-enhancement.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `tests/test_trustworthy_evaluation_enhancements.py`
+  - `aegisqa/datasets/service.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/datasets.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/api/routes/judge.py`
+  - `frontend/src/types.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/App.tsx`
+  - `frontend/src/pages/DatasetsPage.tsx`
+  - `frontend/src/pages/TraceTreePage.tsx`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/pages/JudgeAuditPage.tsx`
+  - `frontend/src/pages/task/TaskOperationsDrawer.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/e2e/productization.spec.ts`
+- 验证命令：
+  - `git rev-parse --is-inside-work-tree`
+  - `git branch --show-current`
+  - `git status --short`
+  - `python -m pytest tests\test_trustworthy_evaluation_enhancements.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Lineage|Trace Tree|质量决策|多 Judge"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `python -m aegisqa.examples.run_mvp_demo`
+- 测试结果：
+  - 当前位于 Git 仓库分支 `feature/product-hardening-roadmap`。
+  - 后端新增测试先红灯：4 failed，失败原因为 Lineage、参数治理、多 Judge API 或 Task Report 字段不存在。
+  - 后端实现后复测：4 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端新增测试先红灯：Lineage 按钮、Trace Tree 独立页、质量决策卡和多 Judge 一致性弹窗不存在。
+  - 前端实现后定向复测：4 passed。
+  - 后端全量：56 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端单测：4 个测试文件、38 passed。
+  - 前端 build：通过。
+  - Playwright E2E：首次运行 7 passed / 1 failed，根因是 CI Gate 阻断文案同时出现在 Alert 和历史表格，严格定位命中两处；收窄断言到 Alert 后复跑 8 passed。
+  - Demo：Dataset `rag_qa_1000:v9`，Run `run-67359b417c65` completed，1000 条样本完成，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条。
+- 下一步：提交本批次 Git 变更；后续进入红队安全扫描、成本预算趋势、跨任务 Score Analytics 和生产 Repository/Worker。
 
 ### 2026-05-31 生产化边界整理与最终验收
 

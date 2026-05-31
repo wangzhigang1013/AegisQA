@@ -47,6 +47,37 @@ export type DatasetSummary = {
   versions: DatasetVersion[];
 };
 
+export type DatasetLineage = {
+  dataset_id: string;
+  dataset_version: number;
+  dataset_version_id: string;
+  name: string;
+  row_count: number;
+  golden: boolean;
+  label_field?: string | null;
+  answer_field?: string | null;
+  created_at?: string;
+  source: {
+    type: string;
+    ref: Record<string, unknown>;
+  };
+  field_count: number;
+  fields: Record<string, string>;
+  field_paths: string[];
+  preview: Record<string, unknown>[];
+  downstream_tasks: {
+    task_id: string;
+    name: string;
+    status: string;
+    workflow_id?: string;
+    workflow_name?: string;
+    workflow_version_id?: string;
+    run_id?: string;
+    created_at?: string;
+    updated_at?: string;
+  }[];
+};
+
 export type WorkflowGraphNode = {
   node_id: string;
   node_type: 'source' | 'skill' | 'branch' | 'join' | 'aggregator' | 'output';
@@ -195,6 +226,13 @@ export type StoredJudgeAudit = {
   created_at: string;
 };
 
+export type JudgeCrossValidationResult = {
+  dataset_version_id: string;
+  profile_count: number;
+  pairwise_agreement: Record<string, number>;
+  audits: Record<string, Partial<StoredJudgeAudit>>;
+};
+
 export type SkillContractResult = {
   skill_id: string;
   ok: boolean;
@@ -318,12 +356,61 @@ export type TaskReport = {
     segment_key?: string | null;
     segment_value?: string | null;
   }[];
+  quality_decision?: QualityDecision;
+  parameter_governance?: TaskParameterGovernance;
   report: RunReport;
   badcases: Record<string, unknown>[];
   export_links: {
     json: string;
     csv: string;
     html: string;
+  };
+};
+
+export type QualityDecision = {
+  status: 'passed' | 'warning' | 'blocked' | string;
+  task_id?: string;
+  run_id?: string;
+  risk_summary: {
+    pass_rate: number;
+    error_rate: number;
+    badcase_count: number;
+    weak_segment_count: number;
+  };
+  top_risks: {
+    type: string;
+    severity: string;
+    message: string;
+    segment_key?: string;
+    segment_value?: string;
+  }[];
+  next_actions: {
+    action: string;
+    label: string;
+  }[];
+};
+
+export type TaskParameterGovernance = {
+  task_id: string;
+  run_id: string;
+  workflow_version_id: string;
+  execution_config: Record<string, unknown>;
+  prompt_skill_versions: {
+    step_id: string;
+    skill_ref: string;
+    prompt_version: string;
+    model?: unknown;
+    model_params: Record<string, unknown>;
+    cacheable: boolean;
+  }[];
+  parameter_sources: {
+    step_id: string;
+    skill_ref: string;
+    parameters: Record<string, { source: string; value_preview: unknown; redacted: boolean; expression_path?: string; secret_ref?: string }>;
+  }[];
+  secret_policy: {
+    redacted: boolean;
+    message: string;
   };
 };
 

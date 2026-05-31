@@ -22,13 +22,21 @@ type ProfileFormValues = {
   threshold: number;
 };
 
+type CrossValidationFormValues = {
+  dataset_version_id: string;
+  human_labels: string;
+  judge_outputs_json: string;
+};
+
 export function JudgeAuditPage() {
   const queryClient = useQueryClient();
   const [auditOpen, setAuditOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [crossOpen, setCrossOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [auditForm] = Form.useForm<AuditFormValues>();
   const [profileForm] = Form.useForm<ProfileFormValues>();
+  const [crossForm] = Form.useForm<CrossValidationFormValues>();
 
   const profilesQuery = useQuery({ queryKey: ['judge-profiles'], queryFn: api.judgeProfiles });
   const auditsQuery = useQuery({ queryKey: ['judge-audits'], queryFn: api.judgeAudits });
@@ -75,6 +83,19 @@ export function JudgeAuditPage() {
     onError: (error) => setNotice(error instanceof Error ? `创建审计失败：${error.message}` : '创建审计失败'),
   });
 
+  const crossValidationMutation = useMutation({
+    mutationFn: (values: CrossValidationFormValues) => {
+      const judgeOutputs = JSON.parse(values.judge_outputs_json) as Record<string, string[]>;
+      return api.crossValidateJudges({
+        dataset_version_id: values.dataset_version_id,
+        human_labels: values.human_labels.split(',').map((item) => item.trim()).filter(Boolean),
+        judge_outputs_by_profile: judgeOutputs,
+      });
+    },
+    onSuccess: () => setNotice('多 Judge 一致性分析完成。'),
+    onError: (error) => setNotice(error instanceof Error ? `一致性分析失败：${error.message}` : '一致性分析失败'),
+  });
+
   const matrixOption = useMemo(() => {
     const matrix = latestAudit?.confusion_matrix ?? { pass: { pass: 0, fail: 0 }, fail: { pass: 0, fail: 0 } };
     const labels = Object.keys(matrix);
@@ -101,6 +122,7 @@ export function JudgeAuditPage() {
         primaryAction={
           <Space>
             <Button icon={<PartitionOutlined />} onClick={() => setProfileOpen(true)}>创建 Profile</Button>
+            <Button onClick={() => setCrossOpen(true)}>多 Judge 一致性</Button>
             <Button type="primary" icon={<AuditOutlined />} onClick={() => setAuditOpen(true)}>创建审计</Button>
           </Space>
         }
@@ -180,6 +202,50 @@ export function JudgeAuditPage() {
             <InputNumber min={0} max={1} step={0.05} className="full-width-control" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="多 Judge 一致性"
+        open={crossOpen}
+        onCancel={() => setCrossOpen(false)}
+        onOk={() => crossForm.submit()}
+        okText="开始一致性分析"
+        confirmLoading={crossValidationMutation.isPending}
+      >
+        <Form
+          form={crossForm}
+          layout="vertical"
+          initialValues={{
+            dataset_version_id: 'dataset-demo:v1',
+            human_labels: 'pass,fail',
+            judge_outputs_json: JSON.stringify({ 'judge-a': ['pass', 'fail'], 'judge-b': ['pass', 'pass'] }, null, 2),
+          }}
+          onFinish={(values) => crossValidationMutation.mutate(values)}
+        >
+          <Form.Item name="dataset_version_id" label="Golden Dataset Version" rules={[{ required: true, message: '请输入 Dataset Version' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="human_labels" label="人工标签，逗号分隔" rules={[{ required: true, message: '请输入人工标签' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="judge_outputs_json" label="Judge 输出 JSON" rules={[{ required: true, message: '请输入 Judge 输出' }]}>
+            <Input.TextArea rows={6} />
+          </Form.Item>
+        </Form>
+        {crossValidationMutation.data ? (
+          <Card size="small" title="一致性结果">
+            <Table
+              size="small"
+              rowKey="pair"
+              pagination={false}
+              dataSource={Object.entries(crossValidationMutation.data.pairwise_agreement).map(([pair, agreement]) => ({ pair, agreement }))}
+              columns={[
+                { title: 'Judge Pair', dataIndex: 'pair' },
+                { title: '一致率', dataIndex: 'agreement', render: (value) => `${Math.round(Number(value ?? 0) * 100)}%` },
+              ]}
+            />
+          </Card>
+        ) : null}
       </Modal>
     </section>
   );

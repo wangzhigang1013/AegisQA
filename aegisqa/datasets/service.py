@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -36,6 +37,9 @@ class DatasetVersion(BaseModel):
     label_field: str | None = None
     answer_field: str | None = None
     row_store_path: str
+    created_at: str = ""
+    source_type: str = "unknown"
+    source_ref: dict[str, Any] = Field(default_factory=dict)
 
 
 class DatasetService:
@@ -105,6 +109,9 @@ class DatasetService:
             label_field=label_field,
             answer_field=answer_field,
             row_store_path="/".join(row_store_parts),
+            created_at=_now(),
+            source_type="file_upload",
+            source_ref={"filename": path.name, "file_format": file_format},
         )
         self._save_version(dataset)
         return dataset
@@ -151,6 +158,9 @@ class DatasetService:
             label_field=label_field,
             answer_field=answer_field,
             row_store_path="/".join(row_store_parts),
+            created_at=_now(),
+            source_type="source_skill",
+            source_ref={"materialized_row_count": len(rows)},
         )
         self._save_version(dataset)
         return dataset
@@ -195,6 +205,51 @@ class DatasetService:
                     }
                 )
         return datasets
+
+    def build_lineage(self, dataset_id: str, version: int, downstream_tasks: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """构建 Dataset Version 的数据血缘。
+
+        数据血缘只描述“这一版数据从哪里来、包含哪些字段、被哪些任务消费”。
+        真实行数据仍然留在 rows.jsonl 中按需读取，避免为了展示血缘而加载全量样本。
+        """
+
+        dataset = self.get_version(dataset_id, version)
+        tasks = downstream_tasks or []
+        matched_tasks = [
+            {
+                "task_id": task.get("task_id"),
+                "name": task.get("name"),
+                "status": task.get("status"),
+                "workflow_id": task.get("workflow_id"),
+                "workflow_name": task.get("workflow_name"),
+                "workflow_version_id": task.get("workflow_version_id"),
+                "run_id": task.get("run_id"),
+                "created_at": task.get("created_at"),
+                "updated_at": task.get("updated_at"),
+            }
+            for task in tasks
+            if task.get("dataset_id") == dataset.dataset_id and int(task.get("dataset_version", -1)) == dataset.version
+        ]
+        return {
+            "dataset_id": dataset.dataset_id,
+            "dataset_version": dataset.version,
+            "dataset_version_id": dataset.version_id,
+            "name": dataset.name,
+            "row_count": dataset.row_count,
+            "golden": dataset.golden,
+            "label_field": dataset.label_field,
+            "answer_field": dataset.answer_field,
+            "created_at": dataset.created_at,
+            "source": {
+                "type": dataset.source_type,
+                "ref": dataset.source_ref,
+            },
+            "field_count": len(dataset.field_schema),
+            "fields": dataset.field_schema,
+            "field_paths": [f"row.{field}" for field in sorted(dataset.field_schema)],
+            "preview": dataset.preview,
+            "downstream_tasks": matched_tasks,
+        }
 
     def iter_rows(self, dataset_id: str, version: int, chunk_size: int = 100) -> Iterator[DatasetRow]:
         """逐行读取数据集。
@@ -352,3 +407,7 @@ def _infer_field_type(values: list[Any]) -> str:
 def _stable_hash(payload: dict[str, Any]) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()

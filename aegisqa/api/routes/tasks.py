@@ -9,11 +9,13 @@ from aegisqa.api.app import (
     TaskCreateRequest,
     _build_attempt_record,
     _build_judge_score_distribution,
+    _build_parameter_governance,
     _build_step_distribution,
     _build_task_record,
     _build_task_report_summary,
     _build_task_report_version_snapshot,
     _build_trace_tree,
+    _build_quality_decision,
     _ensure_task_action_allowed,
     _ensure_task_can_create_attempt,
     _get_record,
@@ -147,6 +149,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         run = ctx.runner.get_run(task["run_id"])
         report = aggregate_run_report(run)
         segments = build_report_segments(run)
+        parameter_governance = _build_parameter_governance(task, run)
         return {
             "task": task,
             "task_summary": _build_task_report_summary(task, run),
@@ -155,6 +158,8 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             "judge_score_distribution": _build_judge_score_distribution(run),
             "segments": [segment.model_dump(mode="json") for segment in segments],
             "recommendations": [recommendation.model_dump(mode="json") for recommendation in build_report_recommendations(segments)],
+            "quality_decision": _build_quality_decision(task, run, report, segments),
+            "parameter_governance": parameter_governance,
             "report": report.model_dump(mode="json"),
             "badcases": [badcase.model_dump(mode="json") for badcase in report.badcases],
             "export_links": {
@@ -163,6 +168,12 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 "html": f"/runs/{task['run_id']}/report/export?file_format=html",
             },
         }
+
+    @app.get("/tasks/{task_id}/parameter-governance")
+    def get_task_parameter_governance(task_id: str) -> dict[str, Any]:
+        task = _get_record(ctx.store, "tasks", task_id)
+        run = ctx.runner.get_run(task["run_id"])
+        return _build_parameter_governance(task, run)
 
     @app.get("/tasks/{task_id}/trace-tree")
     def get_task_trace_tree(task_id: str) -> dict[str, Any]:

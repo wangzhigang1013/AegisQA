@@ -8,11 +8,13 @@ import type {
   CIGateRule,
   CIGateEvaluationResult,
   DashboardSummary,
+  DatasetLineage,
   DatasetSummary,
   DatasetVersion,
   ExperimentRecord,
   GraphValidationResult,
   JudgeProfile,
+  JudgeCrossValidationResult,
   RunRecord,
   RunReport,
   SkillContractResult,
@@ -21,6 +23,7 @@ import type {
   StoredJudgeAudit,
   TaskRecord,
   TaskReport,
+  TaskParameterGovernance,
   TaskTraceFlow,
   TraceTree,
   WorkflowDraftRecord,
@@ -170,6 +173,7 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
   datasets: () => request<DatasetSummary[]>('/datasets'),
+  datasetLineage: (datasetId: string, version: number) => request<DatasetLineage>(`/datasets/${datasetId}/versions/${version}/lineage`),
   uploadDataset: (body: { name: string; filename: string; content: string; golden?: boolean; label_field?: string; answer_field?: string }) =>
     request<DatasetVersion>('/datasets/upload', {
       method: 'POST',
@@ -251,6 +255,7 @@ export const api = {
   cancelTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/cancel`, { method: 'POST' }),
   retryFailedTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/retry-failed`, { method: 'POST' }),
   taskReport: (taskId: string) => request<TaskReport>(`/tasks/${taskId}/report`),
+  taskParameterGovernance: (taskId: string) => request<TaskParameterGovernance>(`/tasks/${taskId}/parameter-governance`),
   taskTraceTree: (taskId: string) => request<TraceTree>(`/tasks/${taskId}/trace-tree`),
   taskTraceFlow: (taskId: string) => request<TaskTraceFlow>(`/tasks/${taskId}/trace-flow`),
   executeRun: (runId: string) => request<RunRecord>(`/runs/${runId}/execute`, { method: 'POST' }),
@@ -290,6 +295,11 @@ export const api = {
     }),
   createJudgeAudit: (profileId: string, body: { dataset_version_id: string; human_labels: string[]; judge_labels: string[]; positive_label?: string }) =>
     request<StoredJudgeAudit>(`/judge-profiles/${profileId}/audits`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  crossValidateJudges: (body: { dataset_version_id: string; human_labels: string[]; judge_outputs_by_profile: Record<string, string[]> }) =>
+    request<JudgeCrossValidationResult>('/judge-cross-validation', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

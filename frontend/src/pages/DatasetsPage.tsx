@@ -1,6 +1,6 @@
 import { CloudUploadOutlined, DatabaseOutlined, FieldStringOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Checkbox, Col, Form, Input, Modal, Row, Select, Space, Table, Tag, Tooltip, Upload } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Descriptions, Drawer, Form, Input, Modal, Row, Select, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd';
 import type { UploadFile } from 'antd';
 import { useMemo, useState } from 'react';
 
@@ -29,11 +29,17 @@ export function DatasetsPage() {
   const [materializeOpen, setMaterializeOpen] = useState(false);
   const [uploadFile, setUploadFile] = useState<UploadFile | null>(null);
   const [activeDataset, setActiveDataset] = useState<DatasetVersion | null>(null);
+  const [lineageDataset, setLineageDataset] = useState<DatasetVersion | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [uploadForm] = Form.useForm<UploadFormValues>();
   const [materializeForm] = Form.useForm<MaterializeFormValues>();
 
   const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets });
+  const lineageQuery = useQuery({
+    queryKey: ['dataset-lineage', lineageDataset?.dataset_id, lineageDataset?.version],
+    queryFn: () => api.datasetLineage(lineageDataset?.dataset_id ?? '', lineageDataset?.version ?? 0),
+    enabled: Boolean(lineageDataset),
+  });
   const latestVersions = useMemo(() => datasetsQuery.data?.flatMap((dataset) => dataset.versions.slice(-1)) ?? [], [datasetsQuery.data]);
   const previewDataset = activeDataset ?? latestVersions[0] ?? null;
   const previewRows = previewDataset
@@ -144,6 +150,7 @@ export function DatasetsPage() {
               <Space wrap>
                 <Button type="primary" onClick={() => setUploadOpen(true)}>创建版本</Button>
                 <Button onClick={() => setMaterializeOpen(true)}>Source Skill 物化</Button>
+                <Button disabled={!previewDataset} onClick={() => setLineageDataset(previewDataset)}>查看 Lineage</Button>
               </Space>
             </Form>
           </Card>
@@ -250,6 +257,51 @@ export function DatasetsPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Drawer title="数据血缘" width={720} open={Boolean(lineageDataset)} onClose={() => setLineageDataset(null)}>
+        {lineageQuery.data ? (
+          <Space direction="vertical" className="drawer-stack" size="large">
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="Dataset">{lineageQuery.data.name}</Descriptions.Item>
+              <Descriptions.Item label="版本">{lineageQuery.data.dataset_version_id}</Descriptions.Item>
+              <Descriptions.Item label="来源类型"><Tag color="blue">{lineageQuery.data.source.type}</Tag></Descriptions.Item>
+              {'filename' in lineageQuery.data.source.ref ? <Descriptions.Item label="文件名">{String(lineageQuery.data.source.ref.filename)}</Descriptions.Item> : null}
+              <Descriptions.Item label="来源参数"><Typography.Text code>{JSON.stringify(lineageQuery.data.source.ref)}</Typography.Text></Descriptions.Item>
+              <Descriptions.Item label="样本数">{lineageQuery.data.row_count}</Descriptions.Item>
+              <Descriptions.Item label="字段数">{lineageQuery.data.field_count}</Descriptions.Item>
+            </Descriptions>
+            <Card size="small" title="字段路径">
+              <Table
+                size="small"
+                rowKey="path"
+                pagination={false}
+                dataSource={Object.entries(lineageQuery.data.fields).map(([field, type]) => ({ field, path: `row.${field}`, type }))}
+                columns={[
+                  { title: '字段', dataIndex: 'field' },
+                  { title: '路径', dataIndex: 'path', render: (value) => <code>{value}</code> },
+                  { title: '类型', dataIndex: 'type', render: (value) => <Tag>{value}</Tag> },
+                ]}
+              />
+            </Card>
+            <Card size="small" title="下游任务">
+              <Table
+                size="small"
+                rowKey="task_id"
+                pagination={false}
+                dataSource={lineageQuery.data.downstream_tasks}
+                columns={[
+                  { title: '任务', dataIndex: 'name' },
+                  { title: '状态', dataIndex: 'status', render: (value) => <Tag>{value}</Tag> },
+                  { title: 'Workflow Version', dataIndex: 'workflow_version_id' },
+                  { title: 'Run', dataIndex: 'run_id' },
+                ]}
+              />
+            </Card>
+          </Space>
+        ) : (
+          <Alert type="info" showIcon message={lineageQuery.isLoading ? '正在加载数据血缘。' : '请选择 Dataset Version 后查看血缘。'} />
+        )}
+      </Drawer>
     </section>
   );
 }

@@ -100,6 +100,7 @@ export function ReportsPage() {
   const task = reportQuery.data?.task ?? selectedTask;
   const badcases = reportQuery.data?.badcases ?? [];
   const stepDistribution = reportQuery.data?.step_distribution ?? [];
+  const qualityDecision = reportQuery.data?.quality_decision;
   const latencyData = useMemo(() => {
     if (stepDistribution.length) {
       return Object.fromEntries(stepDistribution.map((step) => [step.step_id, step.average_latency_ms]));
@@ -122,7 +123,7 @@ export function ReportsPage() {
         eyebrow="任务结果"
         title="任务报告"
         description="报告不再孤立展示指标，而是绑定具体任务，展示数据源、Workflow、执行结果、Badcase 和导出入口。"
-        primaryAction={<Space><Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace` : undefined}>查看 Trace Flow</Button><Button type="primary" icon={<DownloadOutlined />} loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>导出 HTML / CSV</Button></Space>}
+        primaryAction={<Space><Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace` : undefined}>查看 Trace Flow</Button><Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace-tree` : undefined}>查看 Trace Tree</Button><Button type="primary" icon={<DownloadOutlined />} loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>导出 HTML / CSV</Button></Space>}
       />
 
       {notice ? <Alert type={notice.includes('失败') || notice.includes('请先') ? 'warning' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
@@ -171,6 +172,39 @@ export function ReportsPage() {
               <MetricTile title="Badcase" value={task.badcase_count ?? badcases.length} icon={<DownloadOutlined />} tone="red" note="review" />
             </Col>
           </Row>
+
+          {qualityDecision ? (
+            <Card className="flat-card" title="质量决策中心">
+              <Row gutter={[16, 16]}>
+                <Col xs={24} lg={6}>
+                  <Typography.Text type="secondary">决策状态</Typography.Text>
+                  <div><Tag color={qualityDecision.status === 'blocked' ? 'red' : qualityDecision.status === 'warning' ? 'orange' : 'green'}>{qualityDecision.status}</Tag></div>
+                </Col>
+                <Col xs={24} lg={18}>
+                  <Space wrap>
+                    <Tag>通过率 {Math.round(qualityDecision.risk_summary.pass_rate * 100)}%</Tag>
+                    <Tag>错误率 {Math.round(qualityDecision.risk_summary.error_rate * 100)}%</Tag>
+                    <Tag>Badcase {qualityDecision.risk_summary.badcase_count}</Tag>
+                    <Tag>低分层 {qualityDecision.risk_summary.weak_segment_count}</Tag>
+                  </Space>
+                </Col>
+              </Row>
+              <Table
+                size="small"
+                rowKey="message"
+                pagination={false}
+                dataSource={qualityDecision.top_risks}
+                columns={[
+                  { title: '风险', dataIndex: 'type' },
+                  { title: '级别', dataIndex: 'severity', render: (value) => <Tag color={value === 'critical' ? 'red' : 'orange'}>{value}</Tag> },
+                  { title: '说明', dataIndex: 'message' },
+                ]}
+              />
+              <Space wrap className="section-actions">
+                {qualityDecision.next_actions.map((action) => <Button key={action.action}>{action.label}</Button>)}
+              </Space>
+            </Card>
+          ) : null}
 
           <Card className="flat-card" title="Step 分布与耗时">
             {stepDistribution.length ? (

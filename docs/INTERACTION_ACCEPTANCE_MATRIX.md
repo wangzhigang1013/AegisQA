@@ -9,7 +9,7 @@
 
 ## 最近一次交互验证
 
-- `npm test`：35 个前端交互/API client/图模型/任务创建向导/首页任务工作台/任务详情驾驶舱/Trace Flow/Workflow 字段映射/参数预览/报告分层分析/Experiment/CI Gate/Annotation Queue/治理边界测试通过。
+- `npm test`：38 个前端交互/API client/图模型/任务创建向导/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/参数预览/报告质量决策/Experiment/CI Gate/Annotation Queue/治理边界测试通过。
 - `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - 最终验收确认：生产适配状态已从治理页可见状态清单降级为文档边界提示，现有按钮矩阵仍覆盖全部用户可见主动作。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
@@ -27,6 +27,7 @@
 | 数据集 | 上传 CSV/JSONL | 可用，弹窗选择文件、提交、成功后刷新数据集列表；已修复 Upload 真实文件归一化问题；空文件、坏 JSONL、空 CSV 会返回结构化错误 | `POST /datasets/upload`、`GET /datasets` | `npm test` 覆盖上传弹窗；`tests/test_p0_hardening.py` 覆盖异常；Playwright E2E 覆盖真实 JSONL 上传 |
 | 数据集 | Source Skill 物化 | 可用，JSON rows 物化为 Dataset Version | `POST /datasets/source-materialize` | 人工验证和后端契约测试覆盖 |
 | 数据集 | 字段预览 | 可用，优先展示真实 Dataset Version 字段 | `GET /datasets` | 前端类型检查覆盖字段契约 |
+| 数据集 | 查看 Lineage | 可用，打开数据血缘抽屉，展示来源类型、来源参数、字段路径、预览和下游任务 | `GET /datasets/{dataset_id}/versions/{version}/lineage` | `tests/test_trustworthy_evaluation_enhancements.py` 和 `npm test` 覆盖 |
 | Skill 市场 | 查看详情 | 可用，打开抽屉 | `GET /skills` | `npm test` 覆盖详情入口 |
 | Skill 市场 | 搜索 Skill | 可用，支持按 Skill 名称、ID、标签过滤，避免历史数据过多时找不到新插件 | `GET /skills` | Playwright E2E 覆盖按新上传 Skill ID 搜索 |
 | Skill 市场 | 上传 Skill 插件包 | 可用，打开上传向导；zip 上传后进入待审批；非法路径、缺 manifest、缺 handler 会返回业务错误码 | `POST /skills/packages/upload`、`GET /skills/packages` | `npm test` 覆盖上传入口；Playwright E2E 覆盖真实 zip 上传；后端测试覆盖成功、缺 manifest/handler、非法路径 |
@@ -50,8 +51,11 @@
 | 执行中心 | 执行/暂停/恢复/取消/重试 | 可用，动作绑定任务并刷新列表；completed/running/canceled 等非法状态会被后端拒绝，前端按钮按状态禁用并显示原因 | `POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed` | `npm test` 覆盖执行状态刷新和完成态禁用；Playwright E2E 覆盖真实执行；P0 后端测试覆盖状态机 |
 | 执行中心 | 任务详情驾驶舱 | 可用，按概览、样本、Trace、Badcase、Attempts、参数组织；参数页展示任务冻结参数、Skill 参数来源和 Secret 脱敏说明；已完成任务可新建 Attempt 且不覆盖旧报告 | `GET /tasks`、`GET /tasks/{task_id}/trace-tree`、`GET /tasks/{task_id}/trace-flow`、`GET /tasks/{task_id}/report`、`POST /tasks/{task_id}/attempts` | 后端测试覆盖历史报告保留；前端测试覆盖驾驶舱页签；Playwright 覆盖任务执行后查看驾驶舱 |
 | Trace Flow | 样本级数据流 | 可用，从任务详情和报告页进入；展示 Dataset、Workflow、Attempt、队列消息形状、样本列表、Step Timeline、Row、Context、Metrics、Input、参数来源、Output、Error 和 Badcase 状态 | `GET /tasks/{task_id}/trace-flow` | `tests/test_trace_flow_api.py`、`npm test` 和 Playwright 主链路覆盖 |
+| Trace Tree | 独立调用树页面 | 可用，从任务详情和报告页进入；按 Item 展开 Skill Step，展示输入、输出、耗时、缓存和错误 | `GET /tasks/{task_id}/trace-tree` | `npm test` 覆盖 `/tasks/:taskId/trace-tree` |
 | 报告中心 | 任务报告详情 | 可用，围绕选中任务展示任务摘要、版本快照、指标、Step 分布、Judge 分数分布、Badcase 和导出入口 | `GET /tasks/{task_id}/report` | 后端测试覆盖结构化字段；`npm test` 覆盖报告中心展示 |
 | 报告中心 | 分层分析与下一步建议 | 可用，按 scene、expected_label、model_version、prompt_version 展示样本数、通过率、Badcase，并给出加入 Annotation、生成 Golden 候选、生成 CI Gate 建议 | `GET /tasks/{task_id}/report` 中的 `segments`、`recommendations` | `tests/test_report_segment_analysis.py` 和 `npm test` 覆盖分层字段与建议展示 |
+| 报告中心 | 质量决策中心 | 可用，把通过率、错误率、Badcase 和低分层汇总为 passed/warning/blocked 决策，并展示风险摘要和下一步动作 | `GET /tasks/{task_id}/report` 中的 `quality_decision` | `tests/test_trustworthy_evaluation_enhancements.py` 和 `npm test` 覆盖 |
+| 报告中心 | 参数治理证据 | 可用，报告 API 返回 Skill/Prompt 版本、模型参数、任务覆盖和 Secret 脱敏策略；任务详情参数页继续展示来源追踪 | `GET /tasks/{task_id}/parameter-governance`，`GET /tasks/{task_id}/report` | `tests/test_trustworthy_evaluation_enhancements.py` 覆盖 |
 | 报告中心 | 导出 HTML/CSV/JSON | 可用，围绕选中任务导出底层 Run 报告 | `GET /tasks/{task_id}/report`、`GET /runs/{run_id}/report/export` | 后端测试校验 HTML/CSV/JSON 内容；`npm test` 覆盖导出成功反馈 |
 | 报告中心 | Badcase 状态流转 | 可用；支持单条加入 Golden、忽略、重开、加入 Annotation Queue，以及批量加入 Golden；聚合报告中的 Badcase 若尚未持久化，会先创建 Badcase 再纠错入 Golden | `POST /badcases`、`POST /badcases/{badcase_id}/correct`、`POST /badcases/{badcase_id}/reopen`、`POST /badcases/bulk-correct`、`POST /annotation-queue/seed-from-run` | Playwright E2E 覆盖真实 Golden 纠错链路；`npm test` 覆盖报告页按钮和忽略反馈；后端服务测试覆盖状态流转 |
 | 实验中心 | 实验快照列表与 baseline 对比 | 可用，展示 Experiment 列表、当前实验、baseline、通过率变化、失败样本变化、成本变化 | `GET /experiments`、`GET /runs` | `npm test` 覆盖 `/experiments` 页面 |
@@ -67,6 +71,7 @@
 | Annotation Queue | 候选资产 | 可用，展示当前来源任务沉淀出的 Golden 候选和 Assertion 候选数量 | `GET /annotation-candidates?source_task_id=` | `npm test` 覆盖候选资产摘要展示 |
 | Judge 审计 | 创建 Profile | 可用，弹窗保存 Profile | `POST /judge-profiles` | 人工验证和类型检查覆盖 |
 | Judge 审计 | 创建审计 | 可用，弹窗提交审计标签 | `POST /judge-profiles/{profile_id}/audits` | `npm test` 覆盖审计表单 |
+| Judge 审计 | 多 Judge 一致性 | 可用，弹窗输入人工标签和多个 Judge 输出，展示两两一致率和各 Judge 审计指标 | `POST /judge-cross-validation` | `tests/test_trustworthy_evaluation_enhancements.py` 和 `npm test` 覆盖 |
 | 治理与审计 | 查看权限矩阵 | 可用，打开 RBAC 矩阵弹窗 | 前端静态矩阵 | `npm test` 覆盖矩阵弹窗 |
 | 治理与审计 | Skill 搜索 | 可用，支持按 Skill ID 或名称过滤生命周期表 | `GET /skills` | Playwright E2E 覆盖上传后搜索并审批 |
 | 治理与审计 | Skill 审批详情 | 可用，打开审批抽屉，展示 Manifest、输入/输出 Schema、测试日志；未通过合约测试时审批启用禁用并说明原因 | `GET /skills`、`GET /skills/packages`、`POST /skills/{skill_id}/approve` | `npm test` 覆盖审批抽屉和禁用原因 |
@@ -79,4 +84,4 @@
 - Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；字段映射表格和参数预览已进入 Vitest，后续需要进一步拆分组件并补真实浏览器中的字段映射编辑 E2E。
 - Task 创建向导已加入必选校验、并发/重试/repeat 和成本预算，任务详情已升级为驾驶舱页签；后续需要继续接入 CI Gate、实验 baseline 对比和权限检查。
 - 报告中心、Trace Flow、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、样本级数据流、Experiment baseline/A-B 对比、质量门禁阻断评估与历史趋势、人工审核回流和批量审核候选资产沉淀；后续需要增强更复杂的跨任务 Score Analytics。
-- Judge 审计需要增加多 Judge 一致性和红队安全扫描视图。
+- Judge 审计已补齐多 Judge 一致性最小闭环；后续仍需增加红队安全扫描视图和更细的裁判偏差趋势。

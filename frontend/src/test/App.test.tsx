@@ -106,6 +106,35 @@ const demoTraceFlow = {
   ],
 };
 
+const demoTraceTree = {
+  run_id: 'run-demo',
+  status: 'completed',
+  workflow_version: 'wf-demo:v1',
+  dataset_version: 'dataset-demo:v1',
+  items: [
+    {
+      item_id: 'item-demo',
+      row_id: '1',
+      status: 'succeeded',
+      metrics: { judge_score: 0.9 },
+      error: null,
+      children: [
+        {
+          step_id: 'answer',
+          skill_ref: 'llm.call@0.1.0',
+          status: 'succeeded',
+          latency_ms: 12,
+          cache_hit: false,
+          input: { prompt: '什么是 Trace?' },
+          output: { answer: '模型回答' },
+          metrics: { tokens: 12 },
+          error: null,
+        },
+      ],
+    },
+  ],
+};
+
 const demoDataset = {
   dataset_id: 'dataset-demo',
   name: '问答回归集',
@@ -127,6 +156,46 @@ const demoDataset = {
       label_field: 'expected_label',
     },
   ],
+};
+
+const demoDatasetLineage = {
+  dataset_id: 'dataset-demo',
+  dataset_version: 1,
+  dataset_version_id: 'dataset-demo:v1',
+  name: '问答回归集',
+  row_count: 100,
+  golden: true,
+  label_field: 'expected_label',
+  source: { type: 'file_upload', ref: { filename: 'trusted.jsonl', file_format: 'jsonl' } },
+  field_count: 3,
+  fields: { question: 'text', reference: 'text', expected_label: 'text' },
+  field_paths: ['row.question', 'row.reference', 'row.expected_label'],
+  preview: [{ question: '什么是 AegisQA?', reference: 'AI 评测平台', expected_label: 'pass' }],
+  downstream_tasks: [{ task_id: 'task-demo', name: '可信评测任务', status: 'completed', workflow_version_id: 'wf-demo:v1', run_id: 'run-demo' }],
+};
+
+const demoParameterGovernance = {
+  task_id: 'task-demo',
+  run_id: 'run-demo',
+  workflow_version_id: 'wf-demo:v1',
+  execution_config: demoTask.execution_config,
+  prompt_skill_versions: [
+    { step_id: 'answer', skill_ref: 'llm.call@0.1.0', prompt_version: 'prompt-v2', model: 'quality-model', model_params: { temperature: 0 }, cacheable: true },
+  ],
+  parameter_sources: [
+    { step_id: 'answer', skill_ref: 'llm.call@0.1.0', parameters: { model: { source: 'task_override', value_preview: 'task-quality-model', redacted: false } } },
+  ],
+  secret_policy: { redacted: true, message: 'Secret 参数只展示脱敏预览。' },
+};
+
+const demoJudgeCrossValidation = {
+  dataset_version_id: 'dataset-demo:v1',
+  profile_count: 2,
+  pairwise_agreement: { 'judge-a|judge-b': 0.5 },
+  audits: {
+    'judge-a': { accuracy: 1, precision: 1, recall: 1, f1: 1, cohen_kappa: 1 },
+    'judge-b': { accuracy: 0.5, precision: 0.5, recall: 1, f1: 0.66, cohen_kappa: 0 },
+  },
 };
 
 const demoExperiments = [
@@ -386,6 +455,13 @@ describe('AegisQA 前端工作台', () => {
               severity: 'critical',
             },
           ],
+          quality_decision: {
+            status: 'warning',
+            risk_summary: { pass_rate: 0.8, error_rate: 0, badcase_count: 1, weak_segment_count: 1 },
+            top_risks: [{ type: 'badcase_budget', severity: 'warning', message: '当前任务产生 1 条 Badcase。' }],
+            next_actions: [{ action: 'add_to_annotation_queue', label: '将 Badcase 加入人工审核队列' }],
+          },
+          parameter_governance: demoParameterGovernance,
           report: { run_id: 'run-demo', pass_rate: 0.8, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [demoBadcase] },
           badcases: [demoBadcase],
           export_links: { html: '/runs/run-demo/report/export?file_format=html', csv: '/runs/run-demo/report/export?file_format=csv', json: '/runs/run-demo/report/export?file_format=json' },
@@ -393,6 +469,18 @@ describe('AegisQA 前端工作台', () => {
       }
       if (url.endsWith('/tasks/task-demo/trace-flow')) {
         return jsonResponse(demoTraceFlow);
+      }
+      if (url.endsWith('/tasks/task-demo/trace-tree')) {
+        return jsonResponse(demoTraceTree);
+      }
+      if (url.endsWith('/tasks/task-demo/parameter-governance')) {
+        return jsonResponse(demoParameterGovernance);
+      }
+      if (url.endsWith('/datasets/dataset-demo/versions/1/lineage')) {
+        return jsonResponse(demoDatasetLineage);
+      }
+      if (url.endsWith('/judge-cross-validation')) {
+        return jsonResponse(demoJudgeCrossValidation);
       }
       if (url.endsWith('/datasets')) {
         return jsonResponse([demoDataset]);
@@ -503,6 +591,17 @@ describe('AegisQA 前端工作台', () => {
 
     expect(await screen.findByText('上传数据集文件')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '提交上传' })).toBeDisabled();
+  });
+
+  it('数据集页可以打开 Lineage 抽屉查看来源和下游任务', async () => {
+    await renderWorkbench('/datasets');
+
+    fireEvent.click(await screen.findByRole('button', { name: /查看 Lineage/ }));
+
+    expect(await screen.findByText('数据血缘')).toBeInTheDocument();
+    expect(await screen.findByText('file_upload')).toBeInTheDocument();
+    expect(await screen.findByText('trusted.jsonl')).toBeInTheDocument();
+    expect(await screen.findByText('可信评测任务')).toBeInTheDocument();
   });
 
   it('Workflow 设计器支持选择流程、删除节点和保存草稿入口', async () => {
@@ -640,6 +739,15 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Steps' }));
     fireEvent.click(await screen.findByRole('tab', { name: '参数' }));
     expect(screen.getByText(/workflow_config/)).toBeInTheDocument();
+  });
+
+  it('Trace Tree 独立页面展示 Item 到 Skill Step 的调用树', async () => {
+    await renderWorkbench('/tasks/task-demo/trace-tree');
+
+    expect(await screen.findByText('Trace Tree')).toBeInTheDocument();
+    expect(screen.getByText('run-demo')).toBeInTheDocument();
+    expect(screen.getByText('answer')).toBeInTheDocument();
+    expect(screen.getByText('llm.call@0.1.0')).toBeInTheDocument();
   });
 
   it('任务列表执行按钮会刷新任务状态', async () => {
@@ -910,7 +1018,7 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/批量审核完成/)).toBeInTheDocument();
   });
 
-  it('报告中心围绕任务展示报告和导出入口', async () => {
+  it('报告中心围绕任务展示报告、质量决策和导出入口', async () => {
     await renderWorkbench('/reports');
 
     expect(await screen.findByText('任务报告')).toBeInTheDocument();
@@ -918,6 +1026,8 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('任务摘要与版本快照')).toBeInTheDocument();
     expect(screen.getByText('Step 分布与耗时')).toBeInTheDocument();
     expect(screen.getByText('分层分析')).toBeInTheDocument();
+    expect(screen.getByText('质量决策中心')).toBeInTheDocument();
+    expect(screen.getByText('将 Badcase 加入人工审核队列')).toBeInTheDocument();
     expect(screen.getByText('scene=payment')).toBeInTheDocument();
     expect(screen.getByText('低通过率分组加入 Annotation')).toBeInTheDocument();
     expect(screen.getByText('answer')).toBeInTheDocument();
@@ -937,6 +1047,17 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /创建审计/ }));
 
     expect(await screen.findByText('创建 Judge 审计')).toBeInTheDocument();
+  });
+
+  it('Judge 审计支持打开多 Judge 一致性弹窗并展示结果', async () => {
+    await renderWorkbench('/judge');
+
+    fireEvent.click(screen.getByRole('button', { name: /多 Judge 一致性/ }));
+
+    expect((await screen.findAllByText('多 Judge 一致性')).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: /开始一致性分析/ }));
+    expect(await screen.findByText('judge-a|judge-b')).toBeInTheDocument();
+    expect(screen.getByText('50%')).toBeInTheDocument();
   });
 
   it('治理页面权限矩阵按钮打开矩阵弹窗', async () => {

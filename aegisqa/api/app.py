@@ -106,6 +106,12 @@ class ProfileAuditRequest(BaseModel):
     positive_label: str = "pass"
 
 
+class JudgeCrossValidationRequest(BaseModel):
+    dataset_version_id: str
+    human_labels: list[str]
+    judge_outputs_by_profile: dict[str, list[str]]
+
+
 class FieldTypeCorrectionRequest(BaseModel):
     field_type: str
 
@@ -706,6 +712,105 @@ def _build_judge_score_distribution(run: RunRecord) -> list[dict[str, Any]]:
         else:
             buckets["0.8-1.0"] += 1
     return [{"bucket": bucket, "count": count} for bucket, count in buckets.items()]
+
+
+def _build_parameter_governance(task: dict[str, Any], run: RunRecord) -> dict[str, Any]:
+    """汇总一次任务里的 Skill/Prompt 版本和参数来源。
+
+    Task 是用户看到的一次评测，Run Step 是真实执行证据；这里把两者合并，
+    让报告能解释“这次到底用了哪个 prompt、哪个模型参数、哪些值来自任务覆盖”。
+    """
+
+    parameter_sources_by_step: dict[str, dict[str, Any]] = {}
+    for item in run.items:
+        for step in item.steps:
+            if step.parameter_trace:
+                parameter_sources_by_step.setdefault(step.step_id, step.parameter_trace)
+
+    prompt_skill_versions = [
+        {
+            "step_id": step.step_id,
+            "skill_ref": step.skill_ref,
+            "prompt_version": step.config.get("prompt_version") or step.config.get("prompt") or "inline-config",
+            "model": step.config.get("model"),
+            "model_params": {key: step.config.get(key) for key in ("temperature", "threshold", "top_p") if key in step.config},
+            "cacheable": step.cacheable,
+        }
+        for step in run.workflow.steps
+    ]
+    return {
+        "task_id": task.get("task_id"),
+        "run_id": run.run_id,
+        "workflow_version_id": run.workflow.version_id,
+        "execution_config": task.get("execution_config", {}),
+        "prompt_skill_versions": prompt_skill_versions,
+        "parameter_sources": [
+            {
+                "step_id": step.step_id,
+                "skill_ref": step.skill_ref,
+                "parameters": parameter_sources_by_step.get(step.step_id, {}),
+            }
+            for step in run.workflow.steps
+        ],
+        "secret_policy": {
+            "redacted": True,
+            "message": "Secret 参数只保留 secret_ref 与脱敏预览，不在报告或 Trace 中展示明文。",
+        },
+    }
+
+
+def _build_quality_decision(task: dict[str, Any], run: RunRecord, report: RunReport, segments: list[Any]) -> dict[str, Any]:
+    """把报告指标转换成产品决策语言。
+
+    评测报告如果只给指标，用户还要自己判断能否发布；质量决策把通过率、错误率、
+    Badcase 和低分层合并成风险摘要，给出下一步动作。
+    """
+
+    weak_segments = [segment for segment in segments if segment.sample_count > 0 and segment.pass_rate < 0.8]
+    badcase_count = len(report.badcases)
+    status = "passed"
+    top_risks: list[dict[str, Any]] = []
+    next_actions: list[dict[str, str]] = []
+
+    if report.pass_rate < 0.6 or report.error_rate > 0.05:
+        status = "blocked"
+    elif report.pass_rate < 0.8 or badcase_count > 0 or weak_segments:
+        status = "warning"
+
+    if report.pass_rate < 0.8:
+        top_risks.append({"type": "low_pass_rate", "severity": "critical" if report.pass_rate < 0.6 else "warning", "message": f"任务通过率为 {round(report.pass_rate * 100)}%。"})
+        next_actions.append({"action": "create_ci_gate", "label": "为当前任务生成通过率门禁"})
+    if badcase_count:
+        top_risks.append({"type": "badcase_budget", "severity": "warning", "message": f"当前任务产生 {badcase_count} 条 Badcase。"})
+        next_actions.append({"action": "add_to_annotation_queue", "label": "将 Badcase 加入人工审核队列"})
+    if weak_segments:
+        weakest = sorted(weak_segments, key=lambda item: item.pass_rate)[0]
+        top_risks.append(
+            {
+                "type": "weak_segment",
+                "severity": "warning",
+                "message": f"{weakest.segment_key}={weakest.segment_value} 分组通过率为 {round(weakest.pass_rate * 100)}%。",
+                "segment_key": weakest.segment_key,
+                "segment_value": weakest.segment_value,
+            }
+        )
+        next_actions.append({"action": "create_golden_candidates", "label": "把低通过率分组沉淀为 Golden 候选"})
+    if not next_actions:
+        next_actions.append({"action": "snapshot_experiment", "label": "生成 Experiment 快照作为新的 baseline"})
+
+    return {
+        "status": status,
+        "task_id": task.get("task_id"),
+        "run_id": run.run_id,
+        "risk_summary": {
+            "pass_rate": report.pass_rate,
+            "error_rate": report.error_rate,
+            "badcase_count": badcase_count,
+            "weak_segment_count": len(weak_segments),
+        },
+        "top_risks": top_risks,
+        "next_actions": next_actions,
+    }
 
 
 def _ensure_task_action_allowed(task: dict[str, Any], action: str) -> None:
