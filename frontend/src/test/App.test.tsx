@@ -560,6 +560,41 @@ describe('AegisQA 前端工作台', () => {
             repair_task: { ...demoRepairTask, action_history: [{ action: 'retest_and_compare', status: 'completed', result_summary: '复跑完成，质量状态 unchanged。' }] },
           });
         }
+        if (body.action === 'generate_remediation_plan') {
+          return jsonResponse({
+            action: 'generate_remediation_plan',
+            result: {
+              status: 'completed',
+              comparison_status: 'unchanged',
+              recommendations: [
+                {
+                  area: 'annotation',
+                  title: '低通过率分层修复建议',
+                  reason: 'payment 分层仍未改善，需要抽样复核。',
+                  target_url: '/annotation-queue?source_task_id=task-demo',
+                },
+              ],
+            },
+            repair_task: {
+              ...demoRepairTask,
+              action_history: [{ action: 'generate_remediation_plan', status: 'completed', result_summary: '已生成 1 条修复建议。' }],
+              last_action_result: {
+                action: 'generate_remediation_plan',
+                result: {
+                  status: 'completed',
+                  recommendations: [
+                    {
+                      area: 'annotation',
+                      title: '低通过率分层修复建议',
+                      reason: 'payment 分层仍未改善，需要抽样复核。',
+                      target_url: '/annotation-queue?source_task_id=task-demo',
+                    },
+                  ],
+                },
+              },
+            },
+          });
+        }
         return jsonResponse({
           action: 'evaluate_ci_gate',
           result: { status: 'blocked', blocking_failures: 1, target: { kind: 'task', id: 'task-demo' } },
@@ -1311,11 +1346,11 @@ describe('AegisQA 前端工作台', () => {
     await renderWorkbench('/repair-tasks');
 
     fireEvent.click(await screen.findByRole('button', { name: /发起人工审核/ }));
-    expect(await screen.findByText(/已创建 2 个审核样本/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/已创建 2 个审核样本/)).length).toBeGreaterThan(0);
 
     await waitFor(() => expect(screen.getByRole('button', { name: /CI Gate 复测/ })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: /CI Gate 复测/ }));
-    expect(await screen.findByText(/CI Gate 复测结果：blocked/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/CI Gate 复测结果：blocked/)).length).toBeGreaterThan(0);
     expect(screen.getByText('seed_annotation_queue')).toBeInTheDocument();
     expect(screen.getByText('evaluate_ci_gate')).toBeInTheDocument();
   });
@@ -1325,8 +1360,18 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /复跑对比/ }));
 
-    expect(await screen.findByText(/复跑完成，质量状态 unchanged/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/复跑完成，质量状态 unchanged/)).length).toBeGreaterThan(0);
     expect(screen.getByText('retest_and_compare')).toBeInTheDocument();
+  });
+
+  it('修复任务工作台支持生成并展示上下文修复建议', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    fireEvent.click(await screen.findByRole('button', { name: /生成建议/ }));
+
+    expect(await screen.findByText(/已生成 1 条修复建议/)).toBeInTheDocument();
+    expect(screen.getByText('低通过率分层修复建议')).toBeInTheDocument();
+    expect(screen.getByText('generate_remediation_plan')).toBeInTheDocument();
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {

@@ -211,6 +211,12 @@ export function RepairTasksPage() {
               ),
             },
             {
+              title: '最近结果',
+              dataIndex: 'last_action_result',
+              width: 220,
+              render: (_, record) => <RecentActionResult record={record} />,
+            },
+            {
               title: '来源任务',
               dataIndex: 'source_task_id',
               width: 160,
@@ -257,6 +263,14 @@ export function RepairTasksPage() {
                     onClick={() => runAction(record, 'retest_and_compare')}
                   >
                     复跑对比
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<FileSearchOutlined />}
+                    loading={actionMutation.isPending}
+                    onClick={() => runAction(record, 'generate_remediation_plan')}
+                  >
+                    生成建议
                   </Button>
                   <Button size="small" href={`/reports?task_id=${record.source_task_id}&panel=parameter-governance`}>
                     参数治理
@@ -367,6 +381,39 @@ function renderStatus(status: string) {
 function renderSeverity(value: string) {
   const color = value === 'critical' ? 'red' : value === 'warning' ? 'orange' : 'blue';
   return <Tag color={color}>{value}</Tag>;
+}
+
+function RecentActionResult({ record }: { record: RepairTaskRecord }) {
+  const recommendations = extractRecommendations(record);
+  if (recommendations.length) {
+    return (
+      <Space direction="vertical" size={2}>
+        {recommendations.slice(0, 3).map((item) => (
+          <Typography.Text key={`${item.area}-${item.title}`} type="secondary">
+            {item.title}
+          </Typography.Text>
+        ))}
+      </Space>
+    );
+  }
+  const summary = record.action_history?.[record.action_history.length - 1]?.result_summary;
+  return <Typography.Text type="secondary">{summary ?? '暂无结果'}</Typography.Text>;
+}
+
+function extractRecommendations(record: RepairTaskRecord): { area: string; title: string }[] {
+  const result = record.last_action_result?.result;
+  const recommendations = result?.recommendations;
+  if (!Array.isArray(recommendations)) return [];
+  return recommendations
+    .map((item) => {
+      if (!isRecord(item) || typeof item.title !== 'string') return null;
+      return { area: typeof item.area === 'string' ? item.area : 'unknown', title: item.title };
+    })
+    .filter((item): item is { area: string; title: string } => Boolean(item));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function renderCauseType(value: string) {

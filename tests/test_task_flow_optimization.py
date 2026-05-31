@@ -215,3 +215,35 @@ def test_repair_task_retest_action_creates_attempt_and_compares_result(tmp_path:
     assert refreshed_task["run_id"] == result["result"]["new_run_id"]
     assert refreshed_task["attempts"][0]["run_id"] == executed["run_id"]
     assert refreshed_task["attempts"][1]["report"]["run_id"] == result["result"]["new_run_id"]
+
+
+def test_repair_task_can_generate_contextual_remediation_plan_after_retest(tmp_path: Path) -> None:
+    client, dataset, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "修复建议任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"][0]
+    client.post(f"/repair-tasks/{repair['repair_task_id']}/actions", json={"action": "retest_and_compare"})
+
+    result = client.post(
+        f"/repair-tasks/{repair['repair_task_id']}/actions",
+        json={"action": "generate_remediation_plan"},
+    ).json()
+
+    assert result["action"] == "generate_remediation_plan"
+    assert result["result"]["status"] == "completed"
+    assert result["result"]["comparison_status"] == "unchanged"
+    areas = {item["area"] for item in result["result"]["recommendations"]}
+    assert {"annotation", "workflow_parameters", "retest"}.issubset(areas)
+    assert result["result"]["recommendations"][0]["target_url"]
+    assert result["repair_task"]["last_action_result"]["result"]["recommendations"]
+    assert result["repair_task"]["action_history"][-1]["action"] == "generate_remediation_plan"

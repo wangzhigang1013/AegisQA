@@ -178,6 +178,8 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             result = _repair_action_evaluate_ci_gate(ctx, record)
         elif action == "retest_and_compare":
             result = _repair_action_retest_and_compare(ctx, record)
+        elif action == "generate_remediation_plan":
+            result = _repair_action_generate_remediation_plan(ctx, record)
         elif action in {"open_trace_flow", "open_parameter_governance", "open_dataset_lineage"}:
             result = _repair_action_link_target(record, action)
         else:
@@ -185,7 +187,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 "REPAIR_TASK_ACTION_UNSUPPORTED",
                 "当前修复任务动作暂不支持。",
                 status_code=400,
-                details={"action": action, "supported_actions": ["seed_annotation_queue", "evaluate_ci_gate", "retest_and_compare", "open_trace_flow", "open_parameter_governance", "open_dataset_lineage"]},
+                details={"action": action, "supported_actions": ["seed_annotation_queue", "evaluate_ci_gate", "retest_and_compare", "generate_remediation_plan", "open_trace_flow", "open_parameter_governance", "open_dataset_lineage"]},
             )
         updated_record = _append_repair_task_action(ctx, record, action, result)
         return {"action": action, "result": result, "repair_task": updated_record}
@@ -764,6 +766,151 @@ def _repair_retest_status(comparison: dict[str, Any]) -> str:
     return "unchanged"
 
 
+def _repair_action_generate_remediation_plan(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+    """把复跑、诊断和参数治理证据整理成下一步修复清单。"""
+
+    task = _get_record(ctx.store, "tasks", str(repair_task.get("source_task_id")))
+    run_id = _repair_latest_run_id(repair_task, task)
+    run = ctx.runner.get_run(run_id)
+    report = aggregate_run_report(run)
+    segments = build_report_segments(run)
+    parameter_governance = _build_parameter_governance(task, run)
+    diagnostics = build_task_diagnostics(task, run, report, segments, parameter_governance)
+    comparison_status = _repair_last_comparison_status(repair_task)
+    recommendations = _build_repair_remediation_recommendations(task, repair_task, diagnostics, comparison_status)
+    return {
+        "status": "completed",
+        "source_task_id": task["task_id"],
+        "run_id": run.run_id,
+        "comparison_status": comparison_status,
+        "diagnostics_summary": diagnostics.get("summary", {}),
+        "recommendations": recommendations,
+    }
+
+
+def _repair_latest_run_id(repair_task: dict[str, Any], task: dict[str, Any]) -> str:
+    last_action = repair_task.get("last_action_result") or {}
+    if isinstance(last_action, dict):
+        result = last_action.get("result") or {}
+        if isinstance(result, dict) and result.get("new_run_id"):
+            return str(result["new_run_id"])
+    return str(task.get("run_id") or repair_task.get("source_run_id"))
+
+
+def _repair_last_comparison_status(repair_task: dict[str, Any]) -> str | None:
+    last_action = repair_task.get("last_action_result") or {}
+    if not isinstance(last_action, dict):
+        return None
+    result = last_action.get("result") or {}
+    if not isinstance(result, dict):
+        return None
+    status = result.get("comparison_status")
+    return str(status) if status else None
+
+
+def _build_repair_remediation_recommendations(
+    task: dict[str, Any],
+    repair_task: dict[str, Any],
+    diagnostics: dict[str, Any],
+    comparison_status: str | None,
+) -> list[dict[str, Any]]:
+    recommendations: list[dict[str, Any]] = []
+    task_id = str(task["task_id"])
+    cause_type = str(repair_task.get("cause_type") or diagnostics.get("summary", {}).get("primary_cause") or "unknown")
+
+    if comparison_status in {"unchanged", "regressed", "mixed"}:
+        recommendations.append(
+            _remediation_item(
+                "workflow_parameters",
+                "确认修复是否进入当前 Attempt",
+                f"最近复跑状态为 {comparison_status}，需要先确认 Prompt、模型参数、task_override 和 secret_ref 是否被新 Attempt 使用。",
+                f"/reports?task_id={task_id}&panel=parameter-governance",
+                "open_parameter_governance",
+                "high" if comparison_status == "regressed" else "medium",
+                [f"comparison_status={comparison_status}"],
+            )
+        )
+
+    if cause_type == "data_quality" or diagnostics.get("data_quality", {}).get("warnings"):
+        recommendations.append(
+            _remediation_item(
+                "dataset",
+                "修复 Dataset 字段和样本质量",
+                "数据诊断发现字段缺失、重复样本或字段覆盖不足，先处理数据版本再复跑。",
+                f"/datasets?dataset_id={task.get('dataset_id')}&version={task.get('dataset_version')}",
+                "open_dataset_lineage",
+                "high",
+                diagnostics.get("data_quality", {}).get("warnings", []),
+            )
+        )
+
+    if cause_type == "weak_segment" or diagnostics.get("weak_segments"):
+        weakest = (diagnostics.get("weak_segments") or [{}])[0]
+        segment_label = f"{weakest.get('segment_key')}={weakest.get('segment_value')}" if weakest else "低通过率分层"
+        recommendations.append(
+            _remediation_item(
+                "annotation",
+                "低通过率分层修复建议",
+                f"{segment_label} 仍需要抽样复核，优先进入 Annotation Queue 并沉淀 Golden 候选。",
+                f"/annotation-queue?source_task_id={task_id}",
+                "seed_annotation_queue",
+                "high",
+                [f"{segment_label} pass_rate={weakest.get('pass_rate')}"] if weakest else [],
+            )
+        )
+
+    parameter_risks = diagnostics.get("parameter_risks", {})
+    if cause_type == "parameter_risk" or parameter_risks.get("override_count") or parameter_risks.get("expression_count") or not recommendations:
+        recommendations.append(
+            _remediation_item(
+                "workflow_parameters",
+                "审查 Workflow 参数来源",
+                "检查 schema_default、workflow_config、task_override、runtime_expression、secret_ref 的优先级是否符合本次评测目标。",
+                f"/reports?task_id={task_id}&panel=parameter-governance",
+                "open_parameter_governance",
+                "medium",
+                parameter_risks.get("warnings", []),
+            )
+        )
+
+    recommendations.append(
+        _remediation_item(
+            "retest",
+            "完成修复后再次复跑对比",
+            "完成上面的数据或参数修复后，再从当前修复任务触发复跑，确认通过率、错误率和 Badcase 是否改善。",
+            f"/repair-tasks?source_task_id={task_id}",
+            "retest_and_compare",
+            "medium",
+            [],
+        )
+    )
+    return _dedupe_remediation_items(recommendations)
+
+
+def _remediation_item(area: str, title: str, reason: str, target_url: str, action: str, priority: str, evidence: list[Any]) -> dict[str, Any]:
+    return {
+        "area": area,
+        "title": title,
+        "reason": reason,
+        "target_url": target_url,
+        "action": action,
+        "priority": priority,
+        "evidence": [str(item) for item in evidence if item],
+    }
+
+
+def _dedupe_remediation_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str]] = set()
+    result = []
+    for item in items:
+        key = (str(item.get("area")), str(item.get("title")))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
+
+
 def _repair_action_link_target(repair_task: dict[str, Any], action: str) -> dict[str, Any]:
     task_id = str(repair_task.get("source_task_id"))
     link_map = {
@@ -801,6 +948,8 @@ def _repair_action_summary(action: str, result: dict[str, Any]) -> str:
         return f"CI Gate 复测结果：{result.get('status', 'unknown')}。"
     if action == "retest_and_compare":
         return f"复跑完成，质量状态 {result.get('comparison_status', 'unknown')}。"
+    if action == "generate_remediation_plan":
+        return f"已生成 {len(result.get('recommendations', []))} 条修复建议。"
     if result.get("url"):
         return f"已打开证据入口：{result['url']}"
     return "动作已记录。"
