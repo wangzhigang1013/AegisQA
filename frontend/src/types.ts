@@ -359,12 +359,73 @@ export type TaskReport = {
   quality_decision?: QualityDecision;
   parameter_governance?: TaskParameterGovernance;
   budget_status?: BudgetStatus;
+  diagnostics?: TaskDiagnostics;
   report: RunReport;
   badcases: Record<string, unknown>[];
   export_links: {
     json: string;
     csv: string;
     html: string;
+  };
+};
+
+export type TaskDiagnostics = {
+  task_id?: string;
+  run_id?: string;
+  summary: {
+    status: string;
+    primary_cause: string;
+    confidence: number;
+    evidence_count: number;
+  };
+  root_causes: {
+    cause_type: string;
+    severity: string;
+    confidence: number;
+    affected_items: number;
+    evidence: string[];
+    recommendation: string;
+    next_actions: string[];
+  }[];
+  weak_segments: {
+    segment_key: string;
+    segment_value: string;
+    sample_count: number;
+    badcase_count: number;
+    pass_rate: number;
+    severity: string;
+  }[];
+  step_health: {
+    step_id: string;
+    skill_ref: string;
+    total_calls: number;
+    failed_calls: number;
+    cache_hits: number;
+    total_latency_ms: number;
+    average_latency_ms: number;
+    cache_hit_rate: number;
+    status: string;
+    signals: string[];
+  }[];
+  data_quality: {
+    row_count: number;
+    duplicate_row_count: number;
+    field_coverage: {
+      field: string;
+      present_count: number;
+      missing_count: number;
+      coverage: number;
+      required_by_workflow: boolean;
+    }[];
+    warnings: string[];
+  };
+  parameter_risks: {
+    override_count: number;
+    expression_count: number;
+    secret_ref_count: number;
+    redacted_count: number;
+    sources: Record<string, number>;
+    warnings: string[];
   };
 };
 

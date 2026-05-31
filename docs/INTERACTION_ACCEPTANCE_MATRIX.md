@@ -9,7 +9,7 @@
 
 ## 最近一次交互验证
 
-- `npm test`：40 个前端交互/API client/图模型/任务创建向导/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/参数预览/报告质量决策/报告风险治理/Experiment/CI Gate/Annotation Queue/Judge 偏差趋势/治理边界测试通过。
+- `npm test`：40 个前端交互/API client/图模型/任务创建向导/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/参数预览/报告质量决策/报告根因诊断/报告风险治理/Experiment/CI Gate/Annotation Queue/Judge 偏差趋势/治理边界测试通过。
 - `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - SQLite 轻量仓储后端已通过 `tests/test_sqlite_store_adapter.py`，前端交互仍通过完整 Playwright；报告页 E2E 定位已收紧到任务摘要行，避免任务名同时出现在摘要和跨任务表格时触发严格模式误判。
 - 最终验收确认：生产适配状态已从治理页可见状态清单降级为文档边界提示，现有按钮矩阵仍覆盖全部用户可见主动作。
@@ -56,6 +56,7 @@
 | 报告中心 | 任务报告详情 | 可用，围绕选中任务展示任务摘要、版本快照、指标、Step 分布、Judge 分数分布、Badcase 和导出入口 | `GET /tasks/{task_id}/report` | 后端测试覆盖结构化字段；`npm test` 覆盖报告中心展示 |
 | 报告中心 | 分层分析与下一步建议 | 可用，按 scene、expected_label、model_version、prompt_version 展示样本数、通过率、Badcase，并给出加入 Annotation、生成 Golden 候选、生成 CI Gate 建议 | `GET /tasks/{task_id}/report` 中的 `segments`、`recommendations` | `tests/test_report_segment_analysis.py` 和 `npm test` 覆盖分层字段与建议展示 |
 | 报告中心 | 质量决策中心 | 可用，把通过率、错误率、Badcase 和低分层汇总为 passed/warning/blocked 决策，并展示风险摘要和下一步动作 | `GET /tasks/{task_id}/report` 中的 `quality_decision` | `tests/test_trustworthy_evaluation_enhancements.py` 和 `npm test` 覆盖 |
+| 报告中心 | 根因诊断 | 可用，把 Badcase、Step 失败、弱分层、字段缺失/重复和参数风险聚合为主要根因、证据数、影响样本、Step 健康度、数据质量和下一步动作 | `GET /tasks/{task_id}/report` 中的 `diagnostics`、`GET /tasks/{task_id}/diagnostics` | `tests/test_task_diagnostics.py` 和 `npm test` 覆盖 |
 | 报告中心 | 跨任务 Score Analytics | 可用，报告页展示跨任务任务数、平均通过率、Badcase 总数、退化任务、任务趋势表和退化告警 | `GET /score-analytics` | `tests/test_risk_analytics_hardening.py` 和 `npm test` 覆盖 |
 | 报告中心 | 成本预算状态 | 可用，围绕当前 Task 展示预算、已用估算成本、剩余预算、ok/warning/exceeded 状态和修复建议 | `GET /tasks/{task_id}/report` 中的 `budget_status` | `tests/test_risk_analytics_hardening.py` 和 `npm test` 覆盖 |
 | 报告中心 | 红队安全扫描 | 可用，点击“运行红队扫描”会扫描当前 Task，并展示风险类型、级别、字段、证据和下一步建议 | `POST /red-team/scans` | `tests/test_risk_analytics_hardening.py` 和 `npm test` 覆盖 |
@@ -88,5 +89,5 @@
 
 - Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；字段映射表格和参数预览已进入 Vitest，后续需要进一步拆分组件并补真实浏览器中的字段映射编辑 E2E。
 - Task 创建向导已加入必选校验、并发/重试/repeat 和成本预算，任务详情已升级为驾驶舱页签；后续需要继续接入 CI Gate、实验 baseline 对比和权限检查。
-- 报告中心、Trace Flow、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、样本级数据流、跨任务 Score Analytics、红队扫描、成本预算、Experiment baseline/A-B 对比、质量门禁阻断评估与历史趋势、人工审核回流和批量审核候选资产沉淀；后续需要增强真实成本账单接入和更复杂的趋势筛选。
+- 报告中心、Trace Flow、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、根因诊断、样本级数据流、跨任务 Score Analytics、红队扫描、成本预算、Experiment baseline/A-B 对比、质量门禁阻断评估与历史趋势、人工审核回流和批量审核候选资产沉淀；后续需要把根因诊断结果继续打通到一键生成修复任务、真实成本账单接入和更复杂的趋势筛选。
 - Judge 审计已补齐多 Judge 一致性和偏差趋势最小闭环；后续需要按业务标签、模型版本和时间窗口继续细分偏差归因。

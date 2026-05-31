@@ -1400,3 +1400,40 @@
 - 验证命令：暂未执行，本批次仅涉及文档与项目记忆。
 - 测试结果：暂未执行。
 - 下一步：补齐前端需要的后端 API，并搭建 React/Vite/TypeScript 前端工程。
+
+### 2026-05-31 Task Diagnostics 深度优化完成
+
+- 改动摘要：新增 Task Diagnostics 根因诊断层，让任务报告不只展示通过率和 Badcase，还能解释主要失败原因、影响样本、证据、Step 健康度、数据质量、参数风险和下一步动作。
+- 变更文件：
+  - `aegisqa/reports/diagnostics.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_diagnostics.py`
+  - `frontend/src/types.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/superpowers/plans/2026-05-31-task-diagnostics-depth.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PROJECT_STATUS.md`
+- 核心能力：
+  - `/tasks/{task_id}/report` 新增 `diagnostics` 字段。
+  - 新增 `/tasks/{task_id}/diagnostics` 独立诊断接口。
+  - 根因诊断覆盖运行时错误、字段缺失/重复、低通过率分层、Judge/回答质量风险、任务参数覆盖和 Secret/表达式参数风险。
+  - 报告中心新增“根因诊断”卡片，展示主要根因、证据数量、根因表、Step 健康度、数据质量和参数风险。
+- 验证命令：
+  - `python -m pytest tests\test_task_diagnostics.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest -q`
+  - `python -m aegisqa.examples.run_mvp_demo`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端诊断测试：2 passed。
+  - 后端全量：65 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - Demo：`rag_qa_1000:v12`，Run `run-298dd7e6bb5b` completed，1000 条样本完成，队列消息字段仅 `item_id`，Badcase 200 条。
+  - 前端：`npm run typecheck` 通过，`npm test` 40 passed，`npm run build` 通过。
+  - Playwright E2E：8 passed。
+- 下一步：继续把诊断结果做成可操作闭环，例如“一键生成 Annotation Queue / CI Gate / Dataset 修复任务 / Workflow 参数审查任务”，并补真实成本账单、模型版本退化和更细粒度业务分层归因。

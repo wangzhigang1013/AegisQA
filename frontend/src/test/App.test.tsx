@@ -534,6 +534,29 @@ describe('AegisQA 前端工作台', () => {
           },
           parameter_governance: demoParameterGovernance,
           budget_status: { status: 'warning', cost_budget: 20, cost_used: 16.2, budget_remaining: 3.8, usage_ratio: 0.81, message: '估算成本已接近任务预算。' },
+          diagnostics: {
+            summary: { status: 'needs_attention', primary_cause: 'weak_segment', confidence: 0.82, evidence_count: 3 },
+            root_causes: [
+              {
+                cause_type: 'weak_segment',
+                severity: 'warning',
+                confidence: 0.82,
+                affected_items: 12,
+                evidence: ['scene=payment 通过率 40%，Badcase 12 条。'],
+                recommendation: '对低通过率分层抽样复核。',
+                next_actions: ['seed_annotation_queue'],
+              },
+            ],
+            weak_segments: [{ segment_key: 'scene', segment_value: 'payment', sample_count: 20, badcase_count: 12, pass_rate: 0.4, severity: 'critical' }],
+            step_health: [{ step_id: 'answer', skill_ref: 'llm.call@0.1.0', total_calls: 100, failed_calls: 0, cache_hits: 0, total_latency_ms: 100, average_latency_ms: 1, cache_hit_rate: 0, status: 'healthy', signals: [] }],
+            data_quality: {
+              row_count: 100,
+              duplicate_row_count: 0,
+              field_coverage: [{ field: 'reference', present_count: 100, missing_count: 0, coverage: 1, required_by_workflow: true }],
+              warnings: [],
+            },
+            parameter_risks: { override_count: 1, expression_count: 0, secret_ref_count: 0, redacted_count: 0, sources: { task_override: 1 }, warnings: ['检测到 1 个任务级参数覆盖。'] },
+          },
           report: { run_id: 'run-demo', pass_rate: 0.8, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [demoBadcase] },
           badcases: [demoBadcase],
           export_links: { html: '/runs/run-demo/report/export?file_format=html', csv: '/runs/run-demo/report/export?file_format=csv', json: '/runs/run-demo/report/export?file_format=json' },
@@ -827,7 +850,7 @@ describe('AegisQA 前端工作台', () => {
 
     expect(await screen.findByText('Trace Tree')).toBeInTheDocument();
     expect(screen.getByText('run-demo')).toBeInTheDocument();
-    expect(screen.getByText('answer')).toBeInTheDocument();
+    expect(screen.getAllByText('answer').length).toBeGreaterThan(0);
     expect(screen.getByText('llm.call@0.1.0')).toBeInTheDocument();
   });
 
@@ -1108,10 +1131,14 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('Step 分布与耗时')).toBeInTheDocument();
     expect(screen.getByText('分层分析')).toBeInTheDocument();
     expect(screen.getByText('质量决策中心')).toBeInTheDocument();
+    expect(screen.getByText('根因诊断')).toBeInTheDocument();
+    expect(screen.getByText('主要根因')).toBeInTheDocument();
+    expect(screen.getAllByText('弱分层风险').length).toBeGreaterThan(0);
+    expect(screen.getByText('数据质量')).toBeInTheDocument();
     expect(screen.getByText('将 Badcase 加入人工审核队列')).toBeInTheDocument();
     expect(screen.getByText('scene=payment')).toBeInTheDocument();
     expect(screen.getByText('低通过率分组加入 Annotation')).toBeInTheDocument();
-    expect(screen.getByText('answer')).toBeInTheDocument();
+    expect(screen.getAllByText('answer').length).toBeGreaterThan(0);
     expect(screen.getByText('80')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /导出 HTML \/ CSV/ }));
     expect(await screen.findByText(/报告导出成功/)).toBeInTheDocument();

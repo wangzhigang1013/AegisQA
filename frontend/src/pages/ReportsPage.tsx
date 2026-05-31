@@ -114,6 +114,7 @@ export function ReportsPage() {
   const stepDistribution = reportQuery.data?.step_distribution ?? [];
   const qualityDecision = reportQuery.data?.quality_decision;
   const budgetStatus = reportQuery.data?.budget_status;
+  const diagnostics = reportQuery.data?.diagnostics;
   const scoreAnalytics = scoreAnalyticsQuery.data;
   const latencyData = useMemo(() => {
     if (stepDistribution.length) {
@@ -314,6 +315,95 @@ export function ReportsPage() {
             </Card>
           ) : null}
 
+          {diagnostics ? (
+            <Card className="flat-card" title="根因诊断">
+              <Row gutter={[16, 16]}>
+                <Col xs={24} lg={8}>
+                  <Space direction="vertical" className="full-width-control">
+                    <Typography.Text type="secondary">主要根因</Typography.Text>
+                    <Space wrap>
+                      <Tag color={diagnostics.summary.status === 'healthy' ? 'green' : 'orange'}>{diagnostics.summary.status}</Tag>
+                      <Tag color="blue">{causeLabel(diagnostics.summary.primary_cause)}</Tag>
+                      <Tag>置信度 {Math.round(diagnostics.summary.confidence * 100)}%</Tag>
+                      <Tag>证据 {diagnostics.summary.evidence_count}</Tag>
+                    </Space>
+                  </Space>
+                </Col>
+                <Col xs={24} lg={16}>
+                  <Space direction="vertical" className="full-width-control">
+                    {diagnostics.root_causes.slice(0, 2).map((cause) => (
+                      <Alert
+                        key={cause.cause_type}
+                        type={cause.severity === 'critical' ? 'error' : cause.severity === 'warning' ? 'warning' : 'info'}
+                        showIcon
+                        message={causeLabel(cause.cause_type)}
+                        description={cause.recommendation}
+                      />
+                    ))}
+                  </Space>
+                </Col>
+              </Row>
+              <Table
+                className="section-actions"
+                size="small"
+                rowKey="cause_type"
+                pagination={false}
+                dataSource={diagnostics.root_causes}
+                columns={[
+                  { title: '根因', dataIndex: 'cause_type', render: (value) => causeLabel(String(value)) },
+                  { title: '级别', dataIndex: 'severity', render: (value) => <Tag color={value === 'critical' ? 'red' : value === 'warning' ? 'orange' : 'blue'}>{value}</Tag> },
+                  { title: '影响样本', dataIndex: 'affected_items' },
+                  { title: '证据', dataIndex: 'evidence', render: (items: string[]) => items?.join('；') },
+                  { title: '建议动作', dataIndex: 'next_actions', render: (items: string[]) => items?.map((item) => actionLabel(item)).join(' / ') },
+                ]}
+              />
+              <Row gutter={[16, 16]} className="section-actions">
+                <Col xs={24} xl={12}>
+                  <Typography.Title level={5}>Step 健康度</Typography.Title>
+                  <Table
+                    size="small"
+                    rowKey="step_id"
+                    pagination={false}
+                    dataSource={diagnostics.step_health}
+                    columns={[
+                      { title: 'Step', dataIndex: 'step_id' },
+                      { title: 'Skill', dataIndex: 'skill_ref' },
+                      { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'failed' ? 'red' : value === 'slow' ? 'orange' : 'green'}>{value}</Tag> },
+                      { title: '失败', dataIndex: 'failed_calls' },
+                      { title: '平均耗时', dataIndex: 'average_latency_ms', render: (value) => `${Math.round(Number(value ?? 0))} ms` },
+                    ]}
+                  />
+                </Col>
+                <Col xs={24} xl={12}>
+                  <Typography.Title level={5}>数据质量</Typography.Title>
+                  <Space wrap className="section-actions">
+                    <Tag>样本 {diagnostics.data_quality.row_count}</Tag>
+                    <Tag color={diagnostics.data_quality.duplicate_row_count ? 'orange' : 'green'}>重复 {diagnostics.data_quality.duplicate_row_count}</Tag>
+                    {diagnostics.parameter_risks.override_count ? <Tag color="blue">任务覆盖 {diagnostics.parameter_risks.override_count}</Tag> : null}
+                    {diagnostics.parameter_risks.secret_ref_count ? <Tag color="purple">Secret {diagnostics.parameter_risks.secret_ref_count}</Tag> : null}
+                  </Space>
+                  {diagnostics.data_quality.warnings.length ? (
+                    <Space direction="vertical" className="full-width-control">
+                      {diagnostics.data_quality.warnings.map((warning) => <Alert key={warning} type="warning" showIcon message={warning} />)}
+                    </Space>
+                  ) : null}
+                  <Table
+                    size="small"
+                    rowKey="field"
+                    pagination={{ pageSize: 4 }}
+                    dataSource={diagnostics.data_quality.field_coverage}
+                    columns={[
+                      { title: '字段', dataIndex: 'field' },
+                      { title: '覆盖率', dataIndex: 'coverage', render: (value) => `${Math.round(Number(value ?? 0) * 100)}%` },
+                      { title: '缺失', dataIndex: 'missing_count' },
+                      { title: 'Workflow 需要', dataIndex: 'required_by_workflow', render: (value) => (value ? <Tag color="blue">是</Tag> : <Tag>否</Tag>) },
+                    ]}
+                  />
+                </Col>
+              </Row>
+            </Card>
+          ) : null}
+
           <Card className="flat-card" title="Step 分布与耗时">
             {stepDistribution.length ? (
               <Table
@@ -383,4 +473,31 @@ async function ensureBadcaseId(badcase: Record<string, unknown>, task: TaskRecor
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function causeLabel(value: string) {
+  const labels: Record<string, string> = {
+    healthy: '健康',
+    runtime_error: '运行时错误',
+    data_quality: '数据质量',
+    weak_segment: '弱分层风险',
+    judge_or_answer_quality: '回答或裁判质量',
+    parameter_risk: '参数风险',
+  };
+  return labels[value] ?? value;
+}
+
+function actionLabel(value: string) {
+  const labels: Record<string, string> = {
+    open_trace_flow: '查看 Trace Flow',
+    retry_failed_items: '重试失败项',
+    open_dataset_lineage: '查看数据血缘',
+    fix_dataset_fields: '修正数据字段',
+    seed_annotation_queue: '加入人工审核',
+    create_segment_ci_gate: '生成分层门禁',
+    review_badcases: '复核 Badcase',
+    audit_judge_profile: '审计 Judge',
+    open_parameter_governance: '查看参数治理',
+  };
+  return labels[value] ?? value;
 }

@@ -29,6 +29,7 @@ from aegisqa.api.app import (
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.engine.runner import RunRecord, RunRequest
 from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments
+from aegisqa.reports.diagnostics import build_task_diagnostics
 from aegisqa.reports.trace_flow import build_task_trace_flow
 
 
@@ -151,6 +152,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         report = aggregate_run_report(run)
         segments = build_report_segments(run)
         parameter_governance = _build_parameter_governance(task, run)
+        diagnostics = build_task_diagnostics(task, run, report, segments, parameter_governance)
         return {
             "task": task,
             "task_summary": _build_task_report_summary(task, run),
@@ -162,6 +164,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             "quality_decision": _build_quality_decision(task, run, report, segments),
             "parameter_governance": parameter_governance,
             "budget_status": _build_budget_status(task, report),
+            "diagnostics": diagnostics,
             "report": report.model_dump(mode="json"),
             "badcases": [badcase.model_dump(mode="json") for badcase in report.badcases],
             "export_links": {
@@ -170,6 +173,15 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 "html": f"/runs/{task['run_id']}/report/export?file_format=html",
             },
         }
+
+    @app.get("/tasks/{task_id}/diagnostics")
+    def get_task_diagnostics(task_id: str) -> dict[str, Any]:
+        task = _get_record(ctx.store, "tasks", task_id)
+        run = ctx.runner.get_run(task["run_id"])
+        report = aggregate_run_report(run)
+        segments = build_report_segments(run)
+        parameter_governance = _build_parameter_governance(task, run)
+        return build_task_diagnostics(task, run, report, segments, parameter_governance)
 
     @app.get("/tasks/{task_id}/parameter-governance")
     def get_task_parameter_governance(task_id: str) -> dict[str, Any]:
