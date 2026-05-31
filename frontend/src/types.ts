@@ -846,16 +846,60 @@ export type WorkflowPromotionReview = {
   reviewer?: string;
   note?: string;
   review_note?: string;
+  baseline_suggestion_id?: string | null;
+  release_record_id?: string | null;
   promotion_recommendation?: PromptSkillPromotionRecommendation;
   target_url?: string;
   created_at: string;
   updated_at?: string;
 };
 
+export type ExperimentBaselineSuggestion = {
+  suggestion_id: string;
+  candidate_id: string;
+  review_id: string;
+  status: string;
+  suggested_experiment_id?: string | null;
+  suggested_run_id?: string | null;
+  previous_baseline_experiment_id?: string | null;
+  previous_baseline_run_id?: string | null;
+  workflow_version_id?: string | null;
+  metrics?: Record<string, number>;
+  baseline_metrics?: Record<string, number> | null;
+  reason?: string;
+  target_url?: string;
+  created_at: string;
+  updated_at?: string;
+};
+
+export type WorkflowReleaseRecord = {
+  record_id: string;
+  candidate_id: string;
+  review_id: string;
+  workflow_version_id?: string | null;
+  candidate_experiment_id?: string | null;
+  source_task_id?: string | null;
+  retest_task_id?: string | null;
+  status: string;
+  ci_gate_config_ids: string[];
+  ci_gate_evaluation_ids: string[];
+  blocking_failures: number;
+  target_url?: string;
+  created_at: string;
+  updated_at?: string;
+};
+
+export type WorkflowPromotionReleaseArtifacts = {
+  baseline_suggestion?: ExperimentBaselineSuggestion | null;
+  release_record?: WorkflowReleaseRecord | null;
+  ci_gate_evaluations?: CIGateEvaluationRecord[];
+};
+
 export type WorkflowPromotionReviewResult = {
   status: string;
   candidate: PromptSkillCandidate;
   review: WorkflowPromotionReview;
+  release_artifacts?: WorkflowPromotionReleaseArtifacts;
   target_url?: string;
 };
 

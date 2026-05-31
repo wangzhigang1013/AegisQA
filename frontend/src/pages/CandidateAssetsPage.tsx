@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReview } from '../types';
+import type { PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
 
 export function CandidateAssetsPage() {
   const queryClient = useQueryClient();
@@ -13,6 +13,7 @@ export function CandidateAssetsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [lastRetest, setLastRetest] = useState<PromptSkillCandidateRetestResult | null>(null);
   const [lastPromotionReview, setLastPromotionReview] = useState<WorkflowPromotionReview | null>(null);
+  const [lastReleaseArtifacts, setLastReleaseArtifacts] = useState<WorkflowPromotionReleaseArtifacts | null>(null);
   const queryKey = ['prompt-skill-candidates', statusFilter] as const;
   const candidatesQuery = useQuery({
     queryKey,
@@ -91,9 +92,27 @@ export function CandidateAssetsPage() {
     onSuccess: (payload) => {
       mergeCandidate(payload.candidate);
       setLastPromotionReview(payload.review);
+      setLastReleaseArtifacts(payload.release_artifacts ?? null);
       setNotice(`晋升审批已创建：${payload.review.review_id}`);
     },
     onError: (error) => setNotice(`晋升审批创建失败：${formatApiError(error)}`),
+  });
+
+  const approvePromotionReviewMutation = useMutation({
+    mutationFn: (review: WorkflowPromotionReview) =>
+      api.approveWorkflowPromotionReview(review.review_id, {
+        reviewer: 'release_owner',
+        note: '同意晋升为推荐 Workflow 版本，并生成 baseline 建议与 CI Gate 发布记录。',
+      }),
+    onSuccess: (payload) => {
+      mergeCandidate(payload.candidate);
+      setLastPromotionReview(payload.review);
+      setLastReleaseArtifacts(payload.release_artifacts ?? null);
+      void queryClient.invalidateQueries({ queryKey: ['experiments'] });
+      void queryClient.invalidateQueries({ queryKey: ['ci-gates'] });
+      setNotice(`晋升审批已通过：${payload.review.review_id}`);
+    },
+    onError: (error) => setNotice(`晋升审批通过失败：${formatApiError(error)}`),
   });
 
   return (
@@ -242,9 +261,48 @@ export function CandidateAssetsPage() {
             </Space>
             <Typography.Text>候选版本：{lastPromotionReview.candidate_workflow_version_id ?? '-'}</Typography.Text>
             <Typography.Text type="secondary">当前版本：{lastPromotionReview.current_workflow_version_id ?? '-'}</Typography.Text>
-            {lastPromotionReview.target_url ? <Button href={lastPromotionReview.target_url}>打开 Workflow 市场</Button> : null}
+            <Space wrap>
+              {lastPromotionReview.target_url ? <Button href={lastPromotionReview.target_url}>打开 Workflow 市场</Button> : null}
+              <Button
+                type="primary"
+                icon={<CheckCircleOutlined />}
+                disabled={lastPromotionReview.status !== 'pending_review'}
+                loading={approvePromotionReviewMutation.isPending}
+                onClick={() => approvePromotionReviewMutation.mutate(lastPromotionReview)}
+              >
+                通过晋升
+              </Button>
+            </Space>
           </Space>
         </Card>
+      ) : null}
+
+      {lastReleaseArtifacts ? (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          {lastReleaseArtifacts.baseline_suggestion ? (
+            <Card className="flat-card" title="Baseline 替换建议">
+              <Space direction="vertical" size={6}>
+                <Typography.Text>建议 baseline：{lastReleaseArtifacts.baseline_suggestion.suggested_experiment_id ?? '-'}</Typography.Text>
+                <Typography.Text type="secondary">原 baseline：{lastReleaseArtifacts.baseline_suggestion.previous_baseline_experiment_id ?? '-'}</Typography.Text>
+                <Typography.Text type="secondary">{lastReleaseArtifacts.baseline_suggestion.reason ?? '审批通过后生成的 baseline 候选。'}</Typography.Text>
+                {lastReleaseArtifacts.baseline_suggestion.target_url ? <Button href={lastReleaseArtifacts.baseline_suggestion.target_url}>打开实验中心</Button> : null}
+              </Space>
+            </Card>
+          ) : null}
+          {lastReleaseArtifacts.release_record ? (
+            <Card className="flat-card" title="CI Gate 发布记录">
+              <Space direction="vertical" size={6}>
+                <Space wrap>
+                  <Tag color={releaseRecordStatusColor(lastReleaseArtifacts.release_record.status)}>{lastReleaseArtifacts.release_record.status}</Tag>
+                  <Typography.Text>阻断项：{lastReleaseArtifacts.release_record.blocking_failures}</Typography.Text>
+                  <Typography.Text type="secondary">门禁：{lastReleaseArtifacts.release_record.ci_gate_config_ids.length} 个</Typography.Text>
+                </Space>
+                <Typography.Text>Workflow 版本：{lastReleaseArtifacts.release_record.workflow_version_id ?? '-'}</Typography.Text>
+                {lastReleaseArtifacts.release_record.target_url ? <Button href={lastReleaseArtifacts.release_record.target_url}>打开 CI Gate</Button> : null}
+              </Space>
+            </Card>
+          ) : null}
+        </Space>
       ) : null}
     </section>
   );
@@ -375,4 +433,11 @@ function promotionReviewStatusLabel(status: string) {
     rejected: '已拒绝',
   };
   return labels[status] ?? status;
+}
+
+function releaseRecordStatusColor(status: string) {
+  if (status === 'ready_to_release') return 'green';
+  if (status === 'blocked') return 'red';
+  if (status.startsWith('pending')) return 'gold';
+  return 'blue';
 }

@@ -203,6 +203,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  approveWorkflowPromotionReview: (reviewId: string, body: { reviewer?: string; note?: string } = {}) =>
+    request<WorkflowPromotionReviewResult>(`/workflow-promotion-reviews/${encodeURIComponent(reviewId)}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  rejectWorkflowPromotionReview: (reviewId: string, body: { reviewer?: string; note?: string } = {}) =>
+    request<WorkflowPromotionReviewResult>(`/workflow-promotion-reviews/${encodeURIComponent(reviewId)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   skills: () => request<SkillManifest[]>('/skills'),
   skillPackages: () => request<SkillPackageRecord[]>('/skills/packages'),
   uploadSkillPackage: (body: { filename: string; content_base64: string }) =>

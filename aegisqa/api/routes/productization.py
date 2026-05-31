@@ -140,6 +140,36 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             reviews = [review for review in reviews if review.get("status") == status]
         return sorted(reviews, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
 
+    @app.get("/experiment-baseline-suggestions")
+    def list_experiment_baseline_suggestions(
+        candidate_id: str | None = Query(default=None),
+        review_id: str | None = Query(default=None),
+        status: str | None = Query(default=None),
+    ) -> list[dict[str, Any]]:
+        suggestions = _list_records(ctx.store, "experiment_baseline_suggestions")
+        if candidate_id:
+            suggestions = [suggestion for suggestion in suggestions if suggestion.get("candidate_id") == candidate_id]
+        if review_id:
+            suggestions = [suggestion for suggestion in suggestions if suggestion.get("review_id") == review_id]
+        if status:
+            suggestions = [suggestion for suggestion in suggestions if suggestion.get("status") == status]
+        return sorted(suggestions, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+
+    @app.get("/workflow-release-records")
+    def list_workflow_release_records(
+        candidate_id: str | None = Query(default=None),
+        review_id: str | None = Query(default=None),
+        status: str | None = Query(default=None),
+    ) -> list[dict[str, Any]]:
+        records = _list_records(ctx.store, "workflow_release_records")
+        if candidate_id:
+            records = [record for record in records if record.get("candidate_id") == candidate_id]
+        if review_id:
+            records = [record for record in records if record.get("review_id") == review_id]
+        if status:
+            records = [record for record in records if record.get("status") == status]
+        return sorted(records, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+
     @app.post("/prompt-skill-candidates/{candidate_id}/review")
     def review_prompt_skill_candidate(candidate_id: str, request: PromptSkillCandidateReviewRequest) -> dict[str, Any]:
         candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
@@ -876,7 +906,17 @@ def _decide_workflow_promotion_review(
         candidate["status"] = "promoted"
         candidate["promoted_workflow_version_id"] = review.get("candidate_workflow_version_id")
         candidate["promoted_at"] = now
+        release_artifacts = _workflow_promotion_release_artifacts(ctx, review, candidate, now=now)
+        baseline_suggestion = release_artifacts.get("baseline_suggestion")
+        release_record = release_artifacts.get("release_record")
+        if baseline_suggestion:
+            review["baseline_suggestion_id"] = baseline_suggestion.get("suggestion_id")
+            candidate["baseline_suggestion_id"] = baseline_suggestion.get("suggestion_id")
+        if release_record:
+            review["release_record_id"] = release_record.get("record_id")
+            candidate["release_record_id"] = release_record.get("record_id")
     else:
+        release_artifacts = None
         candidate["status"] = "promotion_rejected"
         candidate["promotion_rejected_at"] = now
     candidate["updated_at"] = now
@@ -888,7 +928,164 @@ def _decide_workflow_promotion_review(
         target=review_id,
         detail={"candidate_id": candidate.get("candidate_id"), "workflow_version_id": review.get("candidate_workflow_version_id")},
     )
-    return {"status": decision, "candidate": candidate, "review": review, "target_url": review.get("target_url")}
+    payload = {"status": decision, "candidate": candidate, "review": review, "target_url": review.get("target_url")}
+    if release_artifacts:
+        payload["release_artifacts"] = release_artifacts
+    return payload
+
+
+def _workflow_promotion_release_artifacts(
+    ctx: RouteContext,
+    review: dict[str, Any],
+    candidate: dict[str, Any],
+    *,
+    now: str,
+) -> dict[str, Any]:
+    existing_baseline = _get_record(ctx.store, "experiment_baseline_suggestions", str(review["baseline_suggestion_id"])) if review.get("baseline_suggestion_id") else None
+    existing_release = _get_record(ctx.store, "workflow_release_records", str(review["release_record_id"])) if review.get("release_record_id") else None
+    if existing_baseline or existing_release:
+        evaluations = [
+            _get_record(ctx.store, "ci_gate_evaluations", str(evaluation_id))
+            for evaluation_id in existing_release.get("ci_gate_evaluation_ids", [])
+        ] if existing_release else []
+        return {"baseline_suggestion": existing_baseline, "release_record": existing_release, "ci_gate_evaluations": evaluations}
+
+    baseline_suggestion = _build_experiment_baseline_suggestion(ctx, review, candidate, now=now)
+    release_record, evaluations = _build_workflow_release_record(ctx, review, candidate, now=now)
+    if baseline_suggestion:
+        _save_record(ctx.store, "experiment_baseline_suggestions", "suggestion_id", baseline_suggestion)
+    _save_record(ctx.store, "workflow_release_records", "record_id", release_record)
+    ctx.audit_service.record(
+        actor="api",
+        action="workflow_promotion_review.release_artifacts_created",
+        target=review["review_id"],
+        detail={
+            "baseline_suggestion_id": baseline_suggestion.get("suggestion_id") if baseline_suggestion else None,
+            "release_record_id": release_record.get("record_id"),
+            "ci_gate_evaluation_ids": [item.get("evaluation_id") for item in evaluations],
+        },
+    )
+    return {"baseline_suggestion": baseline_suggestion, "release_record": release_record, "ci_gate_evaluations": evaluations}
+
+
+def _build_experiment_baseline_suggestion(
+    ctx: RouteContext,
+    review: dict[str, Any],
+    candidate: dict[str, Any],
+    *,
+    now: str,
+) -> dict[str, Any] | None:
+    suggested_experiment_id = review.get("candidate_experiment_id") or candidate.get("candidate_experiment_id")
+    if not suggested_experiment_id:
+        return None
+    suggested_experiment = _get_record(ctx.store, "experiments", str(suggested_experiment_id))
+    previous_baseline_id = review.get("baseline_experiment_id") or candidate.get("baseline_experiment_id")
+    previous_baseline = _get_record(ctx.store, "experiments", str(previous_baseline_id)) if previous_baseline_id else None
+    suggestion_id = f"baseline-suggestion-{uuid4().hex[:12]}"
+    return {
+        "suggestion_id": suggestion_id,
+        "candidate_id": candidate["candidate_id"],
+        "review_id": review["review_id"],
+        "status": "pending_apply",
+        "suggested_experiment_id": suggested_experiment["experiment_id"],
+        "suggested_run_id": suggested_experiment.get("run_id"),
+        "previous_baseline_experiment_id": previous_baseline.get("experiment_id") if previous_baseline else None,
+        "previous_baseline_run_id": previous_baseline.get("run_id") if previous_baseline else None,
+        "workflow_version_id": review.get("candidate_workflow_version_id"),
+        "metrics": suggested_experiment.get("metrics", {}),
+        "baseline_metrics": previous_baseline.get("metrics", {}) if previous_baseline else None,
+        "reason": "Workflow 晋升审批已通过，建议把候选实验登记为新的 baseline 候选。",
+        "target_url": f"/experiments?baseline_suggestion_id={suggestion_id}",
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _build_workflow_release_record(
+    ctx: RouteContext,
+    review: dict[str, Any],
+    candidate: dict[str, Any],
+    *,
+    now: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    record_id = f"workflow-release-{uuid4().hex[:12]}"
+    ci_gate_configs = [config for config in _list_records(ctx.store, "ci_gate_configs") if config.get("status", "active") in {"active", "enabled"}]
+    evaluations: list[dict[str, Any]] = []
+    retest_task_id = review.get("retest_task_id") or candidate.get("retest_task_id")
+    if ci_gate_configs and retest_task_id:
+        task = _get_record(ctx.store, "tasks", str(retest_task_id))
+        run = ctx.runner.get_run(str(task["run_id"]))
+        metrics = _ci_gate_metrics_from_task(task, run)
+        # 晋升审批通过后马上复用现有 CI Gate 配置做一次发布前评估，避免审批和发布门禁脱节。
+        for config in ci_gate_configs:
+            evaluations.append(
+                _record_ci_gate_evaluation(
+                    ctx,
+                    config=config,
+                    metrics=metrics,
+                    target={"kind": "task", "id": str(retest_task_id)},
+                    source="workflow_promotion_review",
+                    review_id=review["review_id"],
+                    now=now,
+                )
+            )
+    blocking_failures = sum(int(item.get("blocking_failures", 0)) for item in evaluations)
+    if not ci_gate_configs:
+        status = "pending_ci_gate_config"
+    elif not retest_task_id:
+        status = "pending_ci_gate_target"
+    elif blocking_failures:
+        status = "blocked"
+    else:
+        status = "ready_to_release"
+    return (
+        {
+            "record_id": record_id,
+            "candidate_id": candidate["candidate_id"],
+            "review_id": review["review_id"],
+            "workflow_version_id": review.get("candidate_workflow_version_id"),
+            "candidate_experiment_id": review.get("candidate_experiment_id") or candidate.get("candidate_experiment_id"),
+            "source_task_id": review.get("source_task_id") or candidate.get("source_task_id"),
+            "retest_task_id": retest_task_id,
+            "status": status,
+            "ci_gate_config_ids": [item["config_id"] for item in ci_gate_configs],
+            "ci_gate_evaluation_ids": [item["evaluation_id"] for item in evaluations],
+            "blocking_failures": blocking_failures,
+            "target_url": f"/ci-gates?release_record_id={record_id}",
+            "created_at": now,
+            "updated_at": now,
+        },
+        evaluations,
+    )
+
+
+def _record_ci_gate_evaluation(
+    ctx: RouteContext,
+    *,
+    config: dict[str, Any],
+    metrics: dict[str, float],
+    target: dict[str, str],
+    source: str,
+    review_id: str,
+    now: str,
+) -> dict[str, Any]:
+    gates = [CIGateRuleRequest.model_validate(gate) for gate in config.get("gates", [])]
+    results = [_evaluate_gate(metrics, gate) for gate in gates]
+    blocking_failures = [item for item in results if item["status"] == "failed" and item["blocking"]]
+    evaluation = {
+        "evaluation_id": f"gateeval-{uuid4().hex[:12]}",
+        "config_id": config.get("config_id"),
+        "status": "blocked" if blocking_failures else "passed",
+        "blocking_failures": len(blocking_failures),
+        "target": target,
+        "metrics": metrics,
+        "results": results,
+        "source": source,
+        "review_id": review_id,
+        "created_at": now,
+    }
+    _save_record(ctx.store, "ci_gate_evaluations", "evaluation_id", evaluation)
+    return evaluation
 
 
 def _promotion_pass_rate_check(candidate: dict[str, Any], threshold: float | None) -> dict[str, Any]:

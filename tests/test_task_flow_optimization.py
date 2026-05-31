@@ -715,6 +715,13 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
     cached_review = client.post(f"/prompt-skill-candidates/{candidate['candidate_id']}/promotion-review").json()["review"]
     assert cached_review["review_id"] == promotion_review["review_id"]
 
+    gate_config = client.post(
+        "/ci-gates",
+        json={
+            "name": "Workflow 晋升发布门禁",
+            "gates": [{"gate_id": "pass-rate", "metric": "pass_rate", "operator": ">=", "threshold": 0.0, "blocking": True}],
+        },
+    ).json()
     approved_review = client.post(
         f"/workflow-promotion-reviews/{promotion_review['review_id']}/approve",
         json={"reviewer": "release_owner", "note": "同意晋升为推荐 Workflow 版本。"},
@@ -722,3 +729,22 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
     assert approved_review["review"]["status"] == "approved"
     assert approved_review["candidate"]["status"] == "promoted"
     assert approved_review["candidate"]["promoted_workflow_version_id"] == promotion_review["candidate_workflow_version_id"]
+    artifacts = approved_review["release_artifacts"]
+    baseline_suggestion = artifacts["baseline_suggestion"]
+    assert baseline_suggestion["status"] == "pending_apply"
+    assert baseline_suggestion["candidate_id"] == candidate["candidate_id"]
+    assert baseline_suggestion["suggested_experiment_id"] == retest["candidate_experiment"]["experiment_id"]
+    assert baseline_suggestion["previous_baseline_experiment_id"] == baseline_experiment["experiment_id"]
+    release_record = artifacts["release_record"]
+    assert release_record["status"] == "ready_to_release"
+    assert release_record["workflow_version_id"] == promotion_review["candidate_workflow_version_id"]
+    assert release_record["ci_gate_config_ids"] == [gate_config["config_id"]]
+    assert release_record["blocking_failures"] == 0
+    assert artifacts["ci_gate_evaluations"][0]["source"] == "workflow_promotion_review"
+    assert approved_review["review"]["baseline_suggestion_id"] == baseline_suggestion["suggestion_id"]
+    assert approved_review["review"]["release_record_id"] == release_record["record_id"]
+    assert approved_review["candidate"]["baseline_suggestion_id"] == baseline_suggestion["suggestion_id"]
+    assert approved_review["candidate"]["release_record_id"] == release_record["record_id"]
+    assert client.get(f"/experiment-baseline-suggestions?candidate_id={candidate['candidate_id']}").json()[0]["suggestion_id"] == baseline_suggestion["suggestion_id"]
+    assert client.get(f"/workflow-release-records?review_id={promotion_review['review_id']}").json()[0]["record_id"] == release_record["record_id"]
+    assert client.get(f"/ci-gates/evaluations?task_id={retest['task']['task_id']}").json()[0]["evaluation_id"] == artifacts["ci_gate_evaluations"][0]["evaluation_id"]
