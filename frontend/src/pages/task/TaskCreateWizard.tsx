@@ -1,10 +1,11 @@
 import { Alert, Button, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography } from 'antd';
 import { useEffect, useMemo } from 'react';
 
-import type { DatasetSummary, TaskPreflightResult, WorkflowVersion } from '../../types';
+import type { DatasetSummary, TaskExecutionTemplate, TaskPreflightResult, WorkflowVersion } from '../../types';
 
 export type TaskCreateFormValues = {
   name: string;
+  execution_template_id?: string;
   workflow_version_id: string;
   dataset_version_id: string;
   evaluation_goal?: string;
@@ -26,12 +27,13 @@ type TaskCreateWizardProps = {
   preflightResult?: TaskPreflightResult | null;
   datasets: DatasetSummary[];
   workflows: WorkflowVersion[];
+  executionTemplates?: TaskExecutionTemplate[];
   onCancel: () => void;
   onPreflight: (values: TaskCreateFormValues) => void;
   onSubmit: (values: TaskCreateFormValues) => void;
 };
 
-export function TaskCreateWizard({ open, loading, preflightLoading, preflightResult, datasets, workflows, onCancel, onPreflight, onSubmit }: TaskCreateWizardProps) {
+export function TaskCreateWizard({ open, loading, preflightLoading, preflightResult, datasets, workflows, executionTemplates = [], onCancel, onPreflight, onSubmit }: TaskCreateWizardProps) {
   const [form] = Form.useForm<TaskCreateFormValues>();
   const watchedWorkflow = Form.useWatch('workflow_version_id', form);
   const watchedDataset = Form.useWatch('dataset_version_id', form);
@@ -54,6 +56,26 @@ export function TaskCreateWizard({ open, loading, preflightLoading, preflightRes
       && (preflightResult.status !== 'blocked' || allowBlockedPreflight),
   );
   const createDisabled = !watchedWorkflow || !watchedDataset || !preflightCanContinue;
+
+  function applyExecutionTemplate(templateId: string) {
+    const template = executionTemplates.find((item) => item.template_id === templateId);
+    if (!template) return;
+    const config = template.execution_config ?? {};
+    const retry = config.retry ?? {};
+    const qualityGate = template.quality_gate ?? {};
+    form.setFieldsValue({
+      execution_template_id: template.template_id,
+      evaluation_goal: template.evaluation_goal ?? undefined,
+      pass_rate_threshold: numberOrUndefined(qualityGate.pass_rate),
+      max_badcase_count: numberOrUndefined(qualityGate.max_badcase_count),
+      chunk_size: numberOrUndefined(config.chunk_size),
+      concurrency: numberOrUndefined(config.concurrency),
+      sample_repeat_times: numberOrUndefined(config.sample_repeat_times),
+      max_retries: numberOrUndefined(retry.max_retries),
+      retry_backoff_seconds: numberOrUndefined(retry.backoff_seconds),
+      cost_budget: numberOrUndefined(config.cost_budget),
+    });
+  }
 
   useEffect(() => {
     if (!open) {
@@ -116,6 +138,21 @@ export function TaskCreateWizard({ open, loading, preflightLoading, preflightRes
         >
           <Form.Item name="name" label="任务名称" rules={[{ required: true, message: '请填写任务名称' }]}>
             <Input placeholder="例如：RAG 回归评测 2026-05-31" />
+          </Form.Item>
+          <Form.Item name="execution_template_id" label="执行参数模板" tooltip="模板会一次性填充评测目的、质量门槛、并发、repeat、重试和成本预算，方便同类任务保持一致。">
+            <Select
+              aria-label="执行参数模板"
+              allowClear
+              placeholder="选择执行策略模板"
+              optionFilterProp="label"
+              onChange={(value) => {
+                if (value) applyExecutionTemplate(String(value));
+              }}
+              options={executionTemplates.map((template) => ({
+                value: template.template_id,
+                label: `${template.name}${template.source === 'builtin' ? ' / 内置' : ''}`,
+              }))}
+            />
           </Form.Item>
           <Typography.Title level={5}>评测目的</Typography.Title>
           <Form.Item name="evaluation_goal" label="目标类型" tooltip="任务目标会写入任务快照，并影响预检对 Golden、门槛和报告结论的判断。">
@@ -253,4 +290,8 @@ function preflightColor(status: string) {
   if (status === 'passed') return 'green';
   if (status === 'warning') return 'orange';
   return 'red';
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }

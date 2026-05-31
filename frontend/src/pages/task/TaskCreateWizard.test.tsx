@@ -65,6 +65,27 @@ const blockedPreflight = {
   ],
 };
 
+const executionTemplates = [
+  {
+    template_id: 'tasktpl-strict',
+    name: '高严谨回归模板',
+    description: '用于上线前高严谨回归。',
+    evaluation_goal: 'regression',
+    quality_gate: { pass_rate: 0.96, max_badcase_count: 1 },
+    execution_config: {
+      chunk_size: 50,
+      concurrency: 2,
+      sample_repeat_times: 3,
+      retry: { max_retries: 2, backoff_seconds: 4 },
+      cost_budget: 30,
+    },
+    tags: ['regression', 'strict'],
+    source: 'custom',
+    created_at: '2026-05-31T00:00:00Z',
+    updated_at: '2026-05-31T00:00:00Z',
+  },
+];
+
 describe('TaskCreateWizard', () => {
   it('必须选择 Dataset、Workflow 并完成可继续的 Preflight 后才能创建', async () => {
     const onSubmit = vi.fn();
@@ -126,6 +147,33 @@ describe('TaskCreateWizard', () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ allow_blocked_preflight: false }));
+  });
+
+  it('选择执行参数模板后会填充质量门槛和执行参数', async () => {
+    const onSubmit = vi.fn();
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} executionTemplates={executionTemplates} loading={false} preflightLoading={false} preflightResult={passedPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '模板任务' } });
+    await chooseSelectOption('执行参数模板', '高严谨回归模板');
+    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining<Partial<TaskCreateFormValues>>({
+        execution_template_id: 'tasktpl-strict',
+        evaluation_goal: 'regression',
+        pass_rate_threshold: 0.96,
+        max_badcase_count: 1,
+        chunk_size: 50,
+        concurrency: 2,
+        sample_repeat_times: 3,
+        max_retries: 2,
+        retry_backoff_seconds: 4,
+        cost_budget: 30,
+      }),
+    );
   });
 
   it('提交任务参数时包含并发、重试、repeat 和成本预算', async () => {

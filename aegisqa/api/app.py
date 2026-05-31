@@ -186,6 +186,7 @@ class TaskCreateRequest(BaseModel):
     dataset_id: str
     dataset_version: int
     workflow_version_id: str
+    execution_template_id: str | None = None
     evaluation_goal: str | None = None
     quality_gate: dict[str, Any] = Field(default_factory=dict)
     preflight_result: dict[str, Any] | None = None
@@ -199,10 +200,20 @@ class TaskCreateRequest(BaseModel):
     allow_blocked_preflight: bool = False
 
 
+class TaskExecutionTemplateCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    evaluation_goal: str | None = None
+    quality_gate: dict[str, Any] = Field(default_factory=dict)
+    execution_config: dict[str, Any] = Field(default_factory=dict)
+    tags: list[str] = Field(default_factory=list)
+
+
 class TaskPreflightRequest(BaseModel):
     dataset_id: str
     dataset_version: int
     workflow_version_id: str
+    execution_template_id: str | None = None
     evaluation_goal: str | None = None
     quality_gate: dict[str, Any] = Field(default_factory=dict)
     cost_budget: float | None = None

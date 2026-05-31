@@ -281,6 +281,7 @@ export type TaskRecord = {
   pass_rate: number;
   badcase_count: number;
   execution_config?: {
+    execution_template_id?: string | null;
     evaluation_goal?: string | null;
     quality_gate?: Record<string, unknown>;
     chunk_size?: number | null;
@@ -311,6 +312,29 @@ export type TaskRecord = {
   }[];
   created_at: string;
   updated_at: string;
+};
+
+export type TaskExecutionTemplate = {
+  template_id: string;
+  name: string;
+  description?: string;
+  evaluation_goal?: string | null;
+  quality_gate?: Record<string, unknown>;
+  execution_config?: {
+    chunk_size?: number | null;
+    concurrency?: number | null;
+    sample_repeat_times?: number | null;
+    retry?: {
+      max_retries?: number | null;
+      backoff_seconds?: number | null;
+    };
+    cost_budget?: number | null;
+    skill_overrides?: Record<string, Record<string, unknown>>;
+  };
+  tags?: string[];
+  source?: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type TaskPreflightCheck = {

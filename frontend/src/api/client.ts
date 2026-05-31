@@ -42,6 +42,7 @@ import type {
   TaskRecord,
   TaskReport,
   TaskDiagnostics,
+  TaskExecutionTemplate,
   TaskParameterGovernance,
   TaskPreflightResult,
   TaskTraceFlow,
@@ -355,11 +356,25 @@ export const api = {
     }),
   runs: () => request<RunRecord[]>('/runs'),
   tasks: () => request<TaskRecord[]>('/tasks'),
+  taskExecutionTemplates: () => request<TaskExecutionTemplate[]>('/task-execution-templates'),
+  createTaskExecutionTemplate: (body: {
+    name: string;
+    description?: string;
+    evaluation_goal?: string | null;
+    quality_gate?: Record<string, unknown>;
+    execution_config?: Record<string, unknown>;
+    tags?: string[];
+  }) =>
+    request<TaskExecutionTemplate>('/task-execution-templates', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   createTask: (body: {
     name: string;
     dataset_id: string;
     dataset_version: number;
     workflow_version_id: string;
+    execution_template_id?: string | null;
     evaluation_goal?: string | null;
     quality_gate?: Record<string, unknown>;
     preflight_result?: TaskPreflightResult | null;
@@ -380,6 +395,7 @@ export const api = {
     dataset_id: string;
     dataset_version: number;
     workflow_version_id: string;
+    execution_template_id?: string | null;
     evaluation_goal?: string | null;
     quality_gate?: Record<string, unknown>;
     cost_budget?: number;

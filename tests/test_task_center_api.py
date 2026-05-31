@@ -222,3 +222,60 @@ def test_task_creation_blocks_failed_preflight_unless_explicitly_forced(tmp_path
     assert forced["status"] == "queued"
     assert forced["preflight_result"]["status"] == "blocked"
     assert forced["execution_config"]["allow_blocked_preflight"] is True
+
+
+def test_task_execution_templates_can_be_listed_created_and_snapshotted(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "task_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "task_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+
+    defaults = client.get("/task-execution-templates").json()
+    assert "release_gate_safe" in {template["template_id"] for template in defaults}
+
+    created_template = client.post(
+        "/task-execution-templates",
+        json={
+            "name": "高严谨回归模板",
+            "description": "用于上线前高严谨回归。",
+            "evaluation_goal": "regression",
+            "quality_gate": {"pass_rate": 0.96, "max_badcase_count": 1},
+            "execution_config": {
+                "chunk_size": 50,
+                "concurrency": 2,
+                "sample_repeat_times": 3,
+                "retry": {"max_retries": 2, "backoff_seconds": 4},
+                "cost_budget": 30,
+            },
+            "tags": ["regression", "strict"],
+        },
+    ).json()
+    assert created_template["template_id"].startswith("tasktpl-")
+    assert created_template["execution_config"]["sample_repeat_times"] == 3
+
+    templates = client.get("/task-execution-templates").json()
+    assert created_template["template_id"] in {template["template_id"] for template in templates}
+
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "模板化任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "execution_template_id": created_template["template_id"],
+            "evaluation_goal": created_template["evaluation_goal"],
+            "quality_gate": created_template["quality_gate"],
+            "chunk_size": created_template["execution_config"]["chunk_size"],
+            "concurrency": created_template["execution_config"]["concurrency"],
+            "sample_repeat_times": created_template["execution_config"]["sample_repeat_times"],
+            "max_retries": created_template["execution_config"]["retry"]["max_retries"],
+            "retry_backoff_seconds": created_template["execution_config"]["retry"]["backoff_seconds"],
+            "cost_budget": created_template["execution_config"]["cost_budget"],
+        },
+    ).json()
+    assert task["execution_config"]["execution_template_id"] == created_template["template_id"]
+    assert task["execution_config"]["sample_repeat_times"] == 3

@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Task Preflight Gate”已完成目标实现和全量验证。本批次把任务创建前的 Preflight 从“提示型检查”升级为“真实创建门禁”：后端 `POST /tasks` 会阻断 `preflight_result.status=blocked` 的任务创建，并返回 `TASK_PREFLIGHT_BLOCKED`、阻断检查项和修复建议；前端创建任务必须先运行与当前 Dataset Version、Workflow Version 匹配的 Preflight，阻断时默认禁用创建按钮，只有显式勾选风险确认后才会携带 `allow_blocked_preflight=true` 创建任务并写入执行快照。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Task Execution Templates”已完成目标实现和全量验证。本批次把任务创建参数从“每次手填”升级为“可复用执行策略”：后端新增 `GET/POST /task-execution-templates`，提供上线门禁、Prompt 实验、稳定性重复采样三类内置模板，并支持自定义模板；创建 Task 可携带 `execution_template_id`，该 ID 会进入 Task/Run 执行快照。前端任务创建向导新增“执行参数模板”下拉，选择后自动填充评测目的、质量门槛、并发、repeat、重试和成本预算，同时继续受 Preflight 创建门禁保护。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -30,6 +30,7 @@
 - Workflow 草稿保存后可从 Workflow 市场重新打开并保留流程名称、节点名称等配置；试运行会使用当前选择的数据集并回填 step trace 与队列消息提示。
 - 执行中心已抽出 `TaskCreateWizard`，创建任务前必须选择 Dataset Version 和 Workflow Version；任务参数支持分片大小、并发、repeat、最大重试、重试退避和成本预算。
 - Task Preflight 已升级为创建门禁：后端阻断 blocked Preflight，前端要求先运行匹配当前 Dataset/Workflow 的 Preflight；确需创建坏数据诊断任务时必须显式确认风险，并把 `allow_blocked_preflight` 写入 Run/Task 快照。
+- Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
 - 前端任务详情已展示 Run Attempts、当前 Attempt、执行参数和 Trace Tree，并提供“新建 Attempt”动作。
@@ -108,10 +109,12 @@
 - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`：4 passed，覆盖必须完成可继续 Preflight 后才能创建、阻断 Preflight 需要风险确认、重跑可继续 Preflight 后清除旧强制创建标记，以及并发/retry/repeat/成本预算参数提交。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心默认展示任务列表并可以创建任务"`：1 passed，覆盖执行中心创建任务必须先运行 Preflight，随后才能提交创建。
 - `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`：1 passed，覆盖主链路在创建任务前运行 Preflight。
+- `python -m pytest tests\test_task_center_api.py -q -k "execution_templates"`：1 passed，覆盖内置执行模板列表、自定义模板创建、模板配置标准化和 Task 快照保存 `execution_template_id`。
+- `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx -t "执行参数模板"`：1 passed，覆盖选择模板后填充质量门槛、并发、repeat、重试和成本预算。
 - `python -m pytest tests\test_task_flow_optimization.py -q`：20 passed。
-- `python -m pytest -q`：86 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest -q`：87 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：4 个测试文件、57 passed。
+- `cd frontend && npm test`：4 个测试文件、58 passed。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：8 passed。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
@@ -191,6 +194,15 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Task Execution Templates
+
+- 新增执行计划 `docs/superpowers/plans/2026-05-31-task-execution-templates.md`。
+- 后端新增 `GET /task-execution-templates` 和 `POST /task-execution-templates`，内置上线门禁稳健模板、Prompt 实验快速模板、稳定性重复采样模板，并支持自定义模板落库。
+- `TaskCreateRequest` 与 `TaskPreflightRequest` 新增 `execution_template_id`，Task/Run 执行快照保存所选模板 ID。
+- 前端 API client、类型定义和执行中心接入执行模板查询。
+- `TaskCreateWizard` 新增“执行参数模板”下拉，选择模板后填充评测目的、质量门槛、chunk、concurrency、sample_repeat_times、retry 和 cost_budget。
+- 验证：`python -m pytest -q` 87 个后端测试通过；`npm run typecheck`、`npm test` 58 passed、`npm run build`、`npm run e2e` 8 passed。
 
 ### 2026-05-31 Task Preflight Gate
 

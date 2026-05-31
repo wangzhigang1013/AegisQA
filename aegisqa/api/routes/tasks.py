@@ -17,6 +17,7 @@ from aegisqa.api.app import (
     _build_annotation_task,
     RunCreateRequest,
     TaskCreateRequest,
+    TaskExecutionTemplateCreateRequest,
     TaskPreflightRequest,
     _build_attempt_record,
     _build_budget_status,
@@ -55,6 +56,22 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
     def list_tasks() -> list[dict[str, Any]]:
         return _list_records(ctx.store, "tasks")
 
+    @app.get("/task-execution-templates")
+    def list_task_execution_templates() -> list[dict[str, Any]]:
+        return _list_task_execution_templates(ctx)
+
+    @app.post("/task-execution-templates")
+    def create_task_execution_template(request: TaskExecutionTemplateCreateRequest) -> dict[str, Any]:
+        template = _build_task_execution_template(request)
+        _save_record(ctx.store, "task_execution_templates", "template_id", template)
+        ctx.audit_service.record(
+            actor="api",
+            action="task_execution_template.create",
+            target=template["template_id"],
+            detail={"name": template["name"], "evaluation_goal": template.get("evaluation_goal")},
+        )
+        return template
+
     @app.post("/tasks")
     def create_task(request: TaskCreateRequest) -> dict[str, Any]:
         workflow = ctx.workflow_service.get(request.workflow_version_id)
@@ -90,6 +107,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 sample_repeat_times=request.sample_repeat_times,
                 task_config_snapshot={
                     "evaluation_goal": request.evaluation_goal,
+                    "execution_template_id": request.execution_template_id,
                     "quality_gate": request.quality_gate,
                     "skill_overrides": request.skill_overrides,
                     # 强制创建属于风险接受动作，必须进入 Run 快照，后续报告才能解释来源。
@@ -98,6 +116,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             )
         )
         execution_config = {
+            "execution_template_id": request.execution_template_id,
             "evaluation_goal": request.evaluation_goal,
             "quality_gate": request.quality_gate,
             "chunk_size": request.chunk_size,
@@ -509,10 +528,98 @@ def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> d
         "dataset_id": dataset.dataset_id,
         "dataset_version": dataset.version,
         "workflow_version_id": workflow.version_id,
+        "execution_template_id": request.execution_template_id,
         "evaluation_goal": request.evaluation_goal,
         "quality_gate": request.quality_gate,
         "checks": checks,
         "created_at": _now(),
+    }
+
+
+def _list_task_execution_templates(ctx: RouteContext) -> list[dict[str, Any]]:
+    templates = {template["template_id"]: template for template in _default_task_execution_templates()}
+    for template in _list_records(ctx.store, "task_execution_templates"):
+        templates[str(template["template_id"])] = template
+    return sorted(templates.values(), key=lambda item: (str(item.get("source") or "custom"), str(item.get("name") or "")))
+
+
+def _build_task_execution_template(request: TaskExecutionTemplateCreateRequest) -> dict[str, Any]:
+    now = _now()
+    return {
+        "template_id": f"tasktpl-{uuid4().hex[:12]}",
+        "name": request.name,
+        "description": request.description,
+        "evaluation_goal": request.evaluation_goal,
+        "quality_gate": deepcopy(request.quality_gate),
+        "execution_config": _normalize_execution_template_config(request.execution_config),
+        "tags": list(request.tags),
+        "source": "custom",
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _default_task_execution_templates() -> list[dict[str, Any]]:
+    """内置模板提供可解释的起步策略；用户自定义模板单独落库并覆盖同名 ID。"""
+
+    return [
+        {
+            "template_id": "release_gate_safe",
+            "name": "上线门禁稳健模板",
+            "description": "适合正式发布前评测：低并发、明确通过率和 Badcase 门槛。",
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+            "execution_config": _normalize_execution_template_config(
+                {"chunk_size": 100, "concurrency": 1, "sample_repeat_times": 1, "retry": {"max_retries": 1, "backoff_seconds": 0}, "cost_budget": 20}
+            ),
+            "tags": ["release", "safe"],
+            "source": "builtin",
+            "created_at": "builtin",
+            "updated_at": "builtin",
+        },
+        {
+            "template_id": "prompt_experiment_fast",
+            "name": "Prompt 实验快速模板",
+            "description": "适合早期 Prompt 对比：允许少量 Badcase，成本预算更保守。",
+            "evaluation_goal": "prompt_experiment",
+            "quality_gate": {"pass_rate": 0.8, "max_badcase_count": 20},
+            "execution_config": _normalize_execution_template_config(
+                {"chunk_size": 50, "concurrency": 2, "sample_repeat_times": 1, "retry": {"max_retries": 0, "backoff_seconds": 0}, "cost_budget": 10}
+            ),
+            "tags": ["prompt", "fast"],
+            "source": "builtin",
+            "created_at": "builtin",
+            "updated_at": "builtin",
+        },
+        {
+            "template_id": "stability_repeat",
+            "name": "稳定性重复采样模板",
+            "description": "适合检测非确定性输出：重复采样 3 次并保留重试。",
+            "evaluation_goal": "regression",
+            "quality_gate": {"pass_rate": 0.85, "max_badcase_count": 5},
+            "execution_config": _normalize_execution_template_config(
+                {"chunk_size": 50, "concurrency": 1, "sample_repeat_times": 3, "retry": {"max_retries": 2, "backoff_seconds": 3}, "cost_budget": 30}
+            ),
+            "tags": ["stability", "repeat"],
+            "source": "builtin",
+            "created_at": "builtin",
+            "updated_at": "builtin",
+        },
+    ]
+
+
+def _normalize_execution_template_config(config: dict[str, Any]) -> dict[str, Any]:
+    retry = config.get("retry") if isinstance(config.get("retry"), dict) else {}
+    return {
+        "chunk_size": config.get("chunk_size", 100),
+        "concurrency": config.get("concurrency", 1),
+        "sample_repeat_times": config.get("sample_repeat_times", 1),
+        "retry": {
+            "max_retries": retry.get("max_retries", config.get("max_retries", 1)),
+            "backoff_seconds": retry.get("backoff_seconds", config.get("retry_backoff_seconds", 0)),
+        },
+        "cost_budget": config.get("cost_budget"),
+        "skill_overrides": deepcopy(config.get("skill_overrides") or {}),
     }
 
 

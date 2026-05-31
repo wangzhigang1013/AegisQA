@@ -74,6 +74,25 @@ const demoPreflightResult = {
   ],
 };
 
+const demoTaskExecutionTemplates = [
+  {
+    template_id: 'release_gate_safe',
+    name: '上线门禁稳健模板',
+    description: '适合正式发布前评测。',
+    evaluation_goal: 'release_gate',
+    quality_gate: { pass_rate: 0.9, max_badcase_count: 0 },
+    execution_config: {
+      chunk_size: 100,
+      concurrency: 1,
+      sample_repeat_times: 1,
+      retry: { max_retries: 1, backoff_seconds: 0 },
+      cost_budget: 20,
+    },
+    tags: ['release'],
+    source: 'builtin',
+  },
+];
+
 const demoBadcase = {
   badcase_id: 'badcase-demo',
   run_id: 'run-demo',
@@ -836,6 +855,9 @@ describe('AegisQA 前端工作台', () => {
           return jsonResponse(demoTask);
         }
         return jsonResponse([demoTask]);
+      }
+      if (url.endsWith('/task-execution-templates')) {
+        return jsonResponse(demoTaskExecutionTemplates);
       }
       if (url.endsWith('/tasks/preflight')) {
         return jsonResponse(demoPreflightResult);

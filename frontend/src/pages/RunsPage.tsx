@@ -29,6 +29,7 @@ export function RunsPage() {
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks, refetchOnMount: 'always' });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
   const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets, refetchOnMount: 'always' });
+  const executionTemplatesQuery = useQuery({ queryKey: ['task-execution-templates'], queryFn: api.taskExecutionTemplates, refetchOnMount: 'always' });
 
   const datasetVersions = useMemo(
     () => datasetsQuery.data?.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))) ?? [],
@@ -58,6 +59,7 @@ export function RunsPage() {
         dataset_id: datasetVersion.dataset_id,
         dataset_version: datasetVersion.version,
         workflow_version_id: values.workflow_version_id,
+        execution_template_id: values.execution_template_id,
         evaluation_goal: values.evaluation_goal,
         quality_gate: qualityGateFromValues(values),
         cost_budget: values.cost_budget,
@@ -188,6 +190,7 @@ export function RunsPage() {
         preflightResult={preflightResult}
         datasets={datasetsQuery.data ?? []}
         workflows={workflowsQuery.data ?? []}
+        executionTemplates={Array.isArray(executionTemplatesQuery.data) ? executionTemplatesQuery.data : []}
         onCancel={() => {
           setCreateOpen(false);
           setPreflightResult(null);
