@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Task Preflight Server Guard”已完成目标实现和全量验证。本批次把 Preflight 新鲜度从前端交互校验推进到后端强约束：如果 API 调用方提交的 `preflight_result` 与当前 Dataset、Workflow、执行模板、评测目的、质量门槛、repeat、成本预算或 Skill 覆盖不一致，`POST /tasks` 会返回 `TASK_PREFLIGHT_STALE` 并列出 mismatch 字段，避免绕过前端复用旧预检结果。前端创建任务请求也已补传 `execution_template_id`，确保模板化任务的 Preflight、Task 快照和后端签名一致。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Task Preflight Server Truth Source”已完成目标实现和全量验证。本批次把任务创建 Preflight 的信任边界收紧为“服务端事实源”：`POST /tasks` 永远基于当前 Dataset、Workflow 和执行参数重算 Preflight，客户端传来的 `preflight_result` 只用于判断是否和用户看过的参数一致，不能替代后端检查；即使客户端伪造 `status=passed`，字段缺失、Skill 未审批、预算等阻断项仍会由服务端重算后拦截。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -32,6 +32,7 @@
 - Task Preflight 已升级为创建门禁：后端阻断 blocked Preflight，前端要求先运行匹配当前 Dataset/Workflow 的 Preflight；确需创建坏数据诊断任务时必须显式确认风险，并把 `allow_blocked_preflight` 写入 Run/Task 快照。
 - Task Preflight 已增加关键参数签名新鲜度校验：`execution_template_id`、`evaluation_goal`、`quality_gate`、`sample_repeat_times`、`cost_budget` 变化都会让创建按钮重新进入“需重跑 Preflight”状态，避免模板或质量门槛被修改后沿用旧预检结果。
 - Task 创建 API 已增加服务端 Preflight 过期校验：传入旧 `preflight_result` 时会按 Dataset、Workflow、执行模板、评测目的、质量门槛、repeat、成本预算和 Skill 覆盖逐项比对，不一致时返回 `TASK_PREFLIGHT_STALE`。
+- Task 创建 API 已改为服务端重算 Preflight 作为事实源：客户端提交的 `preflight_result` 即使伪造为 passed，也不能绕过真实字段映射、Skill 审批、Golden 覆盖、质量门槛和预算检查。
 - Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
@@ -97,6 +98,13 @@
 
 ## 最近验证
 
+- `python -m pytest tests\test_task_center_api.py -q -k "recomputes_preflight or stale_preflight"`：2 passed，覆盖伪造 passed Preflight 不能绕过服务端字段缺失阻断，以及旧 Preflight 签名会返回 `TASK_PREFLIGHT_STALE`。
+- `python -m pytest tests\test_task_center_api.py -q -k "execution_templates"`：1 passed，覆盖执行模板签名仍进入 Preflight 和 Task 快照。
+- `python -m pytest -q`：90 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：4 个测试文件、61 passed。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
 - `python -m pytest tests\test_task_center_api.py -q -k "stale_preflight or execution_templates"`：2 passed，覆盖后端拒绝过期 Preflight 签名，以及执行模板进入 Preflight/Task 快照。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心选择执行模板"`：1 passed，覆盖前端选择执行参数模板后创建任务请求会提交 `execution_template_id`，并携带匹配的 `preflight_result`。
 - `python -m pytest -q`：89 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
@@ -212,6 +220,32 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Task Preflight Server Truth Source
+
+- 改动摘要：`POST /tasks` 不再信任客户端提交的 Preflight 状态，创建任务前永远重算服务端 Preflight；客户端结果只用于过期签名判断，不能绕过真实阻断项。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_center_api.py`
+  - `docs/superpowers/plans/2026-05-31-task-preflight-server-truth-source.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q -k recomputes_preflight`
+  - `python -m pytest tests\test_task_center_api.py -q -k "recomputes_preflight or stale_preflight"`
+  - `python -m pytest tests\test_task_center_api.py -q -k "execution_templates"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端全量：90 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：4 个测试文件、61 passed。
+  - TypeScript 与生产构建：通过。
+  - Playwright E2E：8 passed。
+- 下一步：继续评估是否需要把 Preflight 结果持久化为不可变 `preflight_id`，减少大型任务创建时重复计算并提升审计可追溯性。
 
 ### 2026-05-31 Task Preflight Server Guard
 

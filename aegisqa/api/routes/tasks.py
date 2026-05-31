@@ -76,22 +76,22 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
     def create_task(request: TaskCreateRequest) -> dict[str, Any]:
         workflow = ctx.workflow_service.get(request.workflow_version_id)
         dataset = ctx.dataset_service.get_version(request.dataset_id, request.dataset_version)
-        preflight_result = request.preflight_result or _build_task_preflight(
-            ctx,
-            TaskPreflightRequest(
-                dataset_id=request.dataset_id,
-                dataset_version=request.dataset_version,
-                workflow_version_id=request.workflow_version_id,
-                execution_template_id=request.execution_template_id,
-                evaluation_goal=request.evaluation_goal,
-                quality_gate=request.quality_gate,
-                cost_budget=request.cost_budget,
-                sample_repeat_times=request.sample_repeat_times,
-                skill_overrides=request.skill_overrides,
-            ),
+        preflight_request = TaskPreflightRequest(
+            dataset_id=request.dataset_id,
+            dataset_version=request.dataset_version,
+            workflow_version_id=request.workflow_version_id,
+            execution_template_id=request.execution_template_id,
+            evaluation_goal=request.evaluation_goal,
+            quality_gate=request.quality_gate,
+            cost_budget=request.cost_budget,
+            sample_repeat_times=request.sample_repeat_times,
+            skill_overrides=request.skill_overrides,
         )
+        # 客户端传来的 Preflight 只能证明用户看过哪组参数，不能作为安全事实源。
+        # 创建任务前始终重算一次，防止伪造 passed 结果绕过字段、Skill、预算等阻断检查。
+        preflight_result = _build_task_preflight(ctx, preflight_request)
         if request.preflight_result is not None:
-            _ensure_preflight_matches_task_request(preflight_result, request)
+            _ensure_preflight_matches_task_request(request.preflight_result, request)
         if preflight_result.get("status") == "blocked" and not request.allow_blocked_preflight:
             blocked_checks = [check for check in preflight_result.get("checks", []) if check.get("status") == "blocked"]
             raise AegisQAError(

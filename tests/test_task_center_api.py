@@ -267,6 +267,54 @@ def test_task_creation_rejects_stale_preflight_signature(tmp_path: Path) -> None
     assert error["details"]["mismatches"][0]["field"] == "quality_gate.pass_rate"
 
 
+def test_task_creation_recomputes_preflight_instead_of_trusting_client_status(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "missing_reference.jsonl"
+    rows = [{"question": "缺少 reference 字段", "expected_label": "pass"}]
+    with data_path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    dataset = client.post("/datasets/from-path", json={"name": "missing_reference", "path": str(data_path)}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    forged_preflight = {
+        "status": "passed",
+        "summary": "客户端伪造通过",
+        "dataset_id": dataset["dataset_id"],
+        "dataset_version": dataset["version"],
+        "workflow_version_id": workflow["version_id"],
+        "execution_template_id": None,
+        "evaluation_goal": "release_gate",
+        "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+        "sample_repeat_times": 1,
+        "cost_budget": 1.0,
+        "skill_overrides": {},
+        "checks": [],
+    }
+
+    response = client.post(
+        "/tasks",
+        json={
+            "name": "伪造预检任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+            "sample_repeat_times": 1,
+            "cost_budget": 1.0,
+            "preflight_result": forged_preflight,
+        },
+    )
+
+    assert response.status_code == 409
+    error = response.json()
+    assert error["code"] == "TASK_PREFLIGHT_BLOCKED"
+    assert error["details"]["preflight_result"]["status"] == "blocked"
+    assert error["details"]["blocked_checks"][0]["check_id"] == "field_mapping"
+
+
 def test_task_execution_templates_can_be_listed_created_and_snapshotted(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)
