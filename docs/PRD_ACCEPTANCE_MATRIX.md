@@ -55,7 +55,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-RP-01 | Run 指标聚合 | 已实现 | `aggregate_run_report` |
 | FR-RP-02 | Skill 输出指标入库 | 已实现 | Item metrics 与 report 聚合 |
 | FR-RP-03 | Badcase 明细筛选 | 已实现 | `BadcaseService.filter_badcases`，`GET /badcases` 支持状态、问题类型、原因、Skill、关键词、得分区间 |
-| FR-RP-04 | 单次任务报告 | 已实现基础 | API `/tasks/{task_id}/report` 包装任务摘要、版本快照、Step 分布、Judge 分数分布、RunReport、Badcase、导出链接和 Task Diagnostics；React 报告中心围绕 Task 展示“评测结论”第一屏、摘要、版本、指标、根因诊断、Step 分布和 Badcase，并可从诊断一键生成 Repair Task；Playwright E2E 覆盖任务报告查看、导出和 Badcase 加入 Golden |
+| FR-RP-04 | 单次任务报告 | 已实现基础 | API `/tasks/{task_id}/report` 包装任务摘要、版本快照、Step 分布、Judge 分数分布、RunReport、Badcase、导出链接和 Task Diagnostics；React 报告中心围绕 Task 展示“评测结论”第一屏、摘要、版本、指标、根因诊断、Step 分布和 Badcase，并可从诊断一键生成 Repair Task；报告中心任务选择器使用 `GET /tasks?page=1&page_size=20` 加载最近任务，深链 `task_id` 不在最近列表时使用 `GET /tasks/{task_id}` 精准加载单任务，目标任务加载完成前不会请求最近列表第一条任务报告，避免为了打开一份报告扫描全量任务历史或短暂展示错误报告；Playwright E2E 覆盖任务报告查看、导出和 Badcase 加入 Golden |
 | FR-ME-01 | Judge Profile 管理 | 已实现基础 | `JudgeProfileService.create_profile/get_profile`，API 已挂载 |
 | FR-ME-02 | Golden Dataset 裁判评测 | 已实现 | `audit_judge_profile` 输出 Accuracy/Precision/Recall/F1/Kappa/混淆矩阵 |
 | FR-ME-03 | 审计结果入库 | 已实现 | `JudgeProfileService.audit_and_store` |
@@ -95,7 +95,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 | 对标能力 | 当前状态 | 证据 |
 |---|---|---|
-| Task 一等模型 | 已实现基础 | `GET/POST /tasks`、`POST /tasks/preflight`、`GET/POST /task-execution-templates`、`POST /tasks/{task_id}/attempts`、`POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed`、`GET /tasks/{task_id}/report`、`GET /tasks/{task_id}/trace-tree`；`GET /tasks` 无分页参数时保持 legacy 数组响应，带 `page/page_size` 时返回 `{ items, pagination }`，并支持 `status/dataset_id/workflow_id/q` 过滤后分页；Task 创建保存 `execution_template_id`、`evaluation_goal`、`quality_gate`、`preflight_result` 和 `execution_config`，包含并发、repeat、重试、成本预算和 `allow_blocked_preflight` 风险接受标记；Run Attempts 保留旧 Run 报告快照；前端执行中心默认展示任务列表并使用服务端分页、状态筛选和带 Preflight 门禁/执行参数模板的独立创建向导；Playwright E2E 覆盖创建和执行任务 |
+| Task 一等模型 | 已实现基础 | `GET/POST /tasks`、`GET /tasks/{task_id}`、`POST /tasks/preflight`、`GET/POST /task-execution-templates`、`POST /tasks/{task_id}/attempts`、`POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed`、`GET /tasks/{task_id}/report`、`GET /tasks/{task_id}/trace-tree`；`GET /tasks` 无分页参数时保持 legacy 数组响应，带 `page/page_size` 时返回 `{ items, pagination }`，并支持 `status/dataset_id/workflow_id/q` 过滤后分页；Task 创建保存 `execution_template_id`、`evaluation_goal`、`quality_gate`、`preflight_result` 和 `execution_config`，包含并发、repeat、重试、成本预算和 `allow_blocked_preflight` 风险接受标记；Run Attempts 保留旧 Run 报告快照；前端执行中心默认展示任务列表并使用服务端分页、状态筛选和带 Preflight 门禁/执行参数模板的独立创建向导；报告中心深链可按 `task_id` 单任务加载；Playwright E2E 覆盖创建和执行任务 |
 | Experiment 快照与 baseline 对比 | 已实现基础页面 | `POST /experiments/from-run`，`GET /experiments?dataset_id=&workflow_id=`，保存 Workflow/Dataset/Skill/Prompt/Runtime 快照与 baseline diff；React `/experiments` 页面展示实验快照列表、Dataset/Workflow 过滤、baseline 选择、A/B 对比面板、通过率、Badcase、P95 耗时、成本和失败分布变化，并支持从 Run 生成实验快照 |
 | Prompt / Skill 版本注册 | 已实现基础 | Run snapshot 与 Experiment snapshot 记录 `skill_versions`、`prompt_skill_versions`、模型参数 |
 | Assertion DSL | 已实现最小 API | `POST /assertions/evaluate` 支持 contains、regex、json_schema、similarity、latency、cost、safety 的基础断言 |

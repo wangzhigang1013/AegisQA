@@ -398,6 +398,7 @@ export const api = {
     }),
   runs: () => request<RunRecord[]>('/runs'),
   tasks: () => request<TaskRecord[]>('/tasks'),
+  task: (taskId: string) => request<TaskRecord>(`/tasks/${encodeURIComponent(taskId)}`),
   tasksPage: (filters: { status?: string; dataset_id?: string; workflow_id?: string; q?: string; page?: number; pageSize?: number } = {}) => {
     const query = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => {

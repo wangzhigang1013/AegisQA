@@ -44,8 +44,25 @@ export function ReportsPage() {
   const [scorePage, setScorePage] = useState(1);
   const badcasePageSize = 5;
   const scorePageSize = 4;
-  const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
-  const selectedTask = tasksQuery.data?.find((task) => task.task_id === selectedTaskId) ?? tasksQuery.data?.[0] ?? null;
+  const reportTaskPageSize = 20;
+  const tasksQuery = useQuery({
+    queryKey: ['tasks', 'report-picker', 1, reportTaskPageSize],
+    queryFn: () => api.tasksPage({ page: 1, pageSize: reportTaskPageSize }),
+  });
+  const listedTasks = tasksQuery.data?.items ?? [];
+  const selectedTaskFromList = listedTasks.find((task) => task.task_id === selectedTaskId) ?? null;
+  const selectedTaskQuery = useQuery({
+    queryKey: ['task', selectedTaskId],
+    queryFn: () => api.task(selectedTaskId ?? ''),
+    enabled: Boolean(selectedTaskId && !selectedTaskFromList),
+  });
+  const taskOptions = useMemo(() => {
+    if (selectedTaskQuery.data && !listedTasks.some((task) => task.task_id === selectedTaskQuery.data?.task_id)) {
+      return [selectedTaskQuery.data, ...listedTasks];
+    }
+    return listedTasks;
+  }, [listedTasks, selectedTaskQuery.data]);
+  const selectedTask = selectedTaskFromList ?? selectedTaskQuery.data ?? (taskIdFromUrl ? null : listedTasks[0] ?? null);
   const scoreAnalyticsQuery = useQuery({
     queryKey: ['score-analytics', selectedTask?.dataset_id, selectedTask?.workflow_id, scorePage, scorePageSize],
     queryFn: () =>
@@ -74,14 +91,14 @@ export function ReportsPage() {
   });
 
   useEffect(() => {
-    if (taskIdFromUrl && taskIdFromUrl !== selectedTaskId && tasksQuery.data?.some((task) => task.task_id === taskIdFromUrl)) {
+    if (taskIdFromUrl && taskIdFromUrl !== selectedTaskId) {
       setSelectedTaskId(taskIdFromUrl);
       return;
     }
-    if (!selectedTaskId && tasksQuery.data?.[0]) {
-      setSelectedTaskId(tasksQuery.data[0].task_id);
+    if (!selectedTaskId && listedTasks[0]) {
+      setSelectedTaskId(listedTasks[0].task_id);
     }
-  }, [taskIdFromUrl, tasksQuery.data, selectedTaskId]);
+  }, [taskIdFromUrl, listedTasks, selectedTaskId]);
 
   function changeSelectedTask(nextTaskId: string) {
     setSelectedTaskId(nextTaskId);
@@ -418,9 +435,9 @@ export function ReportsPage() {
               placeholder="选择任务"
               className="full-width-control"
               value={selectedTask?.task_id}
-              loading={tasksQuery.isLoading}
+              loading={tasksQuery.isLoading || selectedTaskQuery.isFetching}
               onChange={changeSelectedTask}
-              options={(tasksQuery.data ?? []).map((item) => ({ value: item.task_id, label: `${item.name} / ${item.status}` }))}
+              options={taskOptions.map((item) => ({ value: item.task_id, label: `${item.name} / ${item.status}` }))}
             />
           </Col>
           <Col xs={24} lg={16}>

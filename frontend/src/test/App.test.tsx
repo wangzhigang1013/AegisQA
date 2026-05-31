@@ -2598,7 +2598,7 @@ describe('AegisQA 前端工作台', () => {
     await renderWorkbench('/reports');
 
     expect(await screen.findByText('任务报告')).toBeInTheDocument();
-    expect(screen.getAllByText('RAG 任务').length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('RAG 任务')).length).toBeGreaterThan(0);
     expect(screen.getByText('任务摘要与版本快照')).toBeInTheDocument();
     expect(screen.getByText('创建前 Preflight 证据')).toBeInTheDocument();
     expect(screen.getAllByText('preflight-demo').length).toBeGreaterThan(0);
@@ -2771,6 +2771,42 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText('prompt_injection')).toBeInTheDocument();
     expect(screen.getByText('pii_leakage')).toBeInTheDocument();
     expect(screen.getByText('添加 Prompt Injection 断言')).toBeInTheDocument();
+  });
+
+  it('报告中心深链任务使用单任务接口而不是全量任务列表', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const taskRequests: string[] = [];
+    const reportRequests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      const parsed = new URL(url, 'http://localhost');
+      if (parsed.pathname.endsWith('/tasks') && init?.method !== 'POST') {
+        taskRequests.push(url);
+        return jsonResponse({
+          items: [{ ...demoTask, task_id: 'task-other', name: '其他任务' }],
+          pagination: { page: 1, page_size: 20, total_items: 21, total_pages: 2 },
+        });
+      }
+      if (parsed.pathname.endsWith('/tasks/task-demo')) {
+        taskRequests.push(url);
+        return jsonResponse(demoTask);
+      }
+      if (parsed.pathname.endsWith('/tasks/task-other/report')) {
+        reportRequests.push(url);
+        return jsonResponse({});
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/reports?task_id=task-demo');
+
+    expect(await screen.findByText('任务报告')).toBeInTheDocument();
+    expect((await screen.findAllByText('RAG 任务')).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(taskRequests.some((request) => request.includes('/tasks?page=1') && request.includes('page_size=20'))).toBe(true);
+      expect(taskRequests.some((request) => request.includes('/tasks/task-demo'))).toBe(true);
+    });
+    expect(reportRequests).toEqual([]);
   });
 
   it('报告中心 Score Analytics 使用当前任务作用域和服务端分页', async () => {
