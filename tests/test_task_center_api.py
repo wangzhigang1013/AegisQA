@@ -358,6 +358,10 @@ def test_task_preflight_is_persisted_and_task_references_preflight_id(tmp_path: 
 
     assert task["preflight_result"]["preflight_id"] == preflight["preflight_id"]
     assert task["execution_config"]["preflight_id"] == preflight["preflight_id"]
+    report = client.get(f"/tasks/{task['task_id']}/report").json()
+    assert report["preflight_evidence"]["preflight_id"] == preflight["preflight_id"]
+    assert report["preflight_evidence"]["status"] in {"passed", "warning"}
+    assert report["preflight_evidence"]["checks"][0]["check_id"] == "dataset_non_empty"
 
 
 def test_task_creation_rejects_conflicting_preflight_ids(tmp_path: Path) -> None:

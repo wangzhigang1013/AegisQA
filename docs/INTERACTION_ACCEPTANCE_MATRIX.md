@@ -54,7 +54,7 @@
 | 执行中心 | 任务详情驾驶舱 | 可用，按概览、样本、Trace、Badcase、Attempts、参数组织；参数页展示任务冻结参数、创建前 Preflight 证据、Skill 参数来源和 Secret 脱敏说明；已完成任务可新建 Attempt 且不覆盖旧报告 | `GET /tasks`、`GET /tasks/{task_id}/trace-tree`、`GET /tasks/{task_id}/trace-flow`、`GET /tasks/{task_id}/report`、`POST /tasks/{task_id}/attempts` | 后端测试覆盖历史报告保留；前端测试覆盖驾驶舱页签、Preflight ID、预检摘要和检查项展示；Playwright 覆盖任务执行后查看驾驶舱 |
 | Trace Flow | 样本级数据流 | 可用，从任务详情和报告页进入；展示 Dataset、Workflow、Attempt、队列消息形状、样本列表、Step Timeline、Row、Context、Metrics、Input、参数来源、Output、Error 和 Badcase 状态 | `GET /tasks/{task_id}/trace-flow` | `tests/test_trace_flow_api.py`、`npm test` 和 Playwright 主链路覆盖 |
 | Trace Tree | 独立调用树页面 | 可用，从任务详情和报告页进入；按 Item 展开 Skill Step，展示输入、输出、耗时、缓存和错误 | `GET /tasks/{task_id}/trace-tree` | `npm test` 覆盖 `/tasks/:taskId/trace-tree` |
-| 报告中心 | 任务报告详情 | 可用，围绕选中任务展示任务摘要、版本快照、指标、Step 分布、Judge 分数分布、Badcase 和导出入口 | `GET /tasks/{task_id}/report` | 后端测试覆盖结构化字段；`npm test` 覆盖报告中心展示 |
+| 报告中心 | 任务报告详情 | 可用，围绕选中任务展示任务摘要、版本快照、创建前 Preflight 证据、指标、Step 分布、Judge 分数分布、Badcase 和导出入口 | `GET /tasks/{task_id}/report` | 后端测试覆盖结构化字段和 `preflight_evidence`；`npm test` 覆盖报告中心展示 Preflight 证据 |
 | 报告中心 | 评测结论第一屏 | 可用，报告详情顶部先回答“能否发布 / 为什么 / 影响多大 / 下一步”，并提供生成修复任务入口 | `GET /tasks/{task_id}/report` 中的 `quality_decision` 和 `diagnostics` | 目标前端测试覆盖“评测结论”“能否发布”和按钮展示 |
 | 报告中心 | 分层分析与下一步建议 | 可用，按 scene、expected_label、model_version、prompt_version 展示样本数、通过率、Badcase，并给出加入 Annotation、生成 Golden 候选、生成 CI Gate 建议 | `GET /tasks/{task_id}/report` 中的 `segments`、`recommendations` | `tests/test_report_segment_analysis.py` 和 `npm test` 覆盖分层字段与建议展示 |
 | 报告中心 | 质量决策中心 | 可用，把通过率、错误率、Badcase 和低分层汇总为 passed/warning/blocked 决策，并展示风险摘要和下一步动作 | `GET /tasks/{task_id}/report` 中的 `quality_decision` | `tests/test_trustworthy_evaluation_enhancements.py` 和 `npm test` 覆盖 |

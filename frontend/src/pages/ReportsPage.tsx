@@ -300,7 +300,7 @@ export function ReportsPage() {
             </Card>
           ) : null}
 
-          <ReportSummary task={task} summary={reportQuery.data?.task_summary} versionSnapshot={reportQuery.data?.version_snapshot} />
+          <ReportSummary task={task} summary={reportQuery.data?.task_summary} versionSnapshot={reportQuery.data?.version_snapshot} preflightEvidence={reportQuery.data?.preflight_evidence} />
 
           <Row gutter={[16, 16]}>
             <Col xs={24} xl={14}>

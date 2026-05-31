@@ -407,6 +407,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             "task": task,
             "task_summary": _build_task_report_summary(task, run),
             "version_snapshot": _build_task_report_version_snapshot(task, run),
+            "preflight_evidence": task.get("preflight_result"),
             "step_distribution": _build_step_distribution(run),
             "judge_score_distribution": _build_judge_score_distribution(run),
             "segments": [segment.model_dump(mode="json") for segment in segments],

@@ -1283,6 +1283,7 @@ describe('AegisQA 前端工作台', () => {
             workflow: { workflow_id: 'wf-demo', version_id: 'wf-demo:v1', name: 'RAG 回归评测', step_count: 2 },
             execution_config: demoTask.execution_config,
           },
+          preflight_evidence: demoTask.preflight_result,
           step_distribution: [
             { step_id: 'answer', skill_ref: 'llm.call@0.1.0', total_calls: 100, succeeded: 100, failed: 0, cache_hits: 0, total_latency_ms: 100, average_latency_ms: 1 },
           ],
@@ -2143,6 +2144,8 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText('任务报告')).toBeInTheDocument();
     expect(screen.getAllByText('RAG 任务').length).toBeGreaterThan(0);
     expect(screen.getByText('任务摘要与版本快照')).toBeInTheDocument();
+    expect(screen.getByText('创建前 Preflight 证据')).toBeInTheDocument();
+    expect(screen.getByText('preflight-demo')).toBeInTheDocument();
     expect(screen.getByText('Step 分布与耗时')).toBeInTheDocument();
     expect(screen.getByText('分层分析')).toBeInTheDocument();
     expect(screen.getByText('质量决策中心')).toBeInTheDocument();

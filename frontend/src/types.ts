@@ -462,6 +462,7 @@ export type TaskReport = {
     workflow: Record<string, unknown>;
     execution_config?: Record<string, unknown>;
   };
+  preflight_evidence?: TaskPreflightResult | null;
   step_distribution?: {
     step_id: string;
     skill_ref: string;

@@ -6,11 +6,14 @@ type ReportSummaryProps = {
   task: TaskRecord;
   summary?: TaskReport['task_summary'];
   versionSnapshot?: TaskReport['version_snapshot'];
+  preflightEvidence?: TaskReport['preflight_evidence'];
 };
 
-export function ReportSummary({ task, summary, versionSnapshot }: ReportSummaryProps) {
+export function ReportSummary({ task, summary, versionSnapshot, preflightEvidence }: ReportSummaryProps) {
   const dataset = versionSnapshot?.dataset ?? {};
   const workflow = versionSnapshot?.workflow ?? {};
+  const evidence = preflightEvidence ?? task.preflight_result;
+  const preflightId = task.execution_config?.preflight_id ?? evidence?.preflight_id;
   return (
     <Card className="flat-card" title="任务摘要与版本快照">
       <Descriptions bordered size="small" column={1}>
@@ -21,9 +24,27 @@ export function ReportSummary({ task, summary, versionSnapshot }: ReportSummaryP
         <Descriptions.Item label="样本量">{summary?.sample_count ?? task.total_items}</Descriptions.Item>
         <Descriptions.Item label="当前 Attempt">{summary?.current_attempt ?? task.current_attempt ?? 1}</Descriptions.Item>
         <Descriptions.Item label="执行参数">{formatExecutionConfig(versionSnapshot?.execution_config)}</Descriptions.Item>
+        <Descriptions.Item label="创建前 Preflight 证据">
+          {evidence ? (
+            <>
+              <Tag color={preflightColor(evidence.status)}>{evidence.status}</Tag>
+              {preflightId ? <Tag>{preflightId}</Tag> : null}
+              {evidence.summary}
+            </>
+          ) : (
+            '未记录'
+          )}
+        </Descriptions.Item>
       </Descriptions>
     </Card>
   );
+}
+
+function preflightColor(status: string): string {
+  if (status === 'passed') return 'green';
+  if (status === 'warning') return 'gold';
+  if (status === 'blocked') return 'red';
+  return 'default';
 }
 
 function formatExecutionConfig(config: Record<string, unknown> | undefined): string {
