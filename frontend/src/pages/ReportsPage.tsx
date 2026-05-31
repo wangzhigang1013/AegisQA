@@ -41,10 +41,22 @@ export function ReportsPage() {
   const [pendingDiagnosticAction, setPendingDiagnosticAction] = useState<string | null>(null);
   const [selectedBadcaseKeys, setSelectedBadcaseKeys] = useState<Key[]>([]);
   const [badcasePage, setBadcasePage] = useState(1);
+  const [scorePage, setScorePage] = useState(1);
   const badcasePageSize = 5;
+  const scorePageSize = 4;
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
-  const scoreAnalyticsQuery = useQuery({ queryKey: ['score-analytics'], queryFn: api.scoreAnalytics });
   const selectedTask = tasksQuery.data?.find((task) => task.task_id === selectedTaskId) ?? tasksQuery.data?.[0] ?? null;
+  const scoreAnalyticsQuery = useQuery({
+    queryKey: ['score-analytics', selectedTask?.dataset_id, selectedTask?.workflow_id, scorePage, scorePageSize],
+    queryFn: () =>
+      api.scoreAnalytics({
+        dataset_id: selectedTask?.dataset_id,
+        workflow_id: selectedTask?.workflow_id,
+        page: scorePage,
+        pageSize: scorePageSize,
+      }),
+    enabled: Boolean(selectedTask?.task_id),
+  });
   const reportQuery = useQuery({
     queryKey: ['task-report', selectedTask?.task_id, badcasePage, badcasePageSize],
     queryFn: () => api.taskReport(selectedTask?.task_id ?? '', { badcasePage, badcasePageSize }),
@@ -74,9 +86,14 @@ export function ReportsPage() {
   function changeSelectedTask(nextTaskId: string) {
     setSelectedTaskId(nextTaskId);
     setBadcasePage(1);
+    setScorePage(1);
     setSelectedBadcaseKeys([]);
     setSearchParams(nextTaskId ? { task_id: nextTaskId } : {});
   }
+
+  useEffect(() => {
+    setScorePage(1);
+  }, [selectedTask?.dataset_id, selectedTask?.workflow_id]);
 
   function upsertReportExportRequest(request: ReportExportRequest) {
     queryClient.setQueryData<ReportExportRequest[]>(['report-export-requests', request.task_id], (current = []) =>
@@ -557,7 +574,13 @@ export function ReportsPage() {
                 <Table
                   size="small"
                   rowKey="task_id"
-                  pagination={{ pageSize: 4 }}
+                  pagination={{
+                    current: scoreAnalytics?.pagination?.page ?? scorePage,
+                    pageSize: scoreAnalytics?.pagination?.page_size ?? scorePageSize,
+                    total: scoreAnalytics?.pagination?.total_items ?? scoreAnalytics?.trend.length ?? 0,
+                    showSizeChanger: false,
+                    onChange: (page) => setScorePage(page),
+                  }}
                   dataSource={scoreAnalytics?.trend ?? []}
                   columns={[
                     { title: '任务', dataIndex: 'task_name', render: (value, record) => value ?? record.task_id },

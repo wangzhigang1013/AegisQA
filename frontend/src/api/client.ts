@@ -116,7 +116,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  scoreAnalytics: () => request<ScoreAnalytics>('/score-analytics'),
+  scoreAnalytics: (filters: { dataset_id?: string; workflow_id?: string; status?: string; page?: number; pageSize?: number } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return;
+      query.set(key === 'pageSize' ? 'page_size' : key, String(value));
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<ScoreAnalytics>(`/score-analytics${suffix}`);
+  },
   experiments: (filters: { dataset_id?: string; workflow_id?: string } = {}) => {
     const query = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => {

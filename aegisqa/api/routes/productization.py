@@ -136,8 +136,21 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         return scan
 
     @app.get("/score-analytics")
-    def get_score_analytics() -> dict[str, Any]:
-        return _build_score_analytics(_list_records(ctx.store, "tasks"), ctx.runner)
+    def get_score_analytics(
+        dataset_id: str | None = Query(default=None),
+        workflow_id: str | None = Query(default=None),
+        status: str | None = Query(default=None),
+        page: int | None = Query(default=None, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+    ) -> dict[str, Any]:
+        tasks = _list_records(ctx.store, "tasks")
+        if dataset_id:
+            tasks = [task for task in tasks if task.get("dataset_id") == dataset_id]
+        if workflow_id:
+            tasks = [task for task in tasks if task.get("workflow_id") == workflow_id]
+        if status:
+            tasks = [task for task in tasks if task.get("status") == status]
+        return _build_score_analytics(tasks, ctx.runner, page=page, page_size=page_size)
 
     @app.post("/experiments/from-run")
     def create_experiment_from_run(request: ExperimentFromRunRequest) -> dict[str, Any]:

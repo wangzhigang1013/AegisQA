@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Repair Task Server Pagination”已完成并通过全量验证。本批次继续优化报告诊断后的修复闭环入口：`GET /repair-tasks` 无分页参数时保持旧数组响应，带 `page/page_size` 时返回 `{ items, pagination }`，并支持 `status` 与 `source_task_id` 过滤后分页；React 修复任务工作台主表已改为服务端分页，状态/来源任务筛选变化回到第 1 页。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Score Analytics Scope Pagination”已完成并通过全量验证。本批次继续优化报告中心的任务复盘准确性：`GET /score-analytics` 支持按 `dataset_id`、`workflow_id`、`status` 过滤，并在带 `page/page_size` 时返回趋势分页元数据；React 报告中心改为按当前选中 Task 的 Dataset + Workflow 作用域请求趋势，避免不同业务线或不同 Workflow 的历史任务混在一起。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -82,6 +82,7 @@
 - Annotation Queue 已新增批量审核接口和前端多选审核弹窗，支持一次性设置人工标签、说明和 Golden 回流；审核记录会保留 reviewer、reviewed_at、source_task_id，并同步生成 Golden 候选和 Assertion 候选资产。
 - CI Gate 已新增评估历史记录，`POST /ci-gates/evaluate` 会保存 evaluation record，`GET /ci-gates/evaluations` 支持按 config、task、run 过滤；CI Gate 页面展示历史趋势、阻断次数、通过次数和具体阻断原因。
 - CI Gate 评估历史已支持服务端分页，旧数组响应保持兼容；分页响应额外返回基于筛选后全量历史的 summary，React 评估历史表翻页会请求后端。
+- Score Analytics 已支持 Dataset、Workflow、状态过滤和服务端分页；报告中心按当前任务作用域请求同 Dataset + Workflow 的趋势，summary 保持基于筛选后全量历史，趋势表只加载当前页。
 - Experiment 快照已补齐 Dataset/Workflow 元数据、延迟指标和失败分布；Experiment 页面支持 Dataset/Workflow 过滤，并新增 A/B 对比面板展示通过率、Badcase、P95 耗时、成本和失败分布差异。
 - README 已把主启动路径明确为 FastAPI + React，并将 Streamlit 保留为 legacy demo；文档明确 Task 是用户主对象，Run 是底层执行 Attempt。
 - 治理页已移除容易误导的 MySQL/Redis/Celery 状态清单，改为指向 README 和 PRD 验收矩阵的生产适配边界提示。
@@ -123,6 +124,14 @@
 
 ## 最近验证
 
+- `python -m pytest tests\test_risk_analytics_hardening.py -q -k "score_analytics"`：先 RED 后 GREEN，最终 2 passed，确认 `/score-analytics` 过滤、分页、legacy 响应和 summary 不受当前页截断。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "Score Analytics"`：先 RED 后 GREEN，最终 2 passed，确认报告中心按当前任务 Dataset + Workflow 请求趋势，并携带 `page=1&page_size=4`。
+- `python -m pytest -q`：103 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：6 个测试文件，82 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
+- `cd frontend && npm run build`：通过，ReportsPage chunk 正常生成。
+- `cd frontend && npm run e2e`：8 passed，主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
+- `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - `python -m pytest tests\test_task_flow_optimization.py -q -k "repair_tasks_support_server_side_status_filter"`：先 RED 后 GREEN，最终 1 passed，确认 Repair Task 分页响应、legacy 数组响应和状态筛选后分页。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台列表使用服务端分页"`：先 RED 后 GREEN，最终 1 passed，确认点击第 2 页会请求 `page=2&page_size=8`，状态筛选会请求 `status=resolved&page=1`。
 - `python -m pytest tests\test_task_flow_optimization.py -q -k "repair_task"`：13 passed，确认修复任务创建、状态流转、动作闭环、修复树、指派、字段计划、参数 diff、版本对比、候选沉淀和新增分页兼容。
@@ -426,6 +435,35 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Score Analytics Scope Pagination
+
+- 改动摘要：报告中心的跨任务趋势从“全量任务混合趋势”升级为“当前任务同 Dataset + Workflow 作用域趋势”；后端 `GET /score-analytics` 支持 `dataset_id`、`workflow_id`、`status` 过滤和 `page/page_size` 服务端分页，不带分页参数时继续返回旧结构；前端趋势表改为受控分页，翻页请求后端。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_risk_analytics_hardening.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/superpowers/plans/2026-06-01-score-analytics-scope-pagination.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_risk_analytics_hardening.py -q -k "score_analytics"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Score Analytics"`
+- 测试结果：
+  - 后端定向：2 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端定向：2 passed。
+  - 后端全量：103 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端全量：6 个测试文件，82 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
+  - 前端 build：通过。
+  - Playwright E2E：8 passed。
+  - `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
+- 下一步：继续优化报告中心的趋势可解释性，例如增加 Dataset/Workflow 作用域提示、质量退化 drill-down 和按场景分层趋势。
 
 ### 2026-06-01 Repair Task Server Pagination
 

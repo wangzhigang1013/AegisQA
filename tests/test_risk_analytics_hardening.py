@@ -115,6 +115,45 @@ def test_score_analytics_returns_task_trends_and_regressions(tmp_path: Path) -> 
     assert "regressions" in payload
 
 
+def test_score_analytics_supports_scope_filter_and_trend_pagination(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "score_scope.jsonl"
+    _write_jsonl(data_path, _default_rows())
+    dataset = client.post(
+        "/datasets/from-path",
+        json={"name": "同域趋势数据集", "path": str(data_path), "golden": True, "label_field": "expected_label"},
+    ).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload("同域趋势 Workflow")}).json()
+    for index in range(6):
+        task = client.post(
+            "/tasks",
+            json={
+                "name": f"同域趋势任务 {index}",
+                "dataset_id": dataset["dataset_id"],
+                "dataset_version": dataset["version"],
+                "workflow_version_id": workflow["version_id"],
+            },
+        ).json()
+        client.post(f"/tasks/{task['task_id']}/execute")
+
+    payload = client.get(
+        "/score-analytics",
+        params={"dataset_id": dataset["dataset_id"], "workflow_id": workflow["workflow_id"], "status": "completed", "page": 2, "page_size": 2},
+    ).json()
+
+    assert payload["summary"]["task_count"] == 6
+    assert payload["pagination"] == {"page": 2, "page_size": 2, "total_items": 6, "total_pages": 3}
+    assert len(payload["trend"]) == 2
+    assert {item["dataset_id"] for item in payload["trend"]} == {dataset["dataset_id"]}
+    assert {item["workflow_id"] for item in payload["trend"]} == {workflow["workflow_id"]}
+
+    missing_scope = client.get("/score-analytics", params={"dataset_id": "dataset-missing", "page": 1, "page_size": 2}).json()
+    assert missing_scope["summary"]["task_count"] == 0
+    assert missing_scope["pagination"]["total_items"] == 0
+    assert missing_scope["trend"] == []
+
+
 def test_task_report_returns_budget_status(tmp_path: Path) -> None:
     client, _, _, task = _seed_executed_task(tmp_path, cost_budget=0.0001)
 

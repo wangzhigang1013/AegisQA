@@ -1451,7 +1451,23 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/ci-gates/evaluate')) {
         return jsonResponse({ status: 'blocking', blocking: true, reasons: ['payment 场景通过率低于门禁'], evaluated_at: '2026-05-31T00:00:00Z' });
       }
-      if (url.endsWith('/score-analytics')) {
+      if (url.includes('/score-analytics')) {
+        const parsed = new URL(url, 'http://localhost');
+        if (parsed.searchParams.has('page')) {
+          const page = Number(parsed.searchParams.get('page') ?? 1);
+          const pageSize = Number(parsed.searchParams.get('page_size') ?? demoScoreAnalytics.trend.length);
+          const start = (page - 1) * pageSize;
+          return jsonResponse({
+            ...demoScoreAnalytics,
+            trend: demoScoreAnalytics.trend.slice(start, start + pageSize),
+            pagination: {
+              page,
+              page_size: pageSize,
+              total_items: demoScoreAnalytics.trend.length,
+              total_pages: Math.ceil(demoScoreAnalytics.trend.length / pageSize),
+            },
+          });
+        }
         return jsonResponse(demoScoreAnalytics);
       }
       if (url.endsWith('/judge-audits/trends')) {
@@ -2692,6 +2708,24 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText('prompt_injection')).toBeInTheDocument();
     expect(screen.getByText('pii_leakage')).toBeInTheDocument();
     expect(screen.getByText('添加 Prompt Injection 断言')).toBeInTheDocument();
+  });
+
+  it('报告中心 Score Analytics 使用当前任务作用域和服务端分页', async () => {
+    await renderWorkbench('/reports?task_id=task-demo');
+
+    await waitFor(() => {
+      const requests = vi.mocked(globalThis.fetch).mock.calls.map(([input]) => String(input));
+      expect(
+        requests.some(
+          (request) =>
+            request.includes('/score-analytics') &&
+            request.includes('dataset_id=dataset-demo') &&
+            request.includes('workflow_id=wf-demo') &&
+            request.includes('page=1') &&
+            request.includes('page_size=4'),
+        ),
+      ).toBe(true);
+    });
   });
 
   it('修复任务工作台支持查看证据、领取和完成', async () => {

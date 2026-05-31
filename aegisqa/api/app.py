@@ -1025,7 +1025,13 @@ def _build_red_team_scan(task: dict[str, Any] | None, run: RunRecord) -> dict[st
     }
 
 
-def _build_score_analytics(tasks: list[dict[str, Any]], runner: WorkflowRunner) -> dict[str, Any]:
+def _build_score_analytics(
+    tasks: list[dict[str, Any]],
+    runner: WorkflowRunner,
+    *,
+    page: int | None = None,
+    page_size: int = 20,
+) -> dict[str, Any]:
     """构建跨任务质量趋势。
 
     Task 是用户主对象，因此趋势按 Task 聚合；Run 只作为底层执行证据读取。
@@ -1063,7 +1069,8 @@ def _build_score_analytics(tasks: list[dict[str, Any]], runner: WorkflowRunner) 
     regressions = _detect_score_regressions(trend)
     task_count = len(trend)
     average_pass_rate = sum(float(item["pass_rate"]) for item in trend) / task_count if task_count else 0.0
-    return {
+    visible_trend = list(reversed(trend))
+    payload: dict[str, Any] = {
         "summary": {
             "task_count": task_count,
             "average_pass_rate": average_pass_rate,
@@ -1071,9 +1078,23 @@ def _build_score_analytics(tasks: list[dict[str, Any]], runner: WorkflowRunner) 
             "badcase_count": sum(int(item["badcase_count"]) for item in trend),
             "regression_count": len(regressions),
         },
-        "trend": list(reversed(trend)),
+        "trend": visible_trend,
         "regressions": regressions,
     }
+    if page is not None:
+        # summary 仍基于过滤后的全量趋势，trend 只返回当前页，避免前端为了分页拉取所有历史任务。
+        total_items = len(visible_trend)
+        safe_page = max(page, 1)
+        safe_page_size = min(max(page_size, 1), 100)
+        start = (safe_page - 1) * safe_page_size
+        payload["trend"] = visible_trend[start : start + safe_page_size]
+        payload["pagination"] = {
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "total_items": total_items,
+            "total_pages": ceil(total_items / safe_page_size) if total_items else 0,
+        }
+    return payload
 
 
 def _build_judge_audit_trends(audits: list[StoredJudgeAudit]) -> dict[str, Any]:
