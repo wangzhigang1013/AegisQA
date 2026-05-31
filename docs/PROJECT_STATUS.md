@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Report Page Test 拆分跟进”已完成并通过全量验证。本批次沿用 `workbenchTestHarness.tsx`，把报告中心 10 条测试迁移到独立文件，让 `App.test.tsx` 继续聚焦主工作台和剩余页面入口。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Workflow 字段流转与 Skill 参数深度优化”已完成并通过全量验证。本批次聚焦用户真实使用 Workflow 时最容易断裂的两点：字段映射必须能输入自定义路径并随草稿保存回放，Skill 的 `config_schema` 必须能在画布 Inspector 中变成可编辑参数表单，而不是只靠 JSON 黑盒。
 
 ## 当前已完成
 
@@ -76,6 +76,8 @@
 - 任务详情已抽成驾驶舱组件，按概览、样本、Trace、Badcase、Attempts、参数组织，参数页可查看任务冻结参数、Skill 参数来源和 Secret 脱敏说明。
 - 任务详情 Badcase 页签已增加分页，默认每页 8 条，避免大任务在执行中心详情抽屉中一次性渲染全部坏例。
 - Workflow Inspector 已从纯 JSON 编辑升级为字段映射表格，字段路径可从 Dataset `field_paths`、字段 schema 和上游节点 `output_mapping` 自动推导，并保留 JSON 高级模式。
+- Workflow Inspector 字段映射路径已从只读候选选择升级为可编辑输入框，支持填写尚未出现在候选列表中的自定义路径，例如 `row.prompt_text`，并已用 Playwright 覆盖保存草稿和重新打开回放。
+- Workflow Inspector 已新增 Skill 参数表单，会按当前 Skill 的 `config_schema` 渲染 string/number/integer/boolean/enum/object/array 基础控件，并把 `model`、`temperature`、`threshold` 等配置写入 Workflow 草稿 graph。
 - Workflow Inspector 已新增“参数预览”Tab，可选择 Dataset Version 调用 `/workflow-graphs/parameter-preview`，展示解析后配置和 default/workflow_config/task_override/expression/secret_ref 来源。
 - Task Report 已新增 `segments` 和 `recommendations`，支持按 `scene`、`expected_label`、`model_version`、`prompt_version` 统计样本量、通过率、Badcase，并给出 Annotation、Golden 候选、CI Gate 建议。
 - 报告中心已新增“分层分析”组件，围绕低通过率分组展示分组指标和下一步动作建议，避免只看总体通过率。
@@ -133,6 +135,13 @@
 
 ## 最近验证
 
+- `cd frontend && npm test -- src/test/WorkflowDesignerPage.test.tsx`：先 RED 后 GREEN，最终 1 passed，确认 Skill 参数表单按 `config_schema` 渲染并写入草稿保存 payload。
+- `cd frontend && npm test -- src/test/WorkflowDesignerPage.test.tsx src/test/App.test.tsx -t "Workflow"`：2 个测试文件，12 passed，确认字段映射输入化、参数表单和既有 Workflow 交互没有回归。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：6 passed，覆盖字段映射自定义路径保存回放、节点新增、连线、删除、撤销/重做、保存、试运行、校验和发布。
+- `cd frontend && npm test`：首次全量出现 2 个测试稳定性失败，根因是全量并行下 lazy route 超过默认 1 秒等待，以及报告诊断/修复/分层门禁三个动作塞在单个 10 秒测试内；修复后复跑通过，最终 9 个测试文件、89 passed。
+- `cd frontend && npm run build`：通过，`WorkflowDesignerPage` chunk 正常生成。
+- `cd frontend && npm run e2e`：9 passed，主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心默认展示任务列表并可以创建任务"`：先 RED 后 GREEN，最终 1 passed，确认执行中心创建任务主链路不再触发 `useForm` 未连接警告。
 - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`：8 passed，确认任务创建向导的必选校验、Preflight、模板填充、风险确认、参数提交和关闭生命周期稳定。
 - `cd frontend && npm test -- src/test/App.test.tsx`：70 passed，`App.test.tsx` 单跑测试体耗时约 91.05s；Vitest 环境 motion 降噪后主集成文件仍通过。
@@ -473,6 +482,38 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Workflow 字段流转与 Skill 参数深度优化
+
+- 改动摘要：补齐 Workflow 画布的深度可用性缺口。字段映射路径从 Ant Design Select 改为可编辑输入框 + datalist 建议，支持用户直接填写 `row.prompt_text` 这类自定义路径，并通过 Playwright 验证保存草稿、回到 Workflow 市场、重新进入画布后仍能回放。Skill 节点 Inspector 新增 `SkillConfigEditor`，按 Skill `config_schema` 渲染参数表单，`model`、`temperature` 等参数会写入草稿保存 payload，避免用户只能编辑 JSON。
+- 变更文件：
+  - `frontend/src/pages/workflowDesigner/FieldMappingEditor.tsx`
+  - `frontend/src/pages/workflowDesigner/SkillConfigEditor.tsx`
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/test/WorkflowDesignerPage.test.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/ReportsPage.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `frontend/e2e/workflow-designer.spec.ts`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/WorkflowDesignerPage.test.tsx`
+  - `cd frontend && npm test -- src/test/WorkflowDesignerPage.test.tsx src/test/App.test.tsx -t "Workflow"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - RED：新增 Playwright 字段映射用例最初失败，确认自定义路径无法可靠随草稿保存回放。
+  - RED：新增 `WorkflowDesignerPage.test.tsx` 最初失败，确认 Inspector 没有 `Skill 参数` schema 表单。
+  - GREEN：字段映射定向 E2E 1 passed；Workflow 画布 E2E 6 passed；Workflow 定向组件测试 12 passed；`npm run typecheck` 通过。
+  - 全量：后端 104 passed，前端 9 个测试文件 89 passed，构建通过，Playwright 9 passed；后端仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 稳定性修复：首次 `npm test` 全量发现 lazy route 等待和报告诊断长测试在并行压力下超时，已把路由加载等待改为条件式 8 秒上限，并把报告诊断动作拆成三条独立测试后复跑通过。
+- 下一步：继续优化 Workflow 画布组件拆分、字段映射发布前校验建议和 Skill 参数表单的 schema 复杂联动能力。
 
 ### 2026-06-01 Report Page Test 拆分跟进
 

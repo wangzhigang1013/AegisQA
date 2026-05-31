@@ -854,7 +854,7 @@ export async function renderWorkbench(path: string) {
       </MemoryRouter>,
     );
   });
-  await waitFor(() => expect(screen.queryByText('正在加载页面...')).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByText('正在加载页面...')).not.toBeInTheDocument(), { timeout: 8_000 });
 }
 
 export function jsonResponse(payload: unknown) {

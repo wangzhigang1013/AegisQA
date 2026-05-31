@@ -44,16 +44,28 @@ describe('报告中心', () => {
     expect(screen.getByText('80')).toBeInTheDocument();
   });
 
-  it('报告中心支持诊断动作、修复任务和分层门禁', async () => {
+  it('报告中心支持从诊断加入人工审核队列', async () => {
     await renderWorkbench('/reports');
 
     expect(await screen.findByText('根因诊断')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '加入人工审核' }));
     expect(await screen.findByText(/诊断动作完成：已创建 1 条人工审核任务/)).toBeInTheDocument();
+  });
+
+  it('报告中心支持从诊断生成修复任务', async () => {
+    await renderWorkbench('/reports');
+
+    expect(await screen.findByText('根因诊断')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /生成修复任务/ }));
     expect(await screen.findByText(/已生成 1 个修复任务/)).toBeInTheDocument();
+  });
+
+  it('报告中心支持从分层分析生成 CI Gate 门禁', async () => {
+    await renderWorkbench('/reports');
+
+    expect(await screen.findByText('分层分析')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '生成分层门禁' }));
     expect(await screen.findByText(/CI Gate 即时评估完成：blocking/)).toBeInTheDocument();

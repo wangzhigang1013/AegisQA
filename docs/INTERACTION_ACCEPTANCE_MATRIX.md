@@ -9,6 +9,9 @@
 
 ## 最近一次交互验证
 
+- `cd frontend && npm test -- src/test/WorkflowDesignerPage.test.tsx`：先 RED 后 GREEN，最终 1 passed，确认 Workflow Inspector 会按 Skill `config_schema` 渲染参数表单，并把 `model`、`temperature` 写入草稿保存 payload。
+- `cd frontend && npm test -- src/test/WorkflowDesignerPage.test.tsx src/test/App.test.tsx -t "Workflow"`：2 个测试文件，12 passed，确认字段映射输入化、参数表单和既有 Workflow 交互没有回归。
+- `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：6 passed，新增覆盖字段映射自定义路径 `row.prompt_text` 编辑、保存草稿、市场重新打开后的回放。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心默认展示任务列表并可以创建任务"`：先 RED 后 GREEN，最终 1 passed，确认创建任务主链路不再输出 Ant Design `useForm` 未连接 warning。
 - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`：8 passed，覆盖创建任务向导必选校验、Preflight、模板填充、风险确认、参数提交和关闭生命周期。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`：5 passed，候选资产列表、批量治理、候选审批/草稿/复跑、晋升审批/baseline 和批量审批已拆成独立测试。
@@ -17,9 +20,9 @@
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：1 passed，覆盖报告中心 Admin 拒绝、重新申请、审批后导出和申请人撤销。
 - `python -m pytest tests\test_task_center_api.py -q -k viewer_can_export_task_report_after_admin_approval`：1 passed，覆盖 Viewer 申请导出审批、Reviewer 审批失败、Admin 审批成功、审批后授权导出和审计留痕。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：1 passed，覆盖报告中心导出审批申请、审批请求表、Admin 审批和带 `approval_request_id` 导出。
-- `npm test`：8 个测试文件、86 个前端交互/API client/图模型/任务创建向导/Preflight 创建门禁/关键参数签名新鲜度/Preflight ID 创建提交/Preflight 证据展示/执行参数模板/模板 ID 创建提交/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/参数预览/报告评测结论/报告根因诊断/Repair Task 生成、工作台、动作闭环、复跑对比、上下文修复建议、二级修复任务与修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、候选资产中心审批/拒绝/生成草稿/复跑优先级/批量复跑/复跑对比/三方指标展示/晋升建议/晋升审批/通过晋升后 baseline 与 CI 发布资产/baseline 应用、baseline 影响分析、baseline 回滚门禁、baseline 变更提醒确认、候选资产负责人工作量/批量指派/负责人容量限制/批量指派参数配置/终态候选归档/SLA 逾期升级/批量审批、Workflow 草稿创建/报告风险治理/Experiment/CI Gate/Annotation Queue/Judge 偏差趋势/治理边界和任务创建向导生命周期测试通过；`App.test.tsx` 已抽出共享 harness，修复任务工作台和报告中心已迁移到独立测试文件。
-- `npm run e2e`：8 个 Playwright E2E 通过，默认使用独立后端端口 8010 和 Vite `/api` 代理，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、删除后重连、键盘删除、保存草稿回放、试运行回填、校验、发布；报告页 E2E 已改为按“选择报告任务”语义标签打开任务下拉，不再依赖 Select 排列顺序。
-- `npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Workflow 画布 E2E 通过；曾发现草稿深链加载覆盖用户本地删除边状态，已通过加载态和单草稿缓存修复。
+- `npm test`：9 个测试文件、89 个前端交互/API client/图模型/任务创建向导/Workflow 深度交互/Preflight 创建门禁/关键参数签名新鲜度/Preflight ID 创建提交/Preflight 证据展示/执行参数模板/模板 ID 创建提交/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/Skill 参数表单/参数预览/报告评测结论/报告根因诊断/Repair Task 生成、工作台、动作闭环、复跑对比、上下文修复建议、二级修复任务与修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、候选资产中心审批/拒绝/生成草稿/复跑优先级/批量复跑/复跑对比/三方指标展示/晋升建议/晋升审批/通过晋升后 baseline 与 CI 发布资产/baseline 应用、baseline 影响分析、baseline 回滚门禁、baseline 变更提醒确认、候选资产负责人工作量/批量指派/负责人容量限制/批量指派参数配置/终态候选归档/SLA 逾期升级/批量审批、Workflow 草稿创建/报告风险治理/Experiment/CI Gate/Annotation Queue/Judge 偏差趋势/治理边界和任务创建向导生命周期测试通过；`App.test.tsx` 已抽出共享 harness，修复任务工作台、报告中心和 Workflow 深度交互已迁移到独立测试文件。
+- `npm run e2e`：9 个 Playwright E2E 通过，默认使用独立后端端口 8010 和 Vite `/api` 代理，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、删除后重连、键盘删除、自定义字段映射保存回放、保存草稿回放、试运行回填、校验、发布；报告页 E2E 已改为按“选择报告任务”语义标签打开任务下拉，不再依赖 Select 排列顺序。
+- `npm run e2e -- e2e/workflow-designer.spec.ts`：6 个 Workflow 画布 E2E 通过；曾发现草稿深链加载覆盖用户本地删除边状态，已通过加载态和单草稿缓存修复；本轮新增字段映射自定义路径保存回放验证。
 - SQLite 轻量仓储后端已通过 `tests/test_sqlite_store_adapter.py`，前端交互仍通过完整 Playwright；报告页 E2E 定位已收紧到任务摘要行，避免任务名同时出现在摘要和跨任务表格时触发严格模式误判。
 - 最终验收确认：生产适配状态已从治理页可见状态清单降级为文档边界提示，现有按钮矩阵仍覆盖全部用户可见主动作。
 - Headless Chrome CDP：实际打开 `http://127.0.0.1:5173`，验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
@@ -51,7 +54,7 @@
 | Workflow 画布 | 连线 | 可用，React Flow `onConnect` 写入当前 edges；Inspector 同时提供“可连接目标”按钮，便于选择下游节点并创建依赖线；删除下游连线后会立即出现可重连目标 | 前端画布状态 | `npm test` 和 Playwright E2E 覆盖创建连线、删除下游连线和删除后重连 |
 | Workflow 画布 | 删除节点/连线 | 可用，删除选中节点、Inspector 删除当前节点、键盘 Delete/Backspace 删除，或通过 Inspector 删除选中节点的下游连线，并同步画布状态 | 前端画布状态 | `npm test` 覆盖删除节点、键盘删除和删除下游连线；Playwright E2E 覆盖节点工具栏、键盘删除、删除选中节点和 `answer -> judge_a` 下游连线 |
 | Workflow 画布 | 撤销/重做 | 可用，支持节点新增、删除、Inspector 编辑、自动布局、连线的历史回退与恢复 | 前端画布状态 | `npm test` 和 Playwright E2E 覆盖新增 Join 后撤销/重做 |
-| Workflow 画布 | Inspector 编辑 | 可用，支持名称、类型、Skill、条件、字段映射表格、JSON 高级映射、配置和 Aggregator 聚合策略；字段路径可从 Dataset 和上游输出自动推导 | 前端画布状态、`GET /datasets` | `npm test` 覆盖 Aggregator 策略、字段路径推导和 Inspector 字段映射展示；类型检查覆盖 |
+| Workflow 画布 | Inspector 编辑 | 可用，支持名称、类型、Skill、条件、字段映射表格、JSON 高级映射、配置和 Aggregator 聚合策略；字段路径可从 Dataset 和上游输出自动推导，也可在输入框中填写尚未出现在候选列表里的自定义路径；Skill 节点会按 `config_schema` 渲染参数表单，并把配置写入草稿 graph | 前端画布状态、`GET /datasets`、`GET /skills` | `npm test` 覆盖 Aggregator 策略、字段路径推导、Inspector 字段映射展示和 Skill 参数保存 payload；Playwright E2E 覆盖自定义路径保存回放；类型检查覆盖 |
 | Workflow 画布 | 参数预览 | 可用，Inspector 内选择 Dataset Version 后调用后端参数预览，展示解析后配置、参数来源、表达式路径和 Secret 脱敏状态 | `POST /workflow-graphs/parameter-preview`、`GET /datasets` | `npm test` 覆盖选择数据集、调用预览和展示 `workflow_config` 来源 |
 | Workflow 画布 | 保存草稿 | 可用，新建或更新草稿，保存后回到 Workflow 市场，再打开仍保留名称与节点配置；保存成功会同步单草稿缓存，避免重新打开时读取旧 graph | `POST/PUT /workflow-drafts`、`GET /workflow-drafts/{draft_id}` | 后端契约测试与 Playwright E2E 覆盖 |
 | Workflow 画布 | 校验 | 可用，提交当前画布 graph；前端已抽出图模型转换，避免提交静态 demo graph | `POST /workflow-graphs/validate` | 前端图模型单测与 Playwright E2E 覆盖 |

@@ -210,8 +210,8 @@ describe('AegisQA 前端工作台', () => {
     await renderWorkbench('/workflows/designer/draft-test');
 
     expect(await screen.findByText('字段映射')).toBeInTheDocument();
-    expect(screen.getByText('row.question')).toBeInTheDocument();
-    expect(screen.getByText('context.answer')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('row.question')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('context.answer')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: '参数预览' }));
     fireEvent.mouseDown(screen.getByRole('combobox', { name: '选择参数预览数据集' }));

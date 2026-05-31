@@ -1,5 +1,5 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Input, Select, Space, Table, Typography } from 'antd';
+import { Button, Input, Space, Table, Typography } from 'antd';
 
 type MappingRow = {
   id: string;
@@ -63,15 +63,14 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
             title: '路径',
             dataIndex: 'path',
             render: (_, row) => (
-              <Select
+              <Input
                 aria-label={`字段路径 ${row.field}`}
-                showSearch
-                value={row.path || undefined}
+                value={row.path}
                 className="full-width-control"
+                list={pathListId(title, row.id)}
                 placeholder="选择 row/context/metrics 路径"
-                optionFilterProp="label"
-                onChange={(path) => updateRow(row, { path })}
-                options={options}
+                // 字段路径既可能来自当前 Dataset，也可能来自用户刚设计的上游输出；允许自由输入，避免保存成只读模板。
+                onChange={(event) => updateRow(row, { path: event.target.value })}
               />
             ),
           },
@@ -85,7 +84,14 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
           },
         ]}
       />
-      <Button icon={<PlusOutlined />} onClick={addRow}>
+      {rows.map((row) => (
+        <datalist key={row.id} id={pathListId(title, row.id)}>
+          {options.map((option) => (
+            <option key={option.value} value={option.value} />
+          ))}
+        </datalist>
+      ))}
+      <Button icon={<PlusOutlined />} aria-label={`${title} ${addButtonLabel}`} onClick={addRow}>
         {addButtonLabel}
       </Button>
     </Space>
@@ -114,4 +120,8 @@ function uniqueFieldName(rows: MappingRow[]) {
     field = `field_${index}`;
   }
   return field;
+}
+
+function pathListId(title: string, rowId: string) {
+  return `mapping-path-${title}-${rowId}`.replace(/[^a-zA-Z0-9_-]+/g, '-');
 }

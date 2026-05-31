@@ -48,6 +48,7 @@ import {
   type FlowNode,
 } from './workflowDesigner/graphModel';
 import { ParameterPreviewPanel } from './workflowDesigner/ParameterPreviewPanel';
+import { SkillConfigEditor } from './workflowDesigner/SkillConfigEditor';
 
 export function WorkflowDesignerPage() {
   return (
@@ -145,6 +146,7 @@ function WorkflowDesignerContent() {
   const graph = useMemo(() => buildWorkflowGraph(workflowName, nodes, edges), [workflowName, nodes, edges]);
   const selectedNode = selectedNodeId ? nodes.find((node) => node.id === selectedNodeId) ?? null : null;
   const selectedGraphNode = selectedNode?.data.graphNode ?? null;
+  const selectedSkill = selectedGraphNode?.skill_ref ? skills.find((skill) => skill.skill_id === selectedGraphNode.skill_ref) ?? null : null;
   const fieldPathOptions = useMemo(() => buildAvailableFieldPaths(selectedDataset, graph, selectedGraphNode?.node_id), [selectedDataset, graph, selectedGraphNode?.node_id]);
   const selectedOutgoingEdges = selectedNodeId ? edges.filter((edge) => edge.source === selectedNodeId) : [];
   const connectableTargets = selectedNodeId
@@ -612,6 +614,16 @@ function WorkflowDesignerContent() {
                               ]}
                             />
                           </div>
+                        ) : null}
+                        {selectedGraphNode.node_type === 'skill' ? (
+                          <>
+                            <Divider />
+                            <SkillConfigEditor
+                              skill={selectedSkill}
+                              value={selectedGraphNode.config ?? {}}
+                              onChange={(config) => updateSelectedNode({ config })}
+                            />
+                          </>
                         ) : null}
                         <Divider />
                         <Typography.Text strong>字段映射</Typography.Text>

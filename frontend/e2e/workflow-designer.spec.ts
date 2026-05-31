@@ -83,6 +83,26 @@ test('Workflow 草稿保存后可以从市场重新打开并保留配置', async
   await expect(page.locator('input[value="生成回答已保存"]')).toBeVisible();
 });
 
+test('Workflow 字段映射支持自定义路径编辑并随草稿保存回放', async ({ page }) => {
+  const workflowName = `E2E 字段映射 ${Date.now()}`;
+  await page.goto('/workflows');
+  await page.getByRole('button', { name: /新建 Workflow/ }).click();
+
+  await page.locator('input[value="未命名 Workflow"]').fill(workflowName);
+  await page.getByLabel('映射字段 prompt').fill('prompt_text');
+  await page.getByLabel('字段路径 prompt_text').fill('row.prompt_text');
+  await expect(page.locator('input[value="row.prompt_text"]')).toBeVisible();
+
+  await page.getByRole('button', { name: /保存草稿/ }).click();
+  await expect(page.getByText('Workflow 资产市场')).toBeVisible();
+  await page.getByPlaceholder('搜索 Workflow 名称').fill(workflowName);
+  await page.getByRole('row', { name: new RegExp(workflowName) }).getByRole('button', { name: /进入画布/ }).click();
+
+  await expect(page.locator(`input[value="${workflowName}"]`)).toBeVisible();
+  await expect(page.locator('input[value="prompt_text"]')).toBeVisible();
+  await expect(page.locator('input[value="row.prompt_text"]')).toBeVisible();
+});
+
 test('Workflow 试运行会使用所选数据集并回填结果', async ({ page }) => {
   const datasetName = `aaa_e2e_dryrun_${Date.now()}`;
   await page.request.post(apiPath('/datasets/source-materialize'), {
