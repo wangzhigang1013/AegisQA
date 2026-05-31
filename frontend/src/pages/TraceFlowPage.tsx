@@ -69,6 +69,7 @@ export function TraceFlowPage() {
                 <List
                   loading={traceQuery.isLoading}
                   dataSource={traceFlow.items}
+                  pagination={{ pageSize: 8, showSizeChanger: false }}
                   renderItem={(item) => (
                     <List.Item className={item.item_id === selectedItem?.item_id ? 'selected-list-row' : ''} onClick={() => setSelectedItemId(item.item_id)}>
                       <List.Item.Meta

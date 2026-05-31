@@ -1814,6 +1814,30 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/workflow_config/)).toBeInTheDocument();
   });
 
+  it('Trace Flow 样本列表分页，避免大任务一次性渲染全部样本', async () => {
+    const manyTraceItems = Array.from({ length: 12 }, (_, index) => ({
+      ...demoTraceFlow.items[0],
+      item_id: `trace-item-${index}`,
+      row_id: `row-${index}`,
+      row_index: index,
+      row: { question: `问题 ${index}`, reference: 'AegisQA' },
+    }));
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/task-demo/trace-flow')) {
+        return jsonResponse({ ...demoTraceFlow, items: manyTraceItems });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/tasks/task-demo/trace');
+
+    expect(await screen.findByText('trace-item-0')).toBeInTheDocument();
+    expect(screen.getByText('trace-item-7')).toBeInTheDocument();
+    expect(screen.queryByText('trace-item-8')).not.toBeInTheDocument();
+  });
+
   it('Trace Tree 独立页面展示 Item 到 Skill Step 的调用树', async () => {
     await renderWorkbench('/tasks/task-demo/trace-tree');
 
