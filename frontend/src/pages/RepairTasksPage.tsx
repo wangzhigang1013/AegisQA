@@ -89,6 +89,8 @@ export function RepairTasksPage() {
       setNotice(summary);
       void queryClient.invalidateQueries({ queryKey: ['annotation-queue'] });
       void queryClient.invalidateQueries({ queryKey: ['ci-gates'] });
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      void queryClient.invalidateQueries({ queryKey: ['task-report', payload.repair_task.source_task_id] });
     },
     onError: (error) => setNotice(`动作执行失败：${formatApiError(error)}`),
   });
@@ -247,6 +249,14 @@ export function RepairTasksPage() {
                     onClick={() => runAction(record, 'evaluate_ci_gate')}
                   >
                     CI Gate 复测
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    loading={actionMutation.isPending}
+                    onClick={() => runAction(record, 'retest_and_compare')}
+                  >
+                    复跑对比
                   </Button>
                   <Button size="small" href={`/reports?task_id=${record.source_task_id}&panel=parameter-governance`}>
                     参数治理

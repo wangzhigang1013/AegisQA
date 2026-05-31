@@ -40,7 +40,7 @@ from aegisqa.api.app import (
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
 from aegisqa.engine.runner import RunRecord, RunRequest
-from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments
+from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments, compare_reports
 from aegisqa.reports.diagnostics import build_task_diagnostics
 from aegisqa.reports.trace_flow import build_task_trace_flow
 
@@ -176,6 +176,8 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             result = _repair_action_seed_annotation_queue(ctx, record, request)
         elif action == "evaluate_ci_gate":
             result = _repair_action_evaluate_ci_gate(ctx, record)
+        elif action == "retest_and_compare":
+            result = _repair_action_retest_and_compare(ctx, record)
         elif action in {"open_trace_flow", "open_parameter_governance", "open_dataset_lineage"}:
             result = _repair_action_link_target(record, action)
         else:
@@ -183,7 +185,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 "REPAIR_TASK_ACTION_UNSUPPORTED",
                 "当前修复任务动作暂不支持。",
                 status_code=400,
-                details={"action": action, "supported_actions": ["seed_annotation_queue", "evaluate_ci_gate", "open_trace_flow", "open_parameter_governance", "open_dataset_lineage"]},
+                details={"action": action, "supported_actions": ["seed_annotation_queue", "evaluate_ci_gate", "retest_and_compare", "open_trace_flow", "open_parameter_governance", "open_dataset_lineage"]},
             )
         updated_record = _append_repair_task_action(ctx, record, action, result)
         return {"action": action, "result": result, "repair_task": updated_record}
@@ -683,6 +685,85 @@ def _repair_action_evaluate_ci_gate(ctx: RouteContext, repair_task: dict[str, An
     return evaluation
 
 
+def _repair_action_retest_and_compare(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+    """从修复任务发起一次复跑，并把复跑前后指标差异写成可解释结果。"""
+
+    task = _get_record(ctx.store, "tasks", str(repair_task.get("source_task_id")))
+    _ensure_task_can_create_attempt(task)
+    previous_run = ctx.runner.get_run(str(repair_task.get("source_run_id") or task["run_id"]))
+    previous_report = aggregate_run_report(previous_run)
+    workflow = ctx.workflow_service.get(task["workflow_version_id"])
+    execution_config = task.get("execution_config", {})
+    new_run = ctx.runner.create_run(
+        RunRequest(
+            workflow=workflow,
+            dataset_id=task["dataset_id"],
+            dataset_version=task["dataset_version"],
+            chunk_size=execution_config.get("chunk_size"),
+            concurrency=execution_config.get("concurrency"),
+            sample_repeat_times=execution_config.get("sample_repeat_times"),
+            task_config_snapshot={
+                "evaluation_goal": task.get("evaluation_goal"),
+                "quality_gate": task.get("quality_gate", {}),
+                "skill_overrides": execution_config.get("skill_overrides", {}),
+                "source_repair_task_id": repair_task["repair_task_id"],
+            },
+        )
+    )
+    attempts = _task_attempts(task)
+    attempt_index = len(attempts) + 1
+    task.update(
+        {
+            "run_id": new_run.run_id,
+            "status": new_run.status,
+            "total_items": new_run.total_items,
+            "completed_items": 0,
+            "failed_items": 0,
+            "pass_rate": 0.0,
+            "badcase_count": 0,
+            "current_attempt": attempt_index,
+            "attempts": attempts + [_build_attempt_record(new_run, attempt_index)],
+            "updated_at": _now(),
+        }
+    )
+    _save_record(ctx.store, "tasks", "task_id", task)
+    ctx.audit_service.record(
+        actor="api",
+        action="task.attempt.create_from_repair",
+        target=task["task_id"],
+        detail={"run_id": new_run.run_id, "attempt": attempt_index, "repair_task_id": repair_task["repair_task_id"]},
+    )
+
+    executed_run = ctx.runner.execute_run(new_run.run_id)
+    task = _refresh_task_from_run(ctx.store, task, executed_run)
+    new_report = aggregate_run_report(executed_run)
+    comparison = compare_reports(previous_report, new_report)
+    comparison["badcase_count_delta"] = comparison.get("badcase_delta", 0)
+    comparison_status = _repair_retest_status(comparison)
+    return {
+        "status": executed_run.status,
+        "source_task_id": task["task_id"],
+        "previous_run_id": previous_run.run_id,
+        "new_run_id": executed_run.run_id,
+        "current_attempt": task.get("current_attempt", attempt_index),
+        "comparison_status": comparison_status,
+        "comparison": comparison,
+    }
+
+
+def _repair_retest_status(comparison: dict[str, Any]) -> str:
+    pass_rate_delta = float(comparison.get("pass_rate_delta") or 0)
+    error_rate_delta = float(comparison.get("error_rate_delta") or 0)
+    badcase_delta = int(comparison.get("badcase_delta") or comparison.get("badcase_count_delta") or 0)
+    if pass_rate_delta > 0 or error_rate_delta < 0 or badcase_delta < 0:
+        if pass_rate_delta < 0 or error_rate_delta > 0 or badcase_delta > 0:
+            return "mixed"
+        return "improved"
+    if pass_rate_delta < 0 or error_rate_delta > 0 or badcase_delta > 0:
+        return "regressed"
+    return "unchanged"
+
+
 def _repair_action_link_target(repair_task: dict[str, Any], action: str) -> dict[str, Any]:
     task_id = str(repair_task.get("source_task_id"))
     link_map = {
@@ -718,6 +799,8 @@ def _repair_action_summary(action: str, result: dict[str, Any]) -> str:
         return f"已创建 {result.get('created_count', 0)} 个审核样本。"
     if action == "evaluate_ci_gate":
         return f"CI Gate 复测结果：{result.get('status', 'unknown')}。"
+    if action == "retest_and_compare":
+        return f"复跑完成，质量状态 {result.get('comparison_status', 'unknown')}。"
     if result.get("url"):
         return f"已打开证据入口：{result['url']}"
     return "动作已记录。"

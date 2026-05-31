@@ -547,6 +547,19 @@ describe('AegisQA 前端工作台', () => {
             repair_task: { ...demoRepairTask, action_history: [{ action: 'seed_annotation_queue', status: 'created', result_summary: '已创建 2 个审核样本。' }] },
           });
         }
+        if (body.action === 'retest_and_compare') {
+          return jsonResponse({
+            action: 'retest_and_compare',
+            result: {
+              status: 'completed',
+              previous_run_id: 'run-demo',
+              new_run_id: 'run-demo-2',
+              comparison_status: 'unchanged',
+              comparison: { pass_rate_delta: 0, badcase_count_delta: 0 },
+            },
+            repair_task: { ...demoRepairTask, action_history: [{ action: 'retest_and_compare', status: 'completed', result_summary: '复跑完成，质量状态 unchanged。' }] },
+          });
+        }
         return jsonResponse({
           action: 'evaluate_ci_gate',
           result: { status: 'blocked', blocking_failures: 1, target: { kind: 'task', id: 'task-demo' } },
@@ -1305,6 +1318,15 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/CI Gate 复测结果：blocked/)).toBeInTheDocument();
     expect(screen.getByText('seed_annotation_queue')).toBeInTheDocument();
     expect(screen.getByText('evaluate_ci_gate')).toBeInTheDocument();
+  });
+
+  it('修复任务工作台支持复跑并展示 Attempt 对比结果', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    fireEvent.click(await screen.findByRole('button', { name: /复跑对比/ }));
+
+    expect(await screen.findByText(/复跑完成，质量状态 unchanged/)).toBeInTheDocument();
+    expect(screen.getByText('retest_and_compare')).toBeInTheDocument();
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {

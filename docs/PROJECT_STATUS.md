@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Repair Task Action Loop”已完成。本批次把修复任务从“可管理工作项”继续升级为“可触发后续修复动作并留下证据”的闭环入口：后端新增 `POST /repair-tasks/{repair_task_id}/actions`，支持从修复任务直接发起 Annotation Queue 和 CI Gate 复测；前端修复任务工作台新增“发起人工审核”“CI Gate 复测”“参数治理”动作，并展示 `action_history`。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Repair Task Retest Loop”已完成。本批次把修复任务继续接到“修复后复跑并证明效果”的闭环：`POST /repair-tasks/{repair_task_id}/actions` 新增 `retest_and_compare`，会从来源任务创建新 Attempt、立即执行复跑、对比前后 RunReport，并把 `comparison_status`、指标差异和动作摘要写回 `action_history` / `last_action_result`。前端修复任务工作台新增“复跑对比”按钮，用户不用离开根因工单就能看到修复后质量是否 improved / unchanged / regressed。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -61,6 +61,7 @@
 - Task Report 已新增 `quality_decision` 和 `parameter_governance`，报告中心展示质量决策中心，后端参数治理 API 展示 Skill/Prompt 版本、模型参数、任务覆盖和 Secret 脱敏策略。
 - Repair Task 已从“报告页生成结果”升级为可管理工作台：`POST /repair-tasks/{repair_task_id}/start|resolve|reopen` 支持领取、完成、重开状态流转；React `/repair-tasks` 页面支持状态/来源任务筛选、查看证据、领取、完成、重开，并可跳回来源报告和 Trace。
 - Repair Task 已支持动作闭环：`POST /repair-tasks/{repair_task_id}/actions` 可执行 `seed_annotation_queue` 和 `evaluate_ci_gate`，动作结果写入 `action_history` 与 `last_action_result`；前端工作台可直接发起人工审核、CI Gate 复测并查看动作历史。
+- Repair Task 已支持复跑效果闭环：`retest_and_compare` 会基于来源任务创建新 Attempt、自动执行并对比前后报告，通过 `comparison_status` 标记 improved / mixed / unchanged / regressed；前端工作台新增“复跑对比”入口并刷新任务与报告缓存。
 - Workflow 市场进入画布时会把当前草稿写入 `['workflow-draft', draft_id]` 单草稿缓存；画布深链在草稿未加载时显示加载态，异常 graph 结构会给出中文错误提示而不是白屏。
 - Judge 审计已新增多 Judge 一致性 API 与前端弹窗，支持输入多个 Judge 输出并展示两两一致率。
 - 报告中心已新增跨任务 Score Analytics，按 Task 聚合任务数、平均通过率、Badcase、P95、估算成本和退化任务，避免只看单次任务报告。
@@ -72,12 +73,12 @@
 ## 最近验证
 
 - `python -m pytest tests\test_sqlite_store_adapter.py -q`：3 passed，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
-- `python -m pytest tests\test_task_flow_optimization.py -q`：4 passed，覆盖 Task Preflight、Repair Task 生成查询、领取/完成/重开状态流转，以及 Repair Task 发起 Annotation Queue 和 CI Gate 复测动作。
-- `python -m pytest -q`：通过，覆盖 69 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest tests\test_task_flow_optimization.py -q`：5 passed，覆盖 Task Preflight、Repair Task 生成查询、领取/完成/重开状态流转、Repair Task 发起 Annotation Queue / CI Gate 复测，以及修复后复跑 Attempt 与报告对比。
+- `python -m pytest -q`：通过，覆盖 70 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v11`，Run `run-a0392226decb` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`：2 passed，覆盖修复任务工作台查看证据、领取、完成、发起人工审核和 CI Gate 复测。
-- `cd frontend && npm test`：4 个测试文件、42 个测试通过。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`：3 passed，覆盖修复任务工作台查看证据、领取、完成、发起人工审核、CI Gate 复测和复跑对比。
+- `cd frontend && npm test`：4 个测试文件、43 个测试通过。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow"`：10 passed，覆盖 Workflow 市场、画布、撤销/重做、连线删除/重连、发布失败反馈、Aggregator 和参数预览。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 passed，覆盖 Workflow 画布新增节点、删除/重连、撤销/重做、删除节点、保存草稿回放、试运行、校验、发布。
@@ -95,13 +96,13 @@
 - Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；Run Attempt、CI Gate、Experiment baseline/A-B 对比和任务报告均已接入基础闭环。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
 - Experiment 快照、CI Gate、Annotation Queue 和 Trace Tree 已有独立产品页；跨任务 Score Analytics 和成本预算状态已接入报告中心，后续需要继续补真实成本账单、更多趋势筛选维度和跨任务对比可视化。
-- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势、修复任务状态流转、Annotation Queue 发起和 CI Gate 复测已有最小闭环；后续需要把 Repair Task 与 Dataset 修复、Workflow 参数审查和修复后自动复跑 Attempt 做更深联动。
+- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势、修复任务状态流转、Annotation Queue 发起、CI Gate 复测和修复后复跑对比已有最小闭环；后续需要把 Repair Task 与 Dataset 字段修复、Workflow 参数审查和修复建议模板做更深联动。
 - SQLite 轻量仓储已接入元数据路径；后续如果要进入多用户生产环境，仍需要正式 Repository 层、数据库迁移、索引治理、权限隔离和 Worker 队列接入。
 - 本地服务曾出现旧 FastAPI 进程未重启导致新增路由 404 的问题；已重启后端并完成浏览器复测。后续修改后端 API 时必须确认 8000 端口加载的是最新代码。
 
 ## 下一阶段目标
 
-- Repair Task 深水区：把修复任务继续接到 Dataset 字段修复、Workflow 参数审查、修复后新建 Attempt 和修复效果对比。
+- Repair Task 深水区：把修复任务继续接到 Dataset 字段修复、Workflow 参数审查和修复建议模板，让复跑对比能解释“为什么没有改善”。
 - 红队规则配置化：把当前内置规则升级为可管理规则集，支持按业务线启用、禁用、阈值和严重级别调整。
 - 成本治理生产化：接入真实 token/cost 账单、模型价格表、预算门禁和成本异常告警。
 - 趋势分析增强：为 Score Analytics 增加 Dataset、Workflow、模型版本、Prompt 版本、时间窗口和标签过滤，并补趋势可视化对比。
@@ -109,6 +110,40 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Repair Task Retest Loop 完成
+
+- 改动摘要：继续优化“修复后如何证明有效”的断点。本批次在 Repair Task 动作 API 中新增 `retest_and_compare`，后端会基于来源任务创建新 Attempt、立即执行复跑、对比来源 RunReport 与新 RunReport，并返回 `comparison_status`、通过率差异、错误率差异、Badcase 差异和新旧 Run ID；前端修复任务工作台新增“复跑对比”按钮和动作历史展示，复跑完成后会刷新任务列表与任务报告缓存。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/pages/RepairTasksPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/superpowers/plans/2026-05-31-repair-task-retest-loop.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "复跑"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端 RED：新增复跑对比测试最初失败，确认 `retest_and_compare` 仍属于不支持动作。
+  - 前端 RED：新增复跑对比测试最初失败，确认修复任务工作台缺“复跑对比”按钮。
+  - 后端定向：5 passed，覆盖 Repair Task 复跑创建新 Attempt、自动执行、对比前后报告并回写动作历史。
+  - 前端复跑定向：1 passed。
+  - 后端全量：70 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端修复任务工作台定向：3 passed。
+  - 前端 typecheck：通过。
+  - 前端全量：4 个测试文件、43 passed。
+  - 前端 build：通过。
+  - Playwright E2E：8 passed。
+- 下一步：继续把 Repair Task 与 Dataset 字段修复、Workflow 参数审查和修复建议模板打通，让复跑对比不仅告诉用户“有没有变好”，还告诉用户“下一次应该改哪里”。
 
 ### 2026-05-31 Repair Task Action Loop 完成
 

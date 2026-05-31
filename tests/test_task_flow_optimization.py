@@ -178,3 +178,40 @@ def test_repair_task_actions_create_traceable_follow_up_work(tmp_path: Path) -> 
     assert gate_result["repair_task"]["action_history"][-1]["action"] == "evaluate_ci_gate"
     evaluations = client.get(f"/ci-gates/evaluations?task_id={executed['task_id']}").json()
     assert evaluations
+
+
+def test_repair_task_retest_action_creates_attempt_and_compares_result(tmp_path: Path) -> None:
+    client, dataset, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "修复后复跑任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"][0]
+
+    result = client.post(
+        f"/repair-tasks/{repair['repair_task_id']}/actions",
+        json={"action": "retest_and_compare"},
+    ).json()
+
+    assert result["action"] == "retest_and_compare"
+    assert result["result"]["status"] == "completed"
+    assert result["result"]["previous_run_id"] == executed["run_id"]
+    assert result["result"]["new_run_id"] != executed["run_id"]
+    assert result["result"]["comparison"]["pass_rate_delta"] == 0
+    assert result["result"]["comparison"]["badcase_count_delta"] == 0
+    assert result["repair_task"]["action_history"][-1]["action"] == "retest_and_compare"
+    assert result["repair_task"]["last_action_result"]["result"]["comparison_status"] == "unchanged"
+
+    refreshed_task = client.get(f"/tasks/{executed['task_id']}").json()
+    assert refreshed_task["current_attempt"] == 2
+    assert refreshed_task["run_id"] == result["result"]["new_run_id"]
+    assert refreshed_task["attempts"][0]["run_id"] == executed["run_id"]
+    assert refreshed_task["attempts"][1]["report"]["run_id"] == result["result"]["new_run_id"]
