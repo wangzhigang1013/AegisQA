@@ -14,6 +14,8 @@ import { BadcaseTable } from './report/BadcaseTable';
 import { ReportSegmentAnalysis } from './report/ReportSegmentAnalysis';
 import { ReportSummary } from './report/ReportSummary';
 
+type ReportExportFormat = 'html' | 'csv' | 'json';
+
 const reportExportMimeTypes: Record<string, string> = {
   html: 'text/html;charset=utf-8',
   csv: 'text/csv;charset=utf-8',
@@ -54,11 +56,11 @@ export function ReportsPage() {
   }
 
   const exportMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (format: ReportExportFormat) => {
       if (!selectedTask) {
         throw new Error('请先选择任务，再导出报告。');
       }
-      const exported = await api.exportTaskReport(selectedTask.task_id, 'html');
+      const exported = await api.exportTaskReport(selectedTask.task_id, format);
       return { exported, task: selectedTask };
     },
     onSuccess: ({ exported, task }) => {
@@ -236,7 +238,33 @@ export function ReportsPage() {
             <Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace` : undefined}>查看 Trace Flow</Button>
             <Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace-tree` : undefined}>查看 Trace Tree</Button>
             <Button disabled={!selectedTask} loading={redTeamScanMutation.isPending} onClick={() => redTeamScanMutation.mutate()}>运行红队扫描</Button>
-            <Button type="primary" icon={<DownloadOutlined />} loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>导出 HTML / CSV</Button>
+            <Space.Compact>
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                disabled={!selectedTask || exportMutation.isPending}
+                loading={exportMutation.isPending && exportMutation.variables === 'html'}
+                onClick={() => exportMutation.mutate('html')}
+              >
+                导出 HTML
+              </Button>
+              <Button
+                icon={<DownloadOutlined />}
+                disabled={!selectedTask || exportMutation.isPending}
+                loading={exportMutation.isPending && exportMutation.variables === 'csv'}
+                onClick={() => exportMutation.mutate('csv')}
+              >
+                导出 CSV
+              </Button>
+              <Button
+                icon={<DownloadOutlined />}
+                disabled={!selectedTask || exportMutation.isPending}
+                loading={exportMutation.isPending && exportMutation.variables === 'json'}
+                onClick={() => exportMutation.mutate('json')}
+              >
+                导出 JSON
+              </Button>
+            </Space.Compact>
           </Space>
         }
       />

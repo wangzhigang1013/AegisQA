@@ -140,7 +140,7 @@ async function verifyReportAndCorrectBadcase(page: Page, taskName: string) {
 
   await expect(page.getByRole('row', { name: new RegExp(`^任务 ${escapeRegExp(taskName)}$`) })).toBeVisible();
   await expect(page.getByText('Badcase 明细')).toBeVisible();
-  await page.getByRole('button', { name: /导出 HTML \/ CSV/ }).click();
+  await page.getByRole('button', { name: /导出 HTML/ }).click();
   await expect(page.getByText(/报告导出成功/)).toBeVisible();
 
   await page.getByRole('button', { name: /^加入 Golden$/ }).first().click();

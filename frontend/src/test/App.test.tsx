@@ -1359,6 +1359,12 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/tasks/task-demo/report/export?file_format=html')) {
         return jsonResponse({ task_id: 'task-demo', file_format: 'html', content: '<html>preflight-demo</html>' });
       }
+      if (url.endsWith('/tasks/task-demo/report/export?file_format=csv')) {
+        return jsonResponse({ task_id: 'task-demo', file_format: 'csv', content: 'metric,value\npreflight_id,preflight-demo' });
+      }
+      if (url.endsWith('/tasks/task-demo/report/export?file_format=json')) {
+        return jsonResponse({ task_id: 'task-demo', file_format: 'json', content: { preflight_evidence: { preflight_id: 'preflight-demo' } } });
+      }
       if (url.endsWith('/tasks/task-demo/trace-flow')) {
         return jsonResponse(demoTraceFlow);
       }
@@ -2177,11 +2183,19 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: '生成分层门禁' }));
     expect(await screen.findByText(/CI Gate 即时评估完成：blocking/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /导出 HTML \/ CSV/ }));
+    fireEvent.click(screen.getByRole('button', { name: /导出 HTML/ }));
     expect(await screen.findByText(/报告导出成功：RAG_任务.html 已开始下载/)).toBeInTheDocument();
     expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/report/export?file_format=html'), expect.anything());
+
+    fireEvent.click(screen.getByRole('button', { name: /导出 CSV/ }));
+    expect(await screen.findByText(/报告导出成功：RAG_任务.csv 已开始下载/)).toBeInTheDocument();
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/report/export?file_format=csv'), expect.anything());
+
+    fireEvent.click(screen.getByRole('button', { name: /导出 JSON/ }));
+    expect(await screen.findByText(/报告导出成功：RAG_任务.json 已开始下载/)).toBeInTheDocument();
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/report/export?file_format=json'), expect.anything());
 
     fireEvent.click(screen.getByRole('button', { name: /忽略/ }));
     expect(await screen.findByText(/Badcase 已忽略/)).toBeInTheDocument();

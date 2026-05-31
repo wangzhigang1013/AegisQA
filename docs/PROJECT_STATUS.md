@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Task Report Download UX”已完成目标实现和全量验证。本批次继续补强任务报告导出体验：报告中心点击导出后不再只显示成功提示，而是把后端返回的 Task Report Export 内容转成 Blob，触发浏览器下载，并用任务名生成安全文件名。上一批新增的 `GET /tasks/{task_id}/report/export?file_format=json|csv|html` 仍作为 Task 级导出事实源，导出内容包含 Task Summary、Run Report、Badcase 和创建前 Preflight 证据；HTML 导出已对任务名和 JSON 内容做转义。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Task Report Export Format Actions”已完成目标实现和全量验证。本批次继续补强任务报告导出体验：报告中心的单个“HTML / CSV”模糊按钮已拆成“导出 HTML / 导出 CSV / 导出 JSON”三个明确动作；每个动作调用对应 `file_format` 的 Task 级导出接口，下载文件名也按格式生成。上一批新增的 `GET /tasks/{task_id}/report/export?file_format=json|csv|html` 仍作为 Task 级导出事实源，导出内容包含 Task Summary、Run Report、Badcase 和创建前 Preflight 证据；HTML 导出已对任务名和 JSON 内容做转义。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -38,6 +38,7 @@
 - Task Report API 和报告中心摘要已展示创建前 Preflight 证据，报告复盘时可以直接看到本次任务创建前的预检状态、ID 和摘要。
 - Task Report 已新增任务级导出接口，JSON/CSV/HTML 导出都带创建前 Preflight 证据；报告中心导出按钮已改为调用 Task 级导出，避免 Run 级导出缺少任务、预检、Badcase 等业务上下文。
 - 报告中心导出已触发真实浏览器下载：前端会将导出内容写入 Blob、生成安全文件名、点击临时下载链接并释放 object URL，用户不再只看到“导出成功”的静态提示。
+- 报告中心导出格式已拆分为 HTML、CSV、JSON 三个按钮，按钮文案和实际 `file_format` 对齐，避免用户误以为一个按钮会同时导出多种文件。
 - Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
@@ -103,6 +104,14 @@
 
 ## 最近验证
 
+- `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：先 RED 后 GREEN，最终 1 passed，覆盖报告中心 HTML/CSV/JSON 三个独立导出按钮分别调用对应 Task 级导出接口，并触发对应文件下载。
+- `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`：先因旧按钮文案选择器失败，更新为“导出 HTML”后 1 passed。
+- `python -m pytest -q`：92 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：4 个测试文件、62 passed。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
+- `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：先 RED 后 GREEN，最终 1 passed，覆盖报告导出后创建 Blob、触发下载点击，并显示 `RAG_任务.html` 文件名。
 - `python -m pytest -q`：92 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
@@ -263,6 +272,36 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Task Report Export Format Actions
+
+- 改动摘要：报告中心导出按钮从单个“导出 HTML / CSV”拆成“导出 HTML / 导出 CSV / 导出 JSON”，每个按钮分别调用 Task 级导出的对应 `file_format`，并生成 `.html`、`.csv`、`.json` 文件名。
+- 变更文件：
+  - `frontend/e2e/task-flow.spec.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/superpowers/plans/2026-05-31-task-report-export-format-actions.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`（RED 后 GREEN）
+  - `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 前端目标测试：1 passed。
+  - Playwright 目标链路：1 passed。
+  - 后端全量：92 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：4 个测试文件、62 passed。
+  - TypeScript 与生产构建：通过。
+  - Playwright E2E：8 passed。
+  - 差异检查：通过，仅有 Windows LF/CRLF 换行提示。
+- 下一步：继续扩展 CSV 和 HTML 的内容深度，让导出文件不仅能下载，还能直接用于复盘和汇报。
 
 ### 2026-05-31 Task Report Download UX
 
