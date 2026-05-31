@@ -618,6 +618,28 @@ const demoBaselineRollbackPayload = {
   },
 };
 
+const demoCandidateWorkloadPayload = {
+  summary: { total_candidates: 1, total_open: 1, total_overdue: 1, escalated: 0 },
+  owners: [{ owner: '未指派', total: 1, open_count: 1, overdue_count: 1, escalated_count: 0, status_counts: { candidate: 1 } }],
+};
+
+const demoCandidateBulkAssignPayload = {
+  assigned_count: 1,
+  candidates: [{ ...demoPromptSkillCandidate, owner: 'qa_owner', due_at: '2000-01-01T00:00:00+00:00', overdue: true }],
+};
+
+const demoCandidateEscalatePayload = {
+  escalated_count: 1,
+  candidates: [{ ...demoPromptSkillCandidate, owner: 'qa_owner', due_at: '2000-01-01T00:00:00+00:00', overdue: true, escalation_status: 'escalated' }],
+};
+
+const demoCandidateBulkReviewPayload = {
+  reviewed_count: 1,
+  skipped_count: 0,
+  candidates: [{ ...demoPromptSkillCandidate, status: 'approved', review_history: [{ decision: 'approved', reviewer: 'qa_owner' }] }],
+  skipped: [],
+};
+
 const pendingPackageSkill = {
   ...demoSkills[0],
   skill_id: 'plugin.echo@0.1.0',
@@ -1250,6 +1272,18 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/experiment-baseline-suggestions/baseline-suggestion-demo/rollback')) {
         return jsonResponse(demoBaselineRollbackPayload);
       }
+      if (url.endsWith('/prompt-skill-candidates/workload')) {
+        return jsonResponse(demoCandidateWorkloadPayload);
+      }
+      if (url.endsWith('/prompt-skill-candidates/bulk-assign')) {
+        return jsonResponse(demoCandidateBulkAssignPayload);
+      }
+      if (url.endsWith('/prompt-skill-candidates/escalate-overdue')) {
+        return jsonResponse(demoCandidateEscalatePayload);
+      }
+      if (url.endsWith('/prompt-skill-candidates/bulk-review')) {
+        return jsonResponse(demoCandidateBulkReviewPayload);
+      }
       if (url.includes('/prompt-skill-candidates')) {
         return jsonResponse([demoPromptSkillCandidate]);
       }
@@ -1789,8 +1823,19 @@ describe('AegisQA 前端工作台', () => {
     await renderWorkbench('/candidate-assets');
 
     expect(await screen.findByText('候选资产中心')).toBeInTheDocument();
+    expect(await screen.findByText('负责人工作量')).toBeInTheDocument();
+    expect(screen.getByText(/未指派：1/)).toBeInTheDocument();
+    expect(screen.getByText(/逾期：1/)).toBeInTheDocument();
     expect(screen.getByText('prompt-flow-v0')).toBeInTheDocument();
     expect(screen.getByText('prompt-flow-v1')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /指派当前列表给 qa_owner/ }));
+    expect(await screen.findByText(/候选资产已指派：1 个/)).toBeInTheDocument();
+    expect(screen.getAllByText(/qa_owner/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /升级逾期候选/ }));
+    expect(await screen.findByText(/逾期候选已升级：1 个/)).toBeInTheDocument();
+    expect(screen.getAllByText(/已升级/).length).toBeGreaterThan(0);
 
     fireEvent.click(await screen.findByRole('button', { name: /审批通过/ }));
     expect(await screen.findByText(/候选资产已审批/)).toBeInTheDocument();
@@ -1832,6 +1877,15 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /回滚 baseline/ }));
     expect(await screen.findByText(/Baseline 已回滚：exp-baseline/)).toBeInTheDocument();
     expect(screen.getByText(/回滚门禁：passed/)).toBeInTheDocument();
+  });
+
+  it('候选资产中心支持批量审批当前列表', async () => {
+    await renderWorkbench('/candidate-assets');
+
+    expect(await screen.findByText('候选资产中心')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /批量审批当前列表/ }));
+    expect(await screen.findByText(/批量审批完成：1 个/)).toBeInTheDocument();
+    expect(screen.getByText('已审批')).toBeInTheDocument();
   });
 
   it('报告中心围绕任务展示报告、质量决策和导出入口', async () => {

@@ -623,6 +623,58 @@ def test_prompt_skill_candidates_are_reviewed_before_draft_creation(tmp_path: Pa
     assert updated_candidate["workflow_draft_id"] == draft["draft_id"]
 
 
+def test_prompt_skill_candidate_bulk_governance_and_sla_escalation(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    due_at = "2000-01-01T00:00:00+00:00"
+    for index in range(2):
+        _save_record(
+            client.app.state.store,
+            "prompt_skill_candidates",
+            "candidate_id",
+            {
+                "candidate_id": f"candidate-sla-{index}",
+                "kind": "prompt_skill_version_diff",
+                "status": "candidate",
+                "source_task_id": "task-sla",
+                "source_run_id": "run-sla",
+                "baseline_experiment_id": "exp-baseline",
+                "current_versions": [],
+                "version_diffs": [{"step_id": "answer", "field": "prompt_version", "baseline_value": "v0", "current_value": "v1"}],
+                "recommended_actions": ["create_workflow_draft"],
+                "created_at": due_at,
+                "updated_at": due_at,
+            },
+        )
+
+    assigned = client.post(
+        "/prompt-skill-candidates/bulk-assign",
+        json={"candidate_ids": ["candidate-sla-0", "candidate-sla-1"], "owner": "qa_owner", "due_at": due_at, "actor": "lead"},
+    ).json()
+    assert assigned["assigned_count"] == 2
+    assert all(candidate["owner"] == "qa_owner" for candidate in assigned["candidates"])
+    assert all(candidate["overdue"] is True for candidate in assigned["candidates"])
+
+    workload = client.get("/prompt-skill-candidates/workload").json()
+    assert workload["summary"]["total_candidates"] == 2
+    assert workload["summary"]["total_overdue"] == 2
+    assert workload["owners"][0]["owner"] == "qa_owner"
+    assert workload["owners"][0]["overdue_count"] == 2
+
+    escalated = client.post("/prompt-skill-candidates/escalate-overdue", json={"actor": "lead"}).json()
+    assert escalated["escalated_count"] == 2
+    assert escalated["candidates"][0]["escalation_status"] == "escalated"
+    assert escalated["candidates"][0]["action_history"][-1]["action"] == "escalate_overdue"
+
+    reviewed = client.post(
+        "/prompt-skill-candidates/bulk-review",
+        json={"candidate_ids": ["candidate-sla-0", "candidate-sla-1"], "decision": "approved", "reviewer": "qa_owner", "note": "批量通过候选资产。"},
+    ).json()
+    assert reviewed["reviewed_count"] == 2
+    assert all(candidate["status"] == "approved" for candidate in reviewed["candidates"])
+    assert reviewed["candidates"][0]["review_history"][-1]["decision"] == "approved"
+
+
 def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_three_way_metrics(tmp_path: Path) -> None:
     client, dataset, _ = _seed_dataset_and_workflow(tmp_path, include_reference=True)
     baseline_workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload_with_answer_prompt("prompt-flow-v0")}).json()

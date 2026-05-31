@@ -22,7 +22,12 @@ export function CandidateAssetsPage() {
     queryKey,
     queryFn: () => api.promptSkillCandidates({ status: statusFilter }),
   });
+  const workloadQuery = useQuery({
+    queryKey: ['prompt-skill-candidate-workload'],
+    queryFn: () => api.promptSkillCandidateWorkload(),
+  });
   const candidates = candidatesQuery.data ?? [];
+  const currentCandidateIds = candidates.map((candidate) => candidate.candidate_id);
 
   function mergeCandidate(candidate: PromptSkillCandidate) {
     queryClient.setQueryData<PromptSkillCandidate[]>(queryKey, (current = []) => {
@@ -32,6 +37,10 @@ export function CandidateAssetsPage() {
       const exists = current.some((item) => item.candidate_id === candidate.candidate_id);
       return exists ? current.map((item) => (item.candidate_id === candidate.candidate_id ? candidate : item)) : [candidate, ...current];
     });
+  }
+
+  function mergeCandidates(items: PromptSkillCandidate[]) {
+    items.forEach(mergeCandidate);
   }
 
   const approveMutation = useMutation({
@@ -60,6 +69,48 @@ export function CandidateAssetsPage() {
       setNotice(`候选资产已拒绝：${candidate.candidate_id}`);
     },
     onError: (error) => setNotice(`候选资产拒绝失败：${formatApiError(error)}`),
+  });
+
+  const bulkReviewMutation = useMutation({
+    mutationFn: () =>
+      api.bulkReviewPromptSkillCandidates({
+        candidate_ids: currentCandidateIds,
+        decision: 'approved',
+        reviewer: 'qa_owner',
+        note: '批量确认当前列表候选资产进入后续草稿和复跑验证。',
+      }),
+    onSuccess: (payload) => {
+      mergeCandidates(payload.candidates);
+      void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidate-workload'] });
+      setNotice(`批量审批完成：${payload.reviewed_count} 个`);
+    },
+    onError: (error) => setNotice(`批量审批失败：${formatApiError(error)}`),
+  });
+
+  const bulkAssignMutation = useMutation({
+    mutationFn: () =>
+      api.bulkAssignPromptSkillCandidates({
+        candidate_ids: currentCandidateIds,
+        owner: 'qa_owner',
+        due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        actor: 'lead',
+      }),
+    onSuccess: (payload) => {
+      mergeCandidates(payload.candidates);
+      void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidate-workload'] });
+      setNotice(`候选资产已指派：${payload.assigned_count} 个`);
+    },
+    onError: (error) => setNotice(`候选资产指派失败：${formatApiError(error)}`),
+  });
+
+  const escalateOverdueMutation = useMutation({
+    mutationFn: () => api.escalateOverduePromptSkillCandidates({ actor: 'lead' }),
+    onSuccess: (payload) => {
+      mergeCandidates(payload.candidates);
+      void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidate-workload'] });
+      setNotice(`逾期候选已升级：${payload.escalated_count} 个`);
+    },
+    onError: (error) => setNotice(`逾期候选升级失败：${formatApiError(error)}`),
   });
 
   const draftMutation = useMutation({
@@ -180,6 +231,35 @@ export function CandidateAssetsPage() {
 
       {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
 
+      <Card className="flat-card" title="负责人工作量" loading={workloadQuery.isLoading}>
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Space wrap>
+            <Tag color="blue">候选：{workloadQuery.data?.summary.total_candidates ?? 0}</Tag>
+            <Tag color="gold">待处理：{workloadQuery.data?.summary.total_open ?? 0}</Tag>
+            <Tag color={(workloadQuery.data?.summary.total_overdue ?? 0) > 0 ? 'red' : 'green'}>逾期：{workloadQuery.data?.summary.total_overdue ?? 0}</Tag>
+            <Tag color={(workloadQuery.data?.summary.escalated ?? 0) > 0 ? 'volcano' : 'default'}>已升级：{workloadQuery.data?.summary.escalated ?? 0}</Tag>
+          </Space>
+          <Space wrap>
+            {(workloadQuery.data?.owners ?? []).map((owner) => (
+              <Tag key={owner.owner} color={owner.overdue_count > 0 ? 'red' : 'blue'}>
+                {owner.owner}：{owner.open_count}，SLA超时 {owner.overdue_count}
+              </Tag>
+            ))}
+          </Space>
+          <Space wrap>
+            <Button disabled={!currentCandidateIds.length} loading={bulkAssignMutation.isPending} onClick={() => bulkAssignMutation.mutate()}>
+              指派当前列表给 qa_owner
+            </Button>
+            <Button disabled={!currentCandidateIds.length} loading={bulkReviewMutation.isPending} onClick={() => bulkReviewMutation.mutate()}>
+              批量审批当前列表
+            </Button>
+            <Button danger loading={escalateOverdueMutation.isPending} onClick={() => escalateOverdueMutation.mutate()}>
+              升级逾期候选
+            </Button>
+          </Space>
+        </Space>
+      </Card>
+
       <Card className="flat-card" title="Prompt/Skill 候选配置">
         <Space className="toolbar-row" wrap>
           <Select
@@ -215,6 +295,19 @@ export function CandidateAssetsPage() {
             },
             { title: '状态', dataIndex: 'status', render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
             { title: 'Baseline', dataIndex: 'baseline_experiment_id', render: (value: string) => <code>{value}</code> },
+            {
+              title: '负责人/SLA',
+              render: (_, record) => (
+                <Space direction="vertical" size={2}>
+                  <Typography.Text>{record.owner ?? '未指派'}</Typography.Text>
+                  <Typography.Text type="secondary">截止：{record.due_at ? formatDateTime(record.due_at) : '-'}</Typography.Text>
+                  <Space wrap size={4}>
+                    {record.overdue ? <Tag color="red">逾期</Tag> : null}
+                    {record.escalation_status === 'escalated' ? <Tag color="volcano">已升级</Tag> : null}
+                  </Space>
+                </Space>
+              ),
+            },
             {
               title: '版本差异',
               dataIndex: 'version_diffs',
@@ -426,6 +519,12 @@ function formatPercent(value: unknown) {
 
 function formatDelta(value: unknown) {
   return typeof value === 'number' ? Number(value.toFixed(4)).toString() : '-';
+}
+
+function formatDateTime(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString('zh-CN', { hour12: false });
 }
 
 function renderMetricCard(label: string, card?: PromptSkillMetricCard) {

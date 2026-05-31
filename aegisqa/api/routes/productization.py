@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -50,6 +51,25 @@ class PromptSkillCandidateReviewRequest(BaseModel):
     decision: str
     reviewer: str = "api"
     note: str = ""
+
+
+class PromptSkillCandidateBulkReviewRequest(BaseModel):
+    candidate_ids: list[str]
+    decision: str
+    reviewer: str = "api"
+    note: str = ""
+
+
+class PromptSkillCandidateBulkAssignRequest(BaseModel):
+    candidate_ids: list[str]
+    owner: str
+    due_at: str | None = None
+    actor: str = "api"
+
+
+class PromptSkillCandidateEscalateRequest(BaseModel):
+    actor: str = "api"
+    now: str | None = None
 
 
 class WorkflowPromotionReviewRequest(BaseModel):
@@ -125,7 +145,7 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         status: str | None = Query(default=None),
         baseline_experiment_id: str | None = Query(default=None),
     ) -> list[dict[str, Any]]:
-        candidates = _list_records(ctx.store, "prompt_skill_candidates")
+        candidates = [_with_candidate_sla_status(candidate, now=_now()) for candidate in _list_records(ctx.store, "prompt_skill_candidates")]
         if source_task_id:
             candidates = [candidate for candidate in candidates if candidate.get("source_task_id") == source_task_id]
         if status:
@@ -133,6 +153,22 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         if baseline_experiment_id:
             candidates = [candidate for candidate in candidates if candidate.get("baseline_experiment_id") == baseline_experiment_id]
         return sorted(candidates, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+
+    @app.get("/prompt-skill-candidates/workload")
+    def get_prompt_skill_candidate_workload() -> dict[str, Any]:
+        return _build_prompt_skill_candidate_workload(ctx, now=_now())
+
+    @app.post("/prompt-skill-candidates/bulk-assign")
+    def bulk_assign_prompt_skill_candidates(request: PromptSkillCandidateBulkAssignRequest) -> dict[str, Any]:
+        return _bulk_assign_prompt_skill_candidates(ctx, request)
+
+    @app.post("/prompt-skill-candidates/bulk-review")
+    def bulk_review_prompt_skill_candidates(request: PromptSkillCandidateBulkReviewRequest) -> dict[str, Any]:
+        return _bulk_review_prompt_skill_candidates(ctx, request)
+
+    @app.post("/prompt-skill-candidates/escalate-overdue")
+    def escalate_overdue_prompt_skill_candidates(request: PromptSkillCandidateEscalateRequest) -> dict[str, Any]:
+        return _escalate_overdue_prompt_skill_candidates(ctx, request)
 
     @app.get("/workflow-promotion-reviews")
     def list_workflow_promotion_reviews(
@@ -203,24 +239,9 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.post("/prompt-skill-candidates/{candidate_id}/review")
     def review_prompt_skill_candidate(candidate_id: str, request: PromptSkillCandidateReviewRequest) -> dict[str, Any]:
         candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
-        decision = request.decision.strip().lower()
-        if decision not in {"approved", "rejected"}:
-            raise AegisQAError(
-                "PROMPT_SKILL_CANDIDATE_DECISION_INVALID",
-                "候选配置审批结论只能是 approved 或 rejected。",
-                status_code=400,
-                details={"decision": request.decision},
-            )
-        reviewed_at = _now()
-        review = {"decision": decision, "reviewer": request.reviewer, "note": request.note, "reviewed_at": reviewed_at}
-        history = candidate.get("review_history") if isinstance(candidate.get("review_history"), list) else []
-        history.append(review)
-        candidate["status"] = decision
-        candidate["review"] = review
-        candidate["review_history"] = history
-        candidate["updated_at"] = reviewed_at
+        candidate = _review_prompt_skill_candidate_record(candidate, decision=request.decision, reviewer=request.reviewer, note=request.note, now=_now())
         _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
-        ctx.audit_service.record(actor=request.reviewer or "api", action="prompt_skill_candidate.review", target=candidate_id, detail={"decision": decision})
+        ctx.audit_service.record(actor=request.reviewer or "api", action="prompt_skill_candidate.review", target=candidate_id, detail={"decision": candidate.get("status")})
         return candidate
 
     @app.post("/prompt-skill-candidates/{candidate_id}/workflow-draft")
@@ -701,6 +722,164 @@ def _apply_candidate_version_diffs(graph: dict[str, Any], version_diffs: list[di
             metadata = node.setdefault("metadata", {})
             if isinstance(metadata, dict):
                 metadata["baseline_skill_version"] = baseline_value
+
+
+def _review_prompt_skill_candidate_record(
+    candidate: dict[str, Any],
+    *,
+    decision: str,
+    reviewer: str,
+    note: str,
+    now: str,
+) -> dict[str, Any]:
+    normalized = decision.strip().lower()
+    if normalized not in {"approved", "rejected"}:
+        raise AegisQAError(
+            "PROMPT_SKILL_CANDIDATE_DECISION_INVALID",
+            "候选配置审批结论只能是 approved 或 rejected。",
+            status_code=400,
+            details={"decision": decision},
+        )
+    review = {"decision": normalized, "reviewer": reviewer, "note": note, "reviewed_at": now}
+    history = candidate.get("review_history") if isinstance(candidate.get("review_history"), list) else []
+    history.append(review)
+    candidate["status"] = normalized
+    candidate["review"] = review
+    candidate["review_history"] = history
+    candidate["updated_at"] = now
+    _append_candidate_action(candidate, action="bulk_review" if candidate.get("_bulk_reviewing") else "review", actor=reviewer, note=note, now=now, extra={"decision": normalized})
+    candidate.pop("_bulk_reviewing", None)
+    return _with_candidate_sla_status(candidate, now=now)
+
+
+def _bulk_review_prompt_skill_candidates(ctx: RouteContext, request: PromptSkillCandidateBulkReviewRequest) -> dict[str, Any]:
+    if not request.candidate_ids:
+        raise AegisQAError("PROMPT_SKILL_CANDIDATE_IDS_REQUIRED", "请至少选择一个候选资产。", status_code=400)
+    now = _now()
+    reviewed: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for candidate_id in request.candidate_ids:
+        try:
+            candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
+        except KeyError:
+            skipped.append({"candidate_id": candidate_id, "reason": "not_found"})
+            continue
+        candidate["_bulk_reviewing"] = True
+        candidate = _review_prompt_skill_candidate_record(candidate, decision=request.decision, reviewer=request.reviewer, note=request.note, now=now)
+        _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
+        reviewed.append(candidate)
+    ctx.audit_service.record(
+        actor=request.reviewer or "api",
+        action="prompt_skill_candidate.bulk_review",
+        target="prompt_skill_candidates",
+        detail={"candidate_ids": request.candidate_ids, "decision": request.decision, "reviewed_count": len(reviewed), "skipped_count": len(skipped)},
+    )
+    return {"reviewed_count": len(reviewed), "skipped_count": len(skipped), "candidates": reviewed, "skipped": skipped}
+
+
+def _bulk_assign_prompt_skill_candidates(ctx: RouteContext, request: PromptSkillCandidateBulkAssignRequest) -> dict[str, Any]:
+    if not request.candidate_ids:
+        raise AegisQAError("PROMPT_SKILL_CANDIDATE_IDS_REQUIRED", "请至少选择一个候选资产。", status_code=400)
+    owner = request.owner.strip()
+    if not owner:
+        raise AegisQAError("PROMPT_SKILL_CANDIDATE_OWNER_REQUIRED", "请填写候选资产负责人。", status_code=400)
+    now = _now()
+    assigned: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for candidate_id in request.candidate_ids:
+        try:
+            candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
+        except KeyError:
+            skipped.append({"candidate_id": candidate_id, "reason": "not_found"})
+            continue
+        candidate["owner"] = owner
+        candidate["due_at"] = request.due_at
+        candidate["assigned_by"] = request.actor
+        candidate["assigned_at"] = now
+        candidate["updated_at"] = now
+        _append_candidate_action(candidate, action="assign", actor=request.actor, note=f"指派给 {owner}", now=now, extra={"owner": owner, "due_at": request.due_at})
+        candidate = _with_candidate_sla_status(candidate, now=now)
+        _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
+        assigned.append(candidate)
+    ctx.audit_service.record(
+        actor=request.actor,
+        action="prompt_skill_candidate.bulk_assign",
+        target="prompt_skill_candidates",
+        detail={"candidate_ids": request.candidate_ids, "owner": owner, "assigned_count": len(assigned), "skipped_count": len(skipped)},
+    )
+    return {"assigned_count": len(assigned), "skipped_count": len(skipped), "candidates": assigned, "skipped": skipped}
+
+
+def _escalate_overdue_prompt_skill_candidates(ctx: RouteContext, request: PromptSkillCandidateEscalateRequest) -> dict[str, Any]:
+    now = request.now or _now()
+    escalated: list[dict[str, Any]] = []
+    for candidate in _list_records(ctx.store, "prompt_skill_candidates"):
+        candidate = _with_candidate_sla_status(candidate, now=now)
+        if not candidate.get("overdue") or candidate.get("escalation_status") == "escalated":
+            continue
+        candidate["escalation_status"] = "escalated"
+        candidate["escalated_by"] = request.actor
+        candidate["escalated_at"] = now
+        candidate["updated_at"] = now
+        _append_candidate_action(candidate, action="escalate_overdue", actor=request.actor, note="候选资产超过 SLA 截止时间，已升级处理。", now=now)
+        _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
+        escalated.append(candidate)
+    ctx.audit_service.record(actor=request.actor, action="prompt_skill_candidate.escalate_overdue", target="prompt_skill_candidates", detail={"escalated_count": len(escalated)})
+    return {"escalated_count": len(escalated), "candidates": escalated, "workload": _build_prompt_skill_candidate_workload(ctx, now=now)}
+
+
+def _build_prompt_skill_candidate_workload(ctx: RouteContext, *, now: str) -> dict[str, Any]:
+    candidates = [_with_candidate_sla_status(candidate, now=now) for candidate in _list_records(ctx.store, "prompt_skill_candidates")]
+    by_owner: dict[str, dict[str, Any]] = {}
+    for candidate in candidates:
+        owner = str(candidate.get("owner") or "未指派")
+        bucket = by_owner.setdefault(owner, {"owner": owner, "total": 0, "open_count": 0, "overdue_count": 0, "escalated_count": 0, "status_counts": {}})
+        bucket["total"] += 1
+        status = str(candidate.get("status") or "unknown")
+        bucket["status_counts"][status] = bucket["status_counts"].get(status, 0) + 1
+        if _candidate_is_open(candidate):
+            bucket["open_count"] += 1
+        if candidate.get("overdue"):
+            bucket["overdue_count"] += 1
+        if candidate.get("escalation_status") == "escalated":
+            bucket["escalated_count"] += 1
+    owners = sorted(by_owner.values(), key=lambda item: (-int(item["overdue_count"]), -int(item["open_count"]), item["owner"]))
+    return {
+        "summary": {
+            "total_candidates": len(candidates),
+            "total_open": sum(1 for candidate in candidates if _candidate_is_open(candidate)),
+            "total_overdue": sum(1 for candidate in candidates if candidate.get("overdue")),
+            "escalated": sum(1 for candidate in candidates if candidate.get("escalation_status") == "escalated"),
+        },
+        "owners": owners,
+    }
+
+
+def _with_candidate_sla_status(candidate: dict[str, Any], *, now: str) -> dict[str, Any]:
+    candidate = dict(candidate)
+    candidate["overdue"] = bool(candidate.get("due_at") and _candidate_is_open(candidate) and _iso_before(str(candidate["due_at"]), now))
+    return candidate
+
+
+def _candidate_is_open(candidate: dict[str, Any]) -> bool:
+    return candidate.get("status") not in {"rejected", "promoted", "archived"}
+
+
+def _iso_before(left: str, right: str) -> bool:
+    try:
+        return datetime.fromisoformat(left) < datetime.fromisoformat(right)
+    except ValueError:
+        # 时间格式异常时不直接判定逾期，避免坏数据导致列表不可用；后续可在数据治理中提示修复。
+        return False
+
+
+def _append_candidate_action(candidate: dict[str, Any], *, action: str, actor: str, note: str, now: str, extra: dict[str, Any] | None = None) -> None:
+    history = candidate.get("action_history") if isinstance(candidate.get("action_history"), list) else []
+    payload = {"action": action, "actor": actor, "note": note, "created_at": now}
+    if extra:
+        payload.update(extra)
+    history.append(payload)
+    candidate["action_history"] = history
 
 
 def _prompt_skill_candidate_published_draft(ctx: RouteContext, candidate: dict[str, Any]) -> dict[str, Any]:

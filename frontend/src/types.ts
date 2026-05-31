@@ -748,6 +748,15 @@ export type PromptSkillCandidate = {
   candidate_id: string;
   kind: string;
   status: string;
+  owner?: string | null;
+  due_at?: string | null;
+  assigned_by?: string | null;
+  assigned_at?: string | null;
+  overdue?: boolean;
+  escalation_status?: string | null;
+  escalated_by?: string | null;
+  escalated_at?: string | null;
+  action_history?: Record<string, unknown>[];
   source_repair_task_id?: string | null;
   source_task_id?: string | null;
   source_run_id?: string | null;
@@ -774,6 +783,43 @@ export type PromptSkillCandidate = {
   promotion_recommendation?: PromptSkillPromotionRecommendation;
   created_at: string;
   updated_at?: string;
+};
+
+export type PromptSkillCandidateWorkload = {
+  summary: {
+    total_candidates: number;
+    total_open: number;
+    total_overdue: number;
+    escalated: number;
+  };
+  owners: {
+    owner: string;
+    total: number;
+    open_count: number;
+    overdue_count: number;
+    escalated_count: number;
+    status_counts: Record<string, number>;
+  }[];
+};
+
+export type PromptSkillCandidateBulkReviewResult = {
+  reviewed_count: number;
+  skipped_count: number;
+  candidates: PromptSkillCandidate[];
+  skipped: { candidate_id: string; reason: string }[];
+};
+
+export type PromptSkillCandidateBulkAssignResult = {
+  assigned_count: number;
+  skipped_count?: number;
+  candidates: PromptSkillCandidate[];
+  skipped?: { candidate_id: string; reason: string }[];
+};
+
+export type PromptSkillCandidateEscalationResult = {
+  escalated_count: number;
+  candidates: PromptSkillCandidate[];
+  workload?: PromptSkillCandidateWorkload;
 };
 
 export type PromptSkillMetricCard = {

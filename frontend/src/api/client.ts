@@ -19,7 +19,11 @@ import type {
   JudgeCrossValidationResult,
   JudgeAuditTrends,
   PromptSkillCandidate,
+  PromptSkillCandidateBulkAssignResult,
+  PromptSkillCandidateBulkReviewResult,
+  PromptSkillCandidateEscalationResult,
   PromptSkillCandidateRetestResult,
+  PromptSkillCandidateWorkload,
   WorkflowPromotionReviewResult,
   RedTeamScanResult,
   RepairTaskRecord,
@@ -186,8 +190,24 @@ export const api = {
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<PromptSkillCandidate[]>(`/prompt-skill-candidates${suffix}`);
   },
+  promptSkillCandidateWorkload: () => request<PromptSkillCandidateWorkload>('/prompt-skill-candidates/workload'),
   reviewPromptSkillCandidate: (candidateId: string, body: { decision: 'approved' | 'rejected'; reviewer?: string; note?: string }) =>
     request<PromptSkillCandidate>(`/prompt-skill-candidates/${encodeURIComponent(candidateId)}/review`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  bulkReviewPromptSkillCandidates: (body: { candidate_ids: string[]; decision: 'approved' | 'rejected'; reviewer?: string; note?: string }) =>
+    request<PromptSkillCandidateBulkReviewResult>('/prompt-skill-candidates/bulk-review', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  bulkAssignPromptSkillCandidates: (body: { candidate_ids: string[]; owner: string; due_at?: string | null; actor?: string }) =>
+    request<PromptSkillCandidateBulkAssignResult>('/prompt-skill-candidates/bulk-assign', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  escalateOverduePromptSkillCandidates: (body: { actor?: string } = {}) =>
+    request<PromptSkillCandidateEscalationResult>('/prompt-skill-candidates/escalate-overdue', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
