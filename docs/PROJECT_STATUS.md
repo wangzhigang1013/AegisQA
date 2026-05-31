@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Report Export Approval Flow”已完成实现并进入最终归档。本批次在 `report:export` 权限门禁之上继续补齐敏感报告外发审批：Viewer 不能直接导出，但可以创建 Task Report 导出审批请求；Reviewer 不能审批外发；Admin 审批通过后，Viewer 可携带 `approval_request_id` 导出同一 Task、同一格式的报告；报告中心展示导出审批请求、申请入口和 Admin 审批入口。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Report Export Approval Lifecycle”已完成并通过全量验证。本批次在导出审批闭环之上补齐审批生命周期：Viewer 不能直接导出，但可以创建 Task Report 导出审批请求；Admin 可以批准或拒绝；原申请角色可以撤销待审批或已批准申请；审批请求默认 24 小时过期，过期后不能批准或导出；报告中心展示过期时间、申请、批准、拒绝和撤销入口。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -44,7 +44,7 @@
 - 报告中心已展示当前 Task 的报告导出历史，基于 `GET /audit-events?action=task.report.export&target={task_id}` 追踪导出格式、Run、Preflight ID、操作者和时间。
 - 报告导出已接入 RBAC 门禁：`Evaluator`、`Reviewer`、`Admin` 可导出，`Viewer` 只能查看不能外发；后端拒绝无权限导出并写入 `task.report.export.denied` 审计，前端报告页按角色禁用导出按钮。
 - 报告中心任务选择器已补 `aria-label="选择报告任务"`，Playwright 主链路不再依赖页面 Select 顺序，避免新增角色、筛选器或分页控件后误选下拉。
-- 报告外发已新增审批闭环：Viewer 可申请 HTML/CSV/JSON 导出审批，Admin 审批通过后可带 `approval_request_id` 导出同一 Task 和同一格式，导出审计会记录审批 ID。
+- 报告外发已新增审批闭环：Viewer 可申请 HTML/CSV/JSON 导出审批，Admin 审批通过后可带 `approval_request_id` 导出同一 Task 和同一格式，导出审计会记录审批 ID；审批请求支持拒绝、撤销和过期状态，避免长期悬挂或误用。
 - Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
@@ -110,6 +110,14 @@
 
 ## 最近验证
 
+- `python -m pytest tests\test_task_center_api.py -q -k report_export_request_lifecycle_reject_revoke_and_expire`：先 RED 后 GREEN，最终 1 passed，覆盖导出审批拒绝、撤销、过期后不能批准、拒绝/撤销/过期审计事件。
+- `python -m pytest tests\test_task_center_api.py -q -k "report_export_request_lifecycle_reject_revoke_and_expire or viewer_can_export_task_report_after_admin_approval"`：2 passed，确认新增生命周期没有破坏已批准后导出路径。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：先 RED 后 GREEN，最终 1 passed，覆盖报告中心 Admin 拒绝、重新申请、Admin 审批、审批后导出和申请人撤销。
+- `python -m pytest -q`：全量通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：4 个测试文件、62 passed；报告中心长测试耗时约 14 秒，已列为下一批测试拆分优化目标。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
 - `python -m pytest tests\test_task_center_api.py -q -k viewer_can_export_task_report_after_admin_approval`：先 RED 后 GREEN，最终 1 passed，覆盖 Viewer 直接导出被拒绝、创建导出审批、Reviewer 审批失败、Admin 审批成功、Viewer 带 `approval_request_id` 导出成功和导出审计记录审批 ID。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：先 RED 后 GREEN，最终 1 passed，覆盖报告中心 Viewer 申请 HTML 导出审批、Admin 审批、审批后 HTML 导出按钮恢复并携带 `approval_request_id`。
 - `python -m pytest tests\test_task_center_api.py -q -k "viewer_can_export_task_report_after_admin_approval or preflight_is_persisted"`：2 passed。
@@ -303,6 +311,32 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Report Export Approval Lifecycle
+
+- 改动摘要：补齐报告导出审批的拒绝、撤销和过期生命周期。导出申请创建时写入 `expires_at`，默认 24 小时过期；Admin 可拒绝待审批申请；原申请角色可撤销待审批或已批准申请；审批或导出时会即时刷新过期状态；过期审批不能批准或用于导出；报告中心审批请求表展示过期时间，并提供 Admin 拒绝和申请人撤销入口。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_center_api.py`
+  - `frontend/src/types.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-report-export-approval-lifecycle.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q -k report_export_request_lifecycle_reject_revoke_and_expire`（RED 后 GREEN）
+  - `python -m pytest tests\test_task_center_api.py -q -k "report_export_request_lifecycle_reject_revoke_and_expire or viewer_can_export_task_report_after_admin_approval"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`（RED 后 GREEN）
+- 测试结果：
+  - 后端 RED：`/report-export-requests/{request_id}/reject` 不存在，测试读取 `status` 失败。
+  - 后端 GREEN：生命周期和原有审批导出路径 2 passed。
+  - 前端 RED：报告中心审批请求表缺少“Admin 拒绝”和“撤销申请”按钮。
+  - 前端 GREEN：目标报告页测试 1 passed，覆盖拒绝、重新申请、批准、导出和撤销。
+- 下一步：提交本批次；之后优先拆分报告页超长测试，降低前端回归耗时和偶发超时风险。
 
 ### 2026-05-31 Report Export Approval Flow
 

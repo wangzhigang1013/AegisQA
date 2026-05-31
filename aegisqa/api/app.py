@@ -226,11 +226,17 @@ class ReportExportRequestCreate(BaseModel):
     file_format: str = "json"
     requester_role: str = "Viewer"
     reason: str = ""
+    expires_at: str | None = None
 
 
 class ReportExportApprovalRequest(BaseModel):
     approver_role: str = "Admin"
     note: str = ""
+
+
+class ReportExportRevokeRequest(BaseModel):
+    requester_role: str = "Viewer"
+    reason: str = ""
 
 
 class RepairTaskStartRequest(BaseModel):

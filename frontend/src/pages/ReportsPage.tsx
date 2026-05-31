@@ -74,6 +74,14 @@ export function ReportsPage() {
     setSearchParams(nextTaskId ? { task_id: nextTaskId } : {});
   }
 
+  function upsertReportExportRequest(request: ReportExportRequest) {
+    queryClient.setQueryData<ReportExportRequest[]>(['report-export-requests', request.task_id], (current = []) =>
+      current.some((item) => item.request_id === request.request_id)
+        ? current.map((item) => (item.request_id === request.request_id ? request : item))
+        : [request, ...current],
+    );
+  }
+
   function approvedExportRequestFor(format: ReportExportFormat): ReportExportRequest | undefined {
     return (exportRequestsQuery.data ?? []).find(
       (request) => request.status === 'approved' && request.file_format === format && request.requester_role === exportRole,
@@ -117,10 +125,7 @@ export function ReportsPage() {
     },
     onSuccess: async (request) => {
       setNotice(`导出审批已提交：${request.request_id}`);
-      queryClient.setQueryData<ReportExportRequest[]>(['report-export-requests', request.task_id], (current = []) => [
-        request,
-        ...current.filter((item) => item.request_id !== request.request_id),
-      ]);
+      upsertReportExportRequest(request);
       await queryClient.invalidateQueries({ queryKey: ['report-export-requests', request.task_id] });
     },
     onError: (error) => setNotice(error instanceof Error ? `导出审批提交失败：${error.message}` : '导出审批提交失败'),
@@ -131,13 +136,29 @@ export function ReportsPage() {
     onSuccess: async (request) => {
       setNotice(`导出审批已通过：${request.request_id}`);
       await queryClient.invalidateQueries({ queryKey: ['report-export-requests', request.task_id] });
-      queryClient.setQueryData<ReportExportRequest[]>(['report-export-requests', request.task_id], (current = []) =>
-        current.some((item) => item.request_id === request.request_id)
-          ? current.map((item) => (item.request_id === request.request_id ? request : item))
-          : [request, ...current],
-      );
+      upsertReportExportRequest(request);
     },
     onError: (error) => setNotice(error instanceof Error ? `导出审批失败：${error.message}` : '导出审批失败'),
+  });
+
+  const rejectExportRequestMutation = useMutation({
+    mutationFn: (requestId: string) => api.rejectReportExportRequest(requestId, { approver_role: 'Admin', note: 'CSV 明细包含敏感样本，暂不外发。' }),
+    onSuccess: async (request) => {
+      setNotice(`导出审批已拒绝：${request.request_id}`);
+      await queryClient.invalidateQueries({ queryKey: ['report-export-requests', request.task_id] });
+      upsertReportExportRequest(request);
+    },
+    onError: (error) => setNotice(error instanceof Error ? `导出审批拒绝失败：${error.message}` : '导出审批拒绝失败'),
+  });
+
+  const revokeExportRequestMutation = useMutation({
+    mutationFn: (requestId: string) => api.revokeReportExportRequest(requestId, { requester_role: exportRole, reason: '已改用在线报告。' }),
+    onSuccess: async (request) => {
+      setNotice(`导出审批已撤销：${request.request_id}`);
+      await queryClient.invalidateQueries({ queryKey: ['report-export-requests', request.task_id] });
+      upsertReportExportRequest(request);
+    },
+    onError: (error) => setNotice(error instanceof Error ? `导出审批撤销失败：${error.message}` : '导出审批撤销失败'),
   });
 
   const redTeamScanMutation = useMutation({
@@ -469,19 +490,44 @@ export function ReportsPage() {
                 { title: '申请 ID', dataIndex: 'request_id', render: (value) => <code>{value}</code> },
                 { title: '格式', dataIndex: 'file_format', render: (value) => <Tag color="blue">{String(value)}</Tag> },
                 { title: '申请角色', dataIndex: 'requester_role' },
-                { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'approved' ? 'green' : 'orange'}>{String(value)}</Tag> },
+                {
+                  title: '状态',
+                  dataIndex: 'status',
+                  render: (value) => <Tag color={value === 'approved' ? 'green' : value === 'rejected' || value === 'revoked' || value === 'expired' ? 'red' : 'orange'}>{String(value)}</Tag>,
+                },
                 { title: '原因', dataIndex: 'reason' },
+                { title: '过期时间', dataIndex: 'expires_at', render: (value) => (value ? formatAuditTime(String(value)) : '-') },
                 { title: '审批人', dataIndex: 'approved_by', render: (value) => String(value ?? '-') },
                 {
                   title: '操作',
-                  render: (_, request) =>
-                    request.status === 'pending' ? (
-                      <Button size="small" loading={approveExportRequestMutation.isPending} onClick={() => approveExportRequestMutation.mutate(request.request_id)}>
-                        Admin 审批
-                      </Button>
-                    ) : (
-                      <Typography.Text type="secondary">已处理</Typography.Text>
-                    ),
+                  render: (_, request) => {
+                    const canRequesterRevoke = request.requester_role === exportRole && ['pending', 'approved'].includes(request.status);
+                    if (request.status === 'pending') {
+                      return (
+                        <Space size={6} wrap>
+                          <Button size="small" loading={approveExportRequestMutation.isPending} onClick={() => approveExportRequestMutation.mutate(request.request_id)}>
+                            Admin 审批
+                          </Button>
+                          <Button size="small" danger loading={rejectExportRequestMutation.isPending} onClick={() => rejectExportRequestMutation.mutate(request.request_id)}>
+                            Admin 拒绝
+                          </Button>
+                          {canRequesterRevoke ? (
+                            <Button size="small" loading={revokeExportRequestMutation.isPending} onClick={() => revokeExportRequestMutation.mutate(request.request_id)}>
+                              撤销申请
+                            </Button>
+                          ) : null}
+                        </Space>
+                      );
+                    }
+                    if (canRequesterRevoke) {
+                      return (
+                        <Button size="small" loading={revokeExportRequestMutation.isPending} onClick={() => revokeExportRequestMutation.mutate(request.request_id)}>
+                          撤销申请
+                        </Button>
+                      );
+                    }
+                    return <Typography.Text type="secondary">已处理</Typography.Text>;
+                  },
                 },
               ]}
             />

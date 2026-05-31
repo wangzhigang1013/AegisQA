@@ -474,6 +474,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  rejectReportExportRequest: (requestId: string, body: { approver_role?: string; note?: string } = {}) =>
+    request<ReportExportRequest>(`/report-export-requests/${encodeURIComponent(requestId)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  revokeReportExportRequest: (requestId: string, body: { requester_role?: string; reason?: string } = {}) =>
+    request<ReportExportRequest>(`/report-export-requests/${encodeURIComponent(requestId)}/revoke`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   taskDiagnostics: (taskId: string) => request<TaskDiagnostics>(`/tasks/${taskId}/diagnostics`),
   taskParameterGovernance: (taskId: string) => request<TaskParameterGovernance>(`/tasks/${taskId}/parameter-governance`),
   taskTraceTree: (taskId: string) => request<TraceTree>(`/tasks/${taskId}/trace-tree`),

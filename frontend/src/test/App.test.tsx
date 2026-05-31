@@ -1407,6 +1407,12 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/report-export-requests/rex-export-demo/approve') && init?.method === 'POST') {
         return jsonResponse({ ...demoReportExportRequest, status: 'approved', approved_by: 'Admin', approval_note: '允许本次离线复盘。' });
       }
+      if (url.endsWith('/report-export-requests/rex-export-demo/reject') && init?.method === 'POST') {
+        return jsonResponse({ ...demoReportExportRequest, status: 'rejected', rejected_by: 'Admin', rejection_note: 'CSV 明细包含敏感样本，暂不外发。' });
+      }
+      if (url.endsWith('/report-export-requests/rex-export-demo/revoke') && init?.method === 'POST') {
+        return jsonResponse({ ...demoReportExportRequest, status: 'revoked', revoked_by: 'Viewer', revoke_reason: '已改用在线报告。' });
+      }
       if (url.includes('/report-export-requests') && url.includes('task_id=task-demo')) {
         return jsonResponse([demoReportExportRequest]);
       }
@@ -2253,6 +2259,11 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/当前角色只有报告查看权限，不能导出或外发报告/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /导出 HTML/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: /申请 HTML 导出审批/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Admin 拒绝/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Admin 拒绝/ }));
+    expect(await screen.findByText(/导出审批已拒绝：rex-export-demo/)).toBeInTheDocument();
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/report-export-requests/rex-export-demo/reject'), expect.anything());
 
     fireEvent.click(screen.getByRole('button', { name: /申请 HTML 导出审批/ }));
     expect(await screen.findByText(/导出审批已提交：rex-export-demo/)).toBeInTheDocument();
@@ -2269,6 +2280,10 @@ describe('AegisQA 前端工作台', () => {
       expect.stringContaining('/tasks/task-demo/report/export?file_format=html&role=Viewer&approval_request_id=rex-export-demo'),
       expect.anything(),
     );
+    expect(screen.getByRole('button', { name: /撤销申请/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /撤销申请/ }));
+    expect(await screen.findByText(/导出审批已撤销：rex-export-demo/)).toBeInTheDocument();
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/report-export-requests/rex-export-demo/revoke'), expect.anything());
 
     fireEvent.click(screen.getByRole('button', { name: /忽略/ }));
     expect(await screen.findByText(/Badcase 已忽略/)).toBeInTheDocument();

@@ -448,6 +448,88 @@ def test_viewer_can_export_task_report_after_admin_approval(tmp_path: Path) -> N
     assert export_events[-1]["detail"]["role"] == "Viewer"
 
 
+def test_report_export_request_lifecycle_reject_revoke_and_expire(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "task_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "task_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "报告外发生命周期任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+        },
+    ).json()
+    client.post(f"/tasks/{task['task_id']}/execute")
+
+    rejected_request = client.post(
+        f"/tasks/{task['task_id']}/report/export-requests",
+        json={"file_format": "csv", "requester_role": "Viewer", "reason": "需要给业务方离线分析。"},
+    ).json()
+    rejected = client.post(
+        f"/report-export-requests/{rejected_request['request_id']}/reject",
+        json={"approver_role": "Admin", "note": "CSV 明细包含敏感样本，暂不外发。"},
+    ).json()
+    assert rejected["status"] == "rejected"
+    assert rejected["rejected_by"] == "Admin"
+    assert rejected["rejection_note"] == "CSV 明细包含敏感样本，暂不外发。"
+
+    rejected_export = client.get(
+        f"/tasks/{task['task_id']}/report/export",
+        params={"file_format": "csv", "role": "Viewer", "approval_request_id": rejected_request["request_id"]},
+    )
+    assert rejected_export.status_code == 403
+    assert rejected_export.json()["code"] == "REPORT_EXPORT_APPROVAL_INVALID"
+    assert "status" in rejected_export.json()["details"]["failed_fields"]
+
+    revoked_request = client.post(
+        f"/tasks/{task['task_id']}/report/export-requests",
+        json={"file_format": "html", "requester_role": "Viewer", "reason": "临时排查。"},
+    ).json()
+    revoked = client.post(
+        f"/report-export-requests/{revoked_request['request_id']}/revoke",
+        json={"requester_role": "Viewer", "reason": "已改用在线报告，不再需要外发。"},
+    ).json()
+    assert revoked["status"] == "revoked"
+    assert revoked["revoked_by"] == "Viewer"
+
+    approve_revoked = client.post(
+        f"/report-export-requests/{revoked_request['request_id']}/approve",
+        json={"approver_role": "Admin", "note": "尝试批准已撤销申请。"},
+    )
+    assert approve_revoked.status_code == 409
+    assert approve_revoked.json()["code"] == "REPORT_EXPORT_APPROVAL_INVALID"
+
+    expired_request = client.post(
+        f"/tasks/{task['task_id']}/report/export-requests",
+        json={
+            "file_format": "json",
+            "requester_role": "Viewer",
+            "reason": "过期审批测试。",
+            "expires_at": "2000-01-01T00:00:00+00:00",
+        },
+    ).json()
+    assert expired_request["expires_at"] == "2000-01-01T00:00:00+00:00"
+
+    approve_expired = client.post(
+        f"/report-export-requests/{expired_request['request_id']}/approve",
+        json={"approver_role": "Admin", "note": "过期后不能批准。"},
+    )
+    assert approve_expired.status_code == 409
+    assert approve_expired.json()["code"] == "REPORT_EXPORT_APPROVAL_EXPIRED"
+
+    lifecycle_events = client.get("/audit-events", params={"target": task["task_id"]}).json()
+    lifecycle_actions = {event["action"] for event in lifecycle_events}
+    assert "task.report.export.reject" in lifecycle_actions
+    assert "task.report.export.revoke" in lifecycle_actions
+    assert "task.report.export.expire" in lifecycle_actions
+
+
 def test_task_creation_rejects_conflicting_preflight_ids(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)

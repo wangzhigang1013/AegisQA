@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import io
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Any
 from uuid import uuid4
@@ -19,6 +19,7 @@ from aegisqa.api.app import (
     RepairTaskStartRequest,
     ReportExportApprovalRequest,
     ReportExportRequestCreate,
+    ReportExportRevokeRequest,
     _build_annotation_task,
     RunCreateRequest,
     TaskCreateRequest,
@@ -414,7 +415,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.get("/report-export-requests")
     def list_report_export_requests(task_id: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
-        records = _list_records(ctx.store, "report_export_requests")
+        records = [_refresh_report_export_request_status(ctx, record) for record in _list_records(ctx.store, "report_export_requests")]
         if task_id:
             records = [record for record in records if record.get("task_id") == task_id]
         if status:
@@ -424,6 +425,14 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.post("/report-export-requests/{request_id}/approve")
     def approve_report_export_request(request_id: str, request: ReportExportApprovalRequest) -> dict[str, Any]:
         return _approve_report_export_request(ctx, request_id, request)
+
+    @app.post("/report-export-requests/{request_id}/reject")
+    def reject_report_export_request(request_id: str, request: ReportExportApprovalRequest) -> dict[str, Any]:
+        return _reject_report_export_request(ctx, request_id, request)
+
+    @app.post("/report-export-requests/{request_id}/revoke")
+    def revoke_report_export_request(request_id: str, request: ReportExportRevokeRequest) -> dict[str, Any]:
+        return _revoke_report_export_request(ctx, request_id, request)
 
     @app.get("/tasks/{task_id}/report/export")
     def export_task_report(task_id: str, file_format: str = "json", role: str = "Evaluator", approval_request_id: str | None = None) -> dict[str, Any]:
@@ -605,6 +614,7 @@ def _create_report_export_request(ctx: RouteContext, task_id: str, request: Repo
     _ensure_report_export_format(request.file_format)
     task = _get_record(ctx.store, "tasks", task_id)
     now = _now()
+    expires_at = _normalise_report_export_expires_at(request.expires_at)
     record = {
         "request_id": f"rex-{uuid4().hex[:12]}",
         "task_id": task_id,
@@ -615,6 +625,7 @@ def _create_report_export_request(ctx: RouteContext, task_id: str, request: Repo
         "requested_permission": "report:export",
         "reason": request.reason,
         "status": "pending",
+        "expires_at": expires_at,
         "created_at": now,
         "updated_at": now,
     }
@@ -623,7 +634,7 @@ def _create_report_export_request(ctx: RouteContext, task_id: str, request: Repo
         actor=request.requester_role,
         action="task.report.export.request",
         target=task_id,
-        detail={"request_id": record["request_id"], "file_format": request.file_format, "reason": request.reason},
+        detail={"request_id": record["request_id"], "file_format": request.file_format, "reason": request.reason, "expires_at": expires_at},
     )
     return record
 
@@ -637,6 +648,14 @@ def _approve_report_export_request(ctx: RouteContext, request_id: str, request: 
             details={"role": request.approver_role, "required_permission": "report:export:approve"},
         )
     record = _get_record(ctx.store, "report_export_requests", request_id)
+    record = _refresh_report_export_request_status(ctx, record)
+    if record.get("status") == "expired":
+        raise AegisQAError(
+            "REPORT_EXPORT_APPROVAL_EXPIRED",
+            "报告导出审批已过期，不能继续批准。",
+            status_code=409,
+            details={"request_id": request_id, "expires_at": record.get("expires_at")},
+        )
     if record.get("status") != "pending":
         raise AegisQAError(
             "REPORT_EXPORT_APPROVAL_INVALID",
@@ -659,7 +678,91 @@ def _approve_report_export_request(ctx: RouteContext, request_id: str, request: 
         actor=request.approver_role,
         action="task.report.export.approve",
         target=str(record.get("task_id")),
-        detail={"request_id": request_id, "file_format": record.get("file_format"), "requester_role": record.get("requester_role")},
+        detail={
+            "request_id": request_id,
+            "file_format": record.get("file_format"),
+            "requester_role": record.get("requester_role"),
+            "expires_at": record.get("expires_at"),
+        },
+    )
+    return record
+
+
+def _reject_report_export_request(ctx: RouteContext, request_id: str, request: ReportExportApprovalRequest) -> dict[str, Any]:
+    if not ctx.access_control.can(request.approver_role, "report:export:approve"):
+        raise AegisQAError(
+            "REPORT_EXPORT_APPROVAL_FORBIDDEN",
+            "当前角色没有审批报告导出的权限。",
+            status_code=403,
+            details={"role": request.approver_role, "required_permission": "report:export:approve"},
+        )
+    record = _refresh_report_export_request_status(ctx, _get_record(ctx.store, "report_export_requests", request_id))
+    if record.get("status") == "expired":
+        raise AegisQAError(
+            "REPORT_EXPORT_APPROVAL_EXPIRED",
+            "报告导出审批已过期，不能继续拒绝。",
+            status_code=409,
+            details={"request_id": request_id, "expires_at": record.get("expires_at")},
+        )
+    if record.get("status") != "pending":
+        raise AegisQAError(
+            "REPORT_EXPORT_APPROVAL_INVALID",
+            "只有待审批的报告导出申请可以被拒绝。",
+            status_code=409,
+            details={"request_id": request_id, "status": record.get("status")},
+        )
+    now = _now()
+    record.update(
+        {
+            "status": "rejected",
+            "rejected_by": request.approver_role,
+            "rejection_note": request.note,
+            "rejected_at": now,
+            "updated_at": now,
+        }
+    )
+    _save_record(ctx.store, "report_export_requests", "request_id", record)
+    ctx.audit_service.record(
+        actor=request.approver_role,
+        action="task.report.export.reject",
+        target=str(record.get("task_id")),
+        detail={"request_id": request_id, "file_format": record.get("file_format"), "requester_role": record.get("requester_role"), "note": request.note},
+    )
+    return record
+
+
+def _revoke_report_export_request(ctx: RouteContext, request_id: str, request: ReportExportRevokeRequest) -> dict[str, Any]:
+    record = _refresh_report_export_request_status(ctx, _get_record(ctx.store, "report_export_requests", request_id))
+    if record.get("requester_role") != request.requester_role:
+        raise AegisQAError(
+            "REPORT_EXPORT_REVOKE_FORBIDDEN",
+            "只有原申请角色可以撤销报告导出申请。",
+            status_code=403,
+            details={"request_id": request_id, "requester_role": request.requester_role},
+        )
+    if record.get("status") not in {"pending", "approved"}:
+        raise AegisQAError(
+            "REPORT_EXPORT_APPROVAL_INVALID",
+            "只有待审批或已批准的报告导出申请可以撤销。",
+            status_code=409,
+            details={"request_id": request_id, "status": record.get("status")},
+        )
+    now = _now()
+    record.update(
+        {
+            "status": "revoked",
+            "revoked_by": request.requester_role,
+            "revoke_reason": request.reason,
+            "revoked_at": now,
+            "updated_at": now,
+        }
+    )
+    _save_record(ctx.store, "report_export_requests", "request_id", record)
+    ctx.audit_service.record(
+        actor=request.requester_role,
+        action="task.report.export.revoke",
+        target=str(record.get("task_id")),
+        detail={"request_id": request_id, "file_format": record.get("file_format"), "reason": request.reason},
     )
     return record
 
@@ -691,6 +794,15 @@ def _ensure_report_export_approval(
             status_code=403,
             details={"approval_request_id": approval_request_id},
         ) from exc
+    record = _refresh_report_export_request_status(ctx, record)
+    if record.get("status") == "expired":
+        _record_report_export_denied(ctx, task_id, file_format, role, approval_request_id)
+        raise AegisQAError(
+            "REPORT_EXPORT_APPROVAL_EXPIRED",
+            "报告导出审批已过期，不能继续用于导出。",
+            status_code=403,
+            details={"approval_request_id": approval_request_id, "expires_at": record.get("expires_at")},
+        )
     mismatch = {
         "task_id": record.get("task_id") != task_id,
         "file_format": record.get("file_format") != file_format,
@@ -707,6 +819,49 @@ def _ensure_report_export_approval(
             details={"approval_request_id": approval_request_id, "failed_fields": failed_fields},
         )
     return record
+
+
+def _normalise_report_export_expires_at(expires_at: str | None) -> str:
+    if not expires_at:
+        return (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    parsed = _parse_report_export_datetime(expires_at)
+    if parsed is None:
+        raise AegisQAError(
+            "REPORT_EXPORT_EXPIRY_INVALID",
+            "expires_at 必须是合法 ISO 时间。",
+            details={"expires_at": expires_at},
+        )
+    return parsed.isoformat()
+
+
+def _refresh_report_export_request_status(ctx: RouteContext, record: dict[str, Any]) -> dict[str, Any]:
+    if record.get("status") not in {"pending", "approved"}:
+        return record
+    expires_at = _parse_report_export_datetime(record.get("expires_at"))
+    if expires_at is None or expires_at > datetime.now(timezone.utc):
+        return record
+    # 过期状态在读取、审批或导出时即时刷新，避免长期待处理申请被误用。
+    record.update({"status": "expired", "expired_at": _now(), "updated_at": _now()})
+    _save_record(ctx.store, "report_export_requests", "request_id", record)
+    ctx.audit_service.record(
+        actor="system",
+        action="task.report.export.expire",
+        target=str(record.get("task_id")),
+        detail={"request_id": record.get("request_id"), "file_format": record.get("file_format"), "expires_at": record.get("expires_at")},
+    )
+    return record
+
+
+def _parse_report_export_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _record_report_export_denied(ctx: RouteContext, task_id: str, file_format: str, role: str, approval_request_id: str | None) -> None:
