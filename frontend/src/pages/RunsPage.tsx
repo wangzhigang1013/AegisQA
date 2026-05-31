@@ -40,6 +40,7 @@ export function RunsPage() {
   });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
   const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets, refetchOnMount: 'always' });
+  const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills, refetchOnMount: 'always' });
   const executionTemplatesQuery = useQuery({ queryKey: ['task-execution-templates'], queryFn: api.taskExecutionTemplates, refetchOnMount: 'always' });
 
   const datasetVersions = useMemo(
@@ -247,6 +248,7 @@ export function RunsPage() {
         preflightResult={preflightResult}
         datasets={datasetsQuery.data ?? []}
         workflows={workflowsQuery.data ?? []}
+        skills={skillsQuery.data ?? []}
         executionTemplates={Array.isArray(executionTemplatesQuery.data) ? executionTemplatesQuery.data : []}
         onCancel={() => {
           setCreateOpen(false);

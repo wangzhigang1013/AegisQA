@@ -1,11 +1,30 @@
 import { Alert, Button, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography } from 'antd';
 import { useMemo } from 'react';
 
-import type { DatasetSummary, TaskExecutionTemplate, TaskPreflightResult, WorkflowVersion } from '../../types';
+import type { DatasetSummary, SkillManifest, TaskExecutionTemplate, TaskPreflightResult, WorkflowVersion } from '../../types';
 
 type SkillOverrideValueType = 'string' | 'number' | 'boolean' | 'json' | 'expression' | 'secret';
 type SkillOverrideConfigValue = string | number | boolean | Record<string, unknown> | unknown[];
 type SkillOverrideConfig = Record<string, Record<string, SkillOverrideConfigValue>>;
+type SkillStepOption = {
+  value: string;
+  label: string;
+  skill_ref?: string;
+};
+type SkillParameterOption = {
+  value: string;
+  label: string;
+  value_type: SkillOverrideValueType;
+  default_value?: SkillOverrideConfigValue;
+  description?: string;
+};
+type SkillConfigSchemaField = {
+  type?: string | string[];
+  title?: string;
+  description?: string;
+  enum?: unknown[];
+  default?: unknown;
+};
 
 export type SkillOverrideRow = {
   step_id?: string;
@@ -40,6 +59,7 @@ type TaskCreateWizardProps = {
   preflightResult?: TaskPreflightResult | null;
   datasets: DatasetSummary[];
   workflows: WorkflowVersion[];
+  skills?: SkillManifest[];
   executionTemplates?: TaskExecutionTemplate[];
   onCancel: () => void;
   onPreflight: (values: TaskCreateFormValues) => void;
@@ -53,7 +73,7 @@ export function TaskCreateWizard(props: TaskCreateWizardProps) {
   return <TaskCreateWizardContent {...props} />;
 }
 
-function TaskCreateWizardContent({ open, loading, preflightLoading, preflightResult, datasets, workflows, executionTemplates = [], onCancel, onPreflight, onSubmit }: TaskCreateWizardProps) {
+function TaskCreateWizardContent({ open, loading, preflightLoading, preflightResult, datasets, workflows, skills = [], executionTemplates = [], onCancel, onPreflight, onSubmit }: TaskCreateWizardProps) {
   const [form] = Form.useForm<TaskCreateFormValues>();
   const watchedWorkflow = Form.useWatch('workflow_version_id', form);
   const watchedDataset = Form.useWatch('dataset_version_id', form);
@@ -70,7 +90,8 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
     [datasets],
   );
   const selectedWorkflow = workflows.find((workflow) => workflow.version_id === watchedWorkflow);
-  const overrideTargets = useMemo(() => skillStepOptions(selectedWorkflow), [selectedWorkflow]);
+  const skillById = useMemo(() => indexSkillsById(skills), [skills]);
+  const overrideTargets = useMemo(() => skillStepOptions(selectedWorkflow, skillById), [selectedWorkflow, skillById]);
   const selectedDatasetVersion = datasetVersions.find((item) => item.version.version_id === watchedDataset)?.version;
   const currentExecutionTemplate = watchedTemplate ?? form.getFieldValue('execution_template_id');
   const currentEvaluationGoal = watchedEvaluationGoal ?? form.getFieldValue('evaluation_goal');
@@ -251,12 +272,42 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
                           optionFilterProp="label"
                           placeholder="选择 Skill Step"
                           options={overrideTargets}
+                          onChange={() => {
+                            form.setFieldValue(['skill_override_rows', field.name, 'parameter'], undefined);
+                            form.setFieldValue(['skill_override_rows', field.name, 'value'], undefined);
+                            form.setFieldValue(['skill_override_rows', field.name, 'value_type'], 'string');
+                          }}
                         />
                       </Form.Item>
                     </Col>
                     <Col span={5}>
-                      <Form.Item name={[field.name, 'parameter']} label="参数名" rules={[{ required: true, message: '请填写参数名' }]}>
-                        <Input placeholder="例如：model" />
+                      <Form.Item shouldUpdate noStyle>
+                        {({ getFieldValue }) => {
+                          const stepId = stringOrEmpty(getFieldValue(['skill_override_rows', field.name, 'step_id']));
+                          const parameterOptions = skillParameterOptions(selectedWorkflow, skillById, stepId);
+                          return (
+                            <Form.Item name={[field.name, 'parameter']} label="参数名" rules={[{ required: true, message: '请填写参数名' }]}>
+                              {parameterOptions.length ? (
+                                <Select
+                                  aria-label="参数名"
+                                  showSearch
+                                  optionFilterProp="label"
+                                  placeholder="选择参数"
+                                  options={parameterOptions}
+                                  onChange={(_, option) => {
+                                    const selectedOption = Array.isArray(option) ? option[0] : option;
+                                    const valueType = (selectedOption as SkillParameterOption | undefined)?.value_type ?? 'string';
+                                    const defaultValue = (selectedOption as SkillParameterOption | undefined)?.default_value;
+                                    form.setFieldValue(['skill_override_rows', field.name, 'value_type'], valueType);
+                                    form.setFieldValue(['skill_override_rows', field.name, 'value'], defaultValue);
+                                  }}
+                                />
+                              ) : (
+                                <Input placeholder="例如：model" />
+                              )}
+                            </Form.Item>
+                          );
+                        }}
                       </Form.Item>
                     </Col>
                     <Col span={4}>
@@ -416,16 +467,25 @@ function normalizeTaskCreateValues(values: TaskCreateFormValues): TaskCreateForm
   };
 }
 
-function skillStepOptions(workflow?: WorkflowVersion) {
+function indexSkillsById(skills: SkillManifest[]): Record<string, SkillManifest> {
+  return skills.reduce<Record<string, SkillManifest>>((index, skill) => {
+    index[skill.skill_id] = skill;
+    return index;
+  }, {});
+}
+
+function skillStepOptions(workflow?: WorkflowVersion, skillById: Record<string, SkillManifest> = {}): SkillStepOption[] {
   const graphSkillNodes = workflow?.graph?.nodes
     ?.filter((node) => node.node_type === 'skill')
-    .map((node) => ({
+    .map((node): SkillStepOption => ({
       value: node.node_id,
       label: `${node.label || node.node_id} / ${node.node_id}`,
+      skill_ref: node.skill_ref,
     })) ?? [];
-  const stepOptions = workflow?.steps?.map((step) => ({
+  const stepOptions = workflow?.steps?.map((step): SkillStepOption => ({
     value: step.step_id,
-    label: `${step.step_id} / ${step.skill_ref}`,
+    label: `${skillById[step.skill_ref]?.name || step.step_id} / ${step.step_id}`,
+    skill_ref: step.skill_ref,
   })) ?? [];
   const seen = new Set<string>();
   return [...graphSkillNodes, ...stepOptions].filter((option) => {
@@ -433,6 +493,54 @@ function skillStepOptions(workflow?: WorkflowVersion) {
     seen.add(option.value);
     return true;
   });
+}
+
+function skillParameterOptions(workflow: WorkflowVersion | undefined, skillById: Record<string, SkillManifest>, stepId: string): SkillParameterOption[] {
+  const skillRef = skillRefForStep(workflow, stepId);
+  const skill = skillRef ? skillById[skillRef] : undefined;
+  if (!skill) return [];
+  return Object.entries(configSchemaProperties(skill)).map(([field, schema]) => ({
+    value: field,
+    label: `${field} / ${schemaTypeLabel(schema)}`,
+    value_type: inferOverrideValueType(schema),
+    default_value: defaultOverrideValue(skill, field, schema),
+    description: schema.description,
+  }));
+}
+
+function skillRefForStep(workflow: WorkflowVersion | undefined, stepId: string): string | undefined {
+  if (!workflow || !stepId) return undefined;
+  const graphNode = workflow.graph?.nodes?.find((node) => node.node_id === stepId && node.node_type === 'skill');
+  if (graphNode?.skill_ref) return graphNode.skill_ref;
+  return workflow.steps?.find((step) => step.step_id === stepId)?.skill_ref;
+}
+
+function configSchemaProperties(skill: SkillManifest): Record<string, SkillConfigSchemaField> {
+  const properties = skill.config_schema?.properties;
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return {};
+  return properties as Record<string, SkillConfigSchemaField>;
+}
+
+function inferOverrideValueType(schema: SkillConfigSchemaField): SkillOverrideValueType {
+  const type = firstSchemaType(schema.type);
+  if (type === 'number' || type === 'integer') return 'number';
+  if (type === 'boolean') return 'boolean';
+  if (type === 'object' || type === 'array') return 'json';
+  return 'string';
+}
+
+function defaultOverrideValue(skill: SkillManifest, field: string, schema: SkillConfigSchemaField): SkillOverrideConfigValue | undefined {
+  if (schema.default !== undefined) return ensureOverrideConfigValue(schema.default);
+  const exampleValue = skill.example_config?.[field];
+  return exampleValue === undefined ? undefined : ensureOverrideConfigValue(exampleValue);
+}
+
+function firstSchemaType(type: SkillConfigSchemaField['type']): string | undefined {
+  return Array.isArray(type) ? type[0] : type;
+}
+
+function schemaTypeLabel(schema: SkillConfigSchemaField): string {
+  return firstSchemaType(schema.type) || 'any';
 }
 
 function skillOverridesFromRows(rows: unknown): SkillOverrideConfig {

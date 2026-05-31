@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { TaskCreateWizard, type TaskCreateFormValues } from './TaskCreateWizard';
+import { demoSkills } from '../../data/demo';
 import type { DatasetSummary, WorkflowVersion } from '../../types';
 
 const datasets: DatasetSummary[] = [
@@ -38,14 +39,14 @@ const workflows: WorkflowVersion[] = [
       name: 'RAG 回归评测',
       nodes: [
         { node_id: 'source', node_type: 'source', label: '数据源' },
-        { node_id: 'answer', node_type: 'skill', label: '生成回答', skill_ref: 'llm.answer@0.1.0' },
+        { node_id: 'answer', node_type: 'skill', label: '生成回答', skill_ref: 'llm.call@0.1.0' },
       ],
       edges: [{ source: 'source', target: 'answer' }],
     },
     steps: [
       {
         step_id: 'answer',
-        skill_ref: 'llm.answer@0.1.0',
+        skill_ref: 'llm.call@0.1.0',
         input_mapping: { prompt: 'row.question' },
         output_mapping: { answer: 'context.answer' },
         config: { model: 'workflow-default' },
@@ -305,6 +306,25 @@ describe('TaskCreateWizard', () => {
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining<Partial<TaskCreateFormValues>>({
         skill_overrides: { answer: { model: 'task-model' } },
+      }),
+    );
+  });
+
+  it('任务级 Skill 参数覆盖按所选 Step 的 config_schema 选择参数并推断值类型', async () => {
+    const onPreflight = vi.fn();
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} skills={demoSkills} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={onPreflight} onSubmit={vi.fn()} />);
+
+    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
+    await chooseSelectOption('覆盖 Step', '生成回答 / answer');
+    await chooseSelectOption('参数名', 'temperature / number');
+    fireEvent.change(screen.getByLabelText('覆盖值'), { target: { value: '0.35' } });
+    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
+
+    expect(onPreflight).toHaveBeenCalledWith(
+      expect.objectContaining<Partial<TaskCreateFormValues>>({
+        skill_overrides: { answer: { temperature: 0.35 } },
       }),
     );
   });

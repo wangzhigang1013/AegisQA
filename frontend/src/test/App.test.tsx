@@ -402,7 +402,9 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.mouseDown(findComboboxByLabel('覆盖 Step'));
     const stepOptions = await screen.findAllByText('生成回答 / answer');
     fireEvent.click(stepOptions[stepOptions.length - 1]);
-    fireEvent.change(screen.getByPlaceholderText('例如：model'), { target: { value: 'model' } });
+    fireEvent.mouseDown(findComboboxByLabel('参数名'));
+    const parameterOptions = await screen.findAllByText('model / string');
+    fireEvent.click(parameterOptions[parameterOptions.length - 1]);
     fireEvent.change(screen.getByPlaceholderText('覆盖值'), { target: { value: 'task-model' } });
 
     fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
