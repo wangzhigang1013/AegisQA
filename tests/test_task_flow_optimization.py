@@ -815,6 +815,38 @@ def test_prompt_skill_candidate_bulk_archive_terminal_stale_candidates(tmp_path:
     assert {"candidate-rejected-old", "candidate-promoted-old"} <= archived_list_ids
 
 
+def test_prompt_skill_candidates_support_server_side_pagination_without_breaking_legacy_list(tmp_path: Path) -> None:
+    client, _, _ = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    store = client.app.state.store
+    for index in range(12):
+        _save_record(
+            store,
+            "prompt_skill_candidates",
+            "candidate_id",
+            {
+                "candidate_id": f"candidate-page-{index:02d}",
+                "kind": "prompt_skill_version_diff",
+                "status": "approved" if index % 3 == 0 else "candidate",
+                "current_versions": [],
+                "version_diffs": [],
+                "created_at": f"2026-05-{index + 1:02d}T00:00:00+00:00",
+                "updated_at": f"2026-05-{index + 1:02d}T00:00:00+00:00",
+            },
+        )
+
+    legacy = client.get("/prompt-skill-candidates").json()
+    assert isinstance(legacy, list)
+    assert len(legacy) == 12
+
+    page = client.get("/prompt-skill-candidates", params={"page": 2, "page_size": 5}).json()
+    assert page["pagination"] == {"page": 2, "page_size": 5, "total_items": 12, "total_pages": 3}
+    assert [item["candidate_id"] for item in page["items"]] == [item["candidate_id"] for item in legacy[5:10]]
+
+    approved_page = client.get("/prompt-skill-candidates", params={"status": "approved", "page": 1, "page_size": 5}).json()
+    assert approved_page["pagination"]["total_items"] == 4
+    assert {item["status"] for item in approved_page["items"]} == {"approved"}
+
+
 def test_prompt_skill_candidate_retest_plan_prioritizes_ready_and_overdue_candidates(tmp_path: Path) -> None:
     client, _, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
     store = client.app.state.store

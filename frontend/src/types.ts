@@ -871,6 +871,16 @@ export type PromptSkillCandidate = {
   updated_at?: string;
 };
 
+export type PromptSkillCandidatePageResult = {
+  items: PromptSkillCandidate[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total_items: number;
+    total_pages: number;
+  };
+};
+
 export type PromptSkillCandidateWorkload = {
   summary: {
     total_candidates: number;

@@ -1537,6 +1537,13 @@ describe('AegisQA 前端工作台', () => {
         return jsonResponse(demoCandidateBulkRetestPayload);
       }
       if (url.includes('/prompt-skill-candidates')) {
+        const parsed = new URL(url, 'http://localhost');
+        if (parsed.searchParams.has('page')) {
+          return jsonResponse({
+            items: [demoPromptSkillCandidate],
+            pagination: { page: Number(parsed.searchParams.get('page') ?? 1), page_size: 8, total_items: 1, total_pages: 1 },
+          });
+        }
         return jsonResponse([demoPromptSkillCandidate]);
       }
       if (url.endsWith('/ci-gates')) {
@@ -2387,6 +2394,55 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /批量审批当前列表/ }));
     expect(await screen.findByText(/批量审批完成：1 个/)).toBeInTheDocument();
     expect(screen.getByText('已审批')).toBeInTheDocument();
+  });
+
+  it('候选资产中心列表使用服务端分页', async () => {
+    const manyCandidates = Array.from({ length: 12 }, (_, index) => ({
+      ...demoPromptSkillCandidate,
+      candidate_id: `candidate-page-${String(index).padStart(2, '0')}`,
+      status: 'candidate',
+    }));
+    const candidateRequests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/prompt-skill-candidates/workload')) {
+        return jsonResponse({ summary: { total_candidates: 12, total_open: 12, total_overdue: 0, escalated: 0 }, owners: [] });
+      }
+      if (url.includes('/prompt-skill-candidates/retest-plan')) {
+        return jsonResponse({
+          summary: { total_candidates: 0, ready_for_retest: 0, needs_publish: 0, needs_draft: 0, already_retested: 0, overdue: 0, escalated: 0 },
+          items: [],
+        });
+      }
+      if (url.includes('/baseline-change-notifications')) {
+        return jsonResponse([]);
+      }
+      if (url.includes('/prompt-skill-candidates')) {
+        const parsed = new URL(url, 'http://localhost');
+        candidateRequests.push(url);
+        if (!parsed.searchParams.has('page')) {
+          return jsonResponse(manyCandidates);
+        }
+        const page = Number(parsed.searchParams.get('page') ?? 1);
+        const pageSize = Number(parsed.searchParams.get('page_size') ?? 8);
+        const start = (page - 1) * pageSize;
+        return jsonResponse({
+          items: manyCandidates.slice(start, start + pageSize),
+          pagination: { page, page_size: pageSize, total_items: manyCandidates.length, total_pages: Math.ceil(manyCandidates.length / pageSize) },
+        });
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/candidate-assets');
+
+    expect(await screen.findByText('candidate-page-00')).toBeInTheDocument();
+    expect(screen.queryByText('candidate-page-08')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('2'));
+    await waitFor(() => {
+      expect(candidateRequests.some((request) => request.includes('page=2') && request.includes('page_size=8'))).toBe(true);
+    });
+    expect(await screen.findByText('candidate-page-08')).toBeInTheDocument();
   });
 
   it('报告中心围绕任务展示报告、质量决策和导出入口', async () => {

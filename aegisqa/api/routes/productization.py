@@ -166,7 +166,9 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         status: str | None = Query(default=None),
         baseline_experiment_id: str | None = Query(default=None),
         include_archived: bool = Query(default=False),
-    ) -> list[dict[str, Any]]:
+        page: int | None = Query(default=None, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         candidates = [_with_candidate_sla_status(candidate, now=_now()) for candidate in _list_records(ctx.store, "prompt_skill_candidates")]
         if not include_archived and status != "archived":
             candidates = [candidate for candidate in candidates if candidate.get("status") != "archived"]
@@ -176,7 +178,10 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             candidates = [candidate for candidate in candidates if candidate.get("status") == status]
         if baseline_experiment_id:
             candidates = [candidate for candidate in candidates if candidate.get("baseline_experiment_id") == baseline_experiment_id]
-        return sorted(candidates, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+        sorted_candidates = sorted(candidates, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+        if page is not None:
+            return _paginate_records(sorted_candidates, page=page, page_size=page_size)
+        return sorted_candidates
 
     @app.get("/prompt-skill-candidates/workload")
     def get_prompt_skill_candidate_workload() -> dict[str, Any]:
@@ -522,7 +527,7 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         if source_task_id:
             tasks = [task for task in tasks if task.get("source_task_id") == source_task_id]
         if page is not None:
-            return _paginate_annotation_tasks(tasks, page=page, page_size=page_size)
+            return _paginate_records(tasks, page=page, page_size=page_size)
         return tasks
 
     @app.post("/annotation-queue/{task_id}/assign")
@@ -577,13 +582,13 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         return candidates
 
 
-def _paginate_annotation_tasks(tasks: list[dict[str, Any]], *, page: int, page_size: int) -> dict[str, Any]:
-    total_items = len(tasks)
+def _paginate_records(records: list[dict[str, Any]], *, page: int, page_size: int) -> dict[str, Any]:
+    total_items = len(records)
     safe_page = max(page, 1)
     safe_page_size = min(max(page_size, 1), 100)
     start = (safe_page - 1) * safe_page_size
     return {
-        "items": tasks[start : start + safe_page_size],
+        "items": records[start : start + safe_page_size],
         "pagination": {
             "page": safe_page,
             "page_size": safe_page_size,

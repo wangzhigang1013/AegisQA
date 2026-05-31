@@ -22,6 +22,7 @@ import type {
   JudgeCrossValidationResult,
   JudgeAuditTrends,
   PromptSkillCandidate,
+  PromptSkillCandidatePageResult,
   PromptSkillCandidateBulkArchiveResult,
   PromptSkillCandidateBulkAssignResult,
   PromptSkillCandidateBulkRetestResult,
@@ -206,6 +207,15 @@ export const api = {
     });
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<PromptSkillCandidate[]>(`/prompt-skill-candidates${suffix}`);
+  },
+  promptSkillCandidatesPage: (filters: { source_task_id?: string; status?: string; baseline_experiment_id?: string; page?: number; pageSize?: number } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (!value) return;
+      query.set(key === 'pageSize' ? 'page_size' : key, String(value));
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<PromptSkillCandidatePageResult>(`/prompt-skill-candidates${suffix}`);
   },
   promptSkillCandidateWorkload: () => request<PromptSkillCandidateWorkload>('/prompt-skill-candidates/workload'),
   promptSkillCandidateRetestPlan: (filters: { status?: string } = {}) => {

@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-“Annotation Queue Server Pagination”已完成并通过全量验证。本批次继续优化任务复盘后的人工审核交接点：`GET /annotation-queue` 无分页参数时保持旧数组响应，带 `page/page_size` 时返回 `{ items, pagination }`；Annotation Queue 页面已改为受控服务端分页，筛选变化会重置页码和已选样本。下一批继续从全流程使用视角审查候选资产、Repair Task、CI Gate 评估历史和成本账单等长列表/重动作页面。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Candidate Assets Server Pagination”已完成并通过全量验证。本批次继续优化修复/审核后的候选资产治理入口：`GET /prompt-skill-candidates` 无分页参数时保持旧数组响应，带 `page/page_size` 时返回 `{ items, pagination }`；候选资产中心主表已改为服务端分页，批量审批、批量指派、批量归档保持“当前页候选资产”语义。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -71,6 +71,7 @@
 - Trace Tree API 已支持服务端分页，Run/Task 两个入口都返回 `pagination` 元数据；独立页面翻页请求对应页，任务详情抽屉只请求前 5 条 Trace 摘要。
 - Task Report Badcase 明细已支持服务端分页，页面报告返回当前页坏例和 `badcase_pagination`，导出报告仍返回完整坏例明细。
 - Annotation Queue API 已支持服务端分页，旧数组响应保持兼容；React 审核队列翻页会请求后端，并在筛选变化时重置分页和选择。
+- 候选资产中心 API 已支持服务端分页，旧数组响应保持兼容；React 主表翻页会请求后端，批量操作明确作用于当前页候选资产。
 - 首页已从产品能力展示调整为任务工作台，优先展示最近任务、待审批 Skill、待审核样本、失败任务和 CI Gate 阻断，并固定“上传数据 -> 选择 Workflow -> 创建任务 -> 查看报告”主流程入口。
 - 任务详情已抽成驾驶舱组件，按概览、样本、Trace、Badcase、Attempts、参数组织，参数页可查看任务冻结参数、Skill 参数来源和 Secret 脱敏说明。
 - 任务详情 Badcase 页签已增加分页，默认每页 8 条，避免大任务在执行中心详情抽屉中一次性渲染全部坏例。
@@ -120,6 +121,16 @@
 
 ## 最近验证
 
+- `python -m pytest tests\test_task_flow_optimization.py -q -k "prompt_skill_candidates_support_server_side_pagination"`：先 RED 后 GREEN，最终 1 passed，确认候选资产分页响应、legacy 数组响应和筛选后分页。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心列表使用服务端分页"`：先 RED 后 GREEN，最终 1 passed，确认点击第 2 页会请求 `page=2&page_size=8`。
+- `python -m pytest tests\test_task_flow_optimization.py -q -k "prompt_skill_candidate"`：8 passed，确认候选资产审批、指派、归档、复跑、晋升与新增分页兼容。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`：6 passed，确认候选资产中心既有动作与新增分页兼容。
+- `python -m pytest -q`：100 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：6 个测试文件，79 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
+- `cd frontend && npm run build`：通过，CandidateAssetsPage chunk 正常生成。
+- `cd frontend && npm run e2e`：8 passed，主链路、Annotation Queue 和 Workflow 画布 E2E 均通过。
+- `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - `python -m pytest tests\test_productization_api.py -q -k "annotation_queue_supports_server_side_pagination"`：先 RED 后 GREEN，最终 1 passed，确认 Annotation Queue 分页响应、legacy 数组响应和筛选后分页。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "Annotation Queue 审核队列使用服务端分页"`：先 RED 后 GREEN，最终 1 passed，确认点击第 2 页会请求 `page=2&page_size=8`。
 - `python -m pytest tests\test_productization_api.py -q -k "annotation_queue"`：4 passed，确认领取、审核、来源任务筛选、批量审核与新增分页兼容。
@@ -393,6 +404,41 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Candidate Assets Server Pagination
+
+- 改动摘要：候选资产中心从前端本地分页升级为服务端分页；旧 `GET /prompt-skill-candidates` 数组响应保持兼容，带 `page/page_size` 时返回 `items` 和 `pagination`；React 主表使用受控分页，状态筛选变化回到第 1 页，批量审批/指派/归档基于当前页候选资产。
+- 变更文件：
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/CandidateAssetsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-06-01-candidate-assets-server-pagination.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "prompt_skill_candidates_support_server_side_pagination"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心列表使用服务端分页"`
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "prompt_skill_candidate"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 后端分页测试先 RED 后 GREEN，最终 1 passed。
+  - 前端服务端分页测试先 RED 后 GREEN，最终 1 passed。
+  - 候选资产后端相关回归 8 passed。
+  - 候选资产前端相关回归 6 passed。
+  - 后端全量 100 passed，仍有 Windows `.pytest_cache` 创建警告。
+  - 前端类型检查通过；前端单测 79 passed，仍有既有 Ant Design `useForm` 测试环境 warning。
+  - 前端构建通过；Playwright E2E 8 passed；`git diff --check` 仅有 CRLF 换行转换 warning。
+- 下一步：继续审查 Repair Task、CI Gate 评估历史和成本账单等长列表/重动作页面的分页、筛选与权限边界。
 
 ### 2026-06-01 Annotation Queue Server Pagination
 

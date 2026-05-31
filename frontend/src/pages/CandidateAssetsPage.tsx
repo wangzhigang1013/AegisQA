@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { BaselineChangeNotification, ExperimentBaselineActionResult, ExperimentBaselineImpact, PromptSkillCandidate, PromptSkillCandidateRetestPlanItem, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
+import type { BaselineChangeNotification, ExperimentBaselineActionResult, ExperimentBaselineImpact, PromptSkillCandidate, PromptSkillCandidatePageResult, PromptSkillCandidateRetestPlanItem, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
 
 // 默认容量只作为页面初值，用户仍可按团队当日处理能力调整。
 const CANDIDATE_OWNER_CAPACITY_LIMIT = 5;
@@ -25,10 +25,12 @@ export function CandidateAssetsPage() {
   const [lastBaselineNotifications, setLastBaselineNotifications] = useState<BaselineChangeNotification[]>([]);
   const [batchAssignOwner, setBatchAssignOwner] = useState('qa_owner');
   const [batchAssignCapacity, setBatchAssignCapacity] = useState<number | null>(CANDIDATE_OWNER_CAPACITY_LIMIT);
-  const queryKey = ['prompt-skill-candidates', statusFilter] as const;
+  const [candidatePage, setCandidatePage] = useState(1);
+  const candidatePageSize = 8;
+  const queryKey = ['prompt-skill-candidates', statusFilter, candidatePage, candidatePageSize] as const;
   const candidatesQuery = useQuery({
     queryKey,
-    queryFn: () => api.promptSkillCandidates({ status: statusFilter }),
+    queryFn: () => api.promptSkillCandidatesPage({ status: statusFilter, page: candidatePage, pageSize: candidatePageSize }),
   });
   const workloadQuery = useQuery({
     queryKey: ['prompt-skill-candidate-workload'],
@@ -42,7 +44,8 @@ export function CandidateAssetsPage() {
     queryKey: ['baseline-change-notifications', 'unread'],
     queryFn: () => api.baselineChangeNotifications({ status: 'unread' }),
   });
-  const candidates = candidatesQuery.data ?? [];
+  const candidates = candidatesQuery.data?.items ?? [];
+  const candidatePagination = candidatesQuery.data?.pagination;
   const currentCandidateIds = candidates.map((candidate) => candidate.candidate_id);
   const baselineNotifications = mergeBaselineNotifications(lastBaselineNotifications, baselineNotificationsQuery.data ?? []);
   const retestPlanItems = retestPlanQuery.data?.items ?? [];
@@ -56,12 +59,14 @@ export function CandidateAssetsPage() {
   }
 
   function mergeCandidate(candidate: PromptSkillCandidate) {
-    queryClient.setQueryData<PromptSkillCandidate[]>(queryKey, (current = []) => {
-      if (statusFilter && candidate.status !== statusFilter) {
-        return current.filter((item) => item.candidate_id !== candidate.candidate_id);
+    queryClient.setQueryData<PromptSkillCandidatePageResult>(queryKey, (current) => {
+      if (!current) return current;
+      const keepInCurrentList = (!statusFilter || candidate.status === statusFilter) && !(candidate.status === 'archived' && statusFilter !== 'archived');
+      if (!keepInCurrentList) {
+        return { ...current, items: current.items.filter((item) => item.candidate_id !== candidate.candidate_id) };
       }
-      const exists = current.some((item) => item.candidate_id === candidate.candidate_id);
-      return exists ? current.map((item) => (item.candidate_id === candidate.candidate_id ? candidate : item)) : [candidate, ...current];
+      const exists = current.items.some((item) => item.candidate_id === candidate.candidate_id);
+      return { ...current, items: exists ? current.items.map((item) => (item.candidate_id === candidate.candidate_id ? candidate : item)) : [candidate, ...current.items] };
     });
   }
 
@@ -151,7 +156,9 @@ export function CandidateAssetsPage() {
       if (statusFilter === 'archived') {
         mergeCandidates(payload.candidates);
       } else {
-        queryClient.setQueryData<PromptSkillCandidate[]>(queryKey, (current = []) => current.filter((candidate) => !archivedIds.has(candidate.candidate_id)));
+        queryClient.setQueryData<PromptSkillCandidatePageResult>(queryKey, (current) =>
+          current ? { ...current, items: current.items.filter((candidate) => !archivedIds.has(candidate.candidate_id)) } : current,
+        );
       }
       invalidateCandidateSummaries();
       void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidates'] });
@@ -528,7 +535,10 @@ export function CandidateAssetsPage() {
             allowClear
             placeholder="按状态筛选"
             value={statusFilter}
-            onChange={setStatusFilter}
+            onChange={(value) => {
+              setStatusFilter(value);
+              setCandidatePage(1);
+            }}
             style={{ width: 220 }}
             options={[
               { value: 'candidate', label: '待审批' },
@@ -540,13 +550,19 @@ export function CandidateAssetsPage() {
               { value: 'archived', label: '已归档' },
             ]}
           />
-          <Tag color="blue">{candidates.length} 个候选资产</Tag>
+          <Tag color="blue">{candidatePagination?.total_items ?? candidates.length} 个候选资产</Tag>
         </Space>
         <Table
           rowKey="candidate_id"
           loading={candidatesQuery.isLoading}
           dataSource={candidates}
-          pagination={{ pageSize: 8 }}
+          pagination={{
+            current: candidatePagination?.page ?? candidatePage,
+            pageSize: candidatePagination?.page_size ?? candidatePageSize,
+            total: candidatePagination?.total_items ?? candidates.length,
+            showSizeChanger: false,
+            onChange: setCandidatePage,
+          }}
           columns={[
             {
               title: '候选资产',
