@@ -223,6 +223,8 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             result = _repair_action_fix_dataset_fields(ctx, record)
         elif action == "plan_workflow_parameter_changes":
             result = _repair_action_plan_workflow_parameter_changes(ctx, record)
+        elif action == "compare_prompt_skill_versions":
+            result = _repair_action_compare_prompt_skill_versions(ctx, record)
         elif action in {"open_trace_flow", "open_parameter_governance", "open_dataset_lineage"}:
             result = _repair_action_link_target(record, action)
         else:
@@ -240,6 +242,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                         "create_followup_repair_tasks",
                         "fix_dataset_fields",
                         "plan_workflow_parameter_changes",
+                        "compare_prompt_skill_versions",
                         "open_trace_flow",
                         "open_parameter_governance",
                         "open_dataset_lineage",
@@ -1165,6 +1168,138 @@ def _workflow_parameter_recommendation(source: str) -> str:
     return "请确认该参数来源是否符合本次评测目标。"
 
 
+def _repair_action_compare_prompt_skill_versions(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+    """生成 Prompt/Skill 版本对比计划。
+
+    版本回滚或晋升会改变后续评测基线，不能在修复任务里直接执行。这里把当前 Run
+    与同数据集的 Experiment baseline 做差异比较，帮助用户判断是 Prompt、Skill、模型
+    还是参数版本造成退化，再决定是否创建候选配置或发布新的 Workflow 版本。
+    """
+
+    task = _get_record(ctx.store, "tasks", str(repair_task.get("source_task_id")))
+    run_id = _repair_latest_run_id(repair_task, task)
+    run = ctx.runner.get_run(run_id)
+    current_versions = _build_prompt_skill_version_inventory(ctx, run)
+    baseline_candidates = _build_prompt_skill_baseline_candidates(ctx, task, run, current_versions)
+    return {
+        "status": "planned",
+        "source_task_id": task["task_id"],
+        "run_id": run.run_id,
+        "current_versions": current_versions,
+        "baseline_candidates": baseline_candidates,
+        "candidate_actions": [
+            {
+                "action": "create_prompt_skill_candidate",
+                "label": "沉淀 Prompt/Skill 候选配置",
+                "target_url": f"/experiments?dataset_id={run.dataset_id}&workflow_id={run.workflow.workflow_id}",
+            },
+            {
+                "action": "create_workflow_draft_from_version_diff",
+                "label": "从版本差异创建 Workflow 草稿",
+                "target_url": f"/workflows?source_task_id={task['task_id']}",
+            },
+        ],
+        "next_steps": [
+            "先对比当前 Run 与 baseline 的 prompt_version、skill_ref、model 和模型参数差异。",
+            "如果 baseline 指标更好，优先把差异配置沉淀为 Prompt/Skill 候选，再用同一 Dataset 复跑。",
+            "如果当前版本更好，把当前配置发布为新的 Workflow 版本，并把 Experiment 设为新 baseline。",
+        ],
+    }
+
+
+def _build_prompt_skill_version_inventory(ctx: RouteContext, run: RunRecord) -> list[dict[str, Any]]:
+    inventory: list[dict[str, Any]] = []
+    for step in run.workflow.steps:
+        try:
+            skill_version = ctx.registry.get(step.skill_ref).manifest.version
+        except Exception:  # noqa: BLE001 - 历史 Run 可能引用已经下线的 Skill，版本清单仍要返回可解释占位。
+            skill_version = "unknown"
+        inventory.append(
+            {
+                "step_id": step.step_id,
+                "skill_ref": step.skill_ref,
+                "skill_version": skill_version,
+                "prompt_version": step.config.get("prompt_version") or step.config.get("prompt") or "inline-config",
+                "model": step.config.get("model"),
+                "model_params": {key: step.config.get(key) for key in ("temperature", "threshold", "top_p") if key in step.config},
+                "cacheable": step.cacheable,
+            }
+        )
+    return inventory
+
+
+def _build_prompt_skill_baseline_candidates(
+    ctx: RouteContext,
+    task: dict[str, Any],
+    run: RunRecord,
+    current_versions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for experiment in _list_records(ctx.store, "experiments"):
+        if experiment.get("run_id") == run.run_id:
+            continue
+        if experiment.get("dataset_id") != run.dataset_id:
+            continue
+        snapshot = experiment.get("snapshot") if isinstance(experiment.get("snapshot"), dict) else {}
+        baseline_versions = snapshot.get("prompt_skill_versions", []) if isinstance(snapshot, dict) else []
+        if not isinstance(baseline_versions, list):
+            continue
+        version_diffs = _diff_prompt_skill_versions(current_versions, [item for item in baseline_versions if isinstance(item, dict)])
+        if not version_diffs:
+            continue
+        metrics = experiment.get("metrics") if isinstance(experiment.get("metrics"), dict) else {}
+        candidates.append(
+            {
+                "experiment_id": experiment.get("experiment_id"),
+                "name": experiment.get("name"),
+                "run_id": experiment.get("run_id"),
+                "workflow_version_id": experiment.get("workflow_version_id") or snapshot.get("workflow_version"),
+                "metrics": {
+                    "pass_rate": metrics.get("pass_rate"),
+                    "badcase_count": metrics.get("badcase_count"),
+                    "p95_latency_ms": metrics.get("p95_latency_ms"),
+                },
+                "version_diffs": version_diffs,
+                "target_url": f"/experiments?baseline_run_id={experiment.get('run_id')}&task_id={task['task_id']}",
+            }
+        )
+    return sorted(candidates, key=lambda item: str(item.get("experiment_id") or ""))[:5]
+
+
+def _diff_prompt_skill_versions(current_versions: list[dict[str, Any]], baseline_versions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    current_by_step = {str(item.get("step_id")): item for item in current_versions}
+    baseline_by_step = {str(item.get("step_id")): item for item in baseline_versions}
+    diffs: list[dict[str, Any]] = []
+    for step_id in sorted(set(current_by_step) & set(baseline_by_step)):
+        current = current_by_step[step_id]
+        baseline = baseline_by_step[step_id]
+        for field in ("skill_ref", "skill_version", "prompt_version", "model", "model_params"):
+            if field not in current or field not in baseline:
+                continue
+            current_value = current.get(field)
+            baseline_value = baseline.get(field)
+            if current_value == baseline_value:
+                continue
+            diffs.append(
+                {
+                    "step_id": step_id,
+                    "field": field,
+                    "baseline_value": baseline_value,
+                    "current_value": current_value,
+                    "recommended_action": _prompt_skill_version_recommended_action(field),
+                }
+            )
+    return diffs
+
+
+def _prompt_skill_version_recommended_action(field: str) -> str:
+    if field == "prompt_version":
+        return "compare_or_rollback_prompt_version"
+    if field in {"skill_ref", "skill_version"}:
+        return "verify_skill_version_compatibility"
+    return "compare_model_or_parameter_version"
+
+
 def _repair_recommendations_from_last_result(ctx: RouteContext, repair_task: dict[str, Any]) -> list[dict[str, Any]]:
     last_action = repair_task.get("last_action_result") or {}
     if isinstance(last_action, dict) and last_action.get("action") == "generate_remediation_plan":
@@ -1261,6 +1396,17 @@ def _build_repair_remediation_recommendations(
                 [f"comparison_status={comparison_status}"],
             )
         )
+        recommendations.append(
+            _remediation_item(
+                "prompt_skill_versions",
+                "对比 Prompt/Skill 版本与 baseline",
+                "最近复跑没有明确改善时，需要确认 Prompt、Skill、模型和模型参数版本是否偏离历史高质量 baseline。",
+                f"/experiments?task_id={task_id}",
+                "compare_prompt_skill_versions",
+                "high" if comparison_status == "regressed" else "medium",
+                [f"comparison_status={comparison_status}"],
+            )
+        )
 
     if cause_type == "data_quality" or diagnostics.get("data_quality", {}).get("warnings"):
         recommendations.append(
@@ -1286,6 +1432,17 @@ def _build_repair_remediation_recommendations(
                 f"/annotation-queue?source_task_id={task_id}",
                 "seed_annotation_queue",
                 "high",
+                [f"{segment_label} pass_rate={weakest.get('pass_rate')}"] if weakest else [],
+            )
+        )
+        recommendations.append(
+            _remediation_item(
+                "prompt_skill_versions",
+                "对比低通过率分层的 Prompt/Skill 版本",
+                "低通过率分层可能来自 Prompt、Skill 或模型配置变更，先与同数据集 baseline 做版本差异对比，再决定回滚或晋升。",
+                f"/experiments?task_id={task_id}&segment={segment_label}",
+                "compare_prompt_skill_versions",
+                "medium",
                 [f"{segment_label} pass_rate={weakest.get('pass_rate')}"] if weakest else [],
             )
         )
@@ -1389,6 +1546,8 @@ def _repair_action_summary(action: str, result: dict[str, Any]) -> str:
         return f"已生成 {len(result.get('field_actions', []))} 条字段修复建议。"
     if action == "plan_workflow_parameter_changes":
         return f"已生成 {len(result.get('parameter_diffs', []))} 条参数 diff 和回滚建议。"
+    if action == "compare_prompt_skill_versions":
+        return f"已生成 {len(result.get('baseline_candidates', []))} 个 Prompt/Skill 版本对比候选。"
     if result.get("url"):
         return f"已打开证据入口：{result['url']}"
     return "动作已记录。"
@@ -1424,5 +1583,6 @@ def _repair_task_title(cause_type: str, severity: str) -> str:
         "weak_segment": "复盘低通过率分层",
         "judge_or_answer_quality": "复核 Judge 或回答质量",
         "parameter_risk": "复核任务级参数覆盖",
+        "prompt_skill_versions": "复核 Prompt/Skill 版本差异",
     }
     return f"[{severity}] {titles.get(cause_type, '复核诊断根因')}"

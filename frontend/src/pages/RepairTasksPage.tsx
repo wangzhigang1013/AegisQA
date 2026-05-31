@@ -369,6 +369,16 @@ export function RepairTasksPage() {
                       参数 diff/回滚
                     </Button>
                   ) : null}
+                  {hasRepairAction(record, 'compare_prompt_skill_versions') ? (
+                    <Button
+                      size="small"
+                      icon={<FileSearchOutlined />}
+                      loading={actionMutation.isPending}
+                      onClick={() => runAction(record, 'compare_prompt_skill_versions')}
+                    >
+                      版本对比
+                    </Button>
+                  ) : null}
                   <Button size="small" href={`/reports?task_id=${record.source_task_id}&panel=parameter-governance`}>
                     参数治理
                   </Button>
@@ -540,6 +550,19 @@ function RecentActionResult({ record }: { record: RepairTaskRecord }) {
         {parameterDiffs.slice(0, 3).map((item) => (
           <Typography.Text key={`${item.step_id}-${item.parameter}`} type={item.source === 'task_override' ? 'warning' : 'secondary'}>
             {item.step_id}.{item.parameter}：当前 {String(item.current_value_preview ?? '-')}，Workflow 默认 {String(item.workflow_value_preview ?? '-')}。{item.recommendation}
+          </Typography.Text>
+        ))}
+      </Space>
+    );
+  }
+  const versionDiffs = extractPromptSkillVersionDiffs(record);
+  if (versionDiffs.length) {
+    return (
+      <Space direction="vertical" size={2}>
+        <Typography.Text type="secondary">Prompt/Skill 版本对比</Typography.Text>
+        {versionDiffs.slice(0, 3).map((item) => (
+          <Typography.Text key={`${item.step_id}-${item.field}`} type={item.field === 'prompt_version' ? 'warning' : 'secondary'}>
+            {item.step_id}.{item.field}：baseline {String(item.baseline_value ?? '-')}，当前 {String(item.current_value ?? '-')}。建议：{item.recommended_action}
           </Typography.Text>
         ))}
       </Space>
@@ -718,6 +741,40 @@ function extractParameterDiffs(record: RepairTaskRecord): {
       current_value_preview: unknown;
       workflow_value_preview: unknown;
       recommendation: string;
+    } => Boolean(item));
+}
+
+function extractPromptSkillVersionDiffs(record: RepairTaskRecord): {
+  step_id: string;
+  field: string;
+  baseline_value: unknown;
+  current_value: unknown;
+  recommended_action: string;
+}[] {
+  const result = record.last_action_result?.result;
+  const candidates = result?.baseline_candidates;
+  if (!Array.isArray(candidates)) return [];
+  return candidates
+    .flatMap((candidate) => {
+      if (!isRecord(candidate) || !Array.isArray(candidate.version_diffs)) return [];
+      return candidate.version_diffs;
+    })
+    .map((item) => {
+      if (!isRecord(item) || typeof item.step_id !== 'string' || typeof item.field !== 'string') return null;
+      return {
+        step_id: item.step_id,
+        field: item.field,
+        baseline_value: item.baseline_value,
+        current_value: item.current_value,
+        recommended_action: typeof item.recommended_action === 'string' ? item.recommended_action : 'review_version_diff',
+      };
+    })
+    .filter((item): item is {
+      step_id: string;
+      field: string;
+      baseline_value: unknown;
+      current_value: unknown;
+      recommended_action: string;
     } => Boolean(item));
 }
 

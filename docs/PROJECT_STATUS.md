@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Repair Task Workflow Parameter Diff Loop”已完成并通过全量验证。本批次把参数风险类 Repair Task 从“打开参数治理页看看”推进到“生成 Workflow 参数 diff/回滚计划”：`plan_workflow_parameter_changes` 动作会基于 Task、Run、Workflow 默认配置和参数来源追踪，返回当前执行值、Workflow 默认值、task_override 移除项、runtime_expression/secret_ref 复核项和下一步建议；前端修复任务工作台新增“参数 diff/回滚”动作，并在最近结果中直接展示 `answer.model` 等参数差异。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Repair Task Prompt/Skill Version Compare Loop”已完成并通过全量验证。本批次把 Prompt/Skill 版本变化从 Experiment 快照中的静态信息推进到 Repair Task 可执行动作：`compare_prompt_skill_versions` 会基于来源 Task 的最新 Run 和同数据集 Experiment baseline，对比 `skill_ref`、`skill_version`、`prompt_version`、`model`、`model_params`，返回 baseline 候选、版本差异和候选修复动作；前端修复任务工作台新增“版本对比”动作，并在最近结果中直接展示 `answer.prompt_version` 的 baseline 与当前值。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -68,6 +68,7 @@
 - Repair Task 已支持负责人协作与 SLA 提醒：`POST /repair-tasks/{repair_task_id}/assign` 可为未完成修复任务设置负责人和截止时间，返回 `assigned_at` 与 `overdue`；修复树 summary 返回 `overdue_children`、`overdue_task_ids`，下一步动作和子任务明细展示负责人、截止时间和逾期状态；完成修复任务会清除逾期标记。
 - Repair Task 已支持 Dataset 字段修复计划：`fix_dataset_fields` 动作会读取来源任务、Run Diagnostics 和 Dataset Version，返回缺失 Workflow 必需字段、字段覆盖率、重复样本数、字段级修复建议和数据集入口；前端工作台可直接触发并展示字段建议。
 - Repair Task 已支持 Workflow 参数 diff/回滚计划：`plan_workflow_parameter_changes` 动作会读取来源任务、最新 Run、Workflow 默认配置和参数来源追踪，返回 task_override、runtime_expression、secret_ref 的字段级差异、回滚候选和参数治理入口；前端工作台可直接触发并展示参数差异。
+- Repair Task 已支持 Prompt/Skill 版本对比计划：`compare_prompt_skill_versions` 动作会读取来源任务最新 Run，并与同数据集 Experiment baseline 对比 Prompt、Skill、模型和模型参数版本差异；前端工作台可直接触发并展示 baseline/current 差异。
 - Workflow 市场进入画布时会把当前草稿写入 `['workflow-draft', draft_id]` 单草稿缓存；画布深链在草稿未加载时显示加载态，异常 graph 结构会给出中文错误提示而不是白屏。
 - Judge 审计已新增多 Judge 一致性 API 与前端弹窗，支持输入多个 Judge 输出并展示两两一致率。
 - 报告中心已新增跨任务 Score Analytics，按 Task 聚合任务数、平均通过率、Badcase、P95、估算成本和退化任务，避免只看单次任务报告。
@@ -79,12 +80,13 @@
 ## 最近验证
 
 - `python -m pytest tests\test_sqlite_store_adapter.py -q`：3 passed，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
-- `python -m pytest tests\test_task_flow_optimization.py -q`：11 passed，覆盖 Task Preflight、Repair Task 生成查询、领取/完成/重开状态流转、Repair Task 发起 Annotation Queue / CI Gate 复测、修复后复跑 Attempt 与报告对比、上下文修复建议生成、修复建议拆分为二级任务、修复树进度聚合、负责人指派、截止时间、逾期聚合、完成后清除逾期、Dataset 字段修复计划和 Workflow 参数 diff/回滚计划。
-- `python -m pytest -q`：76 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest tests\test_task_flow_optimization.py -q`：12 passed，覆盖 Task Preflight、Repair Task 生成查询、领取/完成/重开状态流转、Repair Task 发起 Annotation Queue / CI Gate 复测、修复后复跑 Attempt 与报告对比、上下文修复建议生成、修复建议拆分为二级任务、修复树进度聚合、负责人指派、截止时间、逾期聚合、完成后清除逾期、Dataset 字段修复计划、Workflow 参数 diff/回滚计划和 Prompt/Skill 版本对比计划。
+- `python -m pytest -q`：77 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v11`，Run `run-a0392226decb` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`：9 passed，覆盖修复任务工作台查看证据、领取、完成、发起人工审核、CI Gate 复测、复跑对比、生成修复建议、拆分子任务、查看修复树进度、指派负责人、逾期提醒、字段修复计划和参数 diff/回滚计划。
-- `cd frontend && npm test`：4 个测试文件、49 个测试通过。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "Prompt 和 Skill 版本对比"`：1 passed，覆盖修复任务工作台版本对比按钮、动作历史和 Prompt/Skill 版本差异展示。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`：10 passed，覆盖修复任务工作台查看证据、领取、完成、发起人工审核、CI Gate 复测、复跑对比、生成修复建议、拆分子任务、查看修复树进度、指派负责人、逾期提醒、字段修复计划、参数 diff/回滚计划和 Prompt/Skill 版本对比。
+- `cd frontend && npm test`：4 个测试文件、50 passed。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow"`：10 passed，覆盖 Workflow 市场、画布、撤销/重做、连线删除/重连、发布失败反馈、Aggregator 和参数预览。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 passed，覆盖 Workflow 画布新增节点、删除/重连、撤销/重做、删除节点、保存草稿回放、试运行、校验、发布。
@@ -102,13 +104,13 @@
 - Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；Run Attempt、CI Gate、Experiment baseline/A-B 对比和任务报告均已接入基础闭环。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
 - Experiment 快照、CI Gate、Annotation Queue 和 Trace Tree 已有独立产品页；跨任务 Score Analytics 和成本预算状态已接入报告中心，后续需要继续补真实成本账单、更多趋势筛选维度和跨任务对比可视化。
-- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势、修复任务状态流转、Annotation Queue 发起、CI Gate 复测、修复后复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划和 Workflow 参数 diff/回滚计划已有最小闭环；后续需要把二级任务继续动作化到 Prompt/Skill 配置版本对比。
+- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势、修复任务状态流转、Annotation Queue 发起、CI Gate 复测、修复后复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划和 Prompt/Skill 版本对比已有最小闭环；后续需要把版本对比候选继续动作化为真实 Prompt/Skill 候选资产和 Workflow 草稿。
 - SQLite 轻量仓储已接入元数据路径；后续如果要进入多用户生产环境，仍需要正式 Repository 层、数据库迁移、索引治理、权限隔离和 Worker 队列接入。
 - 本地服务曾出现旧 FastAPI 进程未重启导致新增路由 404 的问题；已重启后端并完成浏览器复测。后续修改后端 API 时必须确认 8000 端口加载的是最新代码。
 
 ## 下一阶段目标
 
-- Repair Task 深水区：把当前修复树中的子任务继续接到 Prompt/Skill 配置版本对比、负责人工作量视图和逾期升级策略。
+- Repair Task 深水区：把当前版本对比候选继续接到 Prompt/Skill 候选资产、从差异生成 Workflow 草稿、负责人工作量视图和逾期升级策略。
 - 红队规则配置化：把当前内置规则升级为可管理规则集，支持按业务线启用、禁用、阈值和严重级别调整。
 - 成本治理生产化：接入真实 token/cost 账单、模型价格表、预算门禁和成本异常告警。
 - 趋势分析增强：为 Score Analytics 增加 Dataset、Workflow、模型版本、Prompt 版本、时间窗口和标签过滤，并补趋势可视化对比。
@@ -116,6 +118,34 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Repair Task Prompt/Skill Version Compare Loop
+
+- 改动摘要：继续优化任务退化后的可解释修复闭环，把 Prompt/Skill 版本差异从 Experiment 快照中抽出来，接成 Repair Task 的真实动作。后端 `compare_prompt_skill_versions` 会读取来源任务最新 Run，并与同数据集 Experiment baseline 对比 `skill_ref`、`skill_version`、`prompt_version`、`model`、`model_params`；前端修复任务工作台新增“版本对比”按钮，并在最近结果中展示 `answer.prompt_version` 的 baseline/current 差异和推荐动作。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/pages/RepairTasksPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/superpowers/plans/2026-05-31-repair-task-prompt-skill-version-compare.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Prompt 和 Skill 版本对比"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`
+  - `git diff --check`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - RED：后端最初因 `compare_prompt_skill_versions` 不在 Repair Task 动作支持列表返回 400；前端最初找不到“版本对比”按钮。
+  - GREEN：`git diff --check` 通过；后端定向 12 passed；后端全量 77 passed；前端 Prompt/Skill 版本对比目标测试 1 passed；前端修复任务工作台 10 passed；`npm run typecheck` 通过；前端全量 50 passed；`npm run build` 通过；Playwright E2E 8 passed。
+  - 调试记录：首次前端全量出现 `Workflow 设计器支持撤销和重做节点操作` 在全量负载下 10 秒超时；单测复现为 7.4 秒通过，确认是该重渲染重用例的测试窗口抖动，已将该用例单独放宽到 20 秒并重新跑全量 50 passed。
+- 下一步：把 `create_prompt_skill_candidate` 和 `create_workflow_draft_from_version_diff` 从候选动作接成真实落库与 Workflow 草稿创建。
 
 ### 2026-05-31 Repair Task Workflow Parameter Diff Loop
 

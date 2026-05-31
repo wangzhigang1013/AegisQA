@@ -41,6 +41,17 @@ def _graph_payload() -> dict[str, object]:
     }
 
 
+def _graph_payload_with_answer_prompt(prompt_version: str) -> dict[str, object]:
+    graph = _graph_payload()
+    nodes = graph["nodes"]
+    assert isinstance(nodes, list)
+    answer = next(node for node in nodes if isinstance(node, dict) and node["node_id"] == "answer")
+    config = answer["config"]
+    assert isinstance(config, dict)
+    config["prompt_version"] = prompt_version
+    return graph
+
+
 def _seed_dataset_and_workflow(tmp_path: Path, *, include_reference: bool) -> tuple[TestClient, dict[str, object], dict[str, object]]:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)
@@ -452,3 +463,49 @@ def test_repair_task_workflow_parameter_action_returns_diff_and_rollback_plan(tm
     assert {"step_id": "answer", "parameter": "model"} in payload["result"]["rollback_plan"]["skill_overrides_remove"]
     assert payload["result"]["target_url"] == f"/reports?task_id={executed['task_id']}&panel=parameter-governance"
     assert payload["repair_task"]["action_history"][-1]["action"] == "plan_workflow_parameter_changes"
+
+
+def test_repair_task_prompt_skill_version_action_compares_with_experiment_baseline(tmp_path: Path) -> None:
+    client, dataset, _ = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    baseline_workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload_with_answer_prompt("prompt-flow-v0")}).json()
+    baseline_run = client.post(
+        "/runs",
+        json={"workflow": baseline_workflow, "dataset_id": dataset["dataset_id"], "dataset_version": dataset["version"]},
+    ).json()
+    baseline_run = client.post(f"/runs/{baseline_run['run_id']}/execute").json()
+    baseline_experiment = client.post(
+        "/experiments/from-run",
+        json={"run_id": baseline_run["run_id"], "name": "baseline prompt v0"},
+    ).json()
+    current_workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload_with_answer_prompt("prompt-flow-v1")}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "Prompt 版本对比任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": current_workflow["version_id"],
+            "evaluation_goal": "prompt_experiment",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"][0]
+
+    result = client.post(
+        f"/repair-tasks/{repair['repair_task_id']}/actions",
+        json={"action": "compare_prompt_skill_versions"},
+    )
+
+    assert result.status_code == 200
+    payload = result.json()
+    assert payload["action"] == "compare_prompt_skill_versions"
+    current_answer = next(item for item in payload["result"]["current_versions"] if item["step_id"] == "answer")
+    assert current_answer["prompt_version"] == "prompt-flow-v1"
+    baseline = next(item for item in payload["result"]["baseline_candidates"] if item["experiment_id"] == baseline_experiment["experiment_id"])
+    prompt_diff = next(item for item in baseline["version_diffs"] if item["step_id"] == "answer" and item["field"] == "prompt_version")
+    assert prompt_diff["baseline_value"] == "prompt-flow-v0"
+    assert prompt_diff["current_value"] == "prompt-flow-v1"
+    assert prompt_diff["recommended_action"] == "compare_or_rollback_prompt_version"
+    assert payload["result"]["candidate_actions"][0]["action"] == "create_prompt_skill_candidate"
+    assert payload["repair_task"]["action_history"][-1]["action"] == "compare_prompt_skill_versions"

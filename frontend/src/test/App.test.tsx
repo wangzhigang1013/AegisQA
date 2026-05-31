@@ -97,7 +97,7 @@ const demoRepairTask = {
   affected_items: 12,
   evidence: ['scene=payment 通过率 40%，Badcase 12 条。'],
   recommendation: '优先复核 payment 场景的失败样本，补充 Golden 后再调整 Workflow。',
-  next_actions: ['open_trace_flow', 'seed_annotation_queue', 'evaluate_ci_gate', 'open_parameter_governance', 'fix_dataset_fields', 'plan_workflow_parameter_changes'],
+  next_actions: ['open_trace_flow', 'seed_annotation_queue', 'evaluate_ci_gate', 'open_parameter_governance', 'fix_dataset_fields', 'plan_workflow_parameter_changes', 'compare_prompt_skill_versions'],
   action_history: [],
   owner: null,
   created_at: '2026-05-31T00:00:00Z',
@@ -780,6 +780,59 @@ describe('AegisQA 前端工作台', () => {
             },
           });
         }
+        if (body.action === 'compare_prompt_skill_versions') {
+          return jsonResponse({
+            action: 'compare_prompt_skill_versions',
+            result: {
+              status: 'planned',
+              current_versions: [
+                { step_id: 'answer', skill_ref: 'llm.call@0.1.0', skill_version: '0.1.0', prompt_version: 'prompt-flow-v1', model: 'quality-model' },
+              ],
+              baseline_candidates: [
+                {
+                  experiment_id: 'exp-baseline',
+                  name: 'baseline prompt v0',
+                  run_id: 'run-baseline',
+                  version_diffs: [
+                    {
+                      step_id: 'answer',
+                      field: 'prompt_version',
+                      baseline_value: 'prompt-flow-v0',
+                      current_value: 'prompt-flow-v1',
+                      recommended_action: 'compare_or_rollback_prompt_version',
+                    },
+                  ],
+                },
+              ],
+              candidate_actions: [{ action: 'create_prompt_skill_candidate', label: '沉淀 Prompt/Skill 候选配置' }],
+            },
+            repair_task: {
+              ...demoRepairTask,
+              action_history: [{ action: 'compare_prompt_skill_versions', status: 'planned', result_summary: '已生成 1 个 Prompt/Skill 版本对比候选。' }],
+              last_action_result: {
+                action: 'compare_prompt_skill_versions',
+                result: {
+                  status: 'planned',
+                  baseline_candidates: [
+                    {
+                      experiment_id: 'exp-baseline',
+                      name: 'baseline prompt v0',
+                      version_diffs: [
+                        {
+                          step_id: 'answer',
+                          field: 'prompt_version',
+                          baseline_value: 'prompt-flow-v0',
+                          current_value: 'prompt-flow-v1',
+                          recommended_action: 'compare_or_rollback_prompt_version',
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          });
+        }
         return jsonResponse({
           action: 'evaluate_ci_gate',
           result: { status: 'blocked', blocking_failures: 1, target: { kind: 'task', id: 'task-demo' } },
@@ -1044,7 +1097,7 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /重做/ }));
     expect(await screen.findByText(/已重做/)).toBeInTheDocument();
-  });
+  }, 20_000);
 
   it('Workflow Inspector 支持查看并删除选中节点的下游连线', async () => {
     await renderWorkbench('/workflows/designer/draft-test');
@@ -1622,6 +1675,18 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/answer.model/)).toBeInTheDocument();
     expect(screen.getByText(/task-quality-model/)).toBeInTheDocument();
     expect(screen.getByText(/移除覆盖或将确认后的值发布到新 Workflow 版本/)).toBeInTheDocument();
+  });
+
+  it('修复任务工作台支持生成 Prompt 和 Skill 版本对比', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    fireEvent.click(await screen.findByRole('button', { name: /版本对比/ }));
+
+    expect(await screen.findByText(/已生成 1 个 Prompt\/Skill 版本对比候选/)).toBeInTheDocument();
+    expect(screen.getByText('compare_prompt_skill_versions')).toBeInTheDocument();
+    expect(screen.getByText(/answer.prompt_version/)).toBeInTheDocument();
+    expect(screen.getByText(/prompt-flow-v0/)).toBeInTheDocument();
+    expect(screen.getByText(/prompt-flow-v1/)).toBeInTheDocument();
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {
