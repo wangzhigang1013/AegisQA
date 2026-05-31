@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from aegisqa.api.app import _save_record, create_app
+from aegisqa.api.app import _get_record, _save_record, create_app
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
@@ -736,6 +736,81 @@ def test_prompt_skill_candidate_bulk_assign_respects_owner_capacity(tmp_path: Pa
     workload = client.get("/prompt-skill-candidates/workload").json()
     owner = next(item for item in workload["owners"] if item["owner"] == "qa_owner")
     assert owner["open_count"] == 2
+
+
+def test_prompt_skill_candidate_bulk_archive_terminal_stale_candidates(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    store = client.app.state.store
+    records = [
+        {
+            "candidate_id": "candidate-rejected-old",
+            "kind": "prompt_skill_version_diff",
+            "status": "rejected",
+            "current_versions": [],
+            "version_diffs": [],
+            "created_at": "2026-04-01T00:00:00+00:00",
+            "updated_at": "2026-04-01T00:00:00+00:00",
+        },
+        {
+            "candidate_id": "candidate-promoted-old",
+            "kind": "prompt_skill_version_diff",
+            "status": "promoted",
+            "current_versions": [],
+            "version_diffs": [],
+            "created_at": "2026-04-02T00:00:00+00:00",
+            "updated_at": "2026-04-02T00:00:00+00:00",
+        },
+        {
+            "candidate_id": "candidate-approved-old",
+            "kind": "prompt_skill_version_diff",
+            "status": "approved",
+            "current_versions": [],
+            "version_diffs": [],
+            "created_at": "2026-04-03T00:00:00+00:00",
+            "updated_at": "2026-04-03T00:00:00+00:00",
+        },
+        {
+            "candidate_id": "candidate-rejected-new",
+            "kind": "prompt_skill_version_diff",
+            "status": "rejected",
+            "current_versions": [],
+            "version_diffs": [],
+            "created_at": "2026-05-20T00:00:00+00:00",
+            "updated_at": "2026-05-20T00:00:00+00:00",
+        },
+    ]
+    for record in records:
+        _save_record(store, "prompt_skill_candidates", "candidate_id", record)
+
+    archived = client.post(
+        "/prompt-skill-candidates/bulk-archive",
+        json={
+            "candidate_ids": [record["candidate_id"] for record in records],
+            "statuses": ["rejected", "promoted"],
+            "stale_before": "2026-05-01T00:00:00+00:00",
+            "actor": "ops",
+            "note": "清理已结束的候选资产。",
+        },
+    ).json()
+
+    assert archived["archived_count"] == 2
+    assert archived["skipped_count"] == 2
+    assert {item["candidate_id"] for item in archived["candidates"]} == {"candidate-rejected-old", "candidate-promoted-old"}
+    skipped = {item["candidate_id"]: item["reason"] for item in archived["skipped"]}
+    assert skipped == {
+        "candidate-approved-old": "status_not_archivable",
+        "candidate-rejected-new": "not_stale",
+    }
+    stored = _get_record(store, "prompt_skill_candidates", "candidate-rejected-old")
+    assert stored["status"] == "archived"
+    assert stored["previous_status"] == "rejected"
+    assert stored["archived_by"] == "ops"
+    assert stored["action_history"][-1]["action"] == "archive"
+    default_list_ids = {item["candidate_id"] for item in client.get("/prompt-skill-candidates").json()}
+    assert "candidate-rejected-old" not in default_list_ids
+    archived_list_ids = {item["candidate_id"] for item in client.get("/prompt-skill-candidates?status=archived").json()}
+    assert {"candidate-rejected-old", "candidate-promoted-old"} <= archived_list_ids
 
 
 def test_prompt_skill_candidate_retest_plan_prioritizes_ready_and_overdue_candidates(tmp_path: Path) -> None:

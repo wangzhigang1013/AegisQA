@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Candidate Assign Controls”已完成目标实现和验证。本批次把候选资产批量指派从“固定指派给 qa_owner / 固定容量 5”升级为页面可配置：候选资产中心新增“批量指派负责人”和“负责人开放候选容量”控件，按钮文案和 `POST /prompt-skill-candidates/bulk-assign` 请求体都会使用当前输入值。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Candidate Auto Archive”已完成目标实现和全量验证。本批次把候选资产中心从“只会越堆越多”推进到“可清理终态资产”：后端新增 `POST /prompt-skill-candidates/bulk-archive`，支持按状态和 `stale_before` 归档已拒绝、已晋升、已复跑等终态候选，默认列表隐藏 `archived`，但可用 `status=archived` 查看；前端候选资产中心新增“归档终态候选”按钮并展示归档/跳过数量。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -82,6 +82,7 @@
 - Prompt/Skill 候选资产已支持真实批量复跑执行：`POST /prompt-skill-candidates/bulk-retest` 会根据复跑计划只执行 `retest_candidate` 候选，并把待发布、待建草稿、已复跑或错误候选放入 skipped 明细；复跑结果写入任务、实验、审计和候选 `action_history`；前端候选资产中心可一键批量复跑 ready 候选。
 - Prompt/Skill 候选资产已支持负责人容量限制：`POST /prompt-skill-candidates/bulk-assign` 可传 `max_open_per_owner`，超过负责人开放候选容量时跳过候选并返回 `capacity`、`skipped_count` 与跳过原因；前端候选资产中心展示容量上限和容量跳过反馈。
 - Prompt/Skill 候选资产中心的批量指派负责人和开放候选容量已改为页面可配置，避免固定 `qa_owner` 和固定容量导致误指派。
+- Prompt/Skill 候选资产已支持批量归档终态候选：`POST /prompt-skill-candidates/bulk-archive` 可按状态和清理水位线归档 rejected/promoted/retested/promotion_rejected 候选，默认列表隐藏 archived，前端提供“归档终态候选”入口。
 - Workflow 市场进入画布时会把当前草稿写入 `['workflow-draft', draft_id]` 单草稿缓存；画布深链在草稿未加载时显示加载态，异常 graph 结构会给出中文错误提示而不是白屏。
 - Judge 审计已新增多 Judge 一致性 API 与前端弹窗，支持输入多个 Judge 输出并展示两两一致率。
 - 报告中心已新增跨任务 Score Analytics，按 Task 聚合任务数、平均通过率、Badcase、P95、估算成本和退化任务，避免只看单次任务报告。
@@ -95,6 +96,15 @@
 - `python -m pytest tests\test_task_flow_optimization.py -q -k "owner_capacity"`：1 passed，覆盖候选资产批量指派 `max_open_per_owner`、容量跳过、`capacity` 摘要和负责人工作量更新。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`：1 passed，覆盖候选资产中心批量指派容量跳过提示。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`：1 passed，覆盖候选资产中心批量指派负责人和开放候选容量输入值进入请求体。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：4 个测试文件、55 passed。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
+- `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
+- `python -m pytest tests\test_task_flow_optimization.py -q -k "bulk_archive"`：1 passed，覆盖终态旧候选归档、开放候选跳过、新候选跳过、默认列表隐藏 archived 和 `status=archived` 查询。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`：1 passed，覆盖候选资产中心“归档终态候选”按钮、归档结果反馈和请求体状态策略。
+- `python -m pytest tests\test_task_flow_optimization.py -q`：20 passed。
+- `python -m pytest -q`：85 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、55 passed。
 - `cd frontend && npm run build`：通过。
@@ -176,6 +186,35 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Candidate Auto Archive
+
+- 改动摘要：新增候选资产终态归档闭环。后端 `POST /prompt-skill-candidates/bulk-archive` 支持按候选状态和 `stale_before` 清理水位线归档终态候选，开放候选、未到清理时间候选和已归档候选会进入 skipped 明细；默认候选列表隐藏 archived，`status=archived` 可查询归档记录。前端候选资产中心新增“归档终态候选”按钮，按 30 天前终态候选发起归档并提示归档/跳过数量。
+- 变更文件：
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/CandidateAssetsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/superpowers/plans/2026-05-31-candidate-auto-archive.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "bulk_archive"`（RED，确认接口缺少 `archived_count`；GREEN 后 1 passed）
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`（RED，确认页面缺少“归档终态候选”按钮；GREEN 后 1 passed）
+- 当前测试结果：
+  - 后端目标测试：1 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端目标测试：1 passed。
+  - 后端定向任务流测试：20 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 后端全量测试：85 个测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端全量测试：4 个测试文件、55 passed。
+  - 前端构建：通过。
+  - Playwright E2E：8 passed。
+  - `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
+- 下一步：提交本批次 Git 变更；后续继续推进批量复跑并发控制、外部审批/IM 通知、真实成本账单和候选归档策略配置化。
 
 ### 2026-05-31 Candidate Assign Controls
 

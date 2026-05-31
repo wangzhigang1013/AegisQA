@@ -676,6 +676,13 @@ const demoCandidateBulkAssignPayload = {
   capacity: { owner: 'qa_owner', max_open_per_owner: 5, open_before: 4, open_after: 5 },
 };
 
+const demoCandidateBulkArchivePayload = {
+  archived_count: 1,
+  skipped_count: 0,
+  candidates: [{ ...demoPromptSkillCandidate, status: 'archived', previous_status: 'rejected', archived_by: 'ops' }],
+  skipped: [],
+};
+
 const demoCandidateEscalatePayload = {
   escalated_count: 1,
   candidates: [{ ...demoPromptSkillCandidate, owner: 'qa_owner', due_at: '2000-01-01T00:00:00+00:00', overdue: true, escalation_status: 'escalated' }],
@@ -1392,6 +1399,9 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/prompt-skill-candidates/bulk-assign')) {
         return jsonResponse(demoCandidateBulkAssignPayload);
       }
+      if (url.endsWith('/prompt-skill-candidates/bulk-archive')) {
+        return jsonResponse(demoCandidateBulkArchivePayload);
+      }
       if (url.endsWith('/prompt-skill-candidates/escalate-overdue')) {
         return jsonResponse(demoCandidateEscalatePayload);
       }
@@ -1965,6 +1975,15 @@ describe('AegisQA 前端工作台', () => {
       max_open_per_owner: 3,
     });
     expect(screen.getAllByText(/qa_owner/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /归档终态候选/ }));
+    expect(await screen.findByText(/已归档候选：1 个，跳过 0 个/)).toBeInTheDocument();
+    const bulkArchiveCall = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.find(([input]) => String(input).endsWith('/prompt-skill-candidates/bulk-archive'));
+    expect(JSON.parse(String(bulkArchiveCall?.[1]?.body ?? '{}'))).toMatchObject({
+      statuses: ['rejected', 'promoted', 'retested', 'promotion_rejected'],
+    });
 
     fireEvent.click(screen.getByRole('button', { name: /升级逾期候选/ }));
     expect(await screen.findByText(/逾期候选已升级：1 个/)).toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { CheckCircleOutlined, FileSearchOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, FileSearchOutlined, InboxOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Descriptions, Input, InputNumber, Select, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
@@ -7,8 +7,10 @@ import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import type { BaselineChangeNotification, ExperimentBaselineActionResult, ExperimentBaselineImpact, PromptSkillCandidate, PromptSkillCandidateRetestPlanItem, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
 
-// 批量指派先采用固定试点容量，避免一个负责人被一次性塞满过多开放候选。
+// 默认容量只作为页面初值，用户仍可按团队当日处理能力调整。
 const CANDIDATE_OWNER_CAPACITY_LIMIT = 5;
+const CANDIDATE_ARCHIVE_STALE_DAYS = 30;
+const CANDIDATE_ARCHIVE_STATUSES = ['rejected', 'promoted', 'retested', 'promotion_rejected'];
 
 export function CandidateAssetsPage() {
   const queryClient = useQueryClient();
@@ -133,6 +135,29 @@ export function CandidateAssetsPage() {
       );
     },
     onError: (error) => setNotice(`候选资产指派失败：${formatApiError(error)}`),
+  });
+
+  const bulkArchiveMutation = useMutation({
+    mutationFn: () =>
+      api.bulkArchivePromptSkillCandidates({
+        candidate_ids: currentCandidateIds,
+        statuses: CANDIDATE_ARCHIVE_STATUSES,
+        stale_before: archiveStaleBeforeIso(),
+        actor: 'ops',
+        note: `归档 ${CANDIDATE_ARCHIVE_STALE_DAYS} 天前已结束的候选资产。`,
+      }),
+    onSuccess: (payload) => {
+      const archivedIds = new Set(payload.candidates.map((candidate) => candidate.candidate_id));
+      if (statusFilter === 'archived') {
+        mergeCandidates(payload.candidates);
+      } else {
+        queryClient.setQueryData<PromptSkillCandidate[]>(queryKey, (current = []) => current.filter((candidate) => !archivedIds.has(candidate.candidate_id)));
+      }
+      invalidateCandidateSummaries();
+      void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidates'] });
+      setNotice(`已归档候选：${payload.archived_count} 个，跳过 ${payload.skipped_count} 个`);
+    },
+    onError: (error) => setNotice(`候选资产归档失败：${formatApiError(error)}`),
   });
 
   const escalateOverdueMutation = useMutation({
@@ -389,6 +414,9 @@ export function CandidateAssetsPage() {
             <Button disabled={!currentCandidateIds.length} loading={bulkReviewMutation.isPending} onClick={() => bulkReviewMutation.mutate()}>
               批量审批当前列表
             </Button>
+            <Button disabled={!currentCandidateIds.length} icon={<InboxOutlined />} loading={bulkArchiveMutation.isPending} onClick={() => bulkArchiveMutation.mutate()}>
+              归档终态候选
+            </Button>
             <Button danger loading={escalateOverdueMutation.isPending} onClick={() => escalateOverdueMutation.mutate()}>
               升级逾期候选
             </Button>
@@ -507,6 +535,9 @@ export function CandidateAssetsPage() {
               { value: 'approved', label: '已审批' },
               { value: 'rejected', label: '已拒绝' },
               { value: 'draft_created', label: '已生成草稿' },
+              { value: 'retested', label: '已复跑' },
+              { value: 'promoted', label: '已晋升' },
+              { value: 'archived', label: '已归档' },
             ]}
           />
           <Tag color="blue">{candidates.length} 个候选资产</Tag>
@@ -724,6 +755,8 @@ export function CandidateAssetsPage() {
 }
 
 function statusColor(status: string) {
+  if (status === 'archived') return 'default';
+  if (status === 'promoted') return 'cyan';
   if (status === 'approved') return 'green';
   if (status === 'rejected') return 'red';
   if (status === 'draft_created') return 'blue';
@@ -737,8 +770,15 @@ function statusLabel(status: string) {
     rejected: '已拒绝',
     draft_created: '已生成草稿',
     retested: '已复跑',
+    promoted: '已晋升',
+    promotion_rejected: '晋升拒绝',
+    archived: '已归档',
   };
   return labels[status] ?? status;
+}
+
+function archiveStaleBeforeIso() {
+  return new Date(Date.now() - CANDIDATE_ARCHIVE_STALE_DAYS * 24 * 60 * 60 * 1000).toISOString();
 }
 
 function retestActionLabel(action: string) {

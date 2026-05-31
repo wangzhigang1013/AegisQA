@@ -20,6 +20,7 @@ import type {
   JudgeCrossValidationResult,
   JudgeAuditTrends,
   PromptSkillCandidate,
+  PromptSkillCandidateBulkArchiveResult,
   PromptSkillCandidateBulkAssignResult,
   PromptSkillCandidateBulkRetestResult,
   PromptSkillCandidateBulkReviewResult,
@@ -219,6 +220,11 @@ export const api = {
     }),
   bulkAssignPromptSkillCandidates: (body: { candidate_ids: string[]; owner: string; due_at?: string | null; actor?: string; max_open_per_owner?: number | null }) =>
     request<PromptSkillCandidateBulkAssignResult>('/prompt-skill-candidates/bulk-assign', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  bulkArchivePromptSkillCandidates: (body: { candidate_ids?: string[]; statuses?: string[]; stale_before?: string | null; actor?: string; note?: string }) =>
+    request<PromptSkillCandidateBulkArchiveResult>('/prompt-skill-candidates/bulk-archive', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

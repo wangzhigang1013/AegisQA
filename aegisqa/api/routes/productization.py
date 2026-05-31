@@ -74,6 +74,14 @@ class PromptSkillCandidateBulkAssignRequest(BaseModel):
     max_open_per_owner: int | None = None
 
 
+class PromptSkillCandidateBulkArchiveRequest(BaseModel):
+    candidate_ids: list[str] | None = None
+    statuses: list[str] = ["rejected", "promoted", "retested", "promotion_rejected"]
+    stale_before: str | None = None
+    actor: str = "api"
+    note: str = "归档已结束的候选资产。"
+
+
 class PromptSkillCandidateEscalateRequest(BaseModel):
     actor: str = "api"
     now: str | None = None
@@ -156,8 +164,11 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         source_task_id: str | None = Query(default=None),
         status: str | None = Query(default=None),
         baseline_experiment_id: str | None = Query(default=None),
+        include_archived: bool = Query(default=False),
     ) -> list[dict[str, Any]]:
         candidates = [_with_candidate_sla_status(candidate, now=_now()) for candidate in _list_records(ctx.store, "prompt_skill_candidates")]
+        if not include_archived and status != "archived":
+            candidates = [candidate for candidate in candidates if candidate.get("status") != "archived"]
         if source_task_id:
             candidates = [candidate for candidate in candidates if candidate.get("source_task_id") == source_task_id]
         if status:
@@ -177,6 +188,10 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.post("/prompt-skill-candidates/bulk-assign")
     def bulk_assign_prompt_skill_candidates(request: PromptSkillCandidateBulkAssignRequest) -> dict[str, Any]:
         return _bulk_assign_prompt_skill_candidates(ctx, request)
+
+    @app.post("/prompt-skill-candidates/bulk-archive")
+    def bulk_archive_prompt_skill_candidates(request: PromptSkillCandidateBulkArchiveRequest) -> dict[str, Any]:
+        return _bulk_archive_prompt_skill_candidates(ctx, request)
 
     @app.post("/prompt-skill-candidates/bulk-review")
     def bulk_review_prompt_skill_candidates(request: PromptSkillCandidateBulkReviewRequest) -> dict[str, Any]:
@@ -889,6 +904,68 @@ def _bulk_assign_prompt_skill_candidates(ctx: RouteContext, request: PromptSkill
     }
 
 
+def _bulk_archive_prompt_skill_candidates(ctx: RouteContext, request: PromptSkillCandidateBulkArchiveRequest) -> dict[str, Any]:
+    archive_statuses = {status.strip() for status in request.statuses if status.strip()}
+    if not archive_statuses:
+        raise AegisQAError("PROMPT_SKILL_CANDIDATE_ARCHIVE_STATUSES_REQUIRED", "请至少选择一种允许归档的候选状态。", status_code=400)
+    all_candidates = _list_records(ctx.store, "prompt_skill_candidates")
+    candidate_ids = request.candidate_ids if request.candidate_ids is not None else [str(candidate.get("candidate_id")) for candidate in all_candidates if candidate.get("candidate_id")]
+    if not candidate_ids:
+        return {"archived_count": 0, "skipped_count": 0, "candidates": [], "skipped": []}
+
+    now = _now()
+    archived: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for candidate_id in candidate_ids:
+        try:
+            candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
+        except KeyError:
+            skipped.append({"candidate_id": candidate_id, "reason": "not_found"})
+            continue
+
+        status = str(candidate.get("status") or "")
+        if status == "archived":
+            skipped.append({"candidate_id": candidate_id, "reason": "already_archived", "status": status})
+            continue
+        if status not in archive_statuses:
+            skipped.append({"candidate_id": candidate_id, "reason": "status_not_archivable", "status": status})
+            continue
+        if request.stale_before and not _candidate_is_stale_before(candidate, request.stale_before):
+            skipped.append({"candidate_id": candidate_id, "reason": "not_stale", "status": status, "stale_before": request.stale_before})
+            continue
+
+        candidate["previous_status"] = status
+        candidate["status"] = "archived"
+        candidate["archived_by"] = request.actor
+        candidate["archived_at"] = now
+        candidate["archive_note"] = request.note
+        candidate["updated_at"] = now
+        _append_candidate_action(
+            candidate,
+            action="archive",
+            actor=request.actor,
+            note=request.note,
+            now=now,
+            extra={"previous_status": status, "stale_before": request.stale_before},
+        )
+        _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
+        archived.append(_with_candidate_sla_status(candidate, now=now))
+
+    ctx.audit_service.record(
+        actor=request.actor,
+        action="prompt_skill_candidate.bulk_archive",
+        target="prompt_skill_candidates",
+        detail={
+            "candidate_ids": candidate_ids,
+            "statuses": sorted(archive_statuses),
+            "stale_before": request.stale_before,
+            "archived_count": len(archived),
+            "skipped_count": len(skipped),
+        },
+    )
+    return {"archived_count": len(archived), "skipped_count": len(skipped), "candidates": archived, "skipped": skipped}
+
+
 def _escalate_overdue_prompt_skill_candidates(ctx: RouteContext, request: PromptSkillCandidateEscalateRequest) -> dict[str, Any]:
     now = request.now or _now()
     escalated: list[dict[str, Any]] = []
@@ -942,6 +1019,13 @@ def _prompt_skill_candidate_owner_open_count(ctx: RouteContext, owner: str, *, n
         for candidate in (_with_candidate_sla_status(item, now=now) for item in _list_records(ctx.store, "prompt_skill_candidates"))
         if candidate.get("owner") == owner and _candidate_is_open(candidate)
     )
+
+
+def _candidate_is_stale_before(candidate: dict[str, Any], stale_before: str) -> bool:
+    """判断候选是否早于清理水位线；缺少时间时保守跳过，避免误归档。"""
+
+    timestamp = str(candidate.get("updated_at") or candidate.get("created_at") or "")
+    return bool(timestamp) and _iso_before(timestamp, stale_before)
 
 
 def _build_prompt_skill_candidate_retest_plan(ctx: RouteContext, *, status: str | None, now: str) -> dict[str, Any]:

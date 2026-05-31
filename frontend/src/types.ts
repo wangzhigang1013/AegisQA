@@ -748,10 +748,14 @@ export type PromptSkillCandidate = {
   candidate_id: string;
   kind: string;
   status: string;
+  previous_status?: string | null;
   owner?: string | null;
   due_at?: string | null;
   assigned_by?: string | null;
   assigned_at?: string | null;
+  archived_by?: string | null;
+  archived_at?: string | null;
+  archive_note?: string | null;
   overdue?: boolean;
   escalation_status?: string | null;
   escalated_by?: string | null;
@@ -880,6 +884,18 @@ export type PromptSkillCandidateBulkAssignResult = {
     open_before: number;
     open_after: number;
   };
+};
+
+export type PromptSkillCandidateBulkArchiveResult = {
+  archived_count: number;
+  skipped_count: number;
+  candidates: PromptSkillCandidate[];
+  skipped: {
+    candidate_id: string;
+    reason: string;
+    status?: string;
+    stale_before?: string | null;
+  }[];
 };
 
 export type PromptSkillCandidateEscalationResult = {
