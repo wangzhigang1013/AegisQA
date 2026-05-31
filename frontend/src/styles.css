@@ -238,6 +238,10 @@ pre {
   min-width: 168px;
 }
 
+.status-filter {
+  min-width: 180px;
+}
+
 .task-progress-cell {
   min-width: 120px;
 }

@@ -910,9 +910,18 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/workflows')) {
         return jsonResponse([demoWorkflowVersion]);
       }
-      if (url.endsWith('/tasks')) {
+      if (new URL(url, 'http://localhost').pathname.endsWith('/tasks')) {
         if (init?.method === 'POST') {
           return jsonResponse(demoTask);
+        }
+        const parsed = new URL(url, 'http://localhost');
+        if (parsed.searchParams.has('page')) {
+          const page = Number(parsed.searchParams.get('page') ?? 1);
+          const pageSize = Number(parsed.searchParams.get('page_size') ?? 8);
+          return jsonResponse({
+            items: [demoTask],
+            pagination: { page, page_size: pageSize, total_items: 1, total_pages: 1 },
+          });
         }
         return jsonResponse([demoTask]);
       }
@@ -1823,6 +1832,52 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/任务已创建/)).toBeInTheDocument();
   });
 
+  it('执行中心任务列表使用服务端分页和状态筛选', async () => {
+    const manyTasks = Array.from({ length: 12 }, (_, index) => ({
+      ...demoTask,
+      task_id: `task-page-${String(index).padStart(2, '0')}`,
+      name: `分页任务 ${String(index).padStart(2, '0')}`,
+      status: index % 2 === 0 ? 'completed' : 'queued',
+      completed_items: index % 2 === 0 ? 100 : 0,
+    }));
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const taskRequests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      const parsed = new URL(url, 'http://localhost');
+      if (parsed.pathname.endsWith('/tasks') && init?.method !== 'POST') {
+        taskRequests.push(url);
+        const page = Number(parsed.searchParams.get('page') ?? 1);
+        const pageSize = Number(parsed.searchParams.get('page_size') ?? 8);
+        const status = parsed.searchParams.get('status');
+        const filtered = status ? manyTasks.filter((task) => task.status === status) : manyTasks;
+        const start = (page - 1) * pageSize;
+        return jsonResponse({
+          items: filtered.slice(start, start + pageSize),
+          pagination: { page, page_size: pageSize, total_items: filtered.length, total_pages: Math.ceil(filtered.length / pageSize) },
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/runs');
+
+    expect(await screen.findByText('分页任务 00')).toBeInTheDocument();
+    expect(screen.queryByText('分页任务 08')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('2'));
+    await waitFor(() => {
+      expect(taskRequests.some((request) => request.includes('page=2') && request.includes('page_size=8'))).toBe(true);
+    });
+    expect(await screen.findByText('分页任务 08')).toBeInTheDocument();
+
+    fireEvent.mouseDown(findComboboxByLabel('任务状态筛选'));
+    const completedOptions = await screen.findAllByText('completed');
+    fireEvent.click(completedOptions[completedOptions.length - 1]);
+    await waitFor(() => {
+      expect(taskRequests.some((request) => request.includes('status=completed') && request.includes('page=1'))).toBe(true);
+    });
+  });
+
   it('执行中心选择执行模板后创建任务会提交模板 ID', async () => {
     await renderWorkbench('/runs');
 
@@ -2030,8 +2085,16 @@ describe('AegisQA 前端工作台', () => {
   it('完成态任务不能重复执行', async () => {
     vi.mocked(globalThis.fetch).mockImplementation((input) => {
       const url = String(input);
-      if (url.endsWith('/tasks')) {
-        return jsonResponse([{ ...demoTask, status: 'completed', completed_items: 100, pass_rate: 0.8 }]);
+      const parsed = new URL(url, 'http://localhost');
+      if (parsed.pathname.endsWith('/tasks')) {
+        const completedTask = { ...demoTask, status: 'completed', completed_items: 100, pass_rate: 0.8 };
+        if (parsed.searchParams.has('page')) {
+          return jsonResponse({
+            items: [completedTask],
+            pagination: { page: 1, page_size: 8, total_items: 1, total_pages: 1 },
+          });
+        }
+        return jsonResponse([completedTask]);
       }
       if (url.endsWith('/workflows')) {
         return jsonResponse([demoWorkflowVersion]);

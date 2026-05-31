@@ -49,6 +49,7 @@ import type {
   TaskReport,
   TaskDiagnostics,
   TaskExecutionTemplate,
+  TaskPageResult,
   TaskParameterGovernance,
   TaskPreflightResult,
   TaskTraceFlow,
@@ -397,6 +398,15 @@ export const api = {
     }),
   runs: () => request<RunRecord[]>('/runs'),
   tasks: () => request<TaskRecord[]>('/tasks'),
+  tasksPage: (filters: { status?: string; dataset_id?: string; workflow_id?: string; q?: string; page?: number; pageSize?: number } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return;
+      query.set(key === 'pageSize' ? 'page_size' : key, String(value));
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<TaskPageResult>(`/tasks${suffix}`);
+  },
   taskExecutionTemplates: () => request<TaskExecutionTemplate[]>('/task-execution-templates'),
   createTaskExecutionTemplate: (body: {
     name: string;

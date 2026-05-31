@@ -6,6 +6,7 @@ import {
   Card,
   Empty,
   Progress,
+  Select,
   Space,
   Table,
   Tag,
@@ -25,8 +26,15 @@ export function RunsPage() {
   const [detailTask, setDetailTask] = useState<TaskRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [preflightResult, setPreflightResult] = useState<TaskPreflightResult | null>(null);
+  const [taskPage, setTaskPage] = useState(1);
+  const [taskStatusFilter, setTaskStatusFilter] = useState<string | undefined>();
+  const taskPageSize = 8;
 
-  const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks, refetchOnMount: 'always' });
+  const tasksQuery = useQuery({
+    queryKey: ['tasks', 'page', taskPage, taskStatusFilter],
+    queryFn: () => api.tasksPage({ page: taskPage, pageSize: taskPageSize, status: taskStatusFilter }),
+    refetchOnMount: 'always',
+  });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
   const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets, refetchOnMount: 'always' });
   const executionTemplatesQuery = useQuery({ queryKey: ['task-execution-templates'], queryFn: api.taskExecutionTemplates, refetchOnMount: 'always' });
@@ -35,7 +43,8 @@ export function RunsPage() {
     () => datasetsQuery.data?.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))) ?? [],
     [datasetsQuery.data],
   );
-  const tasks = tasksQuery.data ?? [];
+  const tasks = tasksQuery.data?.items ?? [];
+  const taskPagination = tasksQuery.data?.pagination;
 
   function resolveDatasetVersion(values: TaskCreateFormValues): DatasetVersion {
     const datasetVersion = datasetVersions.find((item) => item.version.version_id === values.dataset_version_id)?.version;
@@ -138,10 +147,36 @@ export function RunsPage() {
       {notice ? <Alert type={notice.includes('失败') ? 'error' : 'info'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
 
       <Card className="flat-card" title="任务列表">
+        <Space wrap className="section-actions">
+          <Select
+            allowClear
+            aria-label="任务状态筛选"
+            placeholder="全部状态"
+            className="status-filter"
+            value={taskStatusFilter}
+            onChange={(value) => {
+              setTaskStatusFilter(value);
+              setTaskPage(1);
+            }}
+            options={[
+              { value: 'queued', label: 'queued' },
+              { value: 'running', label: 'running' },
+              { value: 'completed', label: 'completed' },
+              { value: 'failed', label: 'failed' },
+              { value: 'canceled', label: 'canceled' },
+            ]}
+          />
+        </Space>
         <Table
           rowKey="task_id"
           loading={tasksQuery.isLoading}
-          pagination={{ pageSize: 8 }}
+          pagination={{
+            current: taskPagination?.page ?? taskPage,
+            pageSize: taskPagination?.page_size ?? taskPageSize,
+            total: taskPagination?.total_items ?? tasks.length,
+            showSizeChanger: false,
+            onChange: (page) => setTaskPage(page),
+          }}
           dataSource={tasks}
           locale={{ emptyText: <Empty description="暂无任务。请先上传数据、发布 Workflow，然后创建任务。" /> }}
           columns={[

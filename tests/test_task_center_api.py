@@ -191,6 +191,37 @@ def test_task_lifecycle_report_and_trace_tree(tmp_path: Path) -> None:
     assert trace_tree["items"][0]["children"][0]["skill_ref"] == "llm.call@0.1.0"
 
 
+def test_tasks_support_server_side_pagination_and_status_filter(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "task_page_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "task_page_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    for index in range(6):
+        task = client.post(
+            "/tasks",
+            json={
+                "name": f"分页任务 {index}",
+                "dataset_id": dataset["dataset_id"],
+                "dataset_version": dataset["version"],
+                "workflow_version_id": workflow["version_id"],
+            },
+        ).json()
+        if index % 2 == 0:
+            client.post(f"/tasks/{task['task_id']}/execute")
+
+    legacy = client.get("/tasks").json()
+    assert isinstance(legacy, list)
+    assert len(legacy) == 6
+
+    payload = client.get("/tasks", params={"status": "queued", "page": 2, "page_size": 2}).json()
+    assert payload["pagination"] == {"page": 2, "page_size": 2, "total_items": 3, "total_pages": 2}
+    assert len(payload["items"]) == 1
+    assert {item["status"] for item in payload["items"]} == {"queued"}
+
+
 def test_task_creation_blocks_failed_preflight_unless_explicitly_forced(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)

@@ -64,8 +64,34 @@ REPORT_EXPORT_FORMATS = {"json", "csv", "html"}
 
 def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.get("/tasks")
-    def list_tasks() -> list[dict[str, Any]]:
-        return _list_records(ctx.store, "tasks")
+    def list_tasks(
+        status: str | None = Query(default=None),
+        dataset_id: str | None = Query(default=None),
+        workflow_id: str | None = Query(default=None),
+        q: str | None = Query(default=None),
+        page: int | None = Query(default=None, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        tasks = _list_records(ctx.store, "tasks")
+        if status:
+            tasks = [task for task in tasks if task.get("status") == status]
+        if dataset_id:
+            tasks = [task for task in tasks if task.get("dataset_id") == dataset_id]
+        if workflow_id:
+            tasks = [task for task in tasks if task.get("workflow_id") == workflow_id]
+        if q:
+            keyword = q.strip().lower()
+            tasks = [
+                task
+                for task in tasks
+                if keyword in str(task.get("name", "")).lower()
+                or keyword in str(task.get("dataset_name", "")).lower()
+                or keyword in str(task.get("workflow_name", "")).lower()
+            ]
+        if page is None:
+            # 旧前端和部分测试仍依赖数组响应；只有显式分页时才切换为分页对象。
+            return tasks
+        return _paginate_records(tasks, page=page, page_size=page_size)
 
     @app.get("/task-preflights/{preflight_id}")
     def get_task_preflight(preflight_id: str) -> dict[str, Any]:

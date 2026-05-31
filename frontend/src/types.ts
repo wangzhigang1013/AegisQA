@@ -315,6 +315,16 @@ export type TaskRecord = {
   updated_at: string;
 };
 
+export type TaskPageResult = {
+  items: TaskRecord[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total_items: number;
+    total_pages: number;
+  };
+};
+
 export type TaskExecutionTemplate = {
   template_id: string;
   name: string;
