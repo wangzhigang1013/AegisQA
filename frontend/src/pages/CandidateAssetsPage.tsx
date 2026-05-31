@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { BaselineChangeNotification, ExperimentBaselineActionResult, ExperimentBaselineImpact, PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
+import type { BaselineChangeNotification, ExperimentBaselineActionResult, ExperimentBaselineImpact, PromptSkillCandidate, PromptSkillCandidateRetestPlanItem, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
 
 export function CandidateAssetsPage() {
   const queryClient = useQueryClient();
@@ -27,6 +27,10 @@ export function CandidateAssetsPage() {
     queryKey: ['prompt-skill-candidate-workload'],
     queryFn: () => api.promptSkillCandidateWorkload(),
   });
+  const retestPlanQuery = useQuery({
+    queryKey: ['prompt-skill-candidate-retest-plan', statusFilter],
+    queryFn: () => api.promptSkillCandidateRetestPlan({ status: statusFilter }),
+  });
   const baselineNotificationsQuery = useQuery({
     queryKey: ['baseline-change-notifications', 'unread'],
     queryFn: () => api.baselineChangeNotifications({ status: 'unread' }),
@@ -34,6 +38,11 @@ export function CandidateAssetsPage() {
   const candidates = candidatesQuery.data ?? [];
   const currentCandidateIds = candidates.map((candidate) => candidate.candidate_id);
   const baselineNotifications = mergeBaselineNotifications(lastBaselineNotifications, baselineNotificationsQuery.data ?? []);
+
+  function invalidateCandidateSummaries() {
+    void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidate-workload'] });
+    void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidate-retest-plan'] });
+  }
 
   function mergeCandidate(candidate: PromptSkillCandidate) {
     queryClient.setQueryData<PromptSkillCandidate[]>(queryKey, (current = []) => {
@@ -58,6 +67,7 @@ export function CandidateAssetsPage() {
       }),
     onSuccess: (candidate) => {
       mergeCandidate(candidate);
+      invalidateCandidateSummaries();
       setNotice(`候选资产已审批：${candidate.candidate_id}`);
     },
     onError: (error) => setNotice(`候选资产审批失败：${formatApiError(error)}`),
@@ -72,6 +82,7 @@ export function CandidateAssetsPage() {
       }),
     onSuccess: (candidate) => {
       mergeCandidate(candidate);
+      invalidateCandidateSummaries();
       setNotice(`候选资产已拒绝：${candidate.candidate_id}`);
     },
     onError: (error) => setNotice(`候选资产拒绝失败：${formatApiError(error)}`),
@@ -87,7 +98,7 @@ export function CandidateAssetsPage() {
       }),
     onSuccess: (payload) => {
       mergeCandidates(payload.candidates);
-      void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidate-workload'] });
+      invalidateCandidateSummaries();
       setNotice(`批量审批完成：${payload.reviewed_count} 个`);
     },
     onError: (error) => setNotice(`批量审批失败：${formatApiError(error)}`),
@@ -103,7 +114,7 @@ export function CandidateAssetsPage() {
       }),
     onSuccess: (payload) => {
       mergeCandidates(payload.candidates);
-      void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidate-workload'] });
+      invalidateCandidateSummaries();
       setNotice(`候选资产已指派：${payload.assigned_count} 个`);
     },
     onError: (error) => setNotice(`候选资产指派失败：${formatApiError(error)}`),
@@ -113,7 +124,7 @@ export function CandidateAssetsPage() {
     mutationFn: () => api.escalateOverduePromptSkillCandidates({ actor: 'lead' }),
     onSuccess: (payload) => {
       mergeCandidates(payload.candidates);
-      void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidate-workload'] });
+      invalidateCandidateSummaries();
       setNotice(`逾期候选已升级：${payload.escalated_count} 个`);
     },
     onError: (error) => setNotice(`逾期候选升级失败：${formatApiError(error)}`),
@@ -124,6 +135,7 @@ export function CandidateAssetsPage() {
     onSuccess: (payload) => {
       mergeCandidate(payload.candidate);
       void queryClient.invalidateQueries({ queryKey: ['workflow-drafts'] });
+      invalidateCandidateSummaries();
       setNotice(`Workflow 草稿已创建：${payload.draft.draft_id}`);
     },
     onError: (error) => setNotice(`Workflow 草稿创建失败：${formatApiError(error)}`),
@@ -134,6 +146,7 @@ export function CandidateAssetsPage() {
     onSuccess: (payload) => {
       mergeCandidate(payload.candidate);
       setLastRetest(payload);
+      invalidateCandidateSummaries();
       void queryClient.invalidateQueries({ queryKey: ['tasks'] });
       void queryClient.invalidateQueries({ queryKey: ['experiments'] });
       setNotice(`候选复跑已完成：${payload.task.task_id}`);
@@ -330,6 +343,90 @@ export function CandidateAssetsPage() {
               升级逾期候选
             </Button>
           </Space>
+        </Space>
+      </Card>
+
+      <Card className="flat-card" title="复跑优先级" loading={retestPlanQuery.isLoading}>
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          {retestPlanQuery.isError ? (
+            <Alert type="error" showIcon message={`复跑计划加载失败：${formatApiError(retestPlanQuery.error)}`} />
+          ) : null}
+          <Space wrap>
+            <Tag color="blue">候选：{retestPlanQuery.data?.summary.total_candidates ?? 0}</Tag>
+            <Tag color="green">可复跑：{retestPlanQuery.data?.summary.ready_for_retest ?? 0}</Tag>
+            <Tag color="gold">待发布：{retestPlanQuery.data?.summary.needs_publish ?? 0}</Tag>
+            <Tag color="purple">待建草稿：{retestPlanQuery.data?.summary.needs_draft ?? 0}</Tag>
+            <Tag color="default">已复跑：{retestPlanQuery.data?.summary.already_retested ?? 0}</Tag>
+            <Tag color={(retestPlanQuery.data?.summary.overdue ?? 0) > 0 ? 'red' : 'default'}>逾期：{retestPlanQuery.data?.summary.overdue ?? 0}</Tag>
+            <Tag color={(retestPlanQuery.data?.summary.escalated ?? 0) > 0 ? 'volcano' : 'default'}>已升级：{retestPlanQuery.data?.summary.escalated ?? 0}</Tag>
+          </Space>
+          <Table<PromptSkillCandidateRetestPlanItem>
+            rowKey="candidate_id"
+            size="small"
+            pagination={{ pageSize: 5 }}
+            dataSource={retestPlanQuery.data?.items ?? []}
+            locale={{ emptyText: '暂无候选资产需要复跑决策' }}
+            columns={[
+              {
+                title: '优先级',
+                width: 210,
+                render: (_, record) => (
+                  <Space direction="vertical" size={0}>
+                    <Space size={6}>
+                      <Tag color="blue">#{record.rank}</Tag>
+                      <Typography.Text strong>{record.candidate_id}</Typography.Text>
+                    </Space>
+                    <Typography.Text type="secondary">分数：{record.priority_score}</Typography.Text>
+                  </Space>
+                ),
+              },
+              {
+                title: '下一步',
+                width: 150,
+                dataIndex: 'next_action',
+                render: (value: string) => <Tag color={retestActionColor(value)}>{retestActionLabel(value)}</Tag>,
+              },
+              {
+                title: '负责人/SLA',
+                width: 170,
+                render: (_, record) => (
+                  <Space direction="vertical" size={2}>
+                    <Typography.Text>{record.owner ?? '未指派'}</Typography.Text>
+                    <Typography.Text type="secondary">截止：{record.due_at ? formatDateTime(record.due_at) : '-'}</Typography.Text>
+                    <Space wrap size={4}>
+                      {record.overdue ? <Tag color="red">逾期</Tag> : null}
+                      {record.escalation_status === 'escalated' ? <Tag color="volcano">已升级</Tag> : null}
+                    </Space>
+                  </Space>
+                ),
+              },
+              {
+                title: '排序原因',
+                render: (_, record) => (
+                  <Space wrap size={4}>
+                    {record.reasons.map((reason) => (
+                      <Tag key={`${record.candidate_id}-${reason}`} color={reasonTagColor(reason)}>
+                        {reason}
+                      </Tag>
+                    ))}
+                  </Space>
+                ),
+              },
+              {
+                title: '入口',
+                width: 110,
+                render: (_, record) => (
+                  record.target_url ? (
+                    <Button size="small" href={record.target_url}>
+                      打开入口
+                    </Button>
+                  ) : (
+                    <Typography.Text type="secondary">-</Typography.Text>
+                  )
+                ),
+              },
+            ]}
+          />
         </Space>
       </Card>
 
@@ -578,6 +675,32 @@ function statusLabel(status: string) {
     retested: '已复跑',
   };
   return labels[status] ?? status;
+}
+
+function retestActionLabel(action: string) {
+  const labels: Record<string, string> = {
+    retest_candidate: '直接复跑',
+    publish_workflow_draft: '先发布草稿',
+    create_workflow_draft: '先创建草稿',
+    review_retest_result: '查看复跑结果',
+  };
+  return labels[action] ?? action;
+}
+
+function retestActionColor(action: string) {
+  if (action === 'retest_candidate') return 'green';
+  if (action === 'publish_workflow_draft') return 'gold';
+  if (action === 'create_workflow_draft') return 'purple';
+  if (action === 'review_retest_result') return 'blue';
+  return 'default';
+}
+
+function reasonTagColor(reason: string) {
+  if (reason.includes('逾期')) return 'red';
+  if (reason.includes('升级')) return 'volcano';
+  if (reason.includes('发布')) return 'gold';
+  if (reason.includes('复跑')) return 'green';
+  return 'blue';
 }
 
 function formatUnknown(value: unknown) {

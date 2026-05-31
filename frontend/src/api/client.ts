@@ -23,6 +23,7 @@ import type {
   PromptSkillCandidateBulkAssignResult,
   PromptSkillCandidateBulkReviewResult,
   PromptSkillCandidateEscalationResult,
+  PromptSkillCandidateRetestPlan,
   PromptSkillCandidateRetestResult,
   PromptSkillCandidateWorkload,
   WorkflowPromotionReviewResult,
@@ -192,6 +193,14 @@ export const api = {
     return request<PromptSkillCandidate[]>(`/prompt-skill-candidates${suffix}`);
   },
   promptSkillCandidateWorkload: () => request<PromptSkillCandidateWorkload>('/prompt-skill-candidates/workload'),
+  promptSkillCandidateRetestPlan: (filters: { status?: string } = {}) => {
+    const search = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) search.set(key, value);
+    });
+    const suffix = search.toString();
+    return request<PromptSkillCandidateRetestPlan>(`/prompt-skill-candidates/retest-plan${suffix ? `?${suffix}` : ''}`);
+  },
   reviewPromptSkillCandidate: (candidateId: string, body: { decision: 'approved' | 'rejected'; reviewer?: string; note?: string }) =>
     request<PromptSkillCandidate>(`/prompt-skill-candidates/${encodeURIComponent(candidateId)}/review`, {
       method: 'POST',

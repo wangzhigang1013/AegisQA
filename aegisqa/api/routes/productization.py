@@ -163,6 +163,10 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
     def get_prompt_skill_candidate_workload() -> dict[str, Any]:
         return _build_prompt_skill_candidate_workload(ctx, now=_now())
 
+    @app.get("/prompt-skill-candidates/retest-plan")
+    def get_prompt_skill_candidate_retest_plan(status: str | None = Query(default=None)) -> dict[str, Any]:
+        return _build_prompt_skill_candidate_retest_plan(ctx, status=status, now=_now())
+
     @app.post("/prompt-skill-candidates/bulk-assign")
     def bulk_assign_prompt_skill_candidates(request: PromptSkillCandidateBulkAssignRequest) -> dict[str, Any]:
         return _bulk_assign_prompt_skill_candidates(ctx, request)
@@ -881,6 +885,95 @@ def _build_prompt_skill_candidate_workload(ctx: RouteContext, *, now: str) -> di
         },
         "owners": owners,
     }
+
+
+def _build_prompt_skill_candidate_retest_plan(ctx: RouteContext, *, status: str | None, now: str) -> dict[str, Any]:
+    candidates = [_with_candidate_sla_status(candidate, now=now) for candidate in _list_records(ctx.store, "prompt_skill_candidates")]
+    if status:
+        candidates = [candidate for candidate in candidates if candidate.get("status") == status]
+    items = [_prompt_skill_candidate_retest_plan_item(ctx, candidate, now=now) for candidate in candidates]
+    items = sorted(items, key=lambda item: (-int(item["priority_score"]), str(item.get("updated_at") or ""), str(item["candidate_id"])))
+    for index, item in enumerate(items, start=1):
+        item["rank"] = index
+    return {
+        "summary": {
+            "total_candidates": len(items),
+            "ready_for_retest": sum(1 for item in items if item["next_action"] == "retest_candidate"),
+            "needs_publish": sum(1 for item in items if item["next_action"] == "publish_workflow_draft"),
+            "needs_draft": sum(1 for item in items if item["next_action"] == "create_workflow_draft"),
+            "already_retested": sum(1 for item in items if item["next_action"] == "review_retest_result"),
+            "overdue": sum(1 for item in items if item.get("overdue")),
+            "escalated": sum(1 for item in items if item.get("escalation_status") == "escalated"),
+        },
+        "items": items,
+        "generated_at": now,
+    }
+
+
+def _prompt_skill_candidate_retest_plan_item(ctx: RouteContext, candidate: dict[str, Any], *, now: str) -> dict[str, Any]:
+    next_action = "create_workflow_draft"
+    priority = 30
+    reasons = ["需要先生成 Workflow 草稿"]
+    target_url = f"/candidate-assets?candidate_id={candidate.get('candidate_id')}"
+
+    if candidate.get("retest_task_id"):
+        next_action = "review_retest_result"
+        priority = 20
+        reasons = ["候选已经复跑，下一步应查看候选报告和晋升建议"]
+        target_url = f"/reports?task_id={candidate.get('retest_task_id')}"
+    elif candidate.get("workflow_draft_id"):
+        draft = _safe_get_workflow_draft(ctx, str(candidate["workflow_draft_id"]))
+        if draft and draft.get("published_version_id"):
+            next_action = "retest_candidate"
+            priority = 80
+            reasons = ["候选草稿已发布，可以直接复跑"]
+            target_url = f"/candidate-assets?candidate_id={candidate.get('candidate_id')}&action=retest"
+        else:
+            next_action = "publish_workflow_draft"
+            priority = 55
+            reasons = ["候选草稿尚未发布，需先进入画布校验并发布"]
+            target_url = f"/workflows/designer/{candidate.get('workflow_draft_id')}"
+
+    if candidate.get("overdue"):
+        priority += 25
+        reasons.append("已逾期")
+    if candidate.get("escalation_status") == "escalated":
+        priority += 30
+        reasons.append("已升级")
+    if candidate.get("status") in {"approved", "draft_created"}:
+        priority += 10
+        reasons.append("已通过候选审批")
+    if isinstance(candidate.get("promotion_recommendation"), dict):
+        decision = candidate["promotion_recommendation"].get("decision")
+        if decision == "promote":
+            priority += 15
+            reasons.append("晋升建议为 promote")
+        elif decision == "review":
+            priority += 8
+            reasons.append("晋升建议需要人工复核")
+
+    return {
+        "candidate_id": candidate.get("candidate_id"),
+        "status": candidate.get("status"),
+        "owner": candidate.get("owner"),
+        "due_at": candidate.get("due_at"),
+        "overdue": candidate.get("overdue", False),
+        "escalation_status": candidate.get("escalation_status"),
+        "workflow_draft_id": candidate.get("workflow_draft_id"),
+        "retest_task_id": candidate.get("retest_task_id"),
+        "next_action": next_action,
+        "priority_score": priority,
+        "reasons": reasons,
+        "target_url": target_url,
+        "updated_at": candidate.get("updated_at") or now,
+    }
+
+
+def _safe_get_workflow_draft(ctx: RouteContext, draft_id: str) -> dict[str, Any] | None:
+    try:
+        return _get_workflow_draft(ctx.store, draft_id)
+    except KeyError:
+        return None
 
 
 def _with_candidate_sla_status(candidate: dict[str, Any], *, now: str) -> dict[str, Any]:

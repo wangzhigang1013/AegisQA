@@ -802,6 +802,37 @@ export type PromptSkillCandidateWorkload = {
   }[];
 };
 
+export type PromptSkillCandidateRetestPlanItem = {
+  rank: number;
+  candidate_id: string;
+  status?: string | null;
+  owner?: string | null;
+  due_at?: string | null;
+  overdue?: boolean;
+  escalation_status?: string | null;
+  workflow_draft_id?: string | null;
+  retest_task_id?: string | null;
+  next_action: string;
+  priority_score: number;
+  reasons: string[];
+  target_url?: string | null;
+  updated_at?: string | null;
+};
+
+export type PromptSkillCandidateRetestPlan = {
+  summary: {
+    total_candidates: number;
+    ready_for_retest: number;
+    needs_publish: number;
+    needs_draft: number;
+    already_retested: number;
+    overdue: number;
+    escalated: number;
+  };
+  items: PromptSkillCandidateRetestPlanItem[];
+  generated_at?: string | null;
+};
+
 export type PromptSkillCandidateBulkReviewResult = {
   reviewed_count: number;
   skipped_count: number;

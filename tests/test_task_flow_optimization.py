@@ -675,6 +675,71 @@ def test_prompt_skill_candidate_bulk_governance_and_sla_escalation(tmp_path: Pat
     assert reviewed["candidates"][0]["review_history"][-1]["decision"] == "approved"
 
 
+def test_prompt_skill_candidate_retest_plan_prioritizes_ready_and_overdue_candidates(tmp_path: Path) -> None:
+    client, _, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    store = client.app.state.store
+    _save_record(
+        store,
+        "workflow_drafts",
+        "draft_id",
+        {"draft_id": "draft-ready", "name": "已发布候选草稿", "status": "published", "published_version_id": workflow["version_id"], "updated_at": "2026-05-31T00:00:00Z"},
+    )
+    _save_record(
+        store,
+        "workflow_drafts",
+        "draft_id",
+        {"draft_id": "draft-needs-publish", "name": "待发布候选草稿", "status": "draft", "updated_at": "2026-05-31T00:00:00Z"},
+    )
+    for record in [
+        {
+            "candidate_id": "candidate-ready",
+            "status": "draft_created",
+            "owner": "qa_owner",
+            "workflow_draft_id": "draft-ready",
+            "due_at": "2000-01-01T00:00:00+00:00",
+            "escalation_status": "escalated",
+            "updated_at": "2026-05-31T01:00:00Z",
+        },
+        {
+            "candidate_id": "candidate-needs-publish",
+            "status": "draft_created",
+            "owner": "workflow_owner",
+            "workflow_draft_id": "draft-needs-publish",
+            "due_at": "2000-01-01T00:00:00+00:00",
+            "updated_at": "2026-05-31T02:00:00Z",
+        },
+        {
+            "candidate_id": "candidate-needs-draft",
+            "status": "approved",
+            "owner": "qa_owner",
+            "updated_at": "2026-05-31T03:00:00Z",
+        },
+        {
+            "candidate_id": "candidate-retested",
+            "status": "retested",
+            "owner": "release_owner",
+            "retest_task_id": "task-candidate",
+            "updated_at": "2026-05-31T04:00:00Z",
+        },
+    ]:
+        _save_record(store, "prompt_skill_candidates", "candidate_id", record)
+
+    plan = client.get("/prompt-skill-candidates/retest-plan").json()
+
+    assert plan["summary"]["total_candidates"] == 4
+    assert plan["summary"]["ready_for_retest"] == 1
+    assert plan["summary"]["needs_publish"] == 1
+    assert plan["summary"]["needs_draft"] == 1
+    assert plan["items"][0]["candidate_id"] == "candidate-ready"
+    assert plan["items"][0]["next_action"] == "retest_candidate"
+    assert plan["items"][0]["priority_score"] > plan["items"][1]["priority_score"]
+    assert "已升级" in plan["items"][0]["reasons"]
+    actions = {item["candidate_id"]: item["next_action"] for item in plan["items"]}
+    assert actions["candidate-needs-publish"] == "publish_workflow_draft"
+    assert actions["candidate-needs-draft"] == "create_workflow_draft"
+    assert actions["candidate-retested"] == "review_retest_result"
+
+
 def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_three_way_metrics(tmp_path: Path) -> None:
     client, dataset, _ = _seed_dataset_and_workflow(tmp_path, include_reference=True)
     baseline_workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload_with_answer_prompt("prompt-flow-v0")}).json()

@@ -685,6 +685,37 @@ const demoCandidateBulkReviewPayload = {
   skipped: [],
 };
 
+const demoCandidateRetestPlanPayload = {
+  summary: { total_candidates: 3, ready_for_retest: 1, needs_publish: 1, needs_draft: 1, already_retested: 0, overdue: 1, escalated: 1 },
+  items: [
+    {
+      rank: 1,
+      candidate_id: 'candidate-ready',
+      status: 'draft_created',
+      owner: 'qa_owner',
+      overdue: true,
+      escalation_status: 'escalated',
+      next_action: 'retest_candidate',
+      priority_score: 145,
+      reasons: ['候选草稿已发布，可以直接复跑', '已逾期', '已升级'],
+      target_url: '/candidate-assets?candidate_id=candidate-ready&action=retest',
+      updated_at: '2026-05-31T01:00:00Z',
+    },
+    {
+      rank: 2,
+      candidate_id: 'candidate-needs-publish',
+      status: 'draft_created',
+      owner: 'workflow_owner',
+      next_action: 'publish_workflow_draft',
+      priority_score: 90,
+      reasons: ['候选草稿尚未发布，需先进入画布校验并发布'],
+      target_url: '/workflows/designer/draft-needs-publish',
+      updated_at: '2026-05-31T02:00:00Z',
+    },
+  ],
+  generated_at: '2026-05-31T06:00:00Z',
+};
+
 const pendingPackageSkill = {
   ...demoSkills[0],
   skill_id: 'plugin.echo@0.1.0',
@@ -1326,6 +1357,9 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/prompt-skill-candidates/workload')) {
         return jsonResponse(demoCandidateWorkloadPayload);
       }
+      if (url.endsWith('/prompt-skill-candidates/retest-plan')) {
+        return jsonResponse(demoCandidateRetestPlanPayload);
+      }
       if (url.endsWith('/prompt-skill-candidates/bulk-assign')) {
         return jsonResponse(demoCandidateBulkAssignPayload);
       }
@@ -1875,8 +1909,13 @@ describe('AegisQA 前端工作台', () => {
 
     expect(await screen.findByText('候选资产中心')).toBeInTheDocument();
     expect(await screen.findByText('负责人工作量')).toBeInTheDocument();
+    expect(await screen.findByText('复跑优先级')).toBeInTheDocument();
+    expect(screen.getByText('candidate-ready')).toBeInTheDocument();
+    expect(screen.getByText(/候选草稿已发布，可以直接复跑/)).toBeInTheDocument();
+    expect(screen.getByText('candidate-needs-publish')).toBeInTheDocument();
+    expect(screen.getByText(/候选草稿尚未发布/)).toBeInTheDocument();
     expect(screen.getByText(/未指派：1/)).toBeInTheDocument();
-    expect(screen.getByText(/逾期：1/)).toBeInTheDocument();
+    expect(screen.getAllByText(/逾期：1/).length).toBeGreaterThan(0);
     expect(screen.getByText('prompt-flow-v0')).toBeInTheDocument();
     expect(screen.getByText('prompt-flow-v1')).toBeInTheDocument();
 

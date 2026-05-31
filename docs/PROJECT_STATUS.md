@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Baseline Change Notifications”已完成目标实现和全量验证。本批次把 baseline 应用/回滚从“操作有记录”推进到“团队可感知”：后端新增 baseline 变更提醒列表和确认已读接口，apply/rollback 自动生成提醒并带上影响任务、指标 delta、接收人和回滚门禁状态；前端候选资产中心新增“Baseline 变更提醒”卡片和确认已读动作。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Candidate Retest Priority Plan”已完成目标实现和全量验证。本批次把候选资产治理从“批量处理与提醒”继续推进到“下一步可排序”：后端新增候选资产复跑优先级计划接口，按草稿发布状态、复跑结果、逾期、升级和晋升建议计算优先级；前端候选资产中心新增“复跑优先级”卡片，展示可复跑、待发布、待建草稿、已复跑、逾期和已升级统计，并给出每个候选的下一步入口。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -78,6 +78,7 @@
 - Experiment baseline 替换建议已支持应用与回滚：`GET /experiment-baselines` 可按 Dataset/Workflow 查询当前 baseline，`POST /experiment-baseline-suggestions/{suggestion_id}/apply|rollback` 会更新当前 baseline 并写入 history。
 - Experiment baseline 替换建议已支持影响分析和回滚前门禁复测：`GET /experiment-baseline-suggestions/{suggestion_id}/impact` 返回受影响任务、报告、CI Gate 数量和 baseline/candidate 指标差异；回滚前会基于原 baseline Run 生成来源为 `experiment_baseline_rollback` 的 CI Gate evaluation，并在阻断时要求显式 `force=true`。
 - Baseline 变更已支持订阅式提醒：`GET /baseline-change-notifications` 可按 suggestion、baseline、workflow、status 查询，`POST /baseline-change-notifications/{notification_id}/ack` 可确认已读；baseline apply/rollback 响应返回 `notifications`，提醒包含接收人、影响任务、指标 delta 和回滚门禁状态；候选资产中心展示提醒卡片。
+- Prompt/Skill 候选资产已支持复跑优先级计划：`GET /prompt-skill-candidates/retest-plan` 会按草稿状态、发布状态、复跑结果、逾期、升级和晋升建议计算下一步动作与优先级；候选资产中心展示“复跑优先级”卡片，用户能直接看到应先复跑、先发布、先建草稿或查看复跑报告的候选。
 - Workflow 市场进入画布时会把当前草稿写入 `['workflow-draft', draft_id]` 单草稿缓存；画布深链在草稿未加载时显示加载态，异常 graph 结构会给出中文错误提示而不是白屏。
 - Judge 审计已新增多 Judge 一致性 API 与前端弹窗，支持输入多个 Judge 输出并展示两两一致率。
 - 报告中心已新增跨任务 Score Analytics，按 Task 聚合任务数、平均通过率、Badcase、P95、估算成本和退化任务，避免只看单次任务报告。
@@ -89,8 +90,8 @@
 ## 最近验证
 
 - `python -m pytest tests\test_sqlite_store_adapter.py -q`：3 passed，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
-- `python -m pytest tests\test_task_flow_optimization.py -q`：16 passed，覆盖 Task Preflight、Repair Task 生成查询、领取/完成/重开状态流转、Repair Task 发起 Annotation Queue / CI Gate 复测、修复后复跑 Attempt 与报告对比、上下文修复建议生成、修复建议拆分为二级任务、修复树进度聚合、负责人指派、截止时间、逾期聚合、完成后清除逾期、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比计划、版本差异沉淀候选资产、创建 Workflow 草稿、候选资产审批后创建草稿、候选资产批量指派、工作量聚合、逾期升级、批量审批，以及候选草稿发布后的自动复跑和三方指标对比。
-- `python -m pytest -q`：81 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest tests\test_task_flow_optimization.py -q`：17 passed，覆盖 Task Preflight、Repair Task 生成查询、领取/完成/重开状态流转、Repair Task 发起 Annotation Queue / CI Gate 复测、修复后复跑 Attempt 与报告对比、上下文修复建议生成、修复建议拆分为二级任务、修复树进度聚合、负责人指派、截止时间、逾期聚合、完成后清除逾期、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比计划、版本差异沉淀候选资产、创建 Workflow 草稿、候选资产审批后创建草稿、候选资产批量指派、工作量聚合、逾期升级、批量审批、复跑优先级计划，以及候选草稿发布后的自动复跑和三方指标对比。
+- `python -m pytest -q`：82 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v13`，Run `run-e46e560e1885` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "版本对比|版本差异"`：3 passed，覆盖版本对比、沉淀候选和从版本差异创建 Workflow 草稿。
@@ -112,8 +113,10 @@
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`：2 passed，覆盖候选资产中心负责人工作量、批量指派、逾期升级、批量审批和既有单条治理链路。
 - `python -m pytest tests\test_task_flow_optimization.py -q -k "candidate_retest"`：1 passed，覆盖 baseline apply 生成提醒、提醒列表查询、确认已读、rollback 生成提醒和回滚门禁状态入提醒。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`：1 passed，覆盖应用 baseline 后展示变更提醒、确认已读反馈和回滚门禁提醒。
-- `python -m pytest tests\test_task_flow_optimization.py -q`：16 passed。
-- `python -m pytest -q`：81 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest tests\test_task_flow_optimization.py -q -k "retest_plan"`：1 passed，覆盖候选资产复跑优先级计划、可复跑/待发布/待建草稿/已复跑统计、逾期升级加权和下一步动作。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`：1 passed，覆盖候选资产中心“复跑优先级”卡片、候选 ID、排序原因和下一步状态展示。
+- `python -m pytest tests\test_task_flow_optimization.py -q`：17 passed，覆盖 Task/Repair/Candidate Asset 主链路与候选资产复跑优先级计划。
+- `python -m pytest -q`：82 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、55 passed。
 - `cd frontend && npm run build`：通过。
@@ -139,13 +142,13 @@
 - Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；Run Attempt、CI Gate、Experiment baseline/A-B 对比和任务报告均已接入基础闭环。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
 - Experiment 快照、CI Gate、Annotation Queue 和 Trace Tree 已有独立产品页；跨任务 Score Analytics 和成本预算状态已接入报告中心，后续需要继续补真实成本账单、更多趋势筛选维度和跨任务对比可视化。
-- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势、修复任务状态流转、Annotation Queue 发起、CI Gate 复测、修复后复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、候选资产审批、候选资产批量指派、负责人工作量、逾期升级、批量审批、Workflow 草稿创建、候选草稿发布后自动复跑、三方指标对比、晋升建议、晋升审批、baseline 替换建议、baseline 应用/回滚、baseline 影响分析、回滚前 CI Gate 复测和 CI Gate 发布记录已有最小闭环；后续需要把 baseline 变更订阅提醒和审批流集成继续接起来。
+- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势、修复任务状态流转、Annotation Queue 发起、CI Gate 复测、修复后复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、候选资产审批、候选资产批量指派、负责人工作量、逾期升级、批量审批、复跑优先级计划、Workflow 草稿创建、候选草稿发布后自动复跑、三方指标对比、晋升建议、晋升审批、baseline 替换建议、baseline 应用/回滚、baseline 影响分析、baseline 变更提醒、回滚前 CI Gate 复测和 CI Gate 发布记录已有最小闭环；后续需要把外部审批流集成、真实批量复跑执行和负责人容量限制继续接起来。
 - SQLite 轻量仓储已接入元数据路径；后续如果要进入多用户生产环境，仍需要正式 Repository 层、数据库迁移、索引治理、权限隔离和 Worker 队列接入。
 - 本地服务曾出现旧 FastAPI 进程未重启导致新增路由 404 的问题；已重启后端并完成浏览器复测。后续修改后端 API 时必须确认 8000 端口加载的是最新代码。
 
 ## 下一阶段目标
 
-- Repair Task 深水区：继续为 baseline 变更补订阅提醒、影响通知和审批流集成；候选资产后续可增加批量复跑排序、负责人容量限制和自动归档策略。
+- Repair Task 深水区：继续把 baseline 变更提醒接入外部审批/IM 通知；候选资产后续可增加真实批量复跑执行、负责人容量限制和自动归档策略。
 - 红队规则配置化：把当前内置规则升级为可管理规则集，支持按业务线启用、禁用、阈值和严重级别调整。
 - 成本治理生产化：接入真实 token/cost 账单、模型价格表、预算门禁和成本异常告警。
 - 趋势分析增强：为 Score Analytics 增加 Dataset、Workflow、模型版本、Prompt 版本、时间窗口和标签过滤，并补趋势可视化对比。
@@ -153,6 +156,35 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Candidate Retest Priority Plan
+
+- 改动摘要：把候选资产中心从“能治理”继续推进到“知道先处理谁”。后端新增 `GET /prompt-skill-candidates/retest-plan`，按候选是否已有草稿、草稿是否发布、是否已复跑、是否逾期/升级、晋升建议等因素计算优先级、下一步动作、原因和入口；前端候选资产中心新增“复跑优先级”卡片，展示可复跑、待发布、待建草稿、已复跑、逾期、已升级统计，并在表格中给出排序原因和打开入口。
+- 变更文件：
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/CandidateAssetsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/superpowers/plans/2026-05-31-candidate-retest-priority-plan.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "retest_plan"`（RED，确认接口缺少 `summary`；GREEN 后 1 passed）
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`（RED，确认页面缺少“复跑优先级”；GREEN 后 1 passed）
+- 当前测试结果：
+  - 后端目标测试：1 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端目标测试：1 passed。
+  - 后端定向任务流测试：17 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 后端全量测试：82 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端全量测试：4 个测试文件、55 passed。
+  - 前端构建：通过。
+  - Playwright E2E：8 passed。
+  - `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
+- 下一步：继续推进真实批量复跑执行、负责人容量限制、自动归档策略、外部审批/IM 通知和真实成本账单。
 
 ### 2026-05-31 Baseline Change Notifications
 
