@@ -33,6 +33,7 @@ import type {
   RedTeamScanResult,
   RepairTaskRecord,
   RepairTaskTree,
+  ReportExportRequest,
   RunRecord,
   RunReport,
   ScoreAnalytics,
@@ -451,8 +452,28 @@ export const api = {
   cancelTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/cancel`, { method: 'POST' }),
   retryFailedTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/retry-failed`, { method: 'POST' }),
   taskReport: (taskId: string) => request<TaskReport>(`/tasks/${taskId}/report`),
-  exportTaskReport: (taskId: string, file_format: 'json' | 'csv' | 'html', role = 'Evaluator') =>
-    request<Record<string, unknown>>(`/tasks/${taskId}/report/export?file_format=${file_format}&role=${encodeURIComponent(role)}`),
+  exportTaskReport: (taskId: string, file_format: 'json' | 'csv' | 'html', role = 'Evaluator', approvalRequestId?: string) => {
+    const query = new URLSearchParams({ file_format, role });
+    if (approvalRequestId) query.set('approval_request_id', approvalRequestId);
+    return request<Record<string, unknown>>(`/tasks/${taskId}/report/export?${query.toString()}`);
+  },
+  reportExportRequests: (filters: { task_id?: string; status?: string } = {}) => {
+    const query = new URLSearchParams();
+    if (filters.task_id) query.set('task_id', filters.task_id);
+    if (filters.status) query.set('status', filters.status);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<ReportExportRequest[]>(`/report-export-requests${suffix}`);
+  },
+  createReportExportRequest: (taskId: string, body: { file_format: 'json' | 'csv' | 'html'; requester_role: string; reason?: string }) =>
+    request<ReportExportRequest>(`/tasks/${taskId}/report/export-requests`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  approveReportExportRequest: (requestId: string, body: { approver_role?: string; note?: string } = {}) =>
+    request<ReportExportRequest>(`/report-export-requests/${encodeURIComponent(requestId)}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   taskDiagnostics: (taskId: string) => request<TaskDiagnostics>(`/tasks/${taskId}/diagnostics`),
   taskParameterGovernance: (taskId: string) => request<TaskParameterGovernance>(`/tasks/${taskId}/parameter-governance`),
   taskTraceTree: (taskId: string) => request<TraceTree>(`/tasks/${taskId}/trace-tree`),

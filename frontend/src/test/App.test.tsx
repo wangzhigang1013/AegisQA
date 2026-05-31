@@ -137,6 +137,20 @@ const demoReportExportAuditEvents = [
   },
 ];
 
+const demoReportExportRequest = {
+  request_id: 'rex-export-demo',
+  task_id: 'task-demo',
+  task_name: 'RAG 任务',
+  run_id: 'run-demo',
+  file_format: 'html',
+  requester_role: 'Viewer',
+  requested_permission: 'report:export',
+  reason: '业务复盘需要离线报告。',
+  status: 'pending',
+  created_at: '2026-05-31T08:10:00Z',
+  updated_at: '2026-05-31T08:10:00Z',
+};
+
 const demoRepairTask = {
   repair_task_id: 'repair-demo',
   source_task_id: 'task-demo',
@@ -1387,6 +1401,15 @@ describe('AegisQA 前端工作台', () => {
       if (url.includes('/audit-events?action=task.report.export') && url.includes('target=task-demo')) {
         return jsonResponse(demoReportExportAuditEvents);
       }
+      if (url.endsWith('/tasks/task-demo/report/export-requests') && init?.method === 'POST') {
+        return jsonResponse(demoReportExportRequest);
+      }
+      if (url.endsWith('/report-export-requests/rex-export-demo/approve') && init?.method === 'POST') {
+        return jsonResponse({ ...demoReportExportRequest, status: 'approved', approved_by: 'Admin', approval_note: '允许本次离线复盘。' });
+      }
+      if (url.includes('/report-export-requests') && url.includes('task_id=task-demo')) {
+        return jsonResponse([demoReportExportRequest]);
+      }
       if (url.endsWith('/tasks/task-demo/trace-flow')) {
         return jsonResponse(demoTraceFlow);
       }
@@ -2185,7 +2208,7 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('质量决策中心')).toBeInTheDocument();
     expect(await screen.findByText('报告导出历史')).toBeInTheDocument();
     expect(screen.getByText('audit-export-html')).toBeInTheDocument();
-    expect(screen.getByText('html')).toBeInTheDocument();
+    expect(screen.getAllByText('html').length).toBeGreaterThan(0);
     expect(screen.getAllByText('preflight-demo').length).toBeGreaterThan(0);
     expect(findComboboxByLabel('报告导出角色')).toBeInTheDocument();
     expect(screen.getByText('评测结论')).toBeInTheDocument();
@@ -2229,6 +2252,23 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(await screen.findByText('Viewer（只读）'));
     expect(await screen.findByText(/当前角色只有报告查看权限，不能导出或外发报告/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /导出 HTML/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /申请 HTML 导出审批/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /申请 HTML 导出审批/ }));
+    expect(await screen.findByText(/导出审批已提交：rex-export-demo/)).toBeInTheDocument();
+    expect(screen.getByText('导出审批请求')).toBeInTheDocument();
+    expect(screen.getByText('rex-export-demo')).toBeInTheDocument();
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/report/export-requests'), expect.anything());
+
+    fireEvent.click(screen.getByRole('button', { name: /Admin 审批/ }));
+    expect(await screen.findByText(/导出审批已通过：rex-export-demo/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /导出 HTML/ })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: /导出 HTML/ }));
+    expect(await screen.findByText(/报告导出成功：RAG_任务.html 已开始下载/)).toBeInTheDocument();
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      expect.stringContaining('/tasks/task-demo/report/export?file_format=html&role=Viewer&approval_request_id=rex-export-demo'),
+      expect.anything(),
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /忽略/ }));
     expect(await screen.findByText(/Badcase 已忽略/)).toBeInTheDocument();

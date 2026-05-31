@@ -222,6 +222,17 @@ class TaskPreflightRequest(BaseModel):
     skill_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
+class ReportExportRequestCreate(BaseModel):
+    file_format: str = "json"
+    requester_role: str = "Viewer"
+    reason: str = ""
+
+
+class ReportExportApprovalRequest(BaseModel):
+    approver_role: str = "Admin"
+    note: str = ""
+
+
 class RepairTaskStartRequest(BaseModel):
     owner: str
 

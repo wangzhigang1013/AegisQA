@@ -387,6 +387,67 @@ def test_task_preflight_is_persisted_and_task_references_preflight_id(tmp_path: 
     assert export_events[-1]["detail"]["preflight_id"] == preflight["preflight_id"]
 
 
+def test_viewer_can_export_task_report_after_admin_approval(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "task_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "task_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "需要审批外发的报告",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+        },
+    ).json()
+    client.post(f"/tasks/{task['task_id']}/execute")
+
+    denied_export = client.get(f"/tasks/{task['task_id']}/report/export", params={"file_format": "json", "role": "Viewer"})
+    assert denied_export.status_code == 403
+    assert denied_export.json()["code"] == "REPORT_EXPORT_FORBIDDEN"
+
+    export_request = client.post(
+        f"/tasks/{task['task_id']}/report/export-requests",
+        json={"file_format": "json", "requester_role": "Viewer", "reason": "业务复盘需要离线报告。"},
+    ).json()
+    assert export_request["request_id"].startswith("rex-")
+    assert export_request["status"] == "pending"
+    assert export_request["task_id"] == task["task_id"]
+    assert export_request["requested_permission"] == "report:export"
+
+    listed = client.get("/report-export-requests", params={"task_id": task["task_id"]}).json()
+    assert listed[0]["request_id"] == export_request["request_id"]
+
+    reviewer_approval = client.post(
+        f"/report-export-requests/{export_request['request_id']}/approve",
+        json={"approver_role": "Reviewer", "note": "Reviewer 不能批准外发。"},
+    )
+    assert reviewer_approval.status_code == 403
+    assert reviewer_approval.json()["code"] == "REPORT_EXPORT_APPROVAL_FORBIDDEN"
+
+    approved = client.post(
+        f"/report-export-requests/{export_request['request_id']}/approve",
+        json={"approver_role": "Admin", "note": "允许本次离线复盘。"},
+    ).json()
+    assert approved["status"] == "approved"
+    assert approved["approved_by"] == "Admin"
+    assert approved["approval_note"] == "允许本次离线复盘。"
+
+    approved_export = client.get(
+        f"/tasks/{task['task_id']}/report/export",
+        params={"file_format": "json", "role": "Viewer", "approval_request_id": export_request["request_id"]},
+    ).json()
+    assert approved_export["content"]["task"]["task_id"] == task["task_id"]
+
+    export_events = client.get("/audit-events", params={"action": "task.report.export", "target": task["task_id"]}).json()
+    assert export_events[-1]["detail"]["approval_request_id"] == export_request["request_id"]
+    assert export_events[-1]["detail"]["role"] == "Viewer"
+
+
 def test_task_creation_rejects_conflicting_preflight_ids(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)

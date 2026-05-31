@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Report Export Permission Gate”已完成并通过全量验证。本批次继续补齐报告外发治理：RBAC 新增 `report:export` 权限，Task Report Export 默认以 `Evaluator` 角色导出，`Viewer` 只有 `report:read` 不能导出；后端对无权限角色返回 `REPORT_EXPORT_FORBIDDEN` 并写入 `task.report.export.denied` 审计；报告中心新增“报告导出角色”选择器，切到 Viewer 时直接禁用 HTML/CSV/JSON 导出按钮并提示只读角色不能外发报告。验证中发现新增角色下拉会让 Playwright 主链路误点到第一个 Select，已给“选择报告任务”补稳定语义标签并收紧 E2E 选择器。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Report Export Approval Flow”已完成实现并进入最终归档。本批次在 `report:export` 权限门禁之上继续补齐敏感报告外发审批：Viewer 不能直接导出，但可以创建 Task Report 导出审批请求；Reviewer 不能审批外发；Admin 审批通过后，Viewer 可携带 `approval_request_id` 导出同一 Task、同一格式的报告；报告中心展示导出审批请求、申请入口和 Admin 审批入口。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -44,6 +44,7 @@
 - 报告中心已展示当前 Task 的报告导出历史，基于 `GET /audit-events?action=task.report.export&target={task_id}` 追踪导出格式、Run、Preflight ID、操作者和时间。
 - 报告导出已接入 RBAC 门禁：`Evaluator`、`Reviewer`、`Admin` 可导出，`Viewer` 只能查看不能外发；后端拒绝无权限导出并写入 `task.report.export.denied` 审计，前端报告页按角色禁用导出按钮。
 - 报告中心任务选择器已补 `aria-label="选择报告任务"`，Playwright 主链路不再依赖页面 Select 顺序，避免新增角色、筛选器或分页控件后误选下拉。
+- 报告外发已新增审批闭环：Viewer 可申请 HTML/CSV/JSON 导出审批，Admin 审批通过后可带 `approval_request_id` 导出同一 Task 和同一格式，导出审计会记录审批 ID。
 - Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
@@ -109,6 +110,14 @@
 
 ## 最近验证
 
+- `python -m pytest tests\test_task_center_api.py -q -k viewer_can_export_task_report_after_admin_approval`：先 RED 后 GREEN，最终 1 passed，覆盖 Viewer 直接导出被拒绝、创建导出审批、Reviewer 审批失败、Admin 审批成功、Viewer 带 `approval_request_id` 导出成功和导出审计记录审批 ID。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：先 RED 后 GREEN，最终 1 passed，覆盖报告中心 Viewer 申请 HTML 导出审批、Admin 审批、审批后 HTML 导出按钮恢复并携带 `approval_request_id`。
+- `python -m pytest tests\test_task_center_api.py -q -k "viewer_can_export_task_report_after_admin_approval or preflight_is_persisted"`：2 passed。
+- `python -m pytest -q`：93 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：4 个测试文件、62 passed。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
 - `python -m pytest tests\test_task_center_api.py -q -k preflight_is_persisted`：先 RED 后 GREEN，最终 1 passed，覆盖 Task Report CSV/HTML 导出包含质量决策、Preflight 检查、分层分析和 Badcase 明细章节，以及导出成功写入 `task.report.export` 审计事件。
 - `python -m pytest tests\test_api.py -q -k audit_events`：先 RED 后 GREEN，最终 1 passed，覆盖 `/audit-events` 支持 `actor/action/target` 组合过滤。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：先 RED 后 GREEN，最终 1 passed，覆盖报告中心展示当前 Task 的导出历史，并在导出成功后刷新 `task.report.export` 审计查询。
@@ -294,6 +303,42 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Report Export Approval Flow
+
+- 改动摘要：补齐敏感报告外发审批闭环。Viewer 仍不能直接导出 Task Report，但可以为当前 Task 和指定格式创建导出审批请求；Reviewer 审批会被 `REPORT_EXPORT_APPROVAL_FORBIDDEN` 阻断；Admin 审批后，Viewer 可带 `approval_request_id` 导出同一 Task、同一格式的报告；导出审计事件会记录审批 ID；报告中心新增导出审批请求表、Viewer 申请入口和 Admin 审批入口。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_center_api.py`
+  - `frontend/src/types.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-report-export-approval-flow.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q -k viewer_can_export_task_report_after_admin_approval`（RED 后 GREEN）
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`（RED 后 GREEN）
+  - `python -m pytest tests\test_task_center_api.py -q -k "viewer_can_export_task_report_after_admin_approval or preflight_is_persisted"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端 RED：最初缺少导出审批 API，测试在读取 `request_id` 时失败。
+  - 后端 GREEN：审批闭环定向测试 1 passed，联合 Task Report 导出测试 2 passed。
+  - 前端 RED：报告中心缺少“申请 HTML 导出审批”和审批请求列表。
+  - 前端 GREEN：目标报告页测试 1 passed，覆盖申请、审批、审批后导出携带审批 ID。
+  - 后端全量：93 passed，仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端单测：4 个测试文件、62 passed。
+  - 前端 build：通过。
+  - Playwright 全量：8 passed。
+- 下一步：继续评估报告外发的签名下载链接、审批拒绝/过期/撤销、真实成本账单、跨任务趋势筛选和报告页测试拆分。
 
 ### 2026-05-31 Report Export Permission Gate
 

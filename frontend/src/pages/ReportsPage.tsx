@@ -9,7 +9,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { MetricTile } from '../components/MetricTile';
 import { PageHeader } from '../components/PageHeader';
-import type { AuditEvent, TaskRecord } from '../types';
+import type { AuditEvent, ReportExportRequest, TaskRecord } from '../types';
 import { BadcaseTable } from './report/BadcaseTable';
 import { ReportSegmentAnalysis } from './report/ReportSegmentAnalysis';
 import { ReportSummary } from './report/ReportSummary';
@@ -53,6 +53,11 @@ export function ReportsPage() {
     queryFn: () => api.auditEvents({ action: 'task.report.export', target: selectedTask?.task_id ?? '' }),
     enabled: Boolean(selectedTask?.task_id),
   });
+  const exportRequestsQuery = useQuery({
+    queryKey: ['report-export-requests', selectedTask?.task_id],
+    queryFn: () => api.reportExportRequests({ task_id: selectedTask?.task_id ?? '' }),
+    enabled: Boolean(selectedTask?.task_id),
+  });
 
   useEffect(() => {
     if (taskIdFromUrl && taskIdFromUrl !== selectedTaskId && tasksQuery.data?.some((task) => task.task_id === taskIdFromUrl)) {
@@ -69,12 +74,26 @@ export function ReportsPage() {
     setSearchParams(nextTaskId ? { task_id: nextTaskId } : {});
   }
 
+  function approvedExportRequestFor(format: ReportExportFormat): ReportExportRequest | undefined {
+    return (exportRequestsQuery.data ?? []).find(
+      (request) => request.status === 'approved' && request.file_format === format && request.requester_role === exportRole,
+    );
+  }
+
+  function canExportFormat(format: ReportExportFormat): boolean {
+    return canExportReport || Boolean(approvedExportRequestFor(format));
+  }
+
   const exportMutation = useMutation({
     mutationFn: async (format: ReportExportFormat) => {
       if (!selectedTask) {
         throw new Error('请先选择任务，再导出报告。');
       }
-      const exported = await api.exportTaskReport(selectedTask.task_id, format, exportRole);
+      const approvalRequest = approvedExportRequestFor(format);
+      if (!canExportReport && !approvalRequest) {
+        throw new Error('当前角色需要先获得报告导出审批。');
+      }
+      const exported = await api.exportTaskReport(selectedTask.task_id, format, exportRole, approvalRequest?.request_id);
       return { exported, task: selectedTask };
     },
     onSuccess: async ({ exported, task }) => {
@@ -83,6 +102,42 @@ export function ReportsPage() {
       await queryClient.invalidateQueries({ queryKey: ['audit-events', 'task.report.export', task.task_id] });
     },
     onError: (error) => setNotice(error instanceof Error ? error.message : '报告导出失败'),
+  });
+
+  const exportRequestMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedTask) {
+        throw new Error('请先选择任务，再申请导出审批。');
+      }
+      return api.createReportExportRequest(selectedTask.task_id, {
+        file_format: 'html',
+        requester_role: exportRole,
+        reason: '只读角色需要导出 HTML 任务报告用于业务复盘。',
+      });
+    },
+    onSuccess: async (request) => {
+      setNotice(`导出审批已提交：${request.request_id}`);
+      queryClient.setQueryData<ReportExportRequest[]>(['report-export-requests', request.task_id], (current = []) => [
+        request,
+        ...current.filter((item) => item.request_id !== request.request_id),
+      ]);
+      await queryClient.invalidateQueries({ queryKey: ['report-export-requests', request.task_id] });
+    },
+    onError: (error) => setNotice(error instanceof Error ? `导出审批提交失败：${error.message}` : '导出审批提交失败'),
+  });
+
+  const approveExportRequestMutation = useMutation({
+    mutationFn: (requestId: string) => api.approveReportExportRequest(requestId, { approver_role: 'Admin', note: '允许本次离线复盘。' }),
+    onSuccess: async (request) => {
+      setNotice(`导出审批已通过：${request.request_id}`);
+      await queryClient.invalidateQueries({ queryKey: ['report-export-requests', request.task_id] });
+      queryClient.setQueryData<ReportExportRequest[]>(['report-export-requests', request.task_id], (current = []) =>
+        current.some((item) => item.request_id === request.request_id)
+          ? current.map((item) => (item.request_id === request.request_id ? request : item))
+          : [request, ...current],
+      );
+    },
+    onError: (error) => setNotice(error instanceof Error ? `导出审批失败：${error.message}` : '导出审批失败'),
   });
 
   const redTeamScanMutation = useMutation({
@@ -203,7 +258,9 @@ export function ReportsPage() {
   const diagnostics = reportQuery.data?.diagnostics;
   const scoreAnalytics = scoreAnalyticsQuery.data;
   const exportHistory: AuditEvent[] = exportHistoryQuery.data ?? [];
+  const exportRequests: ReportExportRequest[] = exportRequestsQuery.data ?? [];
   const canExportReport = reportExportRoles.find((item) => item.value === exportRole)?.canExport ?? false;
+  const hasHtmlExportApproval = Boolean(approvedExportRequestFor('html'));
   const latencyData = useMemo(() => {
     if (stepDistribution.length) {
       return Object.fromEntries(stepDistribution.map((step) => [step.step_id, step.average_latency_ms]));
@@ -263,11 +320,11 @@ export function ReportsPage() {
               options={reportExportRoles.map((role) => ({ value: role.value, label: role.label }))}
             />
             <Space.Compact>
-              <Tooltip title={!canExportReport ? '当前角色没有 report:export 权限' : ''}>
+              <Tooltip title={!canExportFormat('html') ? '当前角色没有 report:export 权限，请先申请并通过审批' : ''}>
                 <Button
                   type="primary"
                   icon={<DownloadOutlined />}
-                  disabled={!selectedTask || exportMutation.isPending || !canExportReport}
+                  disabled={!selectedTask || exportMutation.isPending || !canExportFormat('html')}
                   loading={exportMutation.isPending && exportMutation.variables === 'html'}
                   onClick={() => exportMutation.mutate('html')}
                 >
@@ -276,7 +333,7 @@ export function ReportsPage() {
               </Tooltip>
               <Button
                 icon={<DownloadOutlined />}
-                disabled={!selectedTask || exportMutation.isPending || !canExportReport}
+                disabled={!selectedTask || exportMutation.isPending || !canExportFormat('csv')}
                 loading={exportMutation.isPending && exportMutation.variables === 'csv'}
                 onClick={() => exportMutation.mutate('csv')}
               >
@@ -284,7 +341,7 @@ export function ReportsPage() {
               </Button>
               <Button
                 icon={<DownloadOutlined />}
-                disabled={!selectedTask || exportMutation.isPending || !canExportReport}
+                disabled={!selectedTask || exportMutation.isPending || !canExportFormat('json')}
                 loading={exportMutation.isPending && exportMutation.variables === 'json'}
                 onClick={() => exportMutation.mutate('json')}
               >
@@ -296,7 +353,20 @@ export function ReportsPage() {
       />
 
       {notice ? <Alert type={notice.includes('失败') || notice.includes('请先') ? 'warning' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
-      {!canExportReport ? <Alert type="warning" showIcon message="当前角色只有报告查看权限，不能导出或外发报告。" /> : null}
+      {!canExportReport ? (
+        <Alert
+          type={hasHtmlExportApproval ? 'info' : 'warning'}
+          showIcon
+          message={hasHtmlExportApproval ? '当前角色已获得 HTML 导出审批，可导出已审批格式。' : '当前角色只有报告查看权限，不能导出或外发报告。'}
+          action={
+            !hasHtmlExportApproval ? (
+              <Button size="small" loading={exportRequestMutation.isPending} onClick={() => exportRequestMutation.mutate()}>
+                申请 HTML 导出审批
+              </Button>
+            ) : null
+          }
+        />
+      ) : null}
 
       <Card className="flat-card" title="报告列表">
         <Row gutter={[12, 12]} align="middle">
@@ -383,6 +453,36 @@ export function ReportsPage() {
                 { title: 'Preflight', render: (_, event) => String(asRecord(event.detail)?.preflight_id ?? '-') },
                 { title: '操作者', dataIndex: 'actor' },
                 { title: '时间', dataIndex: 'created_at', render: (value) => formatAuditTime(String(value ?? '')) },
+              ]}
+            />
+          </Card>
+
+          <Card className="flat-card" title="导出审批请求">
+            <Table
+              size="small"
+              rowKey="request_id"
+              loading={exportRequestsQuery.isLoading}
+              pagination={{ pageSize: 4 }}
+              dataSource={exportRequests}
+              locale={{ emptyText: '当前任务还没有导出审批请求。只读角色申请后会在这里追踪审批状态。' }}
+              columns={[
+                { title: '申请 ID', dataIndex: 'request_id', render: (value) => <code>{value}</code> },
+                { title: '格式', dataIndex: 'file_format', render: (value) => <Tag color="blue">{String(value)}</Tag> },
+                { title: '申请角色', dataIndex: 'requester_role' },
+                { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'approved' ? 'green' : 'orange'}>{String(value)}</Tag> },
+                { title: '原因', dataIndex: 'reason' },
+                { title: '审批人', dataIndex: 'approved_by', render: (value) => String(value ?? '-') },
+                {
+                  title: '操作',
+                  render: (_, request) =>
+                    request.status === 'pending' ? (
+                      <Button size="small" loading={approveExportRequestMutation.isPending} onClick={() => approveExportRequestMutation.mutate(request.request_id)}>
+                        Admin 审批
+                      </Button>
+                    ) : (
+                      <Typography.Text type="secondary">已处理</Typography.Text>
+                    ),
+                },
               ]}
             />
           </Card>

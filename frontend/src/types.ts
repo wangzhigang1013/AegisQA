@@ -515,6 +515,23 @@ export type AuditEvent = {
   created_at: string;
 };
 
+export type ReportExportRequest = {
+  request_id: string;
+  task_id: string;
+  task_name?: string;
+  run_id?: string;
+  file_format: 'json' | 'csv' | 'html';
+  requester_role: string;
+  requested_permission: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected' | string;
+  approved_by?: string;
+  approval_note?: string;
+  approved_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type TaskDiagnostics = {
   task_id?: string;
   run_id?: string;

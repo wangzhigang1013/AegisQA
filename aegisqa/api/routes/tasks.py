@@ -17,6 +17,8 @@ from aegisqa.api.app import (
     RepairTaskReopenRequest,
     RepairTaskResolveRequest,
     RepairTaskStartRequest,
+    ReportExportApprovalRequest,
+    ReportExportRequestCreate,
     _build_annotation_task,
     RunCreateRequest,
     TaskCreateRequest,
@@ -53,6 +55,9 @@ from aegisqa.engine.runner import RunRecord, RunRequest
 from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments, compare_reports
 from aegisqa.reports.diagnostics import build_task_diagnostics
 from aegisqa.reports.trace_flow import build_task_trace_flow
+
+
+REPORT_EXPORT_FORMATS = {"json", "csv", "html"}
 
 
 def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -403,23 +408,29 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
     def get_task_report(task_id: str) -> dict[str, Any]:
         return _build_task_report_payload(ctx, task_id)
 
+    @app.post("/tasks/{task_id}/report/export-requests")
+    def create_report_export_request(task_id: str, request: ReportExportRequestCreate) -> dict[str, Any]:
+        return _create_report_export_request(ctx, task_id, request)
+
+    @app.get("/report-export-requests")
+    def list_report_export_requests(task_id: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
+        records = _list_records(ctx.store, "report_export_requests")
+        if task_id:
+            records = [record for record in records if record.get("task_id") == task_id]
+        if status:
+            records = [record for record in records if record.get("status") == status]
+        return sorted(records, key=lambda record: str(record.get("created_at", "")), reverse=True)
+
+    @app.post("/report-export-requests/{request_id}/approve")
+    def approve_report_export_request(request_id: str, request: ReportExportApprovalRequest) -> dict[str, Any]:
+        return _approve_report_export_request(ctx, request_id, request)
+
     @app.get("/tasks/{task_id}/report/export")
-    def export_task_report(task_id: str, file_format: str = "json", role: str = "Evaluator") -> dict[str, Any]:
+    def export_task_report(task_id: str, file_format: str = "json", role: str = "Evaluator", approval_request_id: str | None = None) -> dict[str, Any]:
+        _ensure_report_export_format(file_format)
+        approval_request: dict[str, Any] | None = None
         if not ctx.access_control.can(role, "report:export"):
-            ctx.audit_service.record(
-                actor=role,
-                action="task.report.export.denied",
-                target=task_id,
-                detail={"file_format": file_format, "required_permission": "report:export"},
-            )
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "code": "REPORT_EXPORT_FORBIDDEN",
-                    "message": "当前角色没有导出报告权限",
-                    "details": {"role": role, "required_permission": "report:export"},
-                },
-            )
+            approval_request = _ensure_report_export_approval(ctx, task_id, file_format, role, approval_request_id)
         payload = _build_task_report_payload(ctx, task_id)
         task = payload["task"]
         preflight = payload.get("preflight_evidence") or {}
@@ -435,9 +446,21 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             actor=role,
             action="task.report.export",
             target=task_id,
-            detail={"run_id": task.get("run_id"), "file_format": file_format, "preflight_id": preflight.get("preflight_id"), "role": role},
+            detail={
+                "run_id": task.get("run_id"),
+                "file_format": file_format,
+                "preflight_id": preflight.get("preflight_id"),
+                "role": role,
+                "approval_request_id": approval_request.get("request_id") if approval_request else None,
+            },
         )
-        return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": file_format, "content": content}
+        return {
+            "task_id": task_id,
+            "run_id": task.get("run_id"),
+            "file_format": file_format,
+            "approval_request_id": approval_request.get("request_id") if approval_request else None,
+            "content": content,
+        }
 
     @app.get("/tasks/{task_id}/diagnostics")
     def get_task_diagnostics(task_id: str) -> dict[str, Any]:
@@ -576,6 +599,136 @@ def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> d
         "checks": checks,
         "created_at": _now(),
     }
+
+
+def _create_report_export_request(ctx: RouteContext, task_id: str, request: ReportExportRequestCreate) -> dict[str, Any]:
+    _ensure_report_export_format(request.file_format)
+    task = _get_record(ctx.store, "tasks", task_id)
+    now = _now()
+    record = {
+        "request_id": f"rex-{uuid4().hex[:12]}",
+        "task_id": task_id,
+        "task_name": task.get("name"),
+        "run_id": task.get("run_id"),
+        "file_format": request.file_format,
+        "requester_role": request.requester_role,
+        "requested_permission": "report:export",
+        "reason": request.reason,
+        "status": "pending",
+        "created_at": now,
+        "updated_at": now,
+    }
+    _save_record(ctx.store, "report_export_requests", "request_id", record)
+    ctx.audit_service.record(
+        actor=request.requester_role,
+        action="task.report.export.request",
+        target=task_id,
+        detail={"request_id": record["request_id"], "file_format": request.file_format, "reason": request.reason},
+    )
+    return record
+
+
+def _approve_report_export_request(ctx: RouteContext, request_id: str, request: ReportExportApprovalRequest) -> dict[str, Any]:
+    if not ctx.access_control.can(request.approver_role, "report:export:approve"):
+        raise AegisQAError(
+            "REPORT_EXPORT_APPROVAL_FORBIDDEN",
+            "当前角色没有审批报告导出的权限。",
+            status_code=403,
+            details={"role": request.approver_role, "required_permission": "report:export:approve"},
+        )
+    record = _get_record(ctx.store, "report_export_requests", request_id)
+    if record.get("status") != "pending":
+        raise AegisQAError(
+            "REPORT_EXPORT_APPROVAL_INVALID",
+            "只有待审批的报告导出申请可以被审批。",
+            status_code=409,
+            details={"request_id": request_id, "status": record.get("status")},
+        )
+    now = _now()
+    record.update(
+        {
+            "status": "approved",
+            "approved_by": request.approver_role,
+            "approval_note": request.note,
+            "approved_at": now,
+            "updated_at": now,
+        }
+    )
+    _save_record(ctx.store, "report_export_requests", "request_id", record)
+    ctx.audit_service.record(
+        actor=request.approver_role,
+        action="task.report.export.approve",
+        target=str(record.get("task_id")),
+        detail={"request_id": request_id, "file_format": record.get("file_format"), "requester_role": record.get("requester_role")},
+    )
+    return record
+
+
+def _ensure_report_export_approval(
+    ctx: RouteContext,
+    task_id: str,
+    file_format: str,
+    role: str,
+    approval_request_id: str | None,
+) -> dict[str, Any]:
+    if not approval_request_id:
+        _record_report_export_denied(ctx, task_id, file_format, role, approval_request_id)
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "REPORT_EXPORT_FORBIDDEN",
+                "message": "当前角色没有导出报告权限",
+                "details": {"role": role, "required_permission": "report:export"},
+            },
+        )
+    try:
+        record = _get_record(ctx.store, "report_export_requests", approval_request_id)
+    except KeyError as exc:
+        _record_report_export_denied(ctx, task_id, file_format, role, approval_request_id)
+        raise AegisQAError(
+            "REPORT_EXPORT_APPROVAL_INVALID",
+            "报告导出审批不存在或无法用于本次导出。",
+            status_code=403,
+            details={"approval_request_id": approval_request_id},
+        ) from exc
+    mismatch = {
+        "task_id": record.get("task_id") != task_id,
+        "file_format": record.get("file_format") != file_format,
+        "requester_role": record.get("requester_role") != role,
+        "status": record.get("status") != "approved",
+    }
+    failed_fields = [field for field, failed in mismatch.items() if failed]
+    if failed_fields:
+        _record_report_export_denied(ctx, task_id, file_format, role, approval_request_id)
+        raise AegisQAError(
+            "REPORT_EXPORT_APPROVAL_INVALID",
+            "报告导出审批与当前导出请求不匹配，或尚未审批通过。",
+            status_code=403,
+            details={"approval_request_id": approval_request_id, "failed_fields": failed_fields},
+        )
+    return record
+
+
+def _record_report_export_denied(ctx: RouteContext, task_id: str, file_format: str, role: str, approval_request_id: str | None) -> None:
+    ctx.audit_service.record(
+        actor=role,
+        action="task.report.export.denied",
+        target=task_id,
+        detail={
+            "file_format": file_format,
+            "required_permission": "report:export",
+            "approval_request_id": approval_request_id,
+        },
+    )
+
+
+def _ensure_report_export_format(file_format: str) -> None:
+    if file_format not in REPORT_EXPORT_FORMATS:
+        raise AegisQAError(
+            "REPORT_EXPORT_FORMAT_UNSUPPORTED",
+            "file_format 仅支持 json/csv/html。",
+            details={"file_format": file_format, "supported": sorted(REPORT_EXPORT_FORMATS)},
+        )
 
 
 def _build_task_report_payload(ctx: RouteContext, task_id: str) -> dict[str, Any]:
