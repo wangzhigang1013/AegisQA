@@ -198,16 +198,24 @@ class WorkflowGraphService:
         for node in nodes_by_id.values():
             if node.node_type != "skill" or not node.skill_ref:
                 continue
-            if not self.registry.can_reference_new_workflow(node.skill_ref):
+            try:
+                manifest = self.registry.get_manifest(node.skill_ref)
+            except KeyError:
+                errors.append(GraphIssue(code="SKILL_NOT_FOUND", message=f"未注册的 Skill：{node.skill_ref}", node_id=node.node_id, details={"skill_ref": node.skill_ref}))
+                continue
+            if not manifest.enabled or manifest.status != "approved":
                 errors.append(GraphIssue(code="SKILL_NOT_AVAILABLE", message=f"Skill 不允许被新 Workflow 引用：{node.skill_ref}", node_id=node.node_id))
 
     def _validate_skill_mappings(self, nodes_by_id: dict[str, WorkflowGraphNode], errors: list[GraphIssue]) -> None:
         for node in nodes_by_id.values():
             if node.node_type != "skill" or not node.skill_ref:
                 continue
-            if not self.registry.can_reference_new_workflow(node.skill_ref):
+            try:
+                manifest = self.registry.get_manifest(node.skill_ref)
+            except KeyError:
                 continue
-            manifest = self.registry.get_manifest(node.skill_ref)
+            if not manifest.enabled or manifest.status != "approved":
+                continue
             required_inputs = _string_list(manifest.input_schema.get("required", []))
             missing_inputs = [field for field in required_inputs if not _mapping_path(node.input_mapping.get(field))]
             if missing_inputs:

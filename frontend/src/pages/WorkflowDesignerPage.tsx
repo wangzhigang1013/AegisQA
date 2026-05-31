@@ -911,5 +911,8 @@ function issueRepairSuggestion(error: { code: string; details?: Record<string, u
   if (error.code === 'SKILL_NOT_AVAILABLE') {
     return '修复建议：到 Skill 市场或治理页运行合约测试并审批启用该 Skill，或替换为已启用版本。';
   }
+  if (error.code === 'SKILL_NOT_FOUND') {
+    return '修复建议：到 Skill 市场上传或选择已注册的 Skill；如果是旧草稿，请替换为当前可用的 Skill 版本后再发布。';
+  }
   return null;
 }

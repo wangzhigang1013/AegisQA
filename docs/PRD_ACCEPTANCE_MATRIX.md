@@ -18,7 +18,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 最近一次验证结果：
 
-- 单元/API/扩展测试：`python -m pytest -q` 已通过，覆盖 106 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- 单元/API/扩展测试：`python -m pytest -q` 已通过，覆盖 107 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - SQLite 轻量仓储：`python -m pytest tests\test_sqlite_store_adapter.py -q` 已通过，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
 - 端到端 Demo：最新 Dataset `rag_qa_1000:v13`、Run `run-e46e560e1885`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
 - 前端：`npm run typecheck`、`npm test`、`npm run build` 已通过；`npm test` 当前为 9 个测试文件、89 个测试，覆盖交互/API client/图模型/Workflow 深度交互/任务创建向导/Preflight 创建门禁/Workflow 发布失败错误建议/关键参数签名新鲜度/Preflight 证据展示/执行参数模板/模板 ID 创建提交/Run Attempts/Dataset Lineage/Trace Tree/Experiment/CI Gate/Annotation Queue/候选资产中心审批/拒绝/生成草稿/复跑优先级/批量复跑/复跑对比/三方指标展示/晋升建议/晋升审批/通过晋升后 baseline 与 CI 发布资产/baseline 应用、baseline 影响分析、baseline 回滚门禁、baseline 变更提醒确认、候选资产批量指派/负责人工作量/负责人容量限制/批量指派参数配置/终态候选归档/SLA 逾期升级/批量审批、报告评测结论/Repair Task 生成、工作台、动作闭环、复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、Workflow 草稿创建/Judge 偏差趋势/治理边界和任务创建向导生命周期测试；`App.test.tsx` 已抽出共享 harness，并把修复任务工作台、报告中心与 Workflow 深度交互迁移到独立测试文件；最近一次 Playwright 覆盖 9 条 E2E，E2E 默认使用独立后端端口 8010 并通过 Vite `/api` 代理访问后端。
@@ -74,7 +74,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-SK-06 | Skill 启用/禁用/审批/废弃 | 已实现基础 | `SkillRegistry.disable/approve/deprecate`，`POST /skills/{skill_id}/approve|disable|deprecate`，React Skill 市场展示待审批、合约状态、审批人和审批时间；治理页新增审批抽屉展示 Manifest、Schema、测试日志，未通过合约测试的插件不能在前端直接启用；内置 Skill manifest 在实例化时深拷贝，禁用/审批状态不会跨 `SkillRegistry` 实例串扰 |
 | FR-SK-07 | Skill 安全策略声明 | 已实现基础 | `SkillManifest.permissions` |
 | FR-WF-05 | 模板化 Workflow | 已实现基础 | `WorkflowTemplateService`，React Workflow 页面提供示例图 |
-| FR-WF-06 | DAG/条件分支/并行节点 | 已实现基础 | `DAGWorkflow.execution_levels`、`DAGWorkflowExecutor` 支持条件 `exists/not exists` 和按层并行执行；`WorkflowGraphService` 支持画布 DAG 校验、点对多、多对一 Join/Aggregator 规则；发布前阻断测试覆盖未审批 Skill、多对一缺 Join/Aggregator、Branch 缺条件表达式和必填输入映射缺失 |
+| FR-WF-06 | DAG/条件分支/并行节点 | 已实现基础 | `DAGWorkflow.execution_levels`、`DAGWorkflowExecutor` 支持条件 `exists/not exists` 和按层并行执行；`WorkflowGraphService` 支持画布 DAG 校验、点对多、多对一 Join/Aggregator 规则；发布前阻断测试覆盖未知 Skill、未审批 Skill、多对一缺 Join/Aggregator、Branch 缺条件表达式和必填输入映射缺失 |
 | FR-DS-07 | DBQuery/API/线上抽样 Source Skill | 已实现基础 | `DBQuerySkill` 支持 sqlite SQL，`APIPullSkill` 支持 file/http JSON rows，`OnlineSampleSkill` 支持抽样 |
 | FR-DS-08 | 数据导出 | 已实现基础 | `DatasetService.export_rows` |
 | FR-EX-06 | 取消、暂停、恢复 | 已实现基础 | `cancel_run/pause_run/resume_run`，`POST /runs/{run_id}/execute|pause|resume|cancel|retry-failed`，React 执行中心已接入；Task 层已增加 completed/running/canceled 状态机保护 |

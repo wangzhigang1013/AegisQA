@@ -111,3 +111,20 @@ def test_publish_rejects_missing_required_skill_input_mapping(tmp_path) -> None:
     assert "REQUIRED_INPUT_MAPPING_MISSING" in _error_codes(validation)
     assert publish_response.status_code == 400
     assert "REQUIRED_INPUT_MAPPING_MISSING" in _error_codes(publish_response.json())
+
+
+def test_validate_reports_unknown_skill_as_graph_issue(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    graph = _base_graph()
+    graph["nodes"][0]["skill_ref"] = "missing.skill@9.9.9"
+
+    validate_response = client.post("/workflow-graphs/validate", json={"graph": graph})
+    publish_response = client.post("/workflow-graphs/publish", json={"graph": graph})
+
+    assert validate_response.status_code == 200
+    validation = validate_response.json()
+    assert validation["ok"] is False
+    assert "SKILL_NOT_FOUND" in _error_codes(validation)
+    assert publish_response.status_code == 400
+    assert "SKILL_NOT_FOUND" in _error_codes(publish_response.json())

@@ -182,6 +182,12 @@ describe('AegisQA 前端工作台', () => {
                 node_id: 'answer',
                 details: { missing_fields: ['prompt'] },
               },
+              {
+                code: 'SKILL_NOT_FOUND',
+                message: '未注册的 Skill：missing.skill@9.9.9',
+                node_id: 'answer',
+                details: { skill_ref: 'missing.skill@9.9.9' },
+              },
             ],
           },
           trace_id: 'trace_test',
@@ -202,6 +208,8 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText('REQUIRED_INPUT_MAPPING_MISSING')).toBeInTheDocument();
     expect(screen.getByText('Skill 必填输入未配置字段映射：prompt')).toBeInTheDocument();
     expect(screen.getByText(/在右侧 Inspector 的字段映射中为缺失字段配置/)).toBeInTheDocument();
+    expect(screen.getByText('SKILL_NOT_FOUND')).toBeInTheDocument();
+    expect(screen.getByText(/到 Skill 市场上传或选择已注册的 Skill/)).toBeInTheDocument();
   });
 
   it('Workflow Aggregator 节点支持聚合策略配置', async () => {

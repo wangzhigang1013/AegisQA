@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Workflow 发布前质量门禁与 Skill 注册表隔离”已完成并通过全量验证。本批次聚焦全流程稳定性：Skill 必填输入映射缺失必须在 Workflow 校验/发布阶段被阻断，不能等到 Task 执行时才失败；内置 Skill manifest 必须按注册表实例隔离，避免禁用/审批状态在测试或多 app 实例之间串扰。
+新一轮“Workflow 发布前质量门禁与 Skill 注册表隔离”已完成并通过全量验证。本阶段聚焦全流程稳定性：Skill 必填输入映射缺失、未知 Skill 引用都必须在 Workflow 校验/发布阶段被结构化阻断，不能等到 Task 执行时才失败；内置 Skill manifest 必须按注册表实例隔离，避免禁用/审批状态在测试或多 app 实例之间串扰。
 
 ## 当前已完成
 
@@ -24,7 +24,7 @@
 - Workflow Inspector 已支持“可连接目标”，可以选择未连接的下游节点并创建连线；创建/删除连线都会进入撤销历史并在 Console 给反馈。
 - Workflow Inspector 已支持节点工具栏，提供删除当前节点和自动布局；画布支持 Delete/Backspace 快捷删除选中的节点或连线，输入框编辑时不会误删。
 - Workflow Palette 的 Source、Skill、Join、Output 新增路径已进入 Playwright 自动化，避免后续回归成“按钮能看不能用”。
-- Workflow 发布前校验已用后端测试锁定：未审批或禁用 Skill 不能发布，多对一输入必须使用 Join/Aggregator，Branch 必须配置条件表达式，Skill `input_schema.required` 必填字段必须配置非空输入映射。
+- Workflow 发布前校验已用后端测试锁定：未知 Skill、未审批或禁用 Skill 不能发布，多对一输入必须使用 Join/Aggregator，Branch 必须配置条件表达式，Skill `input_schema.required` 必填字段必须配置非空输入映射。
 - 内置 Skill manifest 已在 `BaseSkill` 初始化时深拷贝，Skill 禁用/审批状态不会在不同 `SkillRegistry.with_builtin_skills()` 实例之间共享，避免测试和多 app 实例串扰治理状态。
 - Workflow 发布失败时，前端会把后端 `details.errors` 回填到 Console 的“错误与建议”页签，用户能看到错误码、节点和修复方向。
 - Workflow Inspector 已支持 Aggregator 聚合策略配置，当前覆盖多数投票、均值和一致性三类策略。
@@ -140,6 +140,14 @@
 - `python -m pytest tests\test_product_extensions.py -q -k builtin_skill_registry_instances_do_not_share_manifest_state`：先 RED 后 GREEN，确认修复前两个内置 Skill 注册表实例会共享 manifest 禁用状态，修复后隔离。
 - `python -m pytest tests\test_workflow_graph_hardening.py -q`：4 passed，确认禁用 Skill、多对一缺 Join、Branch 缺条件、必填映射缺失均在发布前被阻断。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 发布失败"`：先 RED 后 GREEN，确认发布失败 Console 会对 `REQUIRED_INPUT_MAPPING_MISSING` 展示中文修复建议。
+- `python -m pytest tests\test_workflow_graph_hardening.py -q -k unknown_skill`：先 RED 后 GREEN，确认未知 Skill 引用不再返回通用 404，而是作为 `SKILL_NOT_FOUND` GraphIssue 出现在校验结果中。
+- `python -m pytest tests\test_workflow_graph_hardening.py -q`：5 passed，确认未知 Skill、禁用 Skill、多对一缺 Join、Branch 缺条件、必填映射缺失均被发布前阻断。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 发布失败"`：先 RED 后 GREEN，确认前端对 `SKILL_NOT_FOUND` 展示上传、注册或替换 Skill 的修复建议。
+- `python -m pytest -q`：107 个后端测试通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：9 个测试文件、89 passed。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：9 passed，任务主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
 - `python -m pytest -q`：106 个后端测试通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：9 个测试文件、89 passed。
@@ -493,6 +501,33 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Workflow 未知 Skill 引用结构化校验
+
+- 改动摘要：继续收紧 Workflow 发布前门禁。画布引用不存在的 `skill_ref` 时，`/workflow-graphs/validate` 不再落到通用 404，而是返回 `SKILL_NOT_FOUND` GraphIssue；发布接口同样通过 `details.errors` 返回结构化错误。前端 Console 已补对应修复建议，引导用户到 Skill 市场上传、选择已注册 Skill 或替换旧草稿引用。
+- 变更文件：
+  - `aegisqa/workflows/graph.py`
+  - `tests/test_workflow_graph_hardening.py`
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q -k unknown_skill`
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 发布失败"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - RED：未知 Skill 测试最初失败，确认 `/workflow-graphs/validate` 返回 404 而不是 GraphIssue。
+  - GREEN：Workflow hardening 5 passed；前端发布失败定向测试通过并展示 `SKILL_NOT_FOUND` 修复建议。
+  - 全量：后端 107 passed，前端 typecheck 通过，前端 89 passed，构建通过，Playwright 9 passed；后端仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- 下一步：继续拆分 Workflow 画布组件，并增强字段映射的数据依赖分析，例如提示某个下游必填字段没有任何上游输出或 Dataset 字段来源。
 
 ### 2026-06-01 Workflow 发布前质量门禁与 Skill 注册表隔离
 
