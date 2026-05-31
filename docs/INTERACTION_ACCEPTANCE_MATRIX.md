@@ -9,7 +9,7 @@
 
 ## 最近一次交互验证
 
-- `npm test`：40 个前端交互/API client/图模型/任务创建向导/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/参数预览/报告质量决策/报告根因诊断/报告风险治理/Experiment/CI Gate/Annotation Queue/Judge 偏差趋势/治理边界测试通过。
+- `npm test`：40 个前端交互/API client/图模型/任务创建向导/Preflight/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/参数预览/报告评测结论/报告根因诊断/Repair Task 生成/报告风险治理/Experiment/CI Gate/Annotation Queue/Judge 偏差趋势/治理边界测试通过。
 - `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - SQLite 轻量仓储后端已通过 `tests/test_sqlite_store_adapter.py`，前端交互仍通过完整 Playwright；报告页 E2E 定位已收紧到任务摘要行，避免任务名同时出现在摘要和跨任务表格时触发严格模式误判。
 - 最终验收确认：生产适配状态已从治理页可见状态清单降级为文档边界提示，现有按钮矩阵仍覆盖全部用户可见主动作。
@@ -48,15 +48,17 @@
 | Workflow 画布 | 校验 | 可用，提交当前画布 graph；前端已抽出图模型转换，避免提交静态 demo graph | `POST /workflow-graphs/validate` | 前端图模型单测与 Playwright E2E 覆盖 |
 | Workflow 画布 | 试运行 | 可用，要求先选择 Dataset Version，会回填 step trace 并提示队列消息只携带 `item_id` | `POST /workflow-graphs/dry-run` | 后端契约测试与 Playwright E2E 覆盖 |
 | Workflow 画布 | 发布 | 可用，提交当前画布 graph；后端发布阻断错误会回填到 Console“错误与建议” | `POST /workflow-graphs/publish` | 后端发布阻断测试、前端发布失败测试与 Playwright E2E 覆盖 |
-| 执行中心 | 创建任务 | 可用，独立向导选择 Dataset Version 和 Workflow Version；未选择时禁用创建；支持分片大小、并发、repeat、最大重试、重试退避、成本预算并保存到任务快照 | `POST /tasks`、`GET /workflows`、`GET /datasets` | `TaskCreateWizard` 单测覆盖必选校验和参数提交；后端测试覆盖 `execution_config` 落库；Playwright E2E 覆盖真实创建 |
+| 执行中心 | 创建任务 | 可用，独立向导选择 Dataset Version 和 Workflow Version；未选择时禁用创建；支持评测目的、质量门槛、Preflight 检查表、分片大小、并发、repeat、最大重试、重试退避、成本预算，并保存到任务快照 | `POST /tasks/preflight`、`POST /tasks`、`GET /workflows`、`GET /datasets` | `TaskCreateWizard` 单测覆盖必选校验和参数提交；目标前端测试覆盖评测目的、质量门槛和 Preflight；后端测试覆盖 `evaluation_goal`、`quality_gate`、`preflight_result`、`execution_config` 落库；Playwright E2E 覆盖真实创建 |
 | 执行中心 | 执行/暂停/恢复/取消/重试 | 可用，动作绑定任务并刷新列表；completed/running/canceled 等非法状态会被后端拒绝，前端按钮按状态禁用并显示原因 | `POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed` | `npm test` 覆盖执行状态刷新和完成态禁用；Playwright E2E 覆盖真实执行；P0 后端测试覆盖状态机 |
 | 执行中心 | 任务详情驾驶舱 | 可用，按概览、样本、Trace、Badcase、Attempts、参数组织；参数页展示任务冻结参数、Skill 参数来源和 Secret 脱敏说明；已完成任务可新建 Attempt 且不覆盖旧报告 | `GET /tasks`、`GET /tasks/{task_id}/trace-tree`、`GET /tasks/{task_id}/trace-flow`、`GET /tasks/{task_id}/report`、`POST /tasks/{task_id}/attempts` | 后端测试覆盖历史报告保留；前端测试覆盖驾驶舱页签；Playwright 覆盖任务执行后查看驾驶舱 |
 | Trace Flow | 样本级数据流 | 可用，从任务详情和报告页进入；展示 Dataset、Workflow、Attempt、队列消息形状、样本列表、Step Timeline、Row、Context、Metrics、Input、参数来源、Output、Error 和 Badcase 状态 | `GET /tasks/{task_id}/trace-flow` | `tests/test_trace_flow_api.py`、`npm test` 和 Playwright 主链路覆盖 |
 | Trace Tree | 独立调用树页面 | 可用，从任务详情和报告页进入；按 Item 展开 Skill Step，展示输入、输出、耗时、缓存和错误 | `GET /tasks/{task_id}/trace-tree` | `npm test` 覆盖 `/tasks/:taskId/trace-tree` |
 | 报告中心 | 任务报告详情 | 可用，围绕选中任务展示任务摘要、版本快照、指标、Step 分布、Judge 分数分布、Badcase 和导出入口 | `GET /tasks/{task_id}/report` | 后端测试覆盖结构化字段；`npm test` 覆盖报告中心展示 |
+| 报告中心 | 评测结论第一屏 | 可用，报告详情顶部先回答“能否发布 / 为什么 / 影响多大 / 下一步”，并提供生成修复任务入口 | `GET /tasks/{task_id}/report` 中的 `quality_decision` 和 `diagnostics` | 目标前端测试覆盖“评测结论”“能否发布”和按钮展示 |
 | 报告中心 | 分层分析与下一步建议 | 可用，按 scene、expected_label、model_version、prompt_version 展示样本数、通过率、Badcase，并给出加入 Annotation、生成 Golden 候选、生成 CI Gate 建议 | `GET /tasks/{task_id}/report` 中的 `segments`、`recommendations` | `tests/test_report_segment_analysis.py` 和 `npm test` 覆盖分层字段与建议展示 |
 | 报告中心 | 质量决策中心 | 可用，把通过率、错误率、Badcase 和低分层汇总为 passed/warning/blocked 决策，并展示风险摘要和下一步动作 | `GET /tasks/{task_id}/report` 中的 `quality_decision` | `tests/test_trustworthy_evaluation_enhancements.py` 和 `npm test` 覆盖 |
 | 报告中心 | 根因诊断 | 可用，把 Badcase、Step 失败、弱分层、字段缺失/重复和参数风险聚合为主要根因、证据数、影响样本、Step 健康度、数据质量和下一步动作；建议动作已按钮化，可跳转 Trace Flow / 数据集 / Judge 审计，或调用 Annotation Queue、CI Gate、失败项重试 | `GET /tasks/{task_id}/report` 中的 `diagnostics`、`GET /tasks/{task_id}/diagnostics`、`POST /annotation-queue/seed-from-run`、`POST /ci-gates/evaluate`、`POST /tasks/{task_id}/retry-failed` | `tests/test_task_diagnostics.py` 和 `npm test` 覆盖；报告中心目标测试覆盖动作按钮、Annotation Queue、CI Gate 和 Trace Flow 跳转 |
+| 报告中心 | 生成 Repair Task | 可用，把当前任务诊断根因沉淀成可追踪修复任务，并展示创建数量；重复根因会复用已有修复任务，避免同一任务反复生成重复工单 | `POST /tasks/{task_id}/repair-tasks/from-diagnostics`、`GET /repair-tasks?source_task_id=` | `tests/test_task_flow_optimization.py` 覆盖后端创建与查询；目标前端测试覆盖按钮调用和成功反馈 |
 | 报告中心 | 跨任务 Score Analytics | 可用，报告页展示跨任务任务数、平均通过率、Badcase 总数、退化任务、任务趋势表和退化告警 | `GET /score-analytics` | `tests/test_risk_analytics_hardening.py` 和 `npm test` 覆盖 |
 | 报告中心 | 成本预算状态 | 可用，围绕当前 Task 展示预算、已用估算成本、剩余预算、ok/warning/exceeded 状态和修复建议 | `GET /tasks/{task_id}/report` 中的 `budget_status` | `tests/test_risk_analytics_hardening.py` 和 `npm test` 覆盖 |
 | 报告中心 | 红队安全扫描 | 可用，点击“运行红队扫描”会扫描当前 Task，并展示风险类型、级别、字段、证据和下一步建议 | `POST /red-team/scans` | `tests/test_risk_analytics_hardening.py` 和 `npm test` 覆盖 |
@@ -88,6 +90,6 @@
 ## 当前仍需增强
 
 - Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；字段映射表格和参数预览已进入 Vitest，后续需要进一步拆分组件并补真实浏览器中的字段映射编辑 E2E。
-- Task 创建向导已加入必选校验、并发/重试/repeat 和成本预算，任务详情已升级为驾驶舱页签；后续需要继续接入 CI Gate、实验 baseline 对比和权限检查。
-- 报告中心、Trace Flow、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、根因诊断、样本级数据流、跨任务 Score Analytics、红队扫描、成本预算、Experiment baseline/A-B 对比、质量门禁阻断评估与历史趋势、人工审核回流和批量审核候选资产沉淀；后续需要把根因诊断结果继续打通到一键生成修复任务、真实成本账单接入和更复杂的趋势筛选。
+- Task 创建向导已加入必选校验、评测目的、质量门槛、Preflight、并发/重试/repeat 和成本预算，任务详情已升级为驾驶舱页签；后续需要继续接入实验 baseline 对比、权限检查和更细粒度执行参数模板。
+- 报告中心、Trace Flow、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、评测结论、根因诊断、Repair Task 生成、样本级数据流、跨任务 Score Analytics、红队扫描、成本预算、Experiment baseline/A-B 对比、质量门禁阻断评估与历史趋势、人工审核回流和批量审核候选资产沉淀；后续需要接入真实成本账单和更复杂的趋势筛选。
 - Judge 审计已补齐多 Judge 一致性和偏差趋势最小闭环；后续需要按业务标签、模型版本和时间窗口继续细分偏差归因。

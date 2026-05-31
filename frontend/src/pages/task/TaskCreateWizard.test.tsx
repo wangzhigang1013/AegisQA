@@ -41,7 +41,7 @@ const workflows: WorkflowVersion[] = [
 describe('TaskCreateWizard', () => {
   it('必须选择 Dataset Version 和 Workflow Version 后才能创建', async () => {
     const onSubmit = vi.fn();
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} onCancel={vi.fn()} onSubmit={onSubmit} />);
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
 
     const createButton = screen.getByRole('button', { name: '确认创建任务' });
     expect(createButton).toBeDisabled();
@@ -55,7 +55,7 @@ describe('TaskCreateWizard', () => {
 
   it('提交任务参数时包含并发、重试、repeat 和成本预算', async () => {
     const onSubmit = vi.fn();
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} onCancel={vi.fn()} onSubmit={onSubmit} />);
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
 
     fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '严谨化任务' } });
     await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');

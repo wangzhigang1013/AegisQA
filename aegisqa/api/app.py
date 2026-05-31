@@ -186,12 +186,26 @@ class TaskCreateRequest(BaseModel):
     dataset_id: str
     dataset_version: int
     workflow_version_id: str
+    evaluation_goal: str | None = None
+    quality_gate: dict[str, Any] = Field(default_factory=dict)
+    preflight_result: dict[str, Any] | None = None
     chunk_size: int | None = None
     concurrency: int | None = None
     sample_repeat_times: int | None = None
     max_retries: int | None = None
     retry_backoff_seconds: int | None = None
     cost_budget: float | None = None
+    skill_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
+class TaskPreflightRequest(BaseModel):
+    dataset_id: str
+    dataset_version: int
+    workflow_version_id: str
+    evaluation_goal: str | None = None
+    quality_gate: dict[str, Any] = Field(default_factory=dict)
+    cost_budget: float | None = None
+    sample_repeat_times: int | None = None
     skill_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -540,11 +554,24 @@ def _first_existing(root: Path, names: list[str]) -> Path | None:
     return None
 
 
-def _build_task_record(name: str, dataset: dict[str, Any], workflow: WorkflowVersion, run: RunRecord, *, execution_config: dict[str, Any] | None = None) -> dict[str, Any]:
+def _build_task_record(
+    name: str,
+    dataset: dict[str, Any],
+    workflow: WorkflowVersion,
+    run: RunRecord,
+    *,
+    execution_config: dict[str, Any] | None = None,
+    evaluation_goal: str | None = None,
+    quality_gate: dict[str, Any] | None = None,
+    preflight_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     now = _now()
     return {
         "task_id": f"task-{uuid4().hex[:12]}",
         "name": name,
+        "evaluation_goal": evaluation_goal,
+        "quality_gate": quality_gate or {},
+        "preflight_result": preflight_result,
         "dataset_id": dataset["dataset_id"],
         "dataset_name": dataset.get("name", dataset["dataset_id"]),
         "dataset_version": dataset["version"],

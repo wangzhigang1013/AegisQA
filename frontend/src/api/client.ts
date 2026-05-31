@@ -17,6 +17,7 @@ import type {
   JudgeCrossValidationResult,
   JudgeAuditTrends,
   RedTeamScanResult,
+  RepairTaskRecord,
   RunRecord,
   RunReport,
   ScoreAnalytics,
@@ -28,6 +29,7 @@ import type {
   TaskReport,
   TaskDiagnostics,
   TaskParameterGovernance,
+  TaskPreflightResult,
   TaskTraceFlow,
   TraceTree,
   WorkflowDraftRecord,
@@ -246,6 +248,9 @@ export const api = {
     dataset_id: string;
     dataset_version: number;
     workflow_version_id: string;
+    evaluation_goal?: string | null;
+    quality_gate?: Record<string, unknown>;
+    preflight_result?: TaskPreflightResult | null;
     chunk_size?: number;
     concurrency?: number;
     sample_repeat_times?: number;
@@ -258,6 +263,30 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  taskPreflight: (body: {
+    dataset_id: string;
+    dataset_version: number;
+    workflow_version_id: string;
+    evaluation_goal?: string | null;
+    quality_gate?: Record<string, unknown>;
+    cost_budget?: number;
+    sample_repeat_times?: number;
+    skill_overrides?: Record<string, Record<string, unknown>>;
+  }) =>
+    request<TaskPreflightResult>('/tasks/preflight', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  repairTasks: (filters: { source_task_id?: string } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<RepairTaskRecord[]>(`/repair-tasks${suffix}`);
+  },
+  createRepairTasksFromDiagnostics: (taskId: string) =>
+    request<{ source_task_id: string; created_count: number; reused_count: number; repair_tasks: RepairTaskRecord[] }>(`/tasks/${taskId}/repair-tasks/from-diagnostics`, { method: 'POST' }),
   executeTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/execute`, { method: 'POST' }),
   createTaskAttempt: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/attempts`, { method: 'POST' }),
   pauseTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/pause`, { method: 'POST' }),

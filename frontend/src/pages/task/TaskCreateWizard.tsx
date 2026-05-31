@@ -1,12 +1,15 @@
-import { Button, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Typography } from 'antd';
+import { Alert, Button, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography } from 'antd';
 import { useEffect, useMemo } from 'react';
 
-import type { DatasetSummary, WorkflowVersion } from '../../types';
+import type { DatasetSummary, TaskPreflightResult, WorkflowVersion } from '../../types';
 
 export type TaskCreateFormValues = {
   name: string;
   workflow_version_id: string;
   dataset_version_id: string;
+  evaluation_goal?: string;
+  pass_rate_threshold?: number;
+  max_badcase_count?: number;
   chunk_size?: number;
   concurrency?: number;
   sample_repeat_times?: number;
@@ -18,13 +21,16 @@ export type TaskCreateFormValues = {
 type TaskCreateWizardProps = {
   open: boolean;
   loading: boolean;
+  preflightLoading: boolean;
+  preflightResult?: TaskPreflightResult | null;
   datasets: DatasetSummary[];
   workflows: WorkflowVersion[];
   onCancel: () => void;
+  onPreflight: (values: TaskCreateFormValues) => void;
   onSubmit: (values: TaskCreateFormValues) => void;
 };
 
-export function TaskCreateWizard({ open, loading, datasets, workflows, onCancel, onSubmit }: TaskCreateWizardProps) {
+export function TaskCreateWizard({ open, loading, preflightLoading, preflightResult, datasets, workflows, onCancel, onPreflight, onSubmit }: TaskCreateWizardProps) {
   const [form] = Form.useForm<TaskCreateFormValues>();
   const watchedWorkflow = Form.useWatch('workflow_version_id', form);
   const watchedDataset = Form.useWatch('dataset_version_id', form);
@@ -48,6 +54,14 @@ export function TaskCreateWizard({ open, loading, datasets, workflows, onCancel,
       footer={[
         <Button key="cancel" onClick={onCancel}>取消</Button>,
         <Button
+          key="preflight"
+          loading={preflightLoading}
+          disabled={!watchedWorkflow || !watchedDataset}
+          onClick={() => onPreflight(form.getFieldsValue())}
+        >
+          运行 Preflight
+        </Button>,
+        <Button
           key="create"
           type="primary"
           loading={loading}
@@ -65,11 +79,32 @@ export function TaskCreateWizard({ open, loading, datasets, workflows, onCancel,
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ chunk_size: 100, concurrency: 1, sample_repeat_times: 1, max_retries: 1, retry_backoff_seconds: 0 }}
+          initialValues={{
+            evaluation_goal: 'release_gate',
+            pass_rate_threshold: 0.9,
+            max_badcase_count: 0,
+            chunk_size: 100,
+            concurrency: 1,
+            sample_repeat_times: 1,
+            max_retries: 1,
+            retry_backoff_seconds: 0,
+          }}
           onFinish={onSubmit}
         >
           <Form.Item name="name" label="任务名称" rules={[{ required: true, message: '请填写任务名称' }]}>
             <Input placeholder="例如：RAG 回归评测 2026-05-31" />
+          </Form.Item>
+          <Typography.Title level={5}>评测目的</Typography.Title>
+          <Form.Item name="evaluation_goal" label="目标类型" tooltip="任务目标会写入任务快照，并影响预检对 Golden、门槛和报告结论的判断。">
+            <Select
+              options={[
+                { value: 'release_gate', label: '上线门禁' },
+                { value: 'regression', label: '回归评测' },
+                { value: 'prompt_experiment', label: 'Prompt 实验' },
+                { value: 'judge_audit', label: 'Judge 审计' },
+                { value: 'red_team', label: '红队扫描' },
+              ]}
+            />
           </Form.Item>
           <Form.Item name="dataset_version_id" label="Dataset Version" rules={[{ required: true, message: '请选择 Dataset' }]}>
             <Select
@@ -89,6 +124,19 @@ export function TaskCreateWizard({ open, loading, datasets, workflows, onCancel,
               options={workflows.map((workflow) => ({ value: workflow.version_id, label: `${workflow.name} v${workflow.version}` }))}
             />
           </Form.Item>
+          <Typography.Title level={5}>质量门槛</Typography.Title>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="pass_rate_threshold" label="最低通过率">
+                <InputNumber min={0} max={1} step={0.01} precision={2} className="full-width-control" placeholder="例如：0.90" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="max_badcase_count" label="最大 Badcase 数">
+                <InputNumber min={0} className="full-width-control" placeholder="例如：0" />
+              </Form.Item>
+            </Col>
+          </Row>
           <Row gutter={12}>
             <Col span={8}>
               <Form.Item name="chunk_size" label="分片大小">
@@ -123,8 +171,42 @@ export function TaskCreateWizard({ open, loading, datasets, workflows, onCancel,
               </Form.Item>
             </Col>
           </Row>
+          {preflightResult ? (
+            <Space direction="vertical" className="full-width-control">
+              <Alert
+                showIcon
+                type={preflightResult.status === 'blocked' ? 'error' : preflightResult.status === 'warning' ? 'warning' : 'success'}
+                message={preflightTitle(preflightResult.status)}
+                description={preflightResult.summary}
+              />
+              <Table
+                size="small"
+                pagination={false}
+                rowKey="check_id"
+                dataSource={preflightResult.checks}
+                columns={[
+                  { title: '检查项', dataIndex: 'title' },
+                  { title: '状态', dataIndex: 'status', render: (value) => <Tag color={preflightColor(String(value))}>{value}</Tag> },
+                  { title: '结果', dataIndex: 'message' },
+                  { title: '修复建议', dataIndex: 'recommendation', render: (value) => value || '-' },
+                ]}
+              />
+            </Space>
+          ) : null}
         </Form>
       </Space>
     </Modal>
   );
+}
+
+function preflightTitle(status: string) {
+  if (status === 'passed') return 'Preflight 通过';
+  if (status === 'warning') return 'Preflight 有警告';
+  return 'Preflight 阻断';
+}
+
+function preflightColor(status: string) {
+  if (status === 'passed') return 'green';
+  if (status === 'warning') return 'orange';
+  return 'red';
 }

@@ -14,7 +14,7 @@ import { useMemo, useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { TaskRecord } from '../types';
+import type { DatasetVersion, TaskPreflightResult, TaskRecord } from '../types';
 import { TaskCreateWizard, type TaskCreateFormValues } from './task/TaskCreateWizard';
 import { TaskActionButton, TaskOperationsDrawer, type TaskAction } from './task/TaskOperationsDrawer';
 import { taskProgress } from './task/TaskSnapshotPanel';
@@ -24,6 +24,7 @@ export function RunsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [detailTask, setDetailTask] = useState<TaskRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [preflightResult, setPreflightResult] = useState<TaskPreflightResult | null>(null);
 
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks, refetchOnMount: 'always' });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
@@ -35,17 +36,52 @@ export function RunsPage() {
   );
   const tasks = tasksQuery.data ?? [];
 
+  function resolveDatasetVersion(values: TaskCreateFormValues): DatasetVersion {
+    const datasetVersion = datasetVersions.find((item) => item.version.version_id === values.dataset_version_id)?.version;
+    if (!datasetVersion || !values.workflow_version_id) {
+      throw new Error('创建任务前必须选择 Dataset Version 和 Workflow Version。');
+    }
+    return datasetVersion;
+  }
+
+  function qualityGateFromValues(values: TaskCreateFormValues) {
+    return {
+      pass_rate: values.pass_rate_threshold,
+      max_badcase_count: values.max_badcase_count,
+    };
+  }
+
+  const preflightMutation = useMutation({
+    mutationFn: (values: TaskCreateFormValues) => {
+      const datasetVersion = resolveDatasetVersion(values);
+      return api.taskPreflight({
+        dataset_id: datasetVersion.dataset_id,
+        dataset_version: datasetVersion.version,
+        workflow_version_id: values.workflow_version_id,
+        evaluation_goal: values.evaluation_goal,
+        quality_gate: qualityGateFromValues(values),
+        cost_budget: values.cost_budget,
+        sample_repeat_times: values.sample_repeat_times,
+      });
+    },
+    onSuccess: (result) => {
+      setPreflightResult(result);
+      setNotice(result.status === 'blocked' ? `Preflight 阻断：${result.summary}` : `Preflight 完成：${result.summary}`);
+    },
+    onError: (error) => setNotice(`Preflight 失败：${formatApiError(error)}`),
+  });
+
   const createTaskMutation = useMutation({
     mutationFn: (values: TaskCreateFormValues) => {
-      const datasetVersion = datasetVersions.find((item) => item.version.version_id === values.dataset_version_id)?.version;
-      if (!datasetVersion || !values.workflow_version_id) {
-        throw new Error('创建任务前必须选择 Dataset Version 和 Workflow Version。');
-      }
+      const datasetVersion = resolveDatasetVersion(values);
       return api.createTask({
         name: values.name || '未命名评测任务',
         dataset_id: datasetVersion.dataset_id,
         dataset_version: datasetVersion.version,
         workflow_version_id: values.workflow_version_id,
+        evaluation_goal: values.evaluation_goal,
+        quality_gate: qualityGateFromValues(values),
+        preflight_result: preflightResult,
         chunk_size: values.chunk_size,
         concurrency: values.concurrency,
         sample_repeat_times: values.sample_repeat_times,
@@ -56,6 +92,7 @@ export function RunsPage() {
     },
     onSuccess: async (task) => {
       setCreateOpen(false);
+      setPreflightResult(null);
       setDetailTask(task);
       setNotice(`任务已创建：${task.name}`);
       await queryClient.invalidateQueries({ queryKey: ['tasks'] });
@@ -146,9 +183,15 @@ export function RunsPage() {
       <TaskCreateWizard
         open={createOpen}
         loading={createTaskMutation.isPending}
+        preflightLoading={preflightMutation.isPending}
+        preflightResult={preflightResult}
         datasets={datasetsQuery.data ?? []}
         workflows={workflowsQuery.data ?? []}
-        onCancel={() => setCreateOpen(false)}
+        onCancel={() => {
+          setCreateOpen(false);
+          setPreflightResult(null);
+        }}
+        onPreflight={(values) => preflightMutation.mutate(values)}
         onSubmit={(values) => createTaskMutation.mutate(values)}
       />
 

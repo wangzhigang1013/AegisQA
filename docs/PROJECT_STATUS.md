@@ -1466,3 +1466,44 @@
   - TypeScript：通过。
   - 前端构建：通过。
 - 下一步：把诊断动作继续沉淀为可追踪的 Repair Task，例如数据字段修复任务、Prompt 修复任务、Judge 审计任务和 Workflow 参数审查任务。
+
+### 2026-05-31 Task Flow P0 全流程优化启动
+
+- 改动摘要：根据用户要求“把这些全部优化”，本批次完成全流程 P0：评测目标、质量门槛、任务 Preflight、报告第一屏结论和 Repair Task 修复闭环。
+- 核心能力：
+  - 后端新增 `POST /tasks/preflight`，检查数据集非空、Workflow 字段映射、Golden 覆盖、Skill 审批状态、质量门槛和成本预算。
+  - Task 创建保存 `evaluation_goal`、`quality_gate`、`preflight_result` 和执行参数快照。
+  - 后端新增 `GET /repair-tasks` 与 `POST /tasks/{task_id}/repair-tasks/from-diagnostics`，把诊断根因沉淀为可追踪修复任务。
+  - 前端任务创建向导新增评测目的、质量门槛和 Preflight 检查表。
+  - 报告中心新增“评测结论”第一屏，先回答“能否发布 / 为什么 / 影响多大 / 下一步”，并支持一键生成修复任务。
+  - 稳定了 Workflow 撤销/重做测试的等待条件，先等待新增 Join 节点落地，再判断撤销按钮状态。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/types.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/task/TaskCreateWizard.tsx`
+  - `frontend/src/pages/task/TaskCreateWizard.test.tsx`
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-task-flow-p0-optimization.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心默认展示任务列表并可以创建任务|报告中心围绕任务展示报告"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+- 测试结果：
+  - 后端 RED：新增测试最初 2 failed，确认 `/tasks/preflight` 缺失且 Task 未保存 `evaluation_goal`。
+  - 后端目标测试：2 passed；全量后端：67 passed，仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 RED：目标测试最初 2 failed，确认创建向导缺 Preflight，报告中心缺评测结论和修复任务入口。
+  - 前端目标测试：2 passed；`npm run typecheck` 通过；`npm test`：40 passed；`npm run build` 通过。
+- 提交记录：
+  - `feat: 优化任务全流程闭环`
+- 下一步：继续增强 Repair Task 的管理页面、负责人/状态流转、与 Annotation Queue / CI Gate / Dataset 修复任务的双向联动，并补更真实的成本账单和趋势筛选。

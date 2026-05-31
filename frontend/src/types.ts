@@ -263,6 +263,9 @@ export type SkillPackageRecord = {
 export type TaskRecord = {
   task_id: string;
   name: string;
+  evaluation_goal?: string | null;
+  quality_gate?: Record<string, unknown>;
+  preflight_result?: TaskPreflightResult | null;
   dataset_id: string;
   dataset_name: string;
   dataset_version: number;
@@ -278,6 +281,8 @@ export type TaskRecord = {
   pass_rate: number;
   badcase_count: number;
   execution_config?: {
+    evaluation_goal?: string | null;
+    quality_gate?: Record<string, unknown>;
     chunk_size?: number | null;
     concurrency?: number | null;
     sample_repeat_times?: number | null;
@@ -305,6 +310,44 @@ export type TaskRecord = {
   }[];
   created_at: string;
   updated_at: string;
+};
+
+export type TaskPreflightCheck = {
+  check_id: string;
+  title: string;
+  status: 'passed' | 'warning' | 'blocked' | string;
+  message: string;
+  details: Record<string, unknown>;
+  recommendation?: string;
+};
+
+export type TaskPreflightResult = {
+  status: 'passed' | 'warning' | 'blocked' | string;
+  summary: string;
+  dataset_id: string;
+  dataset_version: number;
+  workflow_version_id: string;
+  evaluation_goal?: string | null;
+  quality_gate?: Record<string, unknown>;
+  checks: TaskPreflightCheck[];
+  created_at?: string;
+};
+
+export type RepairTaskRecord = {
+  repair_task_id: string;
+  source_task_id: string;
+  source_run_id?: string | null;
+  cause_type: string;
+  severity: string;
+  title: string;
+  status: string;
+  affected_items: number;
+  evidence: string[];
+  recommendation: string;
+  next_actions: string[];
+  owner?: string | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type TaskReport = {

@@ -18,6 +18,9 @@ const demoWorkflowVersion = {
 const demoTask = {
   task_id: 'task-demo',
   name: 'RAG 任务',
+  evaluation_goal: 'release_gate',
+  quality_gate: { pass_rate: 0.9, max_badcase_count: 0 },
+  preflight_result: { status: 'passed', summary: '预检通过，可以创建并执行任务。', checks: [] },
   dataset_id: 'dataset-demo',
   dataset_name: '问答回归集',
   dataset_version: 1,
@@ -54,6 +57,21 @@ const demoTask = {
   ],
   created_at: '2026-05-31T00:00:00Z',
   updated_at: '2026-05-31T00:00:00Z',
+};
+
+const demoPreflightResult = {
+  status: 'passed',
+  summary: 'Preflight 通过：可以创建并执行任务。',
+  dataset_id: 'dataset-demo',
+  dataset_version: 1,
+  workflow_version_id: 'wf-demo:v1',
+  evaluation_goal: 'release_gate',
+  quality_gate: { pass_rate: 0.9, max_badcase_count: 0 },
+  checks: [
+    { check_id: 'dataset_non_empty', title: '数据集非空', status: 'passed', message: '当前数据集包含 100 条样本。', details: {}, recommendation: '' },
+    { check_id: 'field_mapping', title: 'Workflow 字段映射', status: 'passed', message: 'Workflow 需要的 row 字段均存在。', details: {}, recommendation: '' },
+    { check_id: 'quality_gate', title: '质量门槛', status: 'passed', message: '已设置通过率门槛 90%。', details: {}, recommendation: '' },
+  ],
 };
 
 const demoBadcase = {
@@ -481,8 +499,14 @@ describe('AegisQA 前端工作台', () => {
         }
         return jsonResponse([demoTask]);
       }
+      if (url.endsWith('/tasks/preflight')) {
+        return jsonResponse(demoPreflightResult);
+      }
       if (url.endsWith('/tasks/task-demo/execute')) {
         return jsonResponse({ ...demoTask, status: 'completed', completed_items: 100, pass_rate: 0.8, badcase_count: 20 });
+      }
+      if (url.endsWith('/tasks/task-demo/repair-tasks/from-diagnostics')) {
+        return jsonResponse({ source_task_id: 'task-demo', created_count: 1, reused_count: 0, repair_tasks: [{ repair_task_id: 'repair-demo', source_task_id: 'task-demo', cause_type: 'weak_segment', status: 'open' }] });
       }
       if (url.endsWith('/tasks/task-demo/report')) {
         return jsonResponse({
@@ -729,7 +753,9 @@ describe('AegisQA 前端工作台', () => {
   it('Workflow 设计器支持撤销和重做节点操作', async () => {
     await renderWorkbench('/workflows/designer/draft-test');
 
+    const joinCountBefore = screen.getAllByText(/Join/).length;
     fireEvent.click(screen.getByRole('button', { name: /新增 Join/ }));
+    await waitFor(() => expect(screen.getAllByText(/Join/).length).toBeGreaterThan(joinCountBefore));
     await waitFor(() => expect(screen.getByRole('button', { name: /撤销/ })).not.toBeDisabled());
 
     fireEvent.click(screen.getByRole('button', { name: /撤销/ }));
@@ -836,7 +862,20 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /创建任务/ }));
 
     expect(await screen.findByText('创建任务')).toBeInTheDocument();
+    expect(screen.getByText('评测目的')).toBeInTheDocument();
+    expect(screen.getByText('质量门槛')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /运行 Preflight/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: '确认创建任务' })).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '上线门禁任务' } });
+    fireEvent.mouseDown(screen.getAllByLabelText('Dataset Version')[0]);
+    fireEvent.click(await screen.findByText('问答回归集 v1 / 100 条'));
+    fireEvent.mouseDown(screen.getAllByLabelText('Workflow Version')[0]);
+    fireEvent.click(await screen.findByText('RAG 回归评测 v1'));
+    expect(screen.getByRole('button', { name: /运行 Preflight/ })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
+    expect((await screen.findAllByText(/Preflight 通过/)).length).toBeGreaterThan(0);
   });
 
   it('Trace Flow 页面展示样本数据、参数来源和队列消息形状', async () => {
@@ -1137,6 +1176,9 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('Step 分布与耗时')).toBeInTheDocument();
     expect(screen.getByText('分层分析')).toBeInTheDocument();
     expect(screen.getByText('质量决策中心')).toBeInTheDocument();
+    expect(screen.getByText('评测结论')).toBeInTheDocument();
+    expect(screen.getByText('能否发布')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /生成修复任务/ })).toBeInTheDocument();
     expect(screen.getByText('根因诊断')).toBeInTheDocument();
     expect(screen.getByText('主要根因')).toBeInTheDocument();
     expect(screen.getAllByText('弱分层风险').length).toBeGreaterThan(0);
@@ -1149,6 +1191,9 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '加入人工审核' }));
     expect(await screen.findByText(/诊断动作完成：已创建 1 条人工审核任务/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /生成修复任务/ }));
+    expect(await screen.findByText(/已生成 1 个修复任务/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '生成分层门禁' }));
     expect(await screen.findByText(/CI Gate 即时评估完成：blocking/)).toBeInTheDocument();

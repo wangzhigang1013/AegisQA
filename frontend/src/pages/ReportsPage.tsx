@@ -141,6 +141,20 @@ export function ReportsPage() {
     onSettled: () => setPendingDiagnosticAction(null),
   });
 
+  const repairTaskMutation = useMutation({
+    mutationFn: () => {
+      if (!task) {
+        throw new Error('请先选择任务，再生成修复任务。');
+      }
+      return api.createRepairTasksFromDiagnostics(task.task_id);
+    },
+    onSuccess: async (result) => {
+      setNotice(`已生成 ${result.created_count} 个修复任务。`);
+      await queryClient.invalidateQueries({ queryKey: ['repair-tasks', selectedTask?.task_id] });
+    },
+    onError: (error) => setNotice(error instanceof Error ? `生成修复任务失败：${error.message}` : '生成修复任务失败'),
+  });
+
   const report = reportQuery.data?.report;
   const task = reportQuery.data?.task ?? selectedTask;
   const badcases = reportQuery.data?.badcases ?? [];
@@ -235,6 +249,45 @@ export function ReportsPage() {
 
       {task ? (
         <>
+          {qualityDecision ? (
+            <Card className="flat-card" title="评测结论">
+              <Row gutter={[16, 16]} align="middle">
+                <Col xs={24} lg={6}>
+                  <Typography.Text type="secondary">能否发布</Typography.Text>
+                  <div className="section-actions">
+                    <Tag color={qualityDecision.status === 'blocked' ? 'red' : qualityDecision.status === 'warning' ? 'orange' : 'green'}>
+                      {publishDecisionLabel(qualityDecision.status)}
+                    </Tag>
+                  </div>
+                </Col>
+                <Col xs={24} lg={8}>
+                  <Typography.Text type="secondary">为什么</Typography.Text>
+                  <Typography.Paragraph className="paragraph-tight">
+                    {diagnostics?.root_causes[0]?.recommendation ?? qualityDecision.top_risks[0]?.message ?? '当前任务未发现阻断性风险。'}
+                  </Typography.Paragraph>
+                </Col>
+                <Col xs={24} lg={6}>
+                  <Typography.Text type="secondary">影响多大</Typography.Text>
+                  <Space wrap className="section-actions">
+                    <Tag>通过率 {Math.round(qualityDecision.risk_summary.pass_rate * 100)}%</Tag>
+                    <Tag>Badcase {qualityDecision.risk_summary.badcase_count}</Tag>
+                    <Tag>低分层 {qualityDecision.risk_summary.weak_segment_count}</Tag>
+                  </Space>
+                </Col>
+                <Col xs={24} lg={4}>
+                  <Button
+                    type="primary"
+                    block
+                    loading={repairTaskMutation.isPending}
+                    onClick={() => repairTaskMutation.mutate()}
+                  >
+                    生成修复任务
+                  </Button>
+                </Col>
+              </Row>
+            </Card>
+          ) : null}
+
           <ReportSummary task={task} summary={reportQuery.data?.task_summary} versionSnapshot={reportQuery.data?.version_snapshot} />
 
           <Row gutter={[16, 16]}>
@@ -575,6 +628,12 @@ function actionLabel(value: string) {
     open_parameter_governance: '查看参数治理',
   };
   return labels[value] ?? value;
+}
+
+function publishDecisionLabel(status: string) {
+  if (status === 'blocked') return '不建议发布';
+  if (status === 'warning') return '需要复核后发布';
+  return '可以发布';
 }
 
 function formatDiagnosticActionNotice(action: string, result: unknown) {

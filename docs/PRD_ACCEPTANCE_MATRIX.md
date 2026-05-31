@@ -18,13 +18,13 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 最近一次验证结果：
 
-- 单元/API/扩展测试：`python -m pytest -q` 已通过，覆盖 65 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- 单元/API/扩展测试：`python -m pytest -q` 已通过，覆盖 67 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - SQLite 轻量仓储：`python -m pytest tests\test_sqlite_store_adapter.py -q` 已通过，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
 - 端到端 Demo：最新 Dataset `rag_qa_1000:v12`、Run `run-298dd7e6bb5b`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
-- 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 40 个交互/API client/图模型/任务创建向导/Run Attempts/Dataset Lineage/Trace Tree/Experiment/CI Gate/Annotation Queue/报告风险治理/Judge 偏差趋势/治理边界测试，Playwright 覆盖 8 条 E2E。
+- 前端：`npm run typecheck`、`npm test`、`npm run build` 已通过；`npm test` 覆盖 40 个交互/API client/图模型/任务创建向导/Preflight/Run Attempts/Dataset Lineage/Trace Tree/Experiment/CI Gate/Annotation Queue/报告评测结论/Repair Task 生成/Judge 偏差趋势/治理边界测试；最近一次 Playwright 覆盖 8 条 E2E。
 - 浏览器交互：Headless Chrome CDP 验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden；同时覆盖 CI Gate 创建配置和阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核和候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行回填、校验、发布。
-- 产品化增强：Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 已有后端 API 测试；首页已展示真实 Dashboard 和产品化增强入口。
+- 产品化增强：Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree、Task Preflight、Repair Task 已有后端 API 测试；首页已展示真实 Dashboard 和产品化增强入口。
 
 ## P0 功能覆盖
 
@@ -47,7 +47,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-DS-05 | Golden Dataset 与人工标签 | 已实现基础 | `golden`、`label_field`、Judge demo |
 | FR-DS-06 | rows 按需读取 | 已实现 | `iter_rows` / `iter_row_chunks`，队列消息仅 `item_id` |
 | FR-DS-09 | Dataset Lineage | 已实现基础 | `GET /datasets/{dataset_id}/versions/{version}/lineage` 返回来源类型、来源参数、字段路径、预览和下游 Task；React 数据集页提供“查看 Lineage”抽屉 |
-| FR-EX-01 | 分片创建 Run Items 与轻量队列 | 已实现 | `WorkflowRunner.create_run`，1000 样本测试；Task API 将 Dataset/Workflow/Run 绑定为一次业务任务；产品语义中 Task 是用户主对象，Run 是底层执行 Attempt |
+| FR-EX-01 | 分片创建 Run Items 与轻量队列 | 已实现 | `WorkflowRunner.create_run`，1000 样本测试；Task API 将 Dataset/Workflow/Run 绑定为一次业务任务；Task 创建保存评测目标、质量门槛和 Preflight 快照；产品语义中 Task 是用户主对象，Run 是底层执行 Attempt |
 | FR-EX-02 | 并发控制与外部 API 限速 | 已实现基础 | `InMemoryRateLimiter` 记录等待与限速次数；Redis/Celery 适配待生产化 |
 | FR-EX-03 | 失败重试 | 已实现基础 | `retry_failed_items` |
 | FR-EX-04 | 断点续跑 | 已实现基础 | 成功 item 不覆盖，失败 item 可重跑 |
@@ -55,7 +55,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-RP-01 | Run 指标聚合 | 已实现 | `aggregate_run_report` |
 | FR-RP-02 | Skill 输出指标入库 | 已实现 | Item metrics 与 report 聚合 |
 | FR-RP-03 | Badcase 明细筛选 | 已实现 | `BadcaseService.filter_badcases`，`GET /badcases` 支持状态、问题类型、原因、Skill、关键词、得分区间 |
-| FR-RP-04 | 单次任务报告 | 已实现基础 | API `/tasks/{task_id}/report` 包装任务摘要、版本快照、Step 分布、Judge 分数分布、RunReport、Badcase、导出链接和 Task Diagnostics；React 报告中心围绕 Task 展示摘要、版本、指标、根因诊断、Step 分布和 Badcase；Playwright E2E 覆盖任务报告查看、导出和 Badcase 加入 Golden |
+| FR-RP-04 | 单次任务报告 | 已实现基础 | API `/tasks/{task_id}/report` 包装任务摘要、版本快照、Step 分布、Judge 分数分布、RunReport、Badcase、导出链接和 Task Diagnostics；React 报告中心围绕 Task 展示“评测结论”第一屏、摘要、版本、指标、根因诊断、Step 分布和 Badcase，并可从诊断一键生成 Repair Task；Playwright E2E 覆盖任务报告查看、导出和 Badcase 加入 Golden |
 | FR-ME-01 | Judge Profile 管理 | 已实现基础 | `JudgeProfileService.create_profile/get_profile`，API 已挂载 |
 | FR-ME-02 | Golden Dataset 裁判评测 | 已实现 | `audit_judge_profile` 输出 Accuracy/Precision/Recall/F1/Kappa/混淆矩阵 |
 | FR-ME-03 | 审计结果入库 | 已实现 | `JudgeProfileService.audit_and_store` |
@@ -95,7 +95,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 | 对标能力 | 当前状态 | 证据 |
 |---|---|---|
-| Task 一等模型 | 已实现基础 | `GET/POST /tasks`、`POST /tasks/{task_id}/attempts`、`POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed`、`GET /tasks/{task_id}/report`、`GET /tasks/{task_id}/trace-tree`；Task 创建保存 `execution_config`，包含并发、repeat、重试和成本预算；Run Attempts 保留旧 Run 报告快照；前端执行中心默认展示任务列表并使用独立创建向导；Playwright E2E 覆盖创建和执行任务 |
+| Task 一等模型 | 已实现基础 | `GET/POST /tasks`、`POST /tasks/preflight`、`POST /tasks/{task_id}/attempts`、`POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed`、`GET /tasks/{task_id}/report`、`GET /tasks/{task_id}/trace-tree`；Task 创建保存 `evaluation_goal`、`quality_gate`、`preflight_result` 和 `execution_config`，包含并发、repeat、重试和成本预算；Run Attempts 保留旧 Run 报告快照；前端执行中心默认展示任务列表并使用带 Preflight 的独立创建向导；Playwright E2E 覆盖创建和执行任务 |
 | Experiment 快照与 baseline 对比 | 已实现基础页面 | `POST /experiments/from-run`，`GET /experiments?dataset_id=&workflow_id=`，保存 Workflow/Dataset/Skill/Prompt/Runtime 快照与 baseline diff；React `/experiments` 页面展示实验快照列表、Dataset/Workflow 过滤、baseline 选择、A/B 对比面板、通过率、Badcase、P95 耗时、成本和失败分布变化，并支持从 Run 生成实验快照 |
 | Prompt / Skill 版本注册 | 已实现基础 | Run snapshot 与 Experiment snapshot 记录 `skill_versions`、`prompt_skill_versions`、模型参数 |
 | Assertion DSL | 已实现最小 API | `POST /assertions/evaluate` 支持 contains、regex、json_schema、similarity、latency、cost、safety 的基础断言 |
@@ -103,8 +103,10 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | Annotation Queue | 已实现基础页面 | `POST /annotation-queue/seed-from-run`、`GET /annotation-queue`、分派、review、`POST /annotation-queue/bulk-review`、`GET /annotation-candidates`；队列记录回填来源 Task，支持状态/负责人/来源任务筛选；React `/annotation-queue` 页面支持领取、分派、审核、批量审核、回流 Golden Dataset 和候选资产摘要；Playwright 覆盖真实领取、审核、批量审核和回流 |
 | Trace Tree | 已实现独立页面 | `GET /runs/{run_id}/trace-tree` 与 `GET /tasks/{task_id}/trace-tree` 展示 Run Item -> Skill Step 输入、输出、耗时、错误、缓存命中；React `/tasks/:taskId/trace-tree` 独立页面展示 Item 调用树 |
 | Task 参数治理 | 已实现基础 | `GET /tasks/{task_id}/parameter-governance` 和 Task Report `parameter_governance` 展示 Skill/Prompt 版本、模型参数、任务覆盖和脱敏 Secret 策略 |
-| 质量决策中心 | 已实现基础 | Task Report `quality_decision` 把通过率、错误率、Badcase 和低分层转为 passed/warning/blocked 决策、风险摘要和下一步动作；React 报告中心展示“质量决策中心” |
+| Task Preflight | 已实现基础 | `POST /tasks/preflight` 在创建任务前检查数据集非空、Workflow 字段映射、Golden 覆盖、Skill 审批状态、质量门槛和成本预算；React 任务创建向导支持评测目的、质量门槛和 Preflight 检查表 |
+| 质量决策中心 | 已实现基础 | Task Report `quality_decision` 把通过率、错误率、Badcase 和低分层转为 passed/warning/blocked 决策、风险摘要和下一步动作；React 报告中心新增“评测结论”第一屏，先回答“能否发布 / 为什么 / 影响多大 / 下一步” |
 | Task Diagnostics 根因诊断 | 已实现基础 | `GET /tasks/{task_id}/diagnostics` 与 Task Report `diagnostics` 汇总运行时错误、低通过率分层、字段缺失/重复、Step 健康度和参数风险；React 报告中心展示主要根因、证据数、根因表、数据质量和修复动作，且 next_actions 已按钮化，可直接进入 Trace Flow、数据血缘、Judge 审计，或调用 Annotation Queue、CI Gate、失败项重试 |
+| Repair Task 修复闭环 | 已实现基础 | `POST /tasks/{task_id}/repair-tasks/from-diagnostics` 可把诊断 root cause 沉淀为可追踪修复任务，`GET /repair-tasks?source_task_id=` 支持按来源任务查询；React 报告中心可一键生成修复任务并显示创建数量 |
 | 成本预算状态 | 已实现基础 | Task Report 新增 `budget_status`，基于报告 cost 或 token 估算成本，输出 ok/warning/exceeded/not_set、预算、已用、剩余和修复建议；React 报告中心展示“成本预算” |
 | 红队安全扫描 | 已实现基础 | `POST /red-team/scans` 支持按 Task/Run 做规则化扫描，识别 prompt injection、PII、unsafe content、secret exposure，保存扫描记录并生成下一步建议；React 报告中心提供“运行红队扫描”入口 |
 | 产品化入口 | 已实现基础 | React 首页读取真实 Dashboard；Workflow 先进入市场，执行与报告围绕 Task 组织 |
