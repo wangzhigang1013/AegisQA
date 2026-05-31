@@ -16,6 +16,7 @@ import type {
   JudgeProfile,
   JudgeCrossValidationResult,
   JudgeAuditTrends,
+  PromptSkillCandidate,
   RedTeamScanResult,
   RepairTaskRecord,
   RepairTaskTree,
@@ -173,6 +174,24 @@ export const api = {
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<AnnotationCandidate[]>(`/annotation-candidates${suffix}`);
   },
+  promptSkillCandidates: (filters: { source_task_id?: string; status?: string; baseline_experiment_id?: string } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<PromptSkillCandidate[]>(`/prompt-skill-candidates${suffix}`);
+  },
+  reviewPromptSkillCandidate: (candidateId: string, body: { decision: 'approved' | 'rejected'; reviewer?: string; note?: string }) =>
+    request<PromptSkillCandidate>(`/prompt-skill-candidates/${encodeURIComponent(candidateId)}/review`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  createPromptSkillCandidateDraft: (candidateId: string) =>
+    request<{ status: string; candidate: PromptSkillCandidate; draft: WorkflowDraftRecord; target_url: string }>(
+      `/prompt-skill-candidates/${encodeURIComponent(candidateId)}/workflow-draft`,
+      { method: 'POST' },
+    ),
   skills: () => request<SkillManifest[]>('/skills'),
   skillPackages: () => request<SkillPackageRecord[]>('/skills/packages'),
   uploadSkillPackage: (body: { filename: string; content_base64: string }) =>

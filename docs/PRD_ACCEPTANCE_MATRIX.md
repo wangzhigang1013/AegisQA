@@ -18,10 +18,10 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 最近一次验证结果：
 
-- 单元/API/扩展测试：`python -m pytest -q` 已通过，覆盖 78 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- 单元/API/扩展测试：`python -m pytest -q` 已通过，覆盖 79 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - SQLite 轻量仓储：`python -m pytest tests\test_sqlite_store_adapter.py -q` 已通过，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
 - 端到端 Demo：最新 Dataset `rag_qa_1000:v13`、Run `run-e46e560e1885`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
-- 前端：`npm run typecheck`、`npm test`、`npm run build` 已通过；`npm test` 覆盖 53 个交互/API client/图模型/任务创建向导/Preflight/Run Attempts/Dataset Lineage/Trace Tree/Experiment/CI Gate/Annotation Queue/报告评测结论/Repair Task 生成、工作台、动作闭环、复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、Workflow 草稿创建/Judge 偏差趋势/治理边界测试；最近一次 Playwright 覆盖 8 条 E2E。
+- 前端：`npm run typecheck`、`npm test`、`npm run build` 已通过；`npm test` 覆盖 54 个交互/API client/图模型/任务创建向导/Preflight/Run Attempts/Dataset Lineage/Trace Tree/Experiment/CI Gate/Annotation Queue/候选资产中心/报告评测结论/Repair Task 生成、工作台、动作闭环、复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、Workflow 草稿创建/Judge 偏差趋势/治理边界测试；最近一次 Playwright 覆盖 8 条 E2E。
 - 浏览器交互：Headless Chrome CDP 验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden；同时覆盖 CI Gate 创建配置和阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核和候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、删除后重连、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行回填、校验、发布。
 - 产品化增强：Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree、Task Preflight、Repair Task 工作台、动作闭环、复跑对比、上下文修复建议与二级修复任务已有后端 API 测试；首页已展示真实 Dashboard 和产品化增强入口。
@@ -101,6 +101,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | Assertion DSL | 已实现最小 API | `POST /assertions/evaluate` 支持 contains、regex、json_schema、similarity、latency、cost、safety 的基础断言 |
 | CI Gate | 已实现基础页面 | `GET/POST /ci-gates` 支持质量门禁配置保存和列表；`POST /ci-gates/evaluate` 支持按配置和指标阈值 blocking 发布，也支持直接对 Task/Run 抽取指标评估，并保存 `gateeval-*` 历史；`GET /ci-gates/evaluations` 支持按 config、task、run 过滤；React `/ci-gates` 页面支持创建门禁配置、选择 Task/Run 执行评估，并展示阻断原因、实际值、阈值、历史趋势和评估历史；Playwright 覆盖真实创建和阻断评估 |
 | Annotation Queue | 已实现基础页面 | `POST /annotation-queue/seed-from-run`、`GET /annotation-queue`、分派、review、`POST /annotation-queue/bulk-review`、`GET /annotation-candidates`；队列记录回填来源 Task，支持状态/负责人/来源任务筛选；React `/annotation-queue` 页面支持领取、分派、审核、批量审核、回流 Golden Dataset 和候选资产摘要；Playwright 覆盖真实领取、审核、批量审核和回流 |
+| Prompt/Skill 候选资产治理 | 已实现基础页面 | `GET /prompt-skill-candidates` 支持来源任务、状态、baseline 实验筛选；`POST /prompt-skill-candidates/{candidate_id}/review` 支持 approved/rejected 审批并保留 review_history；`POST /prompt-skill-candidates/{candidate_id}/workflow-draft` 要求候选审批通过后才能创建 Workflow 草稿，未审批返回 `PROMPT_SKILL_CANDIDATE_NOT_APPROVED`；React `/candidate-assets` 页面展示候选列表、版本差异、状态筛选、审批通过、拒绝和生成草稿 |
 | Trace Tree | 已实现独立页面 | `GET /runs/{run_id}/trace-tree` 与 `GET /tasks/{task_id}/trace-tree` 展示 Run Item -> Skill Step 输入、输出、耗时、错误、缓存命中；React `/tasks/:taskId/trace-tree` 独立页面展示 Item 调用树 |
 | Task 参数治理 | 已实现基础 | `GET /tasks/{task_id}/parameter-governance` 和 Task Report `parameter_governance` 展示 Skill/Prompt 版本、模型参数、任务覆盖和脱敏 Secret 策略 |
 | Task Preflight | 已实现基础 | `POST /tasks/preflight` 在创建任务前检查数据集非空、Workflow 字段映射、Golden 覆盖、Skill 审批状态、质量门槛和成本预算；React 任务创建向导支持评测目的、质量门槛和 Preflight 检查表 |

@@ -9,7 +9,7 @@
 
 ## 最近一次交互验证
 
-- `npm test`：53 个前端交互/API client/图模型/任务创建向导/Preflight/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/参数预览/报告评测结论/报告根因诊断/Repair Task 生成、工作台、动作闭环、复跑对比、上下文修复建议、二级修复任务与修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、Workflow 草稿创建/报告风险治理/Experiment/CI Gate/Annotation Queue/Judge 偏差趋势/治理边界测试通过。
+- `npm test`：54 个前端交互/API client/图模型/任务创建向导/Preflight/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/参数预览/报告评测结论/报告根因诊断/Repair Task 生成、工作台、动作闭环、复跑对比、上下文修复建议、二级修复任务与修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、候选资产中心审批/拒绝/生成草稿、Workflow 草稿创建/报告风险治理/Experiment/CI Gate/Annotation Queue/Judge 偏差趋势/治理边界测试通过。
 - `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、删除后重连、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - `npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Workflow 画布 E2E 通过；曾发现草稿深链加载覆盖用户本地删除边状态，已通过加载态和单草稿缓存修复。
 - SQLite 轻量仓储后端已通过 `tests/test_sqlite_store_adapter.py`，前端交互仍通过完整 Playwright；报告页 E2E 定位已收紧到任务摘要行，避免任务名同时出现在摘要和跨任务表格时触发严格模式误判。
@@ -84,6 +84,9 @@
 | Annotation Queue | 领取/分派/审核 | 可用，支持领取为当前用户、分派给指定负责人、填写人工标签和说明，审核结果可回流 Golden Dataset | `POST /annotation-queue/{task_id}/assign`、`POST /annotation-queue/{task_id}/review` | `npm test` 覆盖领取和审核弹窗；Playwright E2E 覆盖真实领取、审核和回流 Golden |
 | Annotation Queue | 批量审核 | 可用，支持多选待审核样本，批量设置人工标签、说明和是否回流 Golden，提交后刷新队列和候选资产 | `POST /annotation-queue/bulk-review` | `tests/test_productization_api.py` 覆盖批量审核生成候选资产；`npm test` 覆盖批量审核弹窗和成功反馈；Playwright E2E 覆盖真实批量审核 |
 | Annotation Queue | 候选资产 | 可用，展示当前来源任务沉淀出的 Golden 候选和 Assertion 候选数量 | `GET /annotation-candidates?source_task_id=` | `npm test` 覆盖候选资产摘要展示 |
+| 候选资产中心 | Prompt/Skill 候选列表 | 可用，支持按状态筛选 Prompt/Skill 版本差异候选，展示 baseline、current、recommended actions 和来源任务 | `GET /prompt-skill-candidates?status=&source_task_id=&baseline_experiment_id=` | `tests/test_task_flow_optimization.py` 覆盖后端列表筛选；`npm test` 覆盖 `/candidate-assets` 页面展示 |
+| 候选资产中心 | 审批/拒绝 | 可用，候选资产必须先审批通过才能生成 Workflow 草稿；拒绝会记录 reviewer、note 和 review_history | `POST /prompt-skill-candidates/{candidate_id}/review` | `tests/test_task_flow_optimization.py` 覆盖审批门禁和 review_history；`npm test` 覆盖审批通过和拒绝按钮反馈 |
+| 候选资产中心 | 生成 Workflow 草稿 | 可用，审批通过后可从候选版本差异创建 Workflow 草稿，回填 baseline Prompt/模型/Skill 配置，但不直接发布 | `POST /prompt-skill-candidates/{candidate_id}/workflow-draft` | `tests/test_task_flow_optimization.py` 覆盖未审批阻断、审批后创建和候选状态更新；`npm test` 覆盖草稿创建成功反馈 |
 | Judge 审计 | 创建 Profile | 可用，弹窗保存 Profile | `POST /judge-profiles` | 人工验证和类型检查覆盖 |
 | Judge 审计 | 创建审计 | 可用，弹窗提交审计标签 | `POST /judge-profiles/{profile_id}/audits` | `npm test` 覆盖审计表单 |
 | Judge 审计 | 多 Judge 一致性 | 可用，弹窗输入人工标签和多个 Judge 输出，展示两两一致率和各 Judge 审计指标 | `POST /judge-cross-validation` | `tests/test_trustworthy_evaluation_enhancements.py` 和 `npm test` 覆盖 |
@@ -99,5 +102,5 @@
 
 - Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；字段映射表格和参数预览已进入 Vitest，后续需要进一步拆分组件并补真实浏览器中的字段映射编辑 E2E。
 - Task 创建向导已加入必选校验、评测目的、质量门槛、Preflight、并发/重试/repeat 和成本预算，任务详情已升级为驾驶舱页签；后续需要继续接入实验 baseline 对比、权限检查和更细粒度执行参数模板。
-- 报告中心、Trace Flow、修复任务、实验中心、CI Gate 和 Annotation Queue 已覆盖任务报告、评测结论、根因诊断、Repair Task 生成、领取/完成/重开、指派负责人、截止时间、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、Workflow 草稿创建、发起人工审核、CI Gate 复测、修复后复跑对比、上下文修复建议、二级修复任务、修复树进度、样本级数据流、跨任务 Score Analytics、红队扫描、成本预算、Experiment baseline/A-B 对比、质量门禁阻断评估与历史趋势、人工审核回流和批量审核候选资产沉淀；后续需要接入真实成本账单、更复杂的趋势筛选，并为 Prompt/Skill 候选资产增加独立列表、审批晋升和候选复跑。
+- 报告中心、Trace Flow、修复任务、实验中心、CI Gate、Annotation Queue 和候选资产中心已覆盖任务报告、评测结论、根因诊断、Repair Task 生成、领取/完成/重开、指派负责人、截止时间、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、候选资产审批、Workflow 草稿创建、发起人工审核、CI Gate 复测、修复后复跑对比、上下文修复建议、二级修复任务、修复树进度、样本级数据流、跨任务 Score Analytics、红队扫描、成本预算、Experiment baseline/A-B 对比、质量门禁阻断评估与历史趋势、人工审核回流和批量审核候选资产沉淀；后续需要接入真实成本账单、更复杂的趋势筛选、候选草稿发布后的自动复跑和候选资产批量审批/SLA。
 - Judge 审计已补齐多 Judge 一致性和偏差趋势最小闭环；后续需要按业务标签、模型版本和时间窗口继续细分偏差归因。

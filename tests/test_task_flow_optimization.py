@@ -567,3 +567,57 @@ def test_repair_task_version_diff_actions_materialize_candidate_and_workflow_dra
     answer = next(node for node in draft["graph"]["nodes"] if node["node_id"] == "answer")
     assert answer["config"]["prompt_version"] == "prompt-flow-v0"
     assert draft_payload["repair_task"]["action_history"][-1]["action"] == "create_workflow_draft_from_version_diff"
+
+
+def test_prompt_skill_candidates_are_reviewed_before_draft_creation(tmp_path: Path) -> None:
+    client, dataset, _ = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    baseline_workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload_with_answer_prompt("prompt-flow-v0")}).json()
+    baseline_run = client.post(
+        "/runs",
+        json={"workflow": baseline_workflow, "dataset_id": dataset["dataset_id"], "dataset_version": dataset["version"]},
+    ).json()
+    baseline_run = client.post(f"/runs/{baseline_run['run_id']}/execute").json()
+    baseline_experiment = client.post("/experiments/from-run", json={"run_id": baseline_run["run_id"], "name": "baseline prompt v0"}).json()
+    current_workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload_with_answer_prompt("prompt-flow-v1")}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "候选资产审批任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": current_workflow["version_id"],
+            "evaluation_goal": "prompt_experiment",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"][0]
+    client.post(f"/repair-tasks/{repair['repair_task_id']}/actions", json={"action": "compare_prompt_skill_versions"})
+    candidate = client.post(f"/repair-tasks/{repair['repair_task_id']}/actions", json={"action": "create_prompt_skill_candidate"}).json()["result"]["candidates"][0]
+
+    listed = client.get(f"/prompt-skill-candidates?source_task_id={executed['task_id']}").json()
+    assert [item["candidate_id"] for item in listed] == [candidate["candidate_id"]]
+    assert listed[0]["status"] == "candidate"
+    assert listed[0]["baseline_experiment_id"] == baseline_experiment["experiment_id"]
+
+    blocked_draft = client.post(f"/prompt-skill-candidates/{candidate['candidate_id']}/workflow-draft")
+    assert blocked_draft.status_code == 400
+    assert blocked_draft.json()["code"] == "PROMPT_SKILL_CANDIDATE_NOT_APPROVED"
+
+    approved = client.post(
+        f"/prompt-skill-candidates/{candidate['candidate_id']}/review",
+        json={"decision": "approved", "reviewer": "qa_owner", "note": "baseline 指标更好，允许生成回滚草稿。"},
+    ).json()
+    assert approved["status"] == "approved"
+    assert approved["review"]["reviewer"] == "qa_owner"
+    assert approved["review_history"][-1]["decision"] == "approved"
+
+    draft_payload = client.post(f"/prompt-skill-candidates/{candidate['candidate_id']}/workflow-draft").json()
+    draft = draft_payload["draft"]
+    assert draft["status"] == "draft"
+    assert draft["source_candidate_id"] == candidate["candidate_id"]
+    answer = next(node for node in draft["graph"]["nodes"] if node["node_id"] == "answer")
+    assert answer["config"]["prompt_version"] == "prompt-flow-v0"
+    updated_candidate = draft_payload["candidate"]
+    assert updated_candidate["status"] == "draft_created"
+    assert updated_candidate["workflow_draft_id"] == draft["draft_id"]

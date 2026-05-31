@@ -435,6 +435,31 @@ const demoAnnotationCandidates = [
   },
 ];
 
+const demoPromptSkillCandidate = {
+  candidate_id: 'prompt-skill-candidate-demo',
+  kind: 'prompt_skill_version_diff',
+  status: 'candidate',
+  source_repair_task_id: 'repair-demo',
+  source_task_id: 'task-demo',
+  source_run_id: 'run-demo',
+  baseline_experiment_id: 'exp-baseline',
+  baseline_run_id: 'run-baseline',
+  baseline_metrics: { pass_rate: 0.9, badcase_count: 3 },
+  current_versions: [{ step_id: 'answer', skill_ref: 'llm.call@0.1.0', prompt_version: 'prompt-flow-v1', model: 'quality-model' }],
+  version_diffs: [
+    {
+      step_id: 'answer',
+      field: 'prompt_version',
+      baseline_value: 'prompt-flow-v0',
+      current_value: 'prompt-flow-v1',
+      recommended_action: 'compare_or_rollback_prompt_version',
+    },
+  ],
+  recommended_actions: ['compare_or_rollback_prompt_version'],
+  created_at: '2026-05-31T00:00:00Z',
+  updated_at: '2026-05-31T00:00:00Z',
+};
+
 const pendingPackageSkill = {
   ...demoSkills[0],
   skill_id: 'plugin.echo@0.1.0',
@@ -1033,6 +1058,25 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/annotation-candidates')) {
         return jsonResponse(demoAnnotationCandidates);
       }
+      if (url.endsWith('/prompt-skill-candidates/prompt-skill-candidate-demo/review')) {
+        return jsonResponse({
+          ...demoPromptSkillCandidate,
+          status: 'approved',
+          review: { decision: 'approved', reviewer: 'qa_owner', note: '允许生成草稿', reviewed_at: '2026-05-31T01:00:00Z' },
+          review_history: [{ decision: 'approved', reviewer: 'qa_owner', note: '允许生成草稿', reviewed_at: '2026-05-31T01:00:00Z' }],
+        });
+      }
+      if (url.endsWith('/prompt-skill-candidates/prompt-skill-candidate-demo/workflow-draft')) {
+        return jsonResponse({
+          status: 'draft_created',
+          candidate: { ...demoPromptSkillCandidate, status: 'draft_created', workflow_draft_id: 'draft-candidate-demo' },
+          draft: { draft_id: 'draft-candidate-demo', status: 'draft', name: '候选回滚草稿', graph: demoWorkflowGraph },
+          target_url: '/workflows/designer/draft-candidate-demo',
+        });
+      }
+      if (url.includes('/prompt-skill-candidates')) {
+        return jsonResponse([demoPromptSkillCandidate]);
+      }
       if (url.endsWith('/ci-gates')) {
         return jsonResponse(demoCIGates);
       }
@@ -1226,7 +1270,7 @@ describe('AegisQA 前端工作台', () => {
   it('Workflow Aggregator 节点支持聚合策略配置', async () => {
     await renderWorkbench('/workflows/designer/draft-test');
 
-    fireEvent.click(screen.getByRole('button', { name: /新增 Aggregator/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /新增 Aggregator/ }));
     expect(await screen.findByText('聚合策略')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('均值'));
@@ -1541,7 +1585,7 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('RAG 任务')).toBeInTheDocument();
     expect(screen.getByText('低分或失败样本需要人工复核')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('按负责人筛选')).toBeInTheDocument();
-    expect(screen.getByText('候选资产')).toBeInTheDocument();
+    expect(screen.getByText(/候选资产来自已审核样本/)).toBeInTheDocument();
     expect(screen.getByText(/Golden 1 \/ Assertion 1/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /领取/ }));
@@ -1563,6 +1607,20 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByLabelText('批量回流 Golden Dataset'));
     fireEvent.click(screen.getByRole('button', { name: /确认批量审核/ }));
     expect(await screen.findByText(/批量审核完成/)).toBeInTheDocument();
+  });
+
+  it('候选资产中心支持审批 Prompt/Skill 候选并创建 Workflow 草稿', async () => {
+    await renderWorkbench('/candidate-assets');
+
+    expect(await screen.findByText('候选资产中心')).toBeInTheDocument();
+    expect(screen.getByText('prompt-flow-v0')).toBeInTheDocument();
+    expect(screen.getByText('prompt-flow-v1')).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: /审批通过/ }));
+    expect(await screen.findByText(/候选资产已审批/)).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: /生成草稿/ }));
+    expect(await screen.findByText(/Workflow 草稿已创建：draft-candidate-demo/)).toBeInTheDocument();
   });
 
   it('报告中心围绕任务展示报告、质量决策和导出入口', async () => {

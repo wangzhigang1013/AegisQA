@@ -744,6 +744,32 @@ export type AnnotationCandidate = {
   updated_at?: string;
 };
 
+export type PromptSkillCandidate = {
+  candidate_id: string;
+  kind: string;
+  status: string;
+  source_repair_task_id?: string | null;
+  source_task_id?: string | null;
+  source_run_id?: string | null;
+  baseline_experiment_id?: string | null;
+  baseline_run_id?: string | null;
+  baseline_metrics?: Record<string, number>;
+  current_versions: Record<string, unknown>[];
+  version_diffs: {
+    step_id?: string;
+    field?: string;
+    baseline_value?: unknown;
+    current_value?: unknown;
+    recommended_action?: string;
+  }[];
+  recommended_actions?: string[];
+  review?: Record<string, unknown> | null;
+  review_history?: Record<string, unknown>[];
+  workflow_draft_id?: string | null;
+  created_at: string;
+  updated_at?: string;
+};
+
 export type AssertionEvaluationResult = {
   ok: boolean;
   summary: { passed: number; failed: number };

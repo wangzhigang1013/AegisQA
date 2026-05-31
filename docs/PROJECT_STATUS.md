@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Repair Task Version Diff Materialization Loop”已完成并通过全量验证。本批次把 Prompt/Skill 版本差异从“只给建议”推进到“可沉淀、可编辑、可复跑”的修复闭环：`create_prompt_skill_candidate` 会把 baseline、当前版本和 diff 固化为 `prompt_skill_candidates` 候选资产；`create_workflow_draft_from_version_diff` 会基于 baseline 差异生成可编辑 Workflow 草稿，并把 baseline 的 Prompt/模型/Skill 配置回填到画布图中但不直接发布。前端修复任务工作台新增“沉淀候选”和“生成草稿”动作，并修复“沉淀候选后生成草稿按钮消失”的流程断点。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Prompt/Skill Candidate Assets Governance”已完成后端、前端和 Playwright 全量验证。本批次把 `prompt_skill_candidates` 从后端记录升级为可管理资产：新增候选资产列表、状态筛选、审批/拒绝、审批后创建 Workflow 草稿；未审批候选直接创建草稿会返回结构化错误。前端新增 `/candidate-assets` 候选资产中心，用户可以集中查看 Prompt/Skill 版本差异、审批候选并生成草稿。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -70,6 +70,7 @@
 - Repair Task 已支持 Workflow 参数 diff/回滚计划：`plan_workflow_parameter_changes` 动作会读取来源任务、最新 Run、Workflow 默认配置和参数来源追踪，返回 task_override、runtime_expression、secret_ref 的字段级差异、回滚候选和参数治理入口；前端工作台可直接触发并展示参数差异。
 - Repair Task 已支持 Prompt/Skill 版本对比计划：`compare_prompt_skill_versions` 动作会读取来源任务最新 Run，并与同数据集 Experiment baseline 对比 Prompt、Skill、模型和模型参数版本差异；前端工作台可直接触发并展示 baseline/current 差异。
 - Repair Task 已支持版本差异候选落地：`create_prompt_skill_candidate` 会把 Prompt/Skill 版本差异沉淀为 `prompt_skill_candidates` 资产；`create_workflow_draft_from_version_diff` 会从 baseline diff 创建 Workflow 草稿并回填 baseline Prompt/模型/Skill 配置；前端工作台在“沉淀候选”后仍保留“生成草稿”入口，避免用户无法继续闭环。
+- Prompt/Skill 候选资产已新增独立治理入口：`GET /prompt-skill-candidates` 支持列表和筛选，`POST /prompt-skill-candidates/{candidate_id}/review` 支持审批/拒绝，`POST /prompt-skill-candidates/{candidate_id}/workflow-draft` 支持审批后创建 Workflow 草稿；React `/candidate-assets` 页面可查看版本差异、审批候选、拒绝候选和生成草稿。
 - Workflow 市场进入画布时会把当前草稿写入 `['workflow-draft', draft_id]` 单草稿缓存；画布深链在草稿未加载时显示加载态，异常 graph 结构会给出中文错误提示而不是白屏。
 - Judge 审计已新增多 Judge 一致性 API 与前端弹窗，支持输入多个 Judge 输出并展示两两一致率。
 - 报告中心已新增跨任务 Score Analytics，按 Task 聚合任务数、平均通过率、Badcase、P95、估算成本和退化任务，避免只看单次任务报告。
@@ -81,14 +82,15 @@
 ## 最近验证
 
 - `python -m pytest tests\test_sqlite_store_adapter.py -q`：3 passed，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
-- `python -m pytest tests\test_task_flow_optimization.py -q`：13 passed，覆盖 Task Preflight、Repair Task 生成查询、领取/完成/重开状态流转、Repair Task 发起 Annotation Queue / CI Gate 复测、修复后复跑 Attempt 与报告对比、上下文修复建议生成、修复建议拆分为二级任务、修复树进度聚合、负责人指派、截止时间、逾期聚合、完成后清除逾期、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比计划，以及版本差异沉淀候选资产和创建 Workflow 草稿。
-- `python -m pytest -q`：78 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest tests\test_task_flow_optimization.py -q`：14 passed，覆盖 Task Preflight、Repair Task 生成查询、领取/完成/重开状态流转、Repair Task 发起 Annotation Queue / CI Gate 复测、修复后复跑 Attempt 与报告对比、上下文修复建议生成、修复建议拆分为二级任务、修复树进度聚合、负责人指派、截止时间、逾期聚合、完成后清除逾期、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比计划、版本差异沉淀候选资产、创建 Workflow 草稿，以及候选资产审批后创建草稿。
+- `python -m pytest -q`：79 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v13`，Run `run-e46e560e1885` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "版本对比|版本差异"`：3 passed，覆盖版本对比、沉淀候选和从版本差异创建 Workflow 草稿。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "沉淀候选后仍可继续生成"`：1 passed，覆盖沉淀候选后仍保留生成草稿入口。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`：13 passed，覆盖修复任务工作台查看证据、领取、完成、发起人工审核、CI Gate 复测、复跑对比、生成修复建议、拆分子任务、查看修复树进度、指派负责人、逾期提醒、字段修复计划、参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、Workflow 草稿创建和沉淀后的连续操作。
-- `cd frontend && npm test`：4 个测试文件、53 passed。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心|修复任务工作台"`：14 passed，覆盖候选资产中心审批 Prompt/Skill 候选、拒绝入口、生成 Workflow 草稿，以及修复任务工作台回归。
+- `cd frontend && npm test`：4 个测试文件、54 passed。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow"`：10 passed，覆盖 Workflow 市场、画布、撤销/重做、连线删除/重连、发布失败反馈、Aggregator 和参数预览。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 passed，覆盖 Workflow 画布新增节点、删除/重连、撤销/重做、删除节点、保存草稿回放、试运行、校验、发布。
@@ -106,13 +108,13 @@
 - Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；Run Attempt、CI Gate、Experiment baseline/A-B 对比和任务报告均已接入基础闭环。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
 - Experiment 快照、CI Gate、Annotation Queue 和 Trace Tree 已有独立产品页；跨任务 Score Analytics 和成本预算状态已接入报告中心，后续需要继续补真实成本账单、更多趋势筛选维度和跨任务对比可视化。
-- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势、修复任务状态流转、Annotation Queue 发起、CI Gate 复测、修复后复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀和 Workflow 草稿创建已有最小闭环；后续需要为 `prompt_skill_candidates` 增加独立列表、审批晋升、复跑对比和资产淘汰策略。
+- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势、修复任务状态流转、Annotation Queue 发起、CI Gate 复测、修复后复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、候选资产审批和 Workflow 草稿创建已有最小闭环；后续需要把候选草稿发布后的复跑任务、三方指标对比和批量治理继续接起来。
 - SQLite 轻量仓储已接入元数据路径；后续如果要进入多用户生产环境，仍需要正式 Repository 层、数据库迁移、索引治理、权限隔离和 Worker 队列接入。
 - 本地服务曾出现旧 FastAPI 进程未重启导致新增路由 404 的问题；已重启后端并完成浏览器复测。后续修改后端 API 时必须确认 8000 端口加载的是最新代码。
 
 ## 下一阶段目标
 
-- Repair Task 深水区：为 Prompt/Skill 候选资产增加独立列表、审批晋升、从候选草稿发布后自动创建复跑任务、负责人工作量视图和逾期升级策略。
+- Repair Task 深水区：为 Prompt/Skill 候选资产增加从候选草稿发布后自动创建复跑任务、baseline/current/candidate 三方指标对比、批量审批、负责人工作量视图和逾期升级策略。
 - 红队规则配置化：把当前内置规则升级为可管理规则集，支持按业务线启用、禁用、阈值和严重级别调整。
 - 成本治理生产化：接入真实 token/cost 账单、模型价格表、预算门禁和成本异常告警。
 - 趋势分析增强：为 Score Analytics 增加 Dataset、Workflow、模型版本、Prompt 版本、时间窗口和标签过滤，并补趋势可视化对比。
@@ -120,6 +122,40 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Prompt/Skill Candidate Assets Governance
+
+- 改动摘要：继续优化 Prompt/Skill 版本差异的资产化闭环，把 `prompt_skill_candidates` 从后端记录升级为可治理资产。后端新增候选资产列表、审批/拒绝和审批后创建 Workflow 草稿接口；前端新增 `/candidate-assets` 候选资产中心，支持状态筛选、查看版本差异、审批通过、拒绝和生成草稿；候选审批后会按当前状态筛选更新列表，避免已审批资产继续停留在“待审批”筛选结果中。
+- 变更文件：
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/CandidateAssetsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/superpowers/plans/2026-05-31-prompt-skill-candidate-assets.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "prompt_skill_candidates_are_reviewed"`（RED，确认候选资产 API 缺失）
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`（RED，确认 `/candidate-assets` 路由缺失）
+  - `python -m pytest tests\test_task_flow_optimization.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心|修复任务工作台"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow Aggregator|Annotation Queue 页面"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`
+  - `git diff --check`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - RED：后端最初无法返回 `prompt_skill_candidates` 列表；前端最初没有候选资产中心路由。
+  - 调试记录：全量前端首次复跑发现 Annotation Queue 测试中“候选资产”被新导航项和页面卡片标题同时匹配，已收紧为候选资产说明文案；Workflow Aggregator 测试在草稿加载态未结束时点击按钮，已改为等待按钮出现后再交互。
+  - GREEN：后端任务流定向 14 passed；前端候选资产与修复任务定向 14 passed；`Workflow Aggregator|Annotation Queue 页面` 目标复跑 2 passed；候选资产中心筛选缓存微调后目标复跑 1 passed；`git diff --check` 通过；后端全量 79 passed；`npm run typecheck` 通过；前端全量 54 passed；`npm run build` 通过；Playwright E2E 8 passed。pytest 仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- 下一步：把候选资产从“审批后生成草稿”继续推进到“草稿发布后自动创建同数据集复跑任务”，并在候选资产中心展示 baseline/current/candidate 三方指标对比。
 
 ### 2026-05-31 Repair Task Version Diff Materialization Loop
 

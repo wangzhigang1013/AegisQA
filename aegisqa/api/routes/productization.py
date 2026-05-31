@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, Query
+from pydantic import BaseModel
 
 from aegisqa.api.app import (
     AnnotationAssignRequest,
@@ -29,13 +31,21 @@ from aegisqa.api.app import (
     _evaluate_gate,
     _find_task_by_run_id,
     _get_record,
+    _get_workflow_draft,
     _list_records,
     _needs_annotation,
     _now,
     _save_record,
+    _save_workflow_draft,
 )
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
+
+
+class PromptSkillCandidateReviewRequest(BaseModel):
+    decision: str
+    reviewer: str = "api"
+    note: str = ""
 
 
 def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -88,6 +98,84 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         if workflow_id:
             experiments = [experiment for experiment in experiments if experiment.get("workflow_id") == workflow_id]
         return experiments
+
+    @app.get("/prompt-skill-candidates")
+    def list_prompt_skill_candidates(
+        source_task_id: str | None = Query(default=None),
+        status: str | None = Query(default=None),
+        baseline_experiment_id: str | None = Query(default=None),
+    ) -> list[dict[str, Any]]:
+        candidates = _list_records(ctx.store, "prompt_skill_candidates")
+        if source_task_id:
+            candidates = [candidate for candidate in candidates if candidate.get("source_task_id") == source_task_id]
+        if status:
+            candidates = [candidate for candidate in candidates if candidate.get("status") == status]
+        if baseline_experiment_id:
+            candidates = [candidate for candidate in candidates if candidate.get("baseline_experiment_id") == baseline_experiment_id]
+        return sorted(candidates, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+
+    @app.post("/prompt-skill-candidates/{candidate_id}/review")
+    def review_prompt_skill_candidate(candidate_id: str, request: PromptSkillCandidateReviewRequest) -> dict[str, Any]:
+        candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
+        decision = request.decision.strip().lower()
+        if decision not in {"approved", "rejected"}:
+            raise AegisQAError(
+                "PROMPT_SKILL_CANDIDATE_DECISION_INVALID",
+                "候选配置审批结论只能是 approved 或 rejected。",
+                status_code=400,
+                details={"decision": request.decision},
+            )
+        reviewed_at = _now()
+        review = {"decision": decision, "reviewer": request.reviewer, "note": request.note, "reviewed_at": reviewed_at}
+        history = candidate.get("review_history") if isinstance(candidate.get("review_history"), list) else []
+        history.append(review)
+        candidate["status"] = decision
+        candidate["review"] = review
+        candidate["review_history"] = history
+        candidate["updated_at"] = reviewed_at
+        _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
+        ctx.audit_service.record(actor=request.reviewer or "api", action="prompt_skill_candidate.review", target=candidate_id, detail={"decision": decision})
+        return candidate
+
+    @app.post("/prompt-skill-candidates/{candidate_id}/workflow-draft")
+    def create_workflow_draft_from_prompt_skill_candidate(candidate_id: str) -> dict[str, Any]:
+        candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
+        if candidate.get("workflow_draft_id"):
+            draft = _get_workflow_draft(ctx.store, str(candidate["workflow_draft_id"]))
+            return {"status": "draft_created", "candidate": candidate, "draft": draft, "target_url": f"/workflows/designer/{candidate['workflow_draft_id']}"}
+        if candidate.get("status") != "approved":
+            raise AegisQAError(
+                "PROMPT_SKILL_CANDIDATE_NOT_APPROVED",
+                "候选配置必须先审批通过，才能生成 Workflow 草稿。",
+                status_code=400,
+                details={"candidate_id": candidate_id, "status": candidate.get("status")},
+            )
+        run = ctx.runner.get_run(str(candidate.get("source_run_id") or candidate.get("baseline_run_id")))
+        graph = _candidate_workflow_graph_snapshot(run.workflow)
+        graph["name"] = f"{run.workflow.name}_candidate_{candidate_id[-6:]}"
+        _apply_candidate_version_diffs(graph, [item for item in candidate.get("version_diffs", []) if isinstance(item, dict)])
+        now = _now()
+        draft = {
+            "draft_id": f"draft-{uuid4().hex[:12]}",
+            "name": graph["name"],
+            "status": "draft",
+            "graph": graph,
+            "source_candidate_id": candidate_id,
+            "source_repair_task_id": candidate.get("source_repair_task_id"),
+            "source_task_id": candidate.get("source_task_id"),
+            "baseline_experiment_id": candidate.get("baseline_experiment_id"),
+            "version_diffs": candidate.get("version_diffs", []),
+            "created_at": now,
+            "updated_at": now,
+        }
+        _save_workflow_draft(ctx.store, draft)
+        candidate["status"] = "draft_created"
+        candidate["workflow_draft_id"] = draft["draft_id"]
+        candidate["draft_created_at"] = now
+        candidate["updated_at"] = now
+        _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
+        ctx.audit_service.record(actor="api", action="prompt_skill_candidate.create_workflow_draft", target=candidate_id, detail={"draft_id": draft["draft_id"]})
+        return {"status": "draft_created", "candidate": candidate, "draft": draft, "target_url": f"/workflows/designer/{draft['draft_id']}"}
 
     @app.post("/assertions/evaluate")
     def evaluate_assertions(request: AssertionEvaluateRequest) -> dict[str, Any]:
@@ -331,3 +419,50 @@ def _build_assertion_seed(task: dict[str, Any], review: dict[str, Any]) -> dict[
         "expected": review["human_label"],
         "source_item_id": task.get("item_id"),
     }
+
+
+def _candidate_workflow_graph_snapshot(workflow: Any) -> dict[str, Any]:
+    if isinstance(workflow.graph, dict):
+        return deepcopy(workflow.graph)
+    nodes = [
+        {
+            "node_id": step.step_id,
+            "node_type": "skill",
+            "label": step.step_id,
+            "skill_ref": step.skill_ref,
+            "input_mapping": step.input_mapping,
+            "output_mapping": step.output_mapping,
+            "config": deepcopy(step.config),
+            "cacheable": step.cacheable,
+        }
+        for step in workflow.steps
+    ]
+    edges = [{"source": workflow.steps[index].step_id, "target": workflow.steps[index + 1].step_id} for index in range(len(workflow.steps) - 1)]
+    return {"name": workflow.name, "nodes": nodes, "edges": edges, "runtime": workflow.runtime.model_dump(mode="json")}
+
+
+def _apply_candidate_version_diffs(graph: dict[str, Any], version_diffs: list[dict[str, Any]]) -> None:
+    nodes = graph.get("nodes", [])
+    if not isinstance(nodes, list):
+        return
+    nodes_by_id = {node.get("node_id"): node for node in nodes if isinstance(node, dict)}
+    for diff in version_diffs:
+        node = nodes_by_id.get(diff.get("step_id"))
+        if not isinstance(node, dict):
+            continue
+        config = node.setdefault("config", {})
+        if not isinstance(config, dict):
+            config = {}
+            node["config"] = config
+        field = diff.get("field")
+        baseline_value = deepcopy(diff.get("baseline_value"))
+        if field == "skill_ref":
+            node["skill_ref"] = baseline_value
+        elif field in {"prompt_version", "model"}:
+            config[str(field)] = baseline_value
+        elif field == "model_params" and isinstance(baseline_value, dict):
+            config.update(baseline_value)
+        elif field == "skill_version":
+            metadata = node.setdefault("metadata", {})
+            if isinstance(metadata, dict):
+                metadata["baseline_skill_version"] = baseline_value

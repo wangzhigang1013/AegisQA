@@ -20,6 +20,7 @@ import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { DatasetsPage } from './pages/DatasetsPage';
 import { CIGatesPage } from './pages/CIGatesPage';
 import { AnnotationQueuePage } from './pages/AnnotationQueuePage';
+import { CandidateAssetsPage } from './pages/CandidateAssetsPage';
 import { ExperimentsPage } from './pages/ExperimentsPage';
 import { GovernancePage } from './pages/GovernancePage';
 import { JudgeAuditPage } from './pages/JudgeAuditPage';
@@ -56,6 +57,7 @@ const navItems: MenuProps['items'] = [
   { key: '/experiments', icon: <ExperimentOutlined />, label: <NavLink to="/experiments">实验中心</NavLink> },
   { key: '/ci-gates', icon: <ControlOutlined />, label: <NavLink to="/ci-gates">CI Gate</NavLink> },
   { key: '/annotation-queue', icon: <FileSearchOutlined />, label: <NavLink to="/annotation-queue">人工审核</NavLink> },
+  { key: '/candidate-assets', icon: <FileSearchOutlined />, label: <NavLink to="/candidate-assets">候选资产</NavLink> },
   { key: '/judge', icon: <AuditOutlined />, label: <NavLink to="/judge">Judge 审计</NavLink> },
   { key: '/governance', icon: <SafetyCertificateOutlined />, label: <NavLink to="/governance">治理与审计</NavLink> },
 ];
@@ -108,6 +110,7 @@ export function AppShell() {
                 <Route path="/experiments" element={<ExperimentsPage />} />
                 <Route path="/ci-gates" element={<CIGatesPage />} />
                 <Route path="/annotation-queue" element={<AnnotationQueuePage />} />
+                <Route path="/candidate-assets" element={<CandidateAssetsPage />} />
                 <Route path="/judge" element={<JudgeAuditPage />} />
                 <Route path="/governance" element={<GovernancePage />} />
               </Routes>
