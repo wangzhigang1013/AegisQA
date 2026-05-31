@@ -14,6 +14,12 @@ import { BadcaseTable } from './report/BadcaseTable';
 import { ReportSegmentAnalysis } from './report/ReportSegmentAnalysis';
 import { ReportSummary } from './report/ReportSummary';
 
+const reportExportMimeTypes: Record<string, string> = {
+  html: 'text/html;charset=utf-8',
+  csv: 'text/csv;charset=utf-8',
+  json: 'application/json;charset=utf-8',
+};
+
 export function ReportsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -48,13 +54,17 @@ export function ReportsPage() {
   }
 
   const exportMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!selectedTask) {
         throw new Error('请先选择任务，再导出报告。');
       }
-      return api.exportTaskReport(selectedTask.task_id, 'html');
+      const exported = await api.exportTaskReport(selectedTask.task_id, 'html');
+      return { exported, task: selectedTask };
     },
-    onSuccess: () => setNotice('报告导出成功：HTML 内容已由后端生成。'),
+    onSuccess: ({ exported, task }) => {
+      const filename = downloadReportExport(exported, task);
+      setNotice(`报告导出成功：${filename} 已开始下载。`);
+    },
     onError: (error) => setNotice(error instanceof Error ? error.message : '报告导出失败'),
   });
 
@@ -591,6 +601,35 @@ export function ReportsPage() {
       )}
     </section>
   );
+}
+
+function downloadReportExport(exported: Record<string, unknown>, task: TaskRecord) {
+  const format = typeof exported.file_format === 'string' ? exported.file_format : 'html';
+  const content = normalizeExportContent(exported.content ?? exported, format);
+  const filename = `${safeReportFileName(task.name || task.task_id)}.${format}`;
+  const blob = new Blob([content], { type: reportExportMimeTypes[format] ?? 'text/plain;charset=utf-8' });
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = href;
+  link.download = filename;
+  // 浏览器只有在元素进入 DOM 后才会稳定触发下载，完成后立即清理，避免页面残留临时节点。
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+  return filename;
+}
+
+function normalizeExportContent(content: unknown, format: string) {
+  if (typeof content === 'string') {
+    return content;
+  }
+  return JSON.stringify(content, null, format === 'json' ? 2 : 0);
+}
+
+function safeReportFileName(name: string) {
+  const normalized = name.trim().replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
+  return normalized || 'task-report';
 }
 
 async function ensureBadcaseId(badcase: Record<string, unknown>, task: TaskRecord | null | undefined): Promise<string> {

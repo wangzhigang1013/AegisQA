@@ -845,6 +845,9 @@ function findComboboxByLabel(label: string) {
 describe('AegisQA 前端工作台', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:report-export') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith('/skills')) {
@@ -2175,7 +2178,9 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/CI Gate 即时评估完成：blocking/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /导出 HTML \/ CSV/ }));
-    expect(await screen.findByText(/报告导出成功/)).toBeInTheDocument();
+    expect(await screen.findByText(/报告导出成功：RAG_任务.html 已开始下载/)).toBeInTheDocument();
+    expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/report/export?file_format=html'), expect.anything());
 
     fireEvent.click(screen.getByRole('button', { name: /忽略/ }));
