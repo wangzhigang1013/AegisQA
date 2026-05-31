@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Candidate Assets Test Split”已完成并通过前端全量验证。本批次继续处理前端测试结构风险：继报告中心拆分后，将候选资产中心原约 7.7 秒的大测试拆成候选列表/复跑优先级、批量治理、候选审批/草稿/复跑、晋升审批/baseline 四条聚焦测试，并显式写清晋升审批依赖候选审批、生成草稿和复跑。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Route-Level Lazy Loading”已完成并通过全量验证。本批次继续优化全流程使用体验的性能和稳定性：`AppShell` 不再静态导入全部业务页面，改为按路由懒加载，报告中心和 Judge 审计等图表页不会在概览首屏提前加载；同时修复懒加载后前端测试的异步等待边界，并把报告页 E2E 任务选择器改成点击 Ant Design Select 外层控件，避免已选中文本遮挡 input 导致主链路偶发超时。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -57,6 +57,7 @@
 - Skill 插件包记录已保存合约测试时间、审批人、审批时间和审批备注；Skill 市场展示审批状态，治理页提供审批抽屉，未通过合约测试的插件不能在前端直接启用。
 - 前端 `AppShell` 的 TanStack QueryClient 已改为实例内创建，避免测试和嵌入式渲染场景复用旧缓存导致页面数据串扰。
 - Skill 插件受控子进程已增加 stdout 输出体积上限、stdout/stderr 截断标记和本地绝对路径脱敏，避免恶意或异常插件把大响应、本地路径泄露到 API 与前端。
+- 前端主路由已改为 `React.lazy + Suspense` 页面级懒加载，概览页不会提前加载报告中心和 Judge 审计图表页面；构建产物已生成 `OverviewPage`、`ReportsPage`、`JudgeAuditPage` 等页面级 chunk。
 - 新增 Experiment 实验中心页面，主导航可进入，页面围绕 Run 不可变快照展示 baseline 对比、指标变化、失败样本变化、成本变化，并支持从已完成 Run 生成实验快照。
 - 新增 CI Gate 质量门禁页面，主导航可进入，页面围绕发布门槛展示门禁配置列表、创建弹窗、Task/Run 评估控制台和阻断原因；后端新增 `GET/POST /ci-gates`，`POST /ci-gates/evaluate` 支持直接按 Task/Run 抽取指标。
 - 新增 Annotation Queue 人工审核页面，主导航可进入，页面围绕审核队列展示状态/负责人/来源任务筛选、领取、分派、审核和回流 Golden；后端队列记录已回填 `source_task_id` 与 `source_task_name`，支持按来源任务筛选。
@@ -112,6 +113,14 @@
 
 ## 最近验证
 
+- `cd frontend && npm test -- src/test/lazyRoutes.test.tsx`：先 RED 后 GREEN，最终 2 passed；确认概览路由不会预加载报告中心和 Judge 审计页面模块，进入报告路由时才加载报告页面模块。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：5 个测试文件、71 passed；懒加载后已修复旧测试对页面加载和异步数据的立即断言。
+- `cd frontend && npm run build`：通过；Vite 输出 `OverviewPage`、`ReportsPage`、`JudgeAuditPage`、`WorkflowDesignerPage` 等页面级 chunk，`charts` chunk 仍单独拆分。
+- `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`：1 passed；报告页任务选择器改为点击 Select 外层后主链路通过。
+- `cd frontend && npm run e2e`：8 passed。
+- `python -m pytest -q`：94 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `git diff --check`：通过，仅有 Windows 换行提示。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`：5 passed，53 skipped；原候选资产中心长测试拆为约 1.0 秒、1.5 秒、1.3 秒、3.4 秒和 0.6 秒几段，晋升审批测试显式补齐审批、生成草稿和复跑前置条件。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、69 passed；候选资产中心最长单测为晋升审批/baseline 闭环，约 5.8 秒。
@@ -323,6 +332,37 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Route-Level Lazy Loading
+
+- 改动摘要：前端 `AppShell` 改为页面级懒加载，避免概览首屏提前解析报告中心、Judge 审计等图表页面；新增路由懒加载单测锁定“概览不预加载图表页、进入报告页才加载报告模块”；为懒加载状态增加统一中文加载态；修复 App 测试在懒加载与异步数据查询下的等待边界；修复 Playwright 主链路报告页选择任务时点击内部 input 被已选中文本遮挡导致的超时。
+- 变更文件：
+  - `frontend/src/App.tsx`
+  - `frontend/src/styles.css`
+  - `frontend/src/test/lazyRoutes.test.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/e2e/task-flow.spec.ts`
+  - `docs/superpowers/plans/2026-06-01-route-level-lazy-loading.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/lazyRoutes.test.tsx`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`
+  - `cd frontend && npm run e2e`
+  - `python -m pytest -q`
+  - `git diff --check`
+- 测试结果：
+  - 路由懒加载测试：先 RED 后 GREEN，最终 2 passed。
+  - 前端 typecheck：通过。
+  - 前端全量：5 个测试文件、71 passed。
+  - 前端构建：通过，构建产物包含页面级 chunk 和独立 `charts` chunk。
+  - Playwright 主链路定向：1 passed。
+  - Playwright 全量：8 passed。
+  - 后端全量：94 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - `git diff --check`：通过，仅有 Windows 换行提示。
+- 下一步：继续从真实使用链路看性能与可解释性，优先评估 Ant Design 与 ECharts 大 chunk 的进一步按需化、报告页图表延迟渲染、任务详情/报告详情虚拟列表，以及前端测试文件继续按页面拆分。
 
 ### 2026-05-31 Candidate Assets Test Split
 

@@ -132,7 +132,7 @@ async function createAndExecuteTask(page: Page, datasetName: string, workflowNam
 
 async function verifyReportAndCorrectBadcase(page: Page, taskName: string) {
   await page.goto('/reports');
-  await page.getByRole('combobox', { name: '选择报告任务' }).click();
+  await openSelectByLabel(page, '选择报告任务');
   await page
     .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content')
     .filter({ hasText: `${taskName} / completed` })
@@ -165,6 +165,14 @@ async function selectModalOption(page: Page, label: string, searchText: string) 
     .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content')
     .filter({ hasText: searchText })
     .first()
+    .click();
+}
+
+async function openSelectByLabel(page: Page, label: string) {
+  await page
+    .locator('.ant-select')
+    .filter({ has: page.getByRole('combobox', { name: label }) })
+    .locator('.ant-select-selector')
     .click();
 }
 

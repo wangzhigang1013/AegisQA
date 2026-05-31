@@ -850,6 +850,7 @@ async function renderWorkbench(path: string) {
       </MemoryRouter>,
     );
   });
+  await waitFor(() => expect(screen.queryByText('正在加载页面...')).not.toBeInTheDocument());
 }
 
 function jsonResponse(payload: unknown) {
@@ -1598,15 +1599,15 @@ describe('AegisQA 前端工作台', () => {
 
     expect(await screen.findByText('Workflow 市场')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /新建 Workflow/ })).toBeInTheDocument();
-    expect(screen.getByText('测试草稿')).toBeInTheDocument();
-    expect(screen.getByText('RAG 回归评测')).toBeInTheDocument();
+    expect(await screen.findByText('测试草稿')).toBeInTheDocument();
+    expect(await screen.findByText('RAG 回归评测')).toBeInTheDocument();
     expect(screen.getByText(/模板/)).toBeInTheDocument();
   });
 
   it('Workflow 画布解释点对多和多对一流程', async () => {
     await renderWorkbench('/workflows/designer/draft-test');
 
-    expect(screen.getByText('Skill Palette')).toBeInTheDocument();
+    expect(await screen.findByText('Skill Palette')).toBeInTheDocument();
     expect(screen.getByText('点对多')).toBeInTheDocument();
     expect(screen.getByText('多对一')).toBeInTheDocument();
     expect(screen.getByText('校验与试运行 Console')).toBeInTheDocument();

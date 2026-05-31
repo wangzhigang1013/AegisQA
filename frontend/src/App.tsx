@@ -14,25 +14,25 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConfigProvider, Layout, Menu, theme } from 'antd';
 import type { MenuProps } from 'antd';
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 
-import { DatasetsPage } from './pages/DatasetsPage';
-import { CIGatesPage } from './pages/CIGatesPage';
-import { AnnotationQueuePage } from './pages/AnnotationQueuePage';
-import { CandidateAssetsPage } from './pages/CandidateAssetsPage';
-import { ExperimentsPage } from './pages/ExperimentsPage';
-import { GovernancePage } from './pages/GovernancePage';
-import { JudgeAuditPage } from './pages/JudgeAuditPage';
-import { OverviewPage } from './pages/OverviewPage';
-import { RepairTasksPage } from './pages/RepairTasksPage';
-import { ReportsPage } from './pages/ReportsPage';
-import { RunsPage } from './pages/RunsPage';
-import { SkillsPage } from './pages/SkillsPage';
-import { TraceFlowPage } from './pages/TraceFlowPage';
-import { TraceTreePage } from './pages/TraceTreePage';
-import { WorkflowDesignerPage } from './pages/WorkflowDesignerPage';
-import { WorkflowMarketPage } from './pages/WorkflowMarketPage';
+const OverviewPage = lazy(() => import('./pages/OverviewPage').then(({ OverviewPage }) => ({ default: OverviewPage })));
+const DatasetsPage = lazy(() => import('./pages/DatasetsPage').then(({ DatasetsPage }) => ({ default: DatasetsPage })));
+const SkillsPage = lazy(() => import('./pages/SkillsPage').then(({ SkillsPage }) => ({ default: SkillsPage })));
+const WorkflowMarketPage = lazy(() => import('./pages/WorkflowMarketPage').then(({ WorkflowMarketPage }) => ({ default: WorkflowMarketPage })));
+const WorkflowDesignerPage = lazy(() => import('./pages/WorkflowDesignerPage').then(({ WorkflowDesignerPage }) => ({ default: WorkflowDesignerPage })));
+const RunsPage = lazy(() => import('./pages/RunsPage').then(({ RunsPage }) => ({ default: RunsPage })));
+const TraceFlowPage = lazy(() => import('./pages/TraceFlowPage').then(({ TraceFlowPage }) => ({ default: TraceFlowPage })));
+const TraceTreePage = lazy(() => import('./pages/TraceTreePage').then(({ TraceTreePage }) => ({ default: TraceTreePage })));
+const ReportsPage = lazy(() => import('./pages/ReportsPage').then(({ ReportsPage }) => ({ default: ReportsPage })));
+const RepairTasksPage = lazy(() => import('./pages/RepairTasksPage').then(({ RepairTasksPage }) => ({ default: RepairTasksPage })));
+const ExperimentsPage = lazy(() => import('./pages/ExperimentsPage').then(({ ExperimentsPage }) => ({ default: ExperimentsPage })));
+const CIGatesPage = lazy(() => import('./pages/CIGatesPage').then(({ CIGatesPage }) => ({ default: CIGatesPage })));
+const AnnotationQueuePage = lazy(() => import('./pages/AnnotationQueuePage').then(({ AnnotationQueuePage }) => ({ default: AnnotationQueuePage })));
+const CandidateAssetsPage = lazy(() => import('./pages/CandidateAssetsPage').then(({ CandidateAssetsPage }) => ({ default: CandidateAssetsPage })));
+const JudgeAuditPage = lazy(() => import('./pages/JudgeAuditPage').then(({ JudgeAuditPage }) => ({ default: JudgeAuditPage })));
+const GovernancePage = lazy(() => import('./pages/GovernancePage').then(({ GovernancePage }) => ({ default: GovernancePage })));
 
 function createAppQueryClient() {
   return new QueryClient({
@@ -95,25 +95,27 @@ export function AppShell() {
           </Layout.Sider>
           <Layout className="app-main">
             <Layout.Content className="app-content">
-              <Routes>
-                <Route path="/" element={<OverviewPage />} />
-                <Route path="/datasets" element={<DatasetsPage />} />
-                <Route path="/skills" element={<SkillsPage />} />
-                <Route path="/workflow" element={<WorkflowMarketPage />} />
-                <Route path="/workflows" element={<WorkflowMarketPage />} />
-                <Route path="/workflows/designer/:draftId" element={<WorkflowDesignerPage />} />
-                <Route path="/runs" element={<RunsPage />} />
-                <Route path="/tasks/:taskId/trace" element={<TraceFlowPage />} />
-                <Route path="/tasks/:taskId/trace-tree" element={<TraceTreePage />} />
-                <Route path="/reports" element={<ReportsPage />} />
-                <Route path="/repair-tasks" element={<RepairTasksPage />} />
-                <Route path="/experiments" element={<ExperimentsPage />} />
-                <Route path="/ci-gates" element={<CIGatesPage />} />
-                <Route path="/annotation-queue" element={<AnnotationQueuePage />} />
-                <Route path="/candidate-assets" element={<CandidateAssetsPage />} />
-                <Route path="/judge" element={<JudgeAuditPage />} />
-                <Route path="/governance" element={<GovernancePage />} />
-              </Routes>
+              <Suspense fallback={<div className="route-loading" role="status">正在加载页面...</div>}>
+                <Routes>
+                  <Route path="/" element={<OverviewPage />} />
+                  <Route path="/datasets" element={<DatasetsPage />} />
+                  <Route path="/skills" element={<SkillsPage />} />
+                  <Route path="/workflow" element={<WorkflowMarketPage />} />
+                  <Route path="/workflows" element={<WorkflowMarketPage />} />
+                  <Route path="/workflows/designer/:draftId" element={<WorkflowDesignerPage />} />
+                  <Route path="/runs" element={<RunsPage />} />
+                  <Route path="/tasks/:taskId/trace" element={<TraceFlowPage />} />
+                  <Route path="/tasks/:taskId/trace-tree" element={<TraceTreePage />} />
+                  <Route path="/reports" element={<ReportsPage />} />
+                  <Route path="/repair-tasks" element={<RepairTasksPage />} />
+                  <Route path="/experiments" element={<ExperimentsPage />} />
+                  <Route path="/ci-gates" element={<CIGatesPage />} />
+                  <Route path="/annotation-queue" element={<AnnotationQueuePage />} />
+                  <Route path="/candidate-assets" element={<CandidateAssetsPage />} />
+                  <Route path="/judge" element={<JudgeAuditPage />} />
+                  <Route path="/governance" element={<GovernancePage />} />
+                </Routes>
+              </Suspense>
             </Layout.Content>
           </Layout>
         </Layout>

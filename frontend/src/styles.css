@@ -92,6 +92,17 @@ pre {
   padding: 28px;
 }
 
+.route-loading {
+  display: grid;
+  min-height: 320px;
+  place-items: center;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #5a667a;
+  font-size: 14px;
+}
+
 .page-stack {
   display: flex;
   flex-direction: column;
