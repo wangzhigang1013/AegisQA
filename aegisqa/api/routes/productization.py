@@ -62,6 +62,11 @@ class WorkflowPromotionReviewDecisionRequest(BaseModel):
     note: str = ""
 
 
+class ExperimentBaselineActionRequest(BaseModel):
+    actor: str = "api"
+    note: str = ""
+
+
 def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
     """注册围绕产品化闭环的独立功能接口。"""
 
@@ -154,6 +159,26 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         if status:
             suggestions = [suggestion for suggestion in suggestions if suggestion.get("status") == status]
         return sorted(suggestions, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+
+    @app.get("/experiment-baselines")
+    def list_experiment_baselines(
+        dataset_id: str | None = Query(default=None),
+        workflow_id: str | None = Query(default=None),
+    ) -> list[dict[str, Any]]:
+        baselines = _list_records(ctx.store, "experiment_baselines")
+        if dataset_id:
+            baselines = [baseline for baseline in baselines if baseline.get("scope", {}).get("dataset_id") == dataset_id]
+        if workflow_id:
+            baselines = [baseline for baseline in baselines if baseline.get("scope", {}).get("workflow_id") == workflow_id]
+        return sorted(baselines, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+
+    @app.post("/experiment-baseline-suggestions/{suggestion_id}/apply")
+    def apply_experiment_baseline_suggestion(suggestion_id: str, request: ExperimentBaselineActionRequest) -> dict[str, Any]:
+        return _apply_experiment_baseline_suggestion(ctx, suggestion_id, request)
+
+    @app.post("/experiment-baseline-suggestions/{suggestion_id}/rollback")
+    def rollback_experiment_baseline_suggestion(suggestion_id: str, request: ExperimentBaselineActionRequest) -> dict[str, Any]:
+        return _rollback_experiment_baseline_suggestion(ctx, suggestion_id, request)
 
     @app.get("/workflow-release-records")
     def list_workflow_release_records(
@@ -1086,6 +1111,111 @@ def _record_ci_gate_evaluation(
     }
     _save_record(ctx.store, "ci_gate_evaluations", "evaluation_id", evaluation)
     return evaluation
+
+
+def _apply_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: str, request: ExperimentBaselineActionRequest) -> dict[str, Any]:
+    suggestion = _get_record(ctx.store, "experiment_baseline_suggestions", suggestion_id)
+    if suggestion.get("status") not in {"pending_apply", "rolled_back", "applied"}:
+        raise AegisQAError(
+            "BASELINE_SUGGESTION_STATUS_INVALID",
+            "只有待应用、已回滚或已应用的 baseline 建议可以执行应用动作。",
+            status_code=400,
+            details={"suggestion_id": suggestion_id, "status": suggestion.get("status")},
+        )
+    suggested_experiment = _get_record(ctx.store, "experiments", str(suggestion["suggested_experiment_id"]))
+    baseline = _get_or_create_experiment_baseline(ctx, suggested_experiment, now=_now())
+    if suggestion.get("status") == "applied" and baseline.get("current_experiment_id") == suggestion.get("suggested_experiment_id"):
+        return {"status": "applied", "suggestion": suggestion, "baseline": baseline}
+    now = _now()
+    previous_experiment_id = baseline.get("current_experiment_id") or suggestion.get("previous_baseline_experiment_id")
+    baseline["current_experiment_id"] = suggestion["suggested_experiment_id"]
+    baseline["previous_experiment_id"] = previous_experiment_id
+    baseline["status"] = "active"
+    baseline.setdefault("history", []).append(
+        {
+            "action": "apply",
+            "suggestion_id": suggestion_id,
+            "from_experiment_id": previous_experiment_id,
+            "to_experiment_id": suggestion["suggested_experiment_id"],
+            "actor": request.actor,
+            "note": request.note,
+            "created_at": now,
+        }
+    )
+    baseline["updated_at"] = now
+    suggestion["status"] = "applied"
+    suggestion["applied_by"] = request.actor
+    suggestion["apply_note"] = request.note
+    suggestion["applied_at"] = now
+    suggestion["updated_at"] = now
+    _save_record(ctx.store, "experiment_baselines", "baseline_id", baseline)
+    _save_record(ctx.store, "experiment_baseline_suggestions", "suggestion_id", suggestion)
+    ctx.audit_service.record(actor=request.actor, action="experiment_baseline.apply", target=baseline["baseline_id"], detail={"suggestion_id": suggestion_id, "current_experiment_id": baseline["current_experiment_id"]})
+    return {"status": "applied", "suggestion": suggestion, "baseline": baseline}
+
+
+def _rollback_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: str, request: ExperimentBaselineActionRequest) -> dict[str, Any]:
+    suggestion = _get_record(ctx.store, "experiment_baseline_suggestions", suggestion_id)
+    if suggestion.get("status") != "applied":
+        raise AegisQAError(
+            "BASELINE_SUGGESTION_NOT_APPLIED",
+            "只有已应用的 baseline 建议可以回滚。",
+            status_code=400,
+            details={"suggestion_id": suggestion_id, "status": suggestion.get("status")},
+        )
+    suggested_experiment = _get_record(ctx.store, "experiments", str(suggestion["suggested_experiment_id"]))
+    baseline = _get_or_create_experiment_baseline(ctx, suggested_experiment, now=_now())
+    previous_experiment_id = suggestion.get("previous_baseline_experiment_id")
+    if not previous_experiment_id:
+        raise AegisQAError(
+            "BASELINE_ROLLBACK_TARGET_MISSING",
+            "该 baseline 建议没有记录原 baseline，无法自动回滚。",
+            status_code=400,
+            details={"suggestion_id": suggestion_id},
+        )
+    now = _now()
+    baseline["current_experiment_id"] = previous_experiment_id
+    baseline["previous_experiment_id"] = suggestion.get("suggested_experiment_id")
+    baseline["status"] = "active"
+    baseline.setdefault("history", []).append(
+        {
+            "action": "rollback",
+            "suggestion_id": suggestion_id,
+            "from_experiment_id": suggestion.get("suggested_experiment_id"),
+            "to_experiment_id": previous_experiment_id,
+            "actor": request.actor,
+            "note": request.note,
+            "created_at": now,
+        }
+    )
+    baseline["updated_at"] = now
+    suggestion["status"] = "rolled_back"
+    suggestion["rolled_back_by"] = request.actor
+    suggestion["rollback_note"] = request.note
+    suggestion["rolled_back_at"] = now
+    suggestion["updated_at"] = now
+    _save_record(ctx.store, "experiment_baselines", "baseline_id", baseline)
+    _save_record(ctx.store, "experiment_baseline_suggestions", "suggestion_id", suggestion)
+    ctx.audit_service.record(actor=request.actor, action="experiment_baseline.rollback", target=baseline["baseline_id"], detail={"suggestion_id": suggestion_id, "current_experiment_id": baseline["current_experiment_id"]})
+    return {"status": "rolled_back", "suggestion": suggestion, "baseline": baseline}
+
+
+def _get_or_create_experiment_baseline(ctx: RouteContext, experiment: dict[str, Any], *, now: str) -> dict[str, Any]:
+    scope = {"dataset_id": experiment.get("dataset_id"), "workflow_id": experiment.get("workflow_id")}
+    for baseline in _list_records(ctx.store, "experiment_baselines"):
+        if baseline.get("scope") == scope:
+            return baseline
+    # Baseline 以 Dataset + Workflow 为作用域，避免把不同数据集或不同流程的实验互相覆盖。
+    return {
+        "baseline_id": f"baseline-{uuid4().hex[:12]}",
+        "scope": scope,
+        "current_experiment_id": None,
+        "previous_experiment_id": None,
+        "status": "active",
+        "history": [],
+        "created_at": now,
+        "updated_at": now,
+    }
 
 
 def _promotion_pass_rate_check(candidate: dict[str, Any], threshold: float | None) -> dict[str, Any]:

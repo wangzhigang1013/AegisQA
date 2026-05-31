@@ -11,6 +11,7 @@ import type {
   DatasetLineage,
   DatasetSummary,
   DatasetVersion,
+  ExperimentBaselineActionResult,
   ExperimentRecord,
   GraphValidationResult,
   JudgeProfile,
@@ -210,6 +211,11 @@ export const api = {
     }),
   rejectWorkflowPromotionReview: (reviewId: string, body: { reviewer?: string; note?: string } = {}) =>
     request<WorkflowPromotionReviewResult>(`/workflow-promotion-reviews/${encodeURIComponent(reviewId)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  applyExperimentBaselineSuggestion: (suggestionId: string, body: { actor?: string; note?: string } = {}) =>
+    request<ExperimentBaselineActionResult>(`/experiment-baseline-suggestions/${encodeURIComponent(suggestionId)}/apply`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

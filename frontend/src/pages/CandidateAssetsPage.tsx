@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
+import type { ExperimentBaselineActionResult, PromptSkillCandidate, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
 
 export function CandidateAssetsPage() {
   const queryClient = useQueryClient();
@@ -14,6 +14,7 @@ export function CandidateAssetsPage() {
   const [lastRetest, setLastRetest] = useState<PromptSkillCandidateRetestResult | null>(null);
   const [lastPromotionReview, setLastPromotionReview] = useState<WorkflowPromotionReview | null>(null);
   const [lastReleaseArtifacts, setLastReleaseArtifacts] = useState<WorkflowPromotionReleaseArtifacts | null>(null);
+  const [lastBaselineApplication, setLastBaselineApplication] = useState<ExperimentBaselineActionResult | null>(null);
   const queryKey = ['prompt-skill-candidates', statusFilter] as const;
   const candidatesQuery = useQuery({
     queryKey,
@@ -113,6 +114,24 @@ export function CandidateAssetsPage() {
       setNotice(`晋升审批已通过：${payload.review.review_id}`);
     },
     onError: (error) => setNotice(`晋升审批通过失败：${formatApiError(error)}`),
+  });
+
+  const applyBaselineMutation = useMutation({
+    mutationFn: () => {
+      const suggestionId = lastReleaseArtifacts?.baseline_suggestion?.suggestion_id;
+      if (!suggestionId) throw new Error('缺少 baseline 替换建议。');
+      return api.applyExperimentBaselineSuggestion(suggestionId, {
+        actor: 'release_owner',
+        note: '候选版本通过晋升审批和发布门禁，应用为新 baseline。',
+      });
+    },
+    onSuccess: (payload) => {
+      setLastBaselineApplication(payload);
+      setLastReleaseArtifacts((current) => (current ? { ...current, baseline_suggestion: payload.suggestion } : current));
+      void queryClient.invalidateQueries({ queryKey: ['experiments'] });
+      setNotice(`Baseline 已应用：${payload.baseline.current_experiment_id}`);
+    },
+    onError: (error) => setNotice(`Baseline 应用失败：${formatApiError(error)}`),
   });
 
   return (
@@ -285,7 +304,18 @@ export function CandidateAssetsPage() {
                 <Typography.Text>建议 baseline：{lastReleaseArtifacts.baseline_suggestion.suggested_experiment_id ?? '-'}</Typography.Text>
                 <Typography.Text type="secondary">原 baseline：{lastReleaseArtifacts.baseline_suggestion.previous_baseline_experiment_id ?? '-'}</Typography.Text>
                 <Typography.Text type="secondary">{lastReleaseArtifacts.baseline_suggestion.reason ?? '审批通过后生成的 baseline 候选。'}</Typography.Text>
-                {lastReleaseArtifacts.baseline_suggestion.target_url ? <Button href={lastReleaseArtifacts.baseline_suggestion.target_url}>打开实验中心</Button> : null}
+                {lastBaselineApplication ? <Typography.Text>当前 baseline：{lastBaselineApplication.baseline.current_experiment_id ?? '-'}</Typography.Text> : null}
+                <Space wrap>
+                  {lastReleaseArtifacts.baseline_suggestion.target_url ? <Button href={lastReleaseArtifacts.baseline_suggestion.target_url}>打开实验中心</Button> : null}
+                  <Button
+                    type="primary"
+                    disabled={lastReleaseArtifacts.baseline_suggestion.status === 'applied'}
+                    loading={applyBaselineMutation.isPending}
+                    onClick={() => applyBaselineMutation.mutate()}
+                  >
+                    应用 baseline
+                  </Button>
+                </Space>
               </Space>
             </Card>
           ) : null}

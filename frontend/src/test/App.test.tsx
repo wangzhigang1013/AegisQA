@@ -564,6 +564,26 @@ const demoWorkflowPromotionApprovedPayload = {
   },
 };
 
+const demoBaselineApplyPayload = {
+  status: 'applied',
+  suggestion: {
+    ...demoWorkflowPromotionApprovedPayload.release_artifacts.baseline_suggestion,
+    status: 'applied',
+    applied_by: 'release_owner',
+    applied_at: '2026-05-31T04:00:00Z',
+  },
+  baseline: {
+    baseline_id: 'baseline-demo',
+    scope: { dataset_id: 'dataset-demo', workflow_id: 'wf-demo' },
+    current_experiment_id: 'exp-candidate-demo',
+    previous_experiment_id: 'exp-baseline',
+    status: 'active',
+    history: [{ action: 'apply', suggestion_id: 'baseline-suggestion-demo', from_experiment_id: 'exp-baseline', to_experiment_id: 'exp-candidate-demo', actor: 'release_owner', note: '应用为新 baseline。' }],
+    created_at: '2026-05-31T04:00:00Z',
+    updated_at: '2026-05-31T04:00:00Z',
+  },
+};
+
 const pendingPackageSkill = {
   ...demoSkills[0],
   skill_id: 'plugin.echo@0.1.0',
@@ -1187,6 +1207,9 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/workflow-promotion-reviews/promotion-review-demo/approve')) {
         return jsonResponse(demoWorkflowPromotionApprovedPayload);
       }
+      if (url.endsWith('/experiment-baseline-suggestions/baseline-suggestion-demo/apply')) {
+        return jsonResponse(demoBaselineApplyPayload);
+      }
       if (url.includes('/prompt-skill-candidates')) {
         return jsonResponse([demoPromptSkillCandidate]);
       }
@@ -1757,6 +1780,10 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/建议 baseline：exp-candidate-demo/)).toBeInTheDocument();
     expect(screen.getByText('CI Gate 发布记录')).toBeInTheDocument();
     expect(screen.getByText(/ready_to_release/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /应用 baseline/ }));
+    expect(await screen.findByText(/Baseline 已应用：exp-candidate-demo/)).toBeInTheDocument();
+    expect(screen.getByText(/当前 baseline：exp-candidate-demo/)).toBeInTheDocument();
   });
 
   it('报告中心围绕任务展示报告、质量决策和导出入口', async () => {

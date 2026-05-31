@@ -748,3 +748,22 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
     assert client.get(f"/experiment-baseline-suggestions?candidate_id={candidate['candidate_id']}").json()[0]["suggestion_id"] == baseline_suggestion["suggestion_id"]
     assert client.get(f"/workflow-release-records?review_id={promotion_review['review_id']}").json()[0]["record_id"] == release_record["record_id"]
     assert client.get(f"/ci-gates/evaluations?task_id={retest['task']['task_id']}").json()[0]["evaluation_id"] == artifacts["ci_gate_evaluations"][0]["evaluation_id"]
+
+    applied_baseline = client.post(
+        f"/experiment-baseline-suggestions/{baseline_suggestion['suggestion_id']}/apply",
+        json={"actor": "release_owner", "note": "候选版本通过发布门禁，应用为新 baseline。"},
+    ).json()
+    assert applied_baseline["suggestion"]["status"] == "applied"
+    assert applied_baseline["baseline"]["current_experiment_id"] == retest["candidate_experiment"]["experiment_id"]
+    assert applied_baseline["baseline"]["previous_experiment_id"] == baseline_experiment["experiment_id"]
+    assert applied_baseline["baseline"]["history"][-1]["action"] == "apply"
+    listed_baselines = client.get(f"/experiment-baselines?workflow_id={applied_baseline['baseline']['scope']['workflow_id']}").json()
+    assert listed_baselines[0]["baseline_id"] == applied_baseline["baseline"]["baseline_id"]
+
+    rolled_back_baseline = client.post(
+        f"/experiment-baseline-suggestions/{baseline_suggestion['suggestion_id']}/rollback",
+        json={"actor": "release_owner", "note": "回滚到原 baseline。"},
+    ).json()
+    assert rolled_back_baseline["suggestion"]["status"] == "rolled_back"
+    assert rolled_back_baseline["baseline"]["current_experiment_id"] == baseline_experiment["experiment_id"]
+    assert rolled_back_baseline["baseline"]["history"][-1]["action"] == "rollback"

@@ -868,8 +868,37 @@ export type ExperimentBaselineSuggestion = {
   baseline_metrics?: Record<string, number> | null;
   reason?: string;
   target_url?: string;
+  applied_by?: string;
+  applied_at?: string;
+  rolled_back_by?: string;
+  rolled_back_at?: string;
   created_at: string;
   updated_at?: string;
+};
+
+export type ExperimentBaselineRecord = {
+  baseline_id: string;
+  scope: { dataset_id?: string | null; workflow_id?: string | null };
+  current_experiment_id?: string | null;
+  previous_experiment_id?: string | null;
+  status: string;
+  history: Array<{
+    action: string;
+    suggestion_id?: string;
+    from_experiment_id?: string | null;
+    to_experiment_id?: string | null;
+    actor?: string;
+    note?: string;
+    created_at?: string;
+  }>;
+  created_at: string;
+  updated_at?: string;
+};
+
+export type ExperimentBaselineActionResult = {
+  status: string;
+  suggestion: ExperimentBaselineSuggestion;
+  baseline: ExperimentBaselineRecord;
 };
 
 export type WorkflowReleaseRecord = {
