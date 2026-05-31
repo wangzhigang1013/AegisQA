@@ -377,3 +377,41 @@ def test_repair_task_assignment_due_date_and_overdue_are_traceable(tmp_path: Pat
 
     assert resolved.status_code == 200
     assert resolved.json()["overdue"] is False
+
+
+def test_repair_task_dataset_field_action_returns_fix_plan(tmp_path: Path) -> None:
+    client, dataset, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=False)
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "数据字段修复任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair_tasks = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"]
+    data_repair = next(item for item in repair_tasks if item["cause_type"] == "data_quality")
+
+    result = client.post(
+        f"/repair-tasks/{data_repair['repair_task_id']}/actions",
+        json={"action": "fix_dataset_fields"},
+    )
+
+    assert result.status_code == 200
+    payload = result.json()
+    assert payload["action"] == "fix_dataset_fields"
+    assert payload["result"]["status"] == "planned"
+    assert payload["result"]["dataset"]["dataset_id"] == dataset["dataset_id"]
+    assert payload["result"]["dataset"]["version"] == dataset["version"]
+    assert payload["result"]["missing_required_fields"] == ["reference"]
+    reference_action = next(item for item in payload["result"]["field_actions"] if item["field"] == "reference")
+    assert reference_action["action"] == "add_or_map_field"
+    assert reference_action["missing_count"] == dataset["row_count"]
+    assert reference_action["required_by_workflow"] is True
+    assert payload["result"]["target_url"] == f"/datasets?dataset_id={dataset['dataset_id']}&version={dataset['version']}"
+    assert payload["repair_task"]["action_history"][-1]["action"] == "fix_dataset_fields"
+    assert payload["repair_task"]["last_action_result"]["result"]["field_actions"]

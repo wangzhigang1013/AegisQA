@@ -218,6 +218,8 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             result = _repair_action_generate_remediation_plan(ctx, record)
         elif action == "create_followup_repair_tasks":
             result = _repair_action_create_followup_tasks(ctx, record)
+        elif action == "fix_dataset_fields":
+            result = _repair_action_fix_dataset_fields(ctx, record)
         elif action in {"open_trace_flow", "open_parameter_governance", "open_dataset_lineage"}:
             result = _repair_action_link_target(record, action)
         else:
@@ -233,6 +235,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                         "retest_and_compare",
                         "generate_remediation_plan",
                         "create_followup_repair_tasks",
+                        "fix_dataset_fields",
                         "open_trace_flow",
                         "open_parameter_governance",
                         "open_dataset_lineage",
@@ -963,6 +966,86 @@ def _repair_action_create_followup_tasks(ctx: RouteContext, repair_task: dict[st
     }
 
 
+def _repair_action_fix_dataset_fields(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+    """生成数据字段修复计划。
+
+    数据字段问题不能由系统静默改写样本内容：缺失字段可能需要业务标注、字段映射
+    或重新导入数据。这里返回可执行计划和证据，让用户在数据集页创建新版本或修正
+    字段类型，避免把诊断推断误当成真实数据。
+    """
+
+    task = _get_record(ctx.store, "tasks", str(repair_task.get("source_task_id")))
+    run_id = _repair_latest_run_id(repair_task, task)
+    run = ctx.runner.get_run(run_id)
+    report = aggregate_run_report(run)
+    segments = build_report_segments(run)
+    parameter_governance = _build_parameter_governance(task, run)
+    diagnostics = build_task_diagnostics(task, run, report, segments, parameter_governance)
+    data_quality = diagnostics.get("data_quality", {})
+    dataset = ctx.dataset_service.get_version(str(task["dataset_id"]), int(task["dataset_version"]))
+    field_actions = _build_dataset_field_fix_actions(data_quality)
+    missing_required_fields = [
+        item["field"]
+        for item in field_actions
+        if item.get("required_by_workflow") and item.get("missing_count", 0) > 0
+    ]
+    return {
+        "status": "planned",
+        "source_task_id": task["task_id"],
+        "run_id": run.run_id,
+        "dataset": {
+            "dataset_id": dataset.dataset_id,
+            "version": dataset.version,
+            "version_id": dataset.version_id,
+            "name": dataset.name,
+            "row_count": dataset.row_count,
+            "field_schema": dataset.field_schema,
+        },
+        "target_url": f"/datasets?dataset_id={dataset.dataset_id}&version={dataset.version}",
+        "missing_required_fields": missing_required_fields,
+        "duplicate_row_count": int(data_quality.get("duplicate_row_count") or 0),
+        "warnings": data_quality.get("warnings", []),
+        "field_actions": field_actions,
+        "next_steps": [
+            "在数据集页查看 Lineage 和字段预览。",
+            "为缺失的 Workflow 必需字段补充列，或在 Workflow 画布调整 input_mapping。",
+            "重新上传为新的 Dataset Version 后创建新 Task 或从修复任务触发复跑对比。",
+        ],
+    }
+
+
+def _build_dataset_field_fix_actions(data_quality: dict[str, Any]) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    for item in data_quality.get("field_coverage", []):
+        if not isinstance(item, dict):
+            continue
+        missing_count = int(item.get("missing_count") or 0)
+        required = bool(item.get("required_by_workflow"))
+        if not required and missing_count <= 0:
+            continue
+        field = str(item.get("field") or "")
+        if not field:
+            continue
+        action = "add_or_map_field" if required and missing_count > 0 else "inspect_optional_field"
+        recommendation = (
+            "这是 Workflow 必需字段，请补充该列，或在 Workflow 画布把输入映射到已有等价字段。"
+            if action == "add_or_map_field"
+            else "该字段存在缺失值，建议确认是否影响分层分析或人工审核。"
+        )
+        actions.append(
+            {
+                "field": field,
+                "action": action,
+                "required_by_workflow": required,
+                "present_count": int(item.get("present_count") or 0),
+                "missing_count": missing_count,
+                "coverage": float(item.get("coverage") or 0),
+                "recommendation": recommendation,
+            }
+        )
+    return sorted(actions, key=lambda value: (not bool(value["required_by_workflow"]), str(value["field"])))
+
+
 def _repair_recommendations_from_last_result(ctx: RouteContext, repair_task: dict[str, Any]) -> list[dict[str, Any]]:
     last_action = repair_task.get("last_action_result") or {}
     if isinstance(last_action, dict) and last_action.get("action") == "generate_remediation_plan":
@@ -1067,7 +1150,7 @@ def _build_repair_remediation_recommendations(
                 "修复 Dataset 字段和样本质量",
                 "数据诊断发现字段缺失、重复样本或字段覆盖不足，先处理数据版本再复跑。",
                 f"/datasets?dataset_id={task.get('dataset_id')}&version={task.get('dataset_version')}",
-                "open_dataset_lineage",
+                "fix_dataset_fields",
                 "high",
                 diagnostics.get("data_quality", {}).get("warnings", []),
             )
@@ -1183,6 +1266,8 @@ def _repair_action_summary(action: str, result: dict[str, Any]) -> str:
         return f"已生成 {len(result.get('recommendations', []))} 条修复建议。"
     if action == "create_followup_repair_tasks":
         return f"已创建 {result.get('created_count', 0)} 个后续修复任务，复用 {result.get('reused_count', 0)} 个。"
+    if action == "fix_dataset_fields":
+        return f"已生成 {len(result.get('field_actions', []))} 条字段修复建议。"
     if result.get("url"):
         return f"已打开证据入口：{result['url']}"
     return "动作已记录。"

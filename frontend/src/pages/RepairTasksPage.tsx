@@ -349,6 +349,16 @@ export function RepairTasksPage() {
                   >
                     拆分子任务
                   </Button>
+                  {hasRepairAction(record, 'fix_dataset_fields') ? (
+                    <Button
+                      size="small"
+                      icon={<FileSearchOutlined />}
+                      loading={actionMutation.isPending}
+                      onClick={() => runAction(record, 'fix_dataset_fields')}
+                    >
+                      字段修复计划
+                    </Button>
+                  ) : null}
                   <Button size="small" href={`/reports?task_id=${record.source_task_id}&panel=parameter-governance`}>
                     参数治理
                   </Button>
@@ -499,6 +509,19 @@ function renderSeverity(value: string) {
 }
 
 function RecentActionResult({ record }: { record: RepairTaskRecord }) {
+  const fieldActions = extractFieldFixActions(record);
+  if (fieldActions.length) {
+    return (
+      <Space direction="vertical" size={2}>
+        <Typography.Text type="secondary">字段修复计划</Typography.Text>
+        {fieldActions.slice(0, 3).map((item) => (
+          <Typography.Text key={`${item.field}-${item.action}`} type={item.required_by_workflow ? 'danger' : 'secondary'}>
+            {item.field}：{item.recommendation}
+          </Typography.Text>
+        ))}
+      </Space>
+    );
+  }
   const recommendations = extractRecommendations(record);
   if (recommendations.length) {
     return (
@@ -513,6 +536,10 @@ function RecentActionResult({ record }: { record: RepairTaskRecord }) {
   }
   const summary = record.action_history?.[record.action_history.length - 1]?.result_summary;
   return <Typography.Text type="secondary">{summary ?? '暂无结果'}</Typography.Text>;
+}
+
+function hasRepairAction(record: RepairTaskRecord, action: string) {
+  return record.recommended_action === action || record.next_actions?.includes(action) || record.last_action_result?.action === action;
 }
 
 function RepairOwner({ record, onAssign }: { record: RepairTaskRecord; onAssign: () => void }) {
@@ -619,6 +646,23 @@ function extractRepairTasks(result: Record<string, unknown>): RepairTaskRecord[]
   const repairTasks = result.repair_tasks;
   if (!Array.isArray(repairTasks)) return [];
   return repairTasks.filter((item): item is RepairTaskRecord => isRecord(item) && typeof item.repair_task_id === 'string');
+}
+
+function extractFieldFixActions(record: RepairTaskRecord): { field: string; action: string; recommendation: string; required_by_workflow: boolean }[] {
+  const result = record.last_action_result?.result;
+  const fieldActions = result?.field_actions;
+  if (!Array.isArray(fieldActions)) return [];
+  return fieldActions
+    .map((item) => {
+      if (!isRecord(item) || typeof item.field !== 'string') return null;
+      return {
+        field: item.field,
+        action: typeof item.action === 'string' ? item.action : 'inspect',
+        recommendation: typeof item.recommendation === 'string' ? item.recommendation : '请检查该字段的数据质量。',
+        required_by_workflow: Boolean(item.required_by_workflow),
+      };
+    })
+    .filter((item): item is { field: string; action: string; recommendation: string; required_by_workflow: boolean } => Boolean(item));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

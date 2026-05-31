@@ -97,7 +97,7 @@ const demoRepairTask = {
   affected_items: 12,
   evidence: ['scene=payment 通过率 40%，Badcase 12 条。'],
   recommendation: '优先复核 payment 场景的失败样本，补充 Golden 后再调整 Workflow。',
-  next_actions: ['open_trace_flow', 'seed_annotation_queue', 'evaluate_ci_gate', 'open_parameter_governance'],
+  next_actions: ['open_trace_flow', 'seed_annotation_queue', 'evaluate_ci_gate', 'open_parameter_governance', 'fix_dataset_fields'],
   action_history: [],
   owner: null,
   created_at: '2026-05-31T00:00:00Z',
@@ -691,6 +691,49 @@ describe('AegisQA 前端工作台', () => {
             repair_task: {
               ...demoRepairTask,
               action_history: [{ action: 'create_followup_repair_tasks', status: 'completed', result_summary: '已创建 2 个后续修复任务，复用 0 个。' }],
+            },
+          });
+        }
+        if (body.action === 'fix_dataset_fields') {
+          return jsonResponse({
+            action: 'fix_dataset_fields',
+            result: {
+              status: 'planned',
+              target_url: '/datasets?dataset_id=dataset-demo&version=1',
+              missing_required_fields: ['reference'],
+              duplicate_row_count: 0,
+              field_actions: [
+                {
+                  field: 'reference',
+                  action: 'add_or_map_field',
+                  required_by_workflow: true,
+                  missing_count: 100,
+                  present_count: 0,
+                  coverage: 0,
+                  recommendation: '这是 Workflow 必需字段，请补充该列，或在 Workflow 画布把输入映射到已有等价字段。',
+                },
+              ],
+            },
+            repair_task: {
+              ...demoRepairTask,
+              action_history: [{ action: 'fix_dataset_fields', status: 'planned', result_summary: '已生成 1 条字段修复建议。' }],
+              last_action_result: {
+                action: 'fix_dataset_fields',
+                result: {
+                  status: 'planned',
+                  target_url: '/datasets?dataset_id=dataset-demo&version=1',
+                  missing_required_fields: ['reference'],
+                  field_actions: [
+                    {
+                      field: 'reference',
+                      action: 'add_or_map_field',
+                      required_by_workflow: true,
+                      missing_count: 100,
+                      recommendation: '这是 Workflow 必需字段，请补充该列，或在 Workflow 画布把输入映射到已有等价字段。',
+                    },
+                  ],
+                },
+              },
             },
           });
         }
@@ -1513,6 +1556,17 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /查看进度/ }));
     expect(await screen.findByText(/逾期子任务 1 个/)).toBeInTheDocument();
+  });
+
+  it('修复任务工作台支持生成 Dataset 字段修复计划', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    fireEvent.click(await screen.findByRole('button', { name: /字段修复计划/ }));
+
+    expect(await screen.findByText(/已生成 1 条字段修复建议/)).toBeInTheDocument();
+    expect(screen.getByText('fix_dataset_fields')).toBeInTheDocument();
+    expect(screen.getByText(/reference/)).toBeInTheDocument();
+    expect(screen.getByText(/这是 Workflow 必需字段/)).toBeInTheDocument();
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {
