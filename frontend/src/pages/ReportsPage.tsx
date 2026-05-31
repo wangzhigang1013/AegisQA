@@ -36,6 +36,7 @@ export function ReportsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const taskIdFromUrl = searchParams.get('task_id');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [taskSearch, setTaskSearch] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const [exportRole, setExportRole] = useState<ReportExportRole>('Evaluator');
   const [pendingDiagnosticAction, setPendingDiagnosticAction] = useState<string | null>(null);
@@ -45,9 +46,10 @@ export function ReportsPage() {
   const badcasePageSize = 5;
   const scorePageSize = 4;
   const reportTaskPageSize = 20;
+  const normalizedTaskSearch = taskSearch.trim();
   const tasksQuery = useQuery({
-    queryKey: ['tasks', 'report-picker', 1, reportTaskPageSize],
-    queryFn: () => api.tasksPage({ page: 1, pageSize: reportTaskPageSize }),
+    queryKey: ['tasks', 'report-picker', normalizedTaskSearch, 1, reportTaskPageSize],
+    queryFn: () => api.tasksPage({ q: normalizedTaskSearch || undefined, page: 1, pageSize: reportTaskPageSize }),
   });
   const listedTasks = tasksQuery.data?.items ?? [];
   const selectedTaskFromList = listedTasks.find((task) => task.task_id === selectedTaskId) ?? null;
@@ -102,6 +104,7 @@ export function ReportsPage() {
 
   function changeSelectedTask(nextTaskId: string) {
     setSelectedTaskId(nextTaskId);
+    setTaskSearch('');
     setBadcasePage(1);
     setScorePage(1);
     setSelectedBadcaseKeys([]);
@@ -434,8 +437,12 @@ export function ReportsPage() {
               aria-label="选择报告任务"
               placeholder="选择任务"
               className="full-width-control"
+              showSearch
+              filterOption={false}
+              searchValue={taskSearch}
               value={selectedTask?.task_id}
               loading={tasksQuery.isLoading || selectedTaskQuery.isFetching}
+              onSearch={setTaskSearch}
               onChange={changeSelectedTask}
               options={taskOptions.map((item) => ({ value: item.task_id, label: `${item.name} / ${item.status}` }))}
             />

@@ -2809,6 +2809,35 @@ describe('AegisQA 前端工作台', () => {
     expect(reportRequests).toEqual([]);
   });
 
+  it('报告中心任务选择器支持远程搜索历史任务', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const taskSearches: Array<{ q: string | null; page: string | null; pageSize: string | null }> = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      const parsed = new URL(url, 'http://localhost');
+      if (parsed.pathname.endsWith('/tasks') && init?.method !== 'POST') {
+        const q = parsed.searchParams.get('q');
+        taskSearches.push({ q, page: parsed.searchParams.get('page'), pageSize: parsed.searchParams.get('page_size') });
+        return jsonResponse({
+          items: q
+            ? [{ ...demoTask, task_id: 'task-history', name: '历史任务', status: 'completed' }]
+            : [demoTask],
+          pagination: { page: 1, page_size: 20, total_items: 1, total_pages: 1 },
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/reports');
+
+    expect(await screen.findByText('任务报告')).toBeInTheDocument();
+    fireEvent.change(findComboboxByLabel('选择报告任务'), { target: { value: '历史任务' } });
+
+    await waitFor(() => {
+      expect(taskSearches).toContainEqual({ q: '历史任务', page: '1', pageSize: '20' });
+    });
+  });
+
   it('报告中心 Score Analytics 使用当前任务作用域和服务端分页', async () => {
     await renderWorkbench('/reports?task_id=task-demo');
 
