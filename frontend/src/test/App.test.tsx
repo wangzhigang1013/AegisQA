@@ -538,6 +538,53 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/repair-tasks/repair-demo/reopen')) {
         return jsonResponse({ ...demoRepairTask, status: 'open', reopen_reason: '复测仍未通过。', reopened_at: '2026-05-31T03:00:00Z' });
       }
+      if (url.endsWith('/repair-tasks/repair-demo/tree')) {
+        return jsonResponse({
+          repair_task: demoRepairTask,
+          selected_repair_task_id: 'repair-demo',
+          children: [
+            {
+              ...demoRepairTask,
+              repair_task_id: 'repair-followup-annotation',
+              parent_repair_task_id: 'repair-demo',
+              title: '低通过率分层修复建议',
+              status: 'resolved',
+              recommendation: 'payment 分层仍未改善，需要抽样复核。',
+              recommended_action: 'seed_annotation_queue',
+              target_url: '/annotation-queue?source_task_id=task-demo',
+            },
+            {
+              ...demoRepairTask,
+              repair_task_id: 'repair-followup-parameters',
+              parent_repair_task_id: 'repair-demo',
+              cause_type: 'workflow_parameters',
+              title: '确认修复是否进入当前 Attempt',
+              status: 'open',
+              recommendation: '检查 task_override 和 Prompt 参数是否进入新 Attempt。',
+              recommended_action: 'open_parameter_governance',
+              target_url: '/reports?task_id=task-demo&panel=parameter-governance',
+            },
+          ],
+          summary: {
+            total_children: 2,
+            open_children: 1,
+            in_progress_children: 0,
+            resolved_children: 1,
+            completion_rate: 0.5,
+            overall_status: 'open',
+            blocking_children: ['repair-followup-parameters'],
+            next_actions: [
+              {
+                repair_task_id: 'repair-followup-parameters',
+                title: '确认修复是否进入当前 Attempt',
+                status: 'open',
+                recommended_action: 'open_parameter_governance',
+                target_url: '/reports?task_id=task-demo&panel=parameter-governance',
+              },
+            ],
+          },
+        });
+      }
       if (url.endsWith('/repair-tasks/repair-demo/actions')) {
         const body = JSON.parse(String(init?.body ?? '{}')) as { action?: string };
         if (body.action === 'seed_annotation_queue') {
@@ -1420,6 +1467,18 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('确认修复是否进入当前 Attempt')).toBeInTheDocument();
     expect(screen.getByText('seed_annotation_queue')).toBeInTheDocument();
     expect(screen.getByText('open_parameter_governance')).toBeInTheDocument();
+  });
+
+  it('修复任务工作台支持查看修复树进度', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    fireEvent.click(await screen.findByRole('button', { name: /查看进度/ }));
+
+    expect(await screen.findByText('修复树进度')).toBeInTheDocument();
+    expect(await screen.findByText(/已完成 1 \/ 2/)).toBeInTheDocument();
+    expect(screen.getByText('低通过率分层修复建议')).toBeInTheDocument();
+    expect(screen.getAllByText('确认修复是否进入当前 Attempt').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('open_parameter_governance').length).toBeGreaterThan(0);
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {

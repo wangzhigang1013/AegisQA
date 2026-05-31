@@ -370,6 +370,34 @@ export type RepairTaskRecord = {
   updated_at?: string;
 };
 
+export type RepairTaskTreeNextAction = {
+  repair_task_id: string;
+  title: string;
+  status: string;
+  recommended_action?: string | null;
+  target_url?: string | null;
+  owner?: string | null;
+};
+
+export type RepairTaskTreeSummary = {
+  total_children: number;
+  open_children: number;
+  in_progress_children: number;
+  resolved_children: number;
+  completion_rate: number;
+  overall_status: string;
+  blocking_children: string[];
+  next_actions: RepairTaskTreeNextAction[];
+  selected_repair_task_id?: string;
+};
+
+export type RepairTaskTree = {
+  repair_task: RepairTaskRecord;
+  selected_repair_task_id?: string;
+  children: RepairTaskRecord[];
+  summary: RepairTaskTreeSummary;
+};
+
 export type TaskReport = {
   task: TaskRecord;
   task_summary?: {

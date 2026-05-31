@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Repair Task Follow-up Task Loop”已完成。本批次把修复建议继续接到“可追踪二级任务”的闭环：`POST /repair-tasks/{repair_task_id}/actions` 新增 `create_followup_repair_tasks`，会把最近生成的修复建议拆成带 `parent_repair_task_id`、`recommended_action` 和 `target_url` 的子 Repair Task，并且重复点击会复用已有子任务，避免同一建议被无限复制。前端修复任务工作台新增“拆分子任务”按钮、推荐动作列和子任务标记，用户能把建议分派、领取、完成、复跑，而不是只看到一段建议文本。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Repair Task Tree Progress Loop”已完成。本批次把已拆分的二级修复任务继续接到“修复树进度”闭环：新增 `GET /repair-tasks/{repair_task_id}/tree`，返回父任务、子任务、完成率、阻塞子任务和下一步动作；前端修复任务工作台新增“查看进度”入口和修复树进度抽屉，用户能看到一组修复建议整体推进到哪一步，而不是只看到散落的子任务。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -64,6 +64,7 @@
 - Repair Task 已支持复跑效果闭环：`retest_and_compare` 会基于来源任务创建新 Attempt、自动执行并对比前后报告，通过 `comparison_status` 标记 improved / mixed / unchanged / regressed；前端工作台新增“复跑对比”入口并刷新任务与报告缓存。
 - Repair Task 已支持上下文修复建议：`generate_remediation_plan` 会把复跑结果、诊断根因、弱分层、数据质量和参数来源风险转为可执行建议；前端工作台直接展示最近建议标题，减少用户在报告、Trace、参数治理和人工审核之间来回找入口。
 - Repair Task 已支持建议拆分为二级任务：`create_followup_repair_tasks` 会把建议拆成可领取、可完成、可重开的子任务，并保留父任务、推荐动作和目标入口；前端工作台可直接展示子任务、推荐动作和“打开入口”。
+- Repair Task 已支持修复树进度：`GET /repair-tasks/{repair_task_id}/tree` 聚合父任务、子任务、完成率、阻塞项和下一步动作；前端工作台可打开“查看进度”抽屉，直接看到已完成子任务数量、进度条、待处理动作和子任务明细。
 - Workflow 市场进入画布时会把当前草稿写入 `['workflow-draft', draft_id]` 单草稿缓存；画布深链在草稿未加载时显示加载态，异常 graph 结构会给出中文错误提示而不是白屏。
 - Judge 审计已新增多 Judge 一致性 API 与前端弹窗，支持输入多个 Judge 输出并展示两两一致率。
 - 报告中心已新增跨任务 Score Analytics，按 Task 聚合任务数、平均通过率、Badcase、P95、估算成本和退化任务，避免只看单次任务报告。
@@ -75,12 +76,12 @@
 ## 最近验证
 
 - `python -m pytest tests\test_sqlite_store_adapter.py -q`：3 passed，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
-- `python -m pytest tests\test_task_flow_optimization.py -q`：7 passed，覆盖 Task Preflight、Repair Task 生成查询、领取/完成/重开状态流转、Repair Task 发起 Annotation Queue / CI Gate 复测、修复后复跑 Attempt 与报告对比、上下文修复建议生成，以及修复建议拆分为二级任务。
-- `python -m pytest -q`：通过，覆盖 72 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest tests\test_task_flow_optimization.py -q`：8 passed，覆盖 Task Preflight、Repair Task 生成查询、领取/完成/重开状态流转、Repair Task 发起 Annotation Queue / CI Gate 复测、修复后复跑 Attempt 与报告对比、上下文修复建议生成、修复建议拆分为二级任务，以及修复树进度聚合。
+- `python -m pytest -q`：通过，覆盖 73 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v11`，Run `run-a0392226decb` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`：5 passed，覆盖修复任务工作台查看证据、领取、完成、发起人工审核、CI Gate 复测、复跑对比、生成修复建议和拆分子任务。
-- `cd frontend && npm test`：4 个测试文件、45 个测试通过。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`：6 passed，覆盖修复任务工作台查看证据、领取、完成、发起人工审核、CI Gate 复测、复跑对比、生成修复建议、拆分子任务和查看修复树进度。
+- `cd frontend && npm test`：4 个测试文件、46 个测试通过。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow"`：10 passed，覆盖 Workflow 市场、画布、撤销/重做、连线删除/重连、发布失败反馈、Aggregator 和参数预览。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 passed，覆盖 Workflow 画布新增节点、删除/重连、撤销/重做、删除节点、保存草稿回放、试运行、校验、发布。
@@ -98,13 +99,13 @@
 - Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；Run Attempt、CI Gate、Experiment baseline/A-B 对比和任务报告均已接入基础闭环。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
 - Experiment 快照、CI Gate、Annotation Queue 和 Trace Tree 已有独立产品页；跨任务 Score Analytics 和成本预算状态已接入报告中心，后续需要继续补真实成本账单、更多趋势筛选维度和跨任务对比可视化。
-- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势、修复任务状态流转、Annotation Queue 发起、CI Gate 复测、修复后复跑对比、上下文修复建议和二级修复任务已有最小闭环；后续需要把二级任务继续动作化到 Dataset 字段修正、Workflow 参数 diff/回滚和 Prompt/Skill 配置版本对比。
+- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势、修复任务状态流转、Annotation Queue 发起、CI Gate 复测、修复后复跑对比、上下文修复建议、二级修复任务和修复树进度已有最小闭环；后续需要把二级任务继续动作化到 Dataset 字段修正、Workflow 参数 diff/回滚和 Prompt/Skill 配置版本对比。
 - SQLite 轻量仓储已接入元数据路径；后续如果要进入多用户生产环境，仍需要正式 Repository 层、数据库迁移、索引治理、权限隔离和 Worker 队列接入。
 - 本地服务曾出现旧 FastAPI 进程未重启导致新增路由 404 的问题；已重启后端并完成浏览器复测。后续修改后端 API 时必须确认 8000 端口加载的是最新代码。
 
 ## 下一阶段目标
 
-- Repair Task 深水区：把当前二级修复任务继续接到 Dataset 字段修复、Workflow 参数 diff/回滚、Prompt/Skill 配置版本对比和修复树进度聚合。
+- Repair Task 深水区：把当前修复树中的子任务继续接到 Dataset 字段修复、Workflow 参数 diff/回滚、Prompt/Skill 配置版本对比和负责人协作视图。
 - 红队规则配置化：把当前内置规则升级为可管理规则集，支持按业务线启用、禁用、阈值和严重级别调整。
 - 成本治理生产化：接入真实 token/cost 账单、模型价格表、预算门禁和成本异常告警。
 - 趋势分析增强：为 Score Analytics 增加 Dataset、Workflow、模型版本、Prompt 版本、时间窗口和标签过滤，并补趋势可视化对比。
@@ -112,6 +113,43 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Repair Task Tree Progress Loop 完成
+
+- 改动摘要：继续优化“拆出子任务后仍不知道整体推进到哪一步”的断点。本批次新增 `GET /repair-tasks/{repair_task_id}/tree`，后端会从父任务聚合直接子任务，计算 `completion_rate`、`open_children`、`resolved_children`、`blocking_children` 和 `next_actions`；如果从子任务打开，也会回溯到父任务。前端修复任务工作台新增“查看进度”按钮和抽屉，展示父任务、整体状态、已完成数量、进度条、下一步动作和子任务明细。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/types.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/RepairTasksPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/superpowers/plans/2026-05-31-repair-task-tree-progress.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `git diff --check`
+  - `python -m pytest tests\test_task_flow_optimization.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台支持查看修复树进度"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端 RED：新增修复树进度测试最初失败，确认 `GET /repair-tasks/{repair_task_id}/tree` 仍是 404。
+  - 前端 RED：新增修复树进度测试最初失败，确认工作台缺“查看进度”按钮。
+  - 后端定向：8 passed，覆盖父任务子任务聚合、完成率、阻塞子任务和下一步动作。
+  - 前端修复树定向：1 passed，覆盖“查看进度”按钮、抽屉、已完成数量、子任务和推荐动作展示。
+  - 后端全量：73 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端修复任务工作台定向：6 passed。
+  - 前端 typecheck：通过。
+  - 前端全量：4 个测试文件、46 passed。
+  - 前端 build：通过。
+  - Playwright E2E：8 passed。
+- 下一步：继续把修复树中的子任务动作化到 Dataset 字段修正、Workflow 参数 diff/回滚、Prompt/Skill 版本对比，并增加负责人协作与超时提醒。
 
 ### 2026-05-31 Repair Task Follow-up Task Loop 完成
 

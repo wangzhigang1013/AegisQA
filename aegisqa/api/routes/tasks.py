@@ -120,6 +120,11 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             records = [record for record in records if record.get("source_task_id") == source_task_id]
         return sorted(records, key=lambda item: str(item.get("created_at", "")), reverse=True)
 
+    @app.get("/repair-tasks/{repair_task_id}/tree")
+    def get_repair_task_tree(repair_task_id: str) -> dict[str, Any]:
+        record = _get_record(ctx.store, "repair_tasks", repair_task_id)
+        return _build_repair_task_tree(ctx, record)
+
     @app.post("/repair-tasks/{repair_task_id}/start")
     def start_repair_task(repair_task_id: str, request: RepairTaskStartRequest) -> dict[str, Any]:
         record = _transition_repair_task(
@@ -604,6 +609,73 @@ def _create_repair_tasks_from_diagnostics(ctx: RouteContext, task: dict[str, Any
         "reused_count": len(reused),
         "repair_tasks": created + reused,
         "diagnostics_summary": diagnostics.get("summary", {}),
+    }
+
+
+def _build_repair_task_tree(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+    """返回父修复任务、子任务和聚合进度，支撑前端一次看清修复闭环。
+
+    子任务可能被用户直接打开。为了避免用户只看到孤立节点，这里会先回溯到父任务，
+    再围绕父任务计算整体进度和仍然阻塞的下一步动作。
+    """
+
+    root = repair_task
+    parent_id = repair_task.get("parent_repair_task_id")
+    if parent_id:
+        root = _get_record(ctx.store, "repair_tasks", str(parent_id))
+    records = _list_records(ctx.store, "repair_tasks")
+    root_id = str(root["repair_task_id"])
+    children = [record for record in records if str(record.get("parent_repair_task_id") or "") == root_id]
+    children = sorted(children, key=lambda item: str(item.get("created_at", "")))
+    return {
+        "repair_task": root,
+        "selected_repair_task_id": repair_task.get("repair_task_id"),
+        "children": children,
+        "summary": _build_repair_task_tree_summary(root, children, str(repair_task.get("repair_task_id"))),
+    }
+
+
+def _build_repair_task_tree_summary(root: dict[str, Any], children: list[dict[str, Any]], selected_repair_task_id: str) -> dict[str, Any]:
+    total_children = len(children)
+    resolved_children = sum(1 for item in children if item.get("status") == "resolved")
+    in_progress_children = sum(1 for item in children if item.get("status") == "in_progress")
+    open_children = sum(1 for item in children if item.get("status") == "open")
+    if total_children:
+        completion_rate = resolved_children / total_children
+        overall_status = "resolved" if resolved_children == total_children else "in_progress" if in_progress_children else "open"
+    else:
+        root_status = str(root.get("status") or "open")
+        completion_rate = 1.0 if root_status == "resolved" else 0.0
+        overall_status = root_status
+    blocking_children = [str(item["repair_task_id"]) for item in children if item.get("status") != "resolved"]
+    next_actions = [_repair_task_next_action(item) for item in children if item.get("status") != "resolved"]
+    return {
+        "total_children": total_children,
+        "open_children": open_children,
+        "in_progress_children": in_progress_children,
+        "resolved_children": resolved_children,
+        "completion_rate": round(completion_rate, 4),
+        "overall_status": overall_status,
+        "blocking_children": blocking_children,
+        "next_actions": next_actions,
+        "selected_repair_task_id": selected_repair_task_id,
+    }
+
+
+def _repair_task_next_action(record: dict[str, Any]) -> dict[str, Any]:
+    """把待处理子任务压缩为前端可直接渲染的下一步动作。"""
+
+    fallback_action = None
+    next_actions = record.get("next_actions") or []
+    if isinstance(next_actions, list) and next_actions:
+        fallback_action = next_actions[0]
+    return {
+        "repair_task_id": record.get("repair_task_id"),
+        "title": record.get("title"),
+        "status": record.get("status"),
+        "recommended_action": record.get("recommended_action") or fallback_action,
+        "target_url": record.get("target_url"),
+        "owner": record.get("owner"),
     }
 
 

@@ -1,11 +1,11 @@
 import { CheckCircleOutlined, CheckOutlined, FileSearchOutlined, ReloadOutlined, RollbackOutlined, UserAddOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Drawer, Form, Input, Modal, Progress, Select, Space, Table, Tag, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { RepairTaskRecord } from '../types';
+import type { RepairTaskRecord, RepairTaskTree } from '../types';
 
 type ResolveValues = {
   resolution_note: string;
@@ -21,6 +21,7 @@ export function RepairTasksPage() {
   const [sourceTaskId, setSourceTaskId] = useState<string | undefined>();
   const [resolveTask, setResolveTask] = useState<RepairTaskRecord | null>(null);
   const [reopenTask, setReopenTask] = useState<RepairTaskRecord | null>(null);
+  const [treeTask, setTreeTask] = useState<RepairTaskRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [resolveForm] = Form.useForm<ResolveValues>();
   const [reopenForm] = Form.useForm<ReopenValues>();
@@ -30,6 +31,11 @@ export function RepairTasksPage() {
   const repairTasksQuery = useQuery({
     queryKey: ['repair-tasks', sourceTaskId],
     queryFn: () => api.repairTasks({ source_task_id: sourceTaskId }),
+  });
+  const repairTaskTreeQuery = useQuery({
+    queryKey: ['repair-task-tree', treeTask?.repair_task_id],
+    queryFn: () => api.repairTaskTree(treeTask?.repair_task_id ?? ''),
+    enabled: Boolean(treeTask),
   });
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
 
@@ -47,6 +53,7 @@ export function RepairTasksPage() {
     onSuccess: async (record) => {
       setNotice(`修复任务已领取：${record.owner ?? 'qa_owner'}。`);
       await queryClient.invalidateQueries({ queryKey: ['repair-tasks'] });
+      await queryClient.invalidateQueries({ queryKey: ['repair-task-tree'] });
     },
     onError: (error) => setNotice(`领取失败：${formatApiError(error)}`),
   });
@@ -61,6 +68,7 @@ export function RepairTasksPage() {
       resolveForm.resetFields();
       setNotice(`修复任务已完成：${record.resolution_note ?? '已记录修复说明'}。`);
       await queryClient.invalidateQueries({ queryKey: ['repair-tasks'] });
+      await queryClient.invalidateQueries({ queryKey: ['repair-task-tree'] });
     },
     onError: (error) => setNotice(`完成失败：${formatApiError(error)}`),
   });
@@ -75,6 +83,7 @@ export function RepairTasksPage() {
       reopenForm.resetFields();
       setNotice(`修复任务已重开：${record.reopen_reason ?? '已记录重开原因'}。`);
       await queryClient.invalidateQueries({ queryKey: ['repair-tasks'] });
+      await queryClient.invalidateQueries({ queryKey: ['repair-task-tree'] });
     },
     onError: (error) => setNotice(`重开失败：${formatApiError(error)}`),
   });
@@ -92,6 +101,7 @@ export function RepairTasksPage() {
       void queryClient.invalidateQueries({ queryKey: ['ci-gates'] });
       void queryClient.invalidateQueries({ queryKey: ['tasks'] });
       void queryClient.invalidateQueries({ queryKey: ['task-report', payload.repair_task.source_task_id] });
+      void queryClient.invalidateQueries({ queryKey: ['repair-task-tree'] });
     },
     onError: (error) => setNotice(`动作执行失败：${formatApiError(error)}`),
   });
@@ -259,6 +269,9 @@ export function RepairTasksPage() {
                   <Button size="small" href={`/tasks/${record.source_task_id}/trace`}>
                     Trace
                   </Button>
+                  <Button size="small" onClick={() => setTreeTask(record)}>
+                    查看进度
+                  </Button>
                   <Button
                     size="small"
                     icon={<FileSearchOutlined />}
@@ -387,6 +400,13 @@ export function RepairTasksPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <RepairTaskTreeDrawer
+        tree={repairTaskTreeQuery.data}
+        loading={repairTaskTreeQuery.isLoading}
+        open={Boolean(treeTask)}
+        onClose={() => setTreeTask(null)}
+      />
     </section>
   );
 }
@@ -425,6 +445,74 @@ function RecentActionResult({ record }: { record: RepairTaskRecord }) {
   }
   const summary = record.action_history?.[record.action_history.length - 1]?.result_summary;
   return <Typography.Text type="secondary">{summary ?? '暂无结果'}</Typography.Text>;
+}
+
+function RepairTaskTreeDrawer({
+  tree,
+  loading,
+  open,
+  onClose,
+}: {
+  tree?: RepairTaskTree;
+  loading: boolean;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const summary = tree?.summary;
+  const percent = Math.round((summary?.completion_rate ?? 0) * 100);
+  return (
+    <Drawer title="修复树进度" width={720} open={open} onClose={onClose}>
+      <Space direction="vertical" className="drawer-stack">
+        <Typography.Text type="secondary">
+          父任务：{tree?.repair_task.title ?? '加载中'}
+        </Typography.Text>
+        <Space wrap>
+          <Typography.Text strong>整体状态：{summary ? renderStatus(summary.overall_status) : '-'}</Typography.Text>
+          <Typography.Text>
+            已完成 {summary?.resolved_children ?? 0} / {summary?.total_children ?? 0}
+          </Typography.Text>
+          <Typography.Text type="secondary">阻塞子任务 {summary?.blocking_children.length ?? 0} 个</Typography.Text>
+        </Space>
+        <Progress percent={percent} status={percent === 100 ? 'success' : 'active'} />
+
+        <Typography.Title level={5}>下一步动作</Typography.Title>
+        <Table
+          size="small"
+          rowKey="repair_task_id"
+          loading={loading}
+          dataSource={summary?.next_actions ?? []}
+          pagination={false}
+          columns={[
+            { title: '子任务', dataIndex: 'title' },
+            { title: '状态', dataIndex: 'status', width: 110, render: renderStatus },
+            { title: '推荐动作', dataIndex: 'recommended_action', width: 180 },
+            {
+              title: '入口',
+              dataIndex: 'target_url',
+              width: 120,
+              render: (value: string | null) => (value ? <Button size="small" href={value}>打开</Button> : '-'),
+            },
+          ]}
+        />
+
+        <Typography.Title level={5}>子任务明细</Typography.Title>
+        <Table
+          size="small"
+          rowKey="repair_task_id"
+          loading={loading}
+          dataSource={tree?.children ?? []}
+          pagination={false}
+          columns={[
+            { title: '标题', dataIndex: 'title' },
+            { title: '状态', dataIndex: 'status', width: 110, render: renderStatus },
+            { title: '根因', dataIndex: 'cause_type', width: 140, render: renderCauseType },
+            { title: '推荐动作', dataIndex: 'recommended_action', width: 180, render: (value) => value || '-' },
+            { title: '负责人', dataIndex: 'owner', width: 120, render: (value) => value || '未领取' },
+          ]}
+        />
+      </Space>
+    </Drawer>
+  );
 }
 
 function extractRecommendations(record: RepairTaskRecord): { area: string; title: string }[] {

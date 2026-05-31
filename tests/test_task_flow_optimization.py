@@ -287,3 +287,42 @@ def test_repair_task_can_split_remediation_plan_into_followup_tasks(tmp_path: Pa
 
     assert duplicate["result"]["created_count"] == 0
     assert duplicate["result"]["reused_count"] >= result["result"]["created_count"]
+
+
+def test_repair_task_tree_summarizes_followup_progress(tmp_path: Path) -> None:
+    client, dataset, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "修复树进度任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"][0]
+    client.post(f"/repair-tasks/{repair['repair_task_id']}/actions", json={"action": "retest_and_compare"})
+    client.post(f"/repair-tasks/{repair['repair_task_id']}/actions", json={"action": "generate_remediation_plan"})
+    split = client.post(
+        f"/repair-tasks/{repair['repair_task_id']}/actions",
+        json={"action": "create_followup_repair_tasks"},
+    ).json()
+    followups = split["result"]["repair_tasks"]
+
+    client.post(f"/repair-tasks/{followups[0]['repair_task_id']}/resolve", json={"resolution_note": "已完成人工审核。"})
+    response = client.get(f"/repair-tasks/{repair['repair_task_id']}/tree")
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["repair_task"]["repair_task_id"] == repair["repair_task_id"]
+    assert result["summary"]["total_children"] >= 2
+    assert result["summary"]["resolved_children"] == 1
+    assert result["summary"]["open_children"] >= 1
+    assert 0 < result["summary"]["completion_rate"] < 1
+    assert result["summary"]["overall_status"] == "open"
+    assert result["summary"]["blocking_children"]
+    assert result["summary"]["next_actions"]
+    assert result["children"][0]["parent_repair_task_id"] == repair["repair_task_id"]

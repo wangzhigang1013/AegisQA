@@ -18,6 +18,7 @@ import type {
   JudgeAuditTrends,
   RedTeamScanResult,
   RepairTaskRecord,
+  RepairTaskTree,
   RunRecord,
   RunReport,
   ScoreAnalytics,
@@ -287,6 +288,7 @@ export const api = {
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<RepairTaskRecord[]>(`/repair-tasks${suffix}`);
   },
+  repairTaskTree: (repairTaskId: string) => request<RepairTaskTree>(`/repair-tasks/${encodeURIComponent(repairTaskId)}/tree`),
   createRepairTasksFromDiagnostics: (taskId: string) =>
     request<{ source_task_id: string; created_count: number; reused_count: number; repair_tasks: RepairTaskRecord[] }>(`/tasks/${taskId}/repair-tasks/from-diagnostics`, { method: 'POST' }),
   startRepairTask: (repairTaskId: string, body: { owner: string }) =>
