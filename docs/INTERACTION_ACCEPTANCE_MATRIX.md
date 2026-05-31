@@ -9,6 +9,7 @@
 
 ## 最近一次交互验证
 
+- `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`：5 passed，候选资产列表、批量治理、候选审批/草稿/复跑、晋升审批/baseline 和批量审批已拆成独立测试。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心"`：6 passed，报告中心基础渲染、诊断动作、任务报告导出、导出审批生命周期、Badcase/Trace 跳转和 Score Analytics 已拆成独立测试，去掉原 20 秒特殊超时窗口。
 - `python -m pytest tests\test_task_center_api.py -q -k report_export_request_lifecycle_reject_revoke_and_expire`：1 passed，覆盖报告导出审批拒绝、撤销、过期阻断和生命周期审计。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：1 passed，覆盖报告中心 Admin 拒绝、重新申请、审批后导出和申请人撤销。

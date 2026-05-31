@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Report Page Test Split”已完成并通过前端全量验证。本批次不改业务行为，专门处理报告中心测试结构风险：把原来约 14 秒的报告页大测试拆成基础报告渲染、诊断动作、任务报告导出、导出审批生命周期、Badcase/Trace 跳转五个聚焦测试，去掉单测 20 秒特殊超时窗口，让后续报告中心功能回归更容易定位。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Candidate Assets Test Split”已完成并通过前端全量验证。本批次继续处理前端测试结构风险：继报告中心拆分后，将候选资产中心原约 7.7 秒的大测试拆成候选列表/复跑优先级、批量治理、候选审批/草稿/复跑、晋升审批/baseline 四条聚焦测试，并显式写清晋升审批依赖候选审批、生成草稿和复跑。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -46,6 +46,7 @@
 - 报告中心任务选择器已补 `aria-label="选择报告任务"`，Playwright 主链路不再依赖页面 Select 顺序，避免新增角色、筛选器或分页控件后误选下拉。
 - 报告外发已新增审批闭环：Viewer 可申请 HTML/CSV/JSON 导出审批，Admin 审批通过后可带 `approval_request_id` 导出同一 Task 和同一格式，导出审计会记录审批 ID；审批请求支持拒绝、撤销和过期状态，避免长期悬挂或误用。
 - 报告中心前端大测试已拆分为五个职责测试：基础报告渲染、诊断动作、任务报告导出、导出审批生命周期、Badcase/Trace 跳转；原 20 秒特殊超时窗口已移除。
+- 候选资产中心前端大测试已拆分为四条主职责测试：候选资产列表与复跑优先级、批量复跑/指派/归档/逾期升级、候选审批/生成草稿/复跑对比、晋升审批/baseline 应用/影响分析/回滚。
 - Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
@@ -111,6 +112,11 @@
 
 ## 最近验证
 
+- `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`：5 passed，53 skipped；原候选资产中心长测试拆为约 1.0 秒、1.5 秒、1.3 秒、3.4 秒和 0.6 秒几段，晋升审批测试显式补齐审批、生成草稿和复跑前置条件。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：4 个测试文件、69 passed；候选资产中心最长单测为晋升审批/baseline 闭环，约 5.8 秒。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心"`：6 passed，49 skipped；原报告页单测从约 14 秒拆为约 2.1 秒、2.7 秒、2.1 秒、3.3 秒、1.6 秒五个聚焦测试，Score Analytics 测试约 1.4 秒。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、66 passed；报告中心最长测试为导出审批生命周期，约 6.1 秒。
@@ -317,6 +323,29 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Candidate Assets Test Split
+
+- 改动摘要：拆分候选资产中心超长前端测试。原 `候选资产中心支持审批 Prompt/Skill 候选并创建 Workflow 草稿` 同时覆盖列表状态、批量治理、审批、生成草稿、复跑对比、晋升审批、baseline 应用、提醒确认、影响分析和回滚；现在拆成四条主职责测试，并保留独立批量审批测试，失败定位更清晰。
+- 变更文件：
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/superpowers/plans/2026-05-31-candidate-assets-test-split.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 5 passed，53 skipped。
+  - 候选列表与复跑优先级约 1.0 秒；批量治理约 1.5 秒；候选审批/草稿/复跑约 1.3 秒；晋升审批/baseline 闭环约 3.4 秒；批量审批约 0.6 秒。
+  - 拆分后曾发现晋升审批测试缺少候选审批、生成草稿和复跑前置条件，已显式补齐。
+  - 前端 typecheck：通过。
+  - 前端全量：4 个测试文件、69 passed；全量环境下晋升审批/baseline 闭环约 5.8 秒。
+  - 前端 build：通过。
+  - Playwright 全量：8 passed。
+- 下一步：提交本批次；之后继续评估 TaskCreateWizard 慢路径和 App.test 是否需要进一步按页面拆文件。
 
 ### 2026-05-31 Report Page Test Split
 

@@ -2113,12 +2113,19 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/候选草稿已发布，可以直接复跑/)).toBeInTheDocument();
     expect(screen.getByText('candidate-needs-publish')).toBeInTheDocument();
     expect(screen.getByText(/候选草稿尚未发布/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /批量复跑可执行候选/ }));
-    expect(await screen.findByText(/批量复跑完成：1 个，跳过 1 个/)).toBeInTheDocument();
     expect(screen.getByText(/未指派：1/)).toBeInTheDocument();
     expect(screen.getAllByText(/逾期：1/).length).toBeGreaterThan(0);
     expect(screen.getByText('prompt-flow-v0')).toBeInTheDocument();
     expect(screen.getByText('prompt-flow-v1')).toBeInTheDocument();
+  });
+
+  it('候选资产中心支持批量复跑、指派、归档和逾期升级', async () => {
+    await renderWorkbench('/candidate-assets');
+
+    expect(await screen.findByText('候选资产中心')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /批量复跑可执行候选/ }));
+    expect(await screen.findByText(/批量复跑完成：1 个，跳过 1 个/)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('批量指派负责人'), { target: { value: 'prompt_owner' } });
     fireEvent.change(screen.getByLabelText('负责人开放候选容量'), { target: { value: '3' } });
@@ -2145,6 +2152,12 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /升级逾期候选/ }));
     expect(await screen.findByText(/逾期候选已升级：1 个/)).toBeInTheDocument();
     expect(screen.getAllByText(/已升级/).length).toBeGreaterThan(0);
+  });
+
+  it('候选资产中心支持候选审批、生成草稿和复跑对比', async () => {
+    await renderWorkbench('/candidate-assets');
+
+    expect(await screen.findByText('候选资产中心')).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole('button', { name: /审批通过/ }));
     expect(await screen.findByText(/候选资产已审批/)).toBeInTheDocument();
@@ -2162,6 +2175,21 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('晋升建议')).toBeInTheDocument();
     expect(screen.getByText(/建议晋升：候选版本已达到质量门槛/)).toBeInTheDocument();
     expect(screen.getByText(/创建 Workflow 晋升审批/)).toBeInTheDocument();
+  });
+
+  it('候选资产中心支持晋升审批、Baseline 应用、影响分析和回滚', async () => {
+    await renderWorkbench('/candidate-assets');
+
+    expect(await screen.findByText('候选资产中心')).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: /审批通过/ }));
+    expect(await screen.findByText(/候选资产已审批/)).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: /生成草稿/ }));
+    expect(await screen.findByText(/Workflow 草稿已创建：draft-candidate-demo/)).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: /复跑对比/ }));
+    expect(await screen.findByText(/候选复跑已完成：task-candidate-demo/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /创建 Workflow 晋升审批/ }));
     expect(await screen.findByText(/晋升审批已创建：promotion-review-demo/)).toBeInTheDocument();
