@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Candidate Auto Archive”已完成目标实现和全量验证。本批次把候选资产中心从“只会越堆越多”推进到“可清理终态资产”：后端新增 `POST /prompt-skill-candidates/bulk-archive`，支持按状态和 `stale_before` 归档已拒绝、已晋升、已复跑等终态候选，默认列表隐藏 `archived`，但可用 `status=archived` 查看；前端候选资产中心新增“归档终态候选”按钮并展示归档/跳过数量。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Task Preflight Gate”已完成目标实现和全量验证。本批次把任务创建前的 Preflight 从“提示型检查”升级为“真实创建门禁”：后端 `POST /tasks` 会阻断 `preflight_result.status=blocked` 的任务创建，并返回 `TASK_PREFLIGHT_BLOCKED`、阻断检查项和修复建议；前端创建任务必须先运行与当前 Dataset Version、Workflow Version 匹配的 Preflight，阻断时默认禁用创建按钮，只有显式勾选风险确认后才会携带 `allow_blocked_preflight=true` 创建任务并写入执行快照。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -29,6 +29,7 @@
 - Workflow Inspector 已支持 Aggregator 聚合策略配置，当前覆盖多数投票、均值和一致性三类策略。
 - Workflow 草稿保存后可从 Workflow 市场重新打开并保留流程名称、节点名称等配置；试运行会使用当前选择的数据集并回填 step trace 与队列消息提示。
 - 执行中心已抽出 `TaskCreateWizard`，创建任务前必须选择 Dataset Version 和 Workflow Version；任务参数支持分片大小、并发、repeat、最大重试、重试退避和成本预算。
+- Task Preflight 已升级为创建门禁：后端阻断 blocked Preflight，前端要求先运行匹配当前 Dataset/Workflow 的 Preflight；确需创建坏数据诊断任务时必须显式确认风险，并把 `allow_blocked_preflight` 写入 Run/Task 快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
 - 前端任务详情已展示 Run Attempts、当前 Attempt、执行参数和 Trace Tree，并提供“新建 Attempt”动作。
@@ -103,10 +104,14 @@
 - `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
 - `python -m pytest tests\test_task_flow_optimization.py -q -k "bulk_archive"`：1 passed，覆盖终态旧候选归档、开放候选跳过、新候选跳过、默认列表隐藏 archived 和 `status=archived` 查询。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持审批"`：1 passed，覆盖候选资产中心“归档终态候选”按钮、归档结果反馈和请求体状态策略。
+- `python -m pytest tests\test_task_center_api.py -q -k preflight`：1 passed，覆盖 blocked Preflight 默认阻断任务创建、返回 `TASK_PREFLIGHT_BLOCKED`，以及显式 `allow_blocked_preflight=true` 后允许创建并写入执行快照。
+- `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`：4 passed，覆盖必须完成可继续 Preflight 后才能创建、阻断 Preflight 需要风险确认、重跑可继续 Preflight 后清除旧强制创建标记，以及并发/retry/repeat/成本预算参数提交。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心默认展示任务列表并可以创建任务"`：1 passed，覆盖执行中心创建任务必须先运行 Preflight，随后才能提交创建。
+- `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`：1 passed，覆盖主链路在创建任务前运行 Preflight。
 - `python -m pytest tests\test_task_flow_optimization.py -q`：20 passed。
-- `python -m pytest -q`：85 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest -q`：86 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：4 个测试文件、55 passed。
+- `cd frontend && npm test`：4 个测试文件、57 passed。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：8 passed。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
@@ -186,6 +191,16 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Task Preflight Gate
+
+- 新增执行计划 `docs/superpowers/plans/2026-05-31-task-preflight-gate.md`。
+- 后端 `TaskCreateRequest` 新增 `allow_blocked_preflight`，`POST /tasks` 在 Preflight blocked 且未显式强制时返回 `TASK_PREFLIGHT_BLOCKED`。
+- 后端 Task/Run 执行快照保存 `allow_blocked_preflight`，审计事件记录是否强制创建。
+- 前端 `TaskCreateWizard` 要求先运行匹配当前 Dataset Version 和 Workflow Version 的 Preflight；Preflight 结果过期会提示重新运行。
+- Preflight blocked 时创建按钮默认禁用，必须勾选“我已确认 Preflight 阻断风险，仍要创建任务”才可提交。
+- Playwright 主链路在创建任务前运行 Preflight，避免端到端流程绕过新门禁。
+- 验证：`python -m pytest -q` 86 个后端测试通过；`npm run typecheck`、`npm test` 57 passed、`npm run build`、`npm run e2e` 8 passed。
 
 ### 2026-05-31 Candidate Auto Archive
 

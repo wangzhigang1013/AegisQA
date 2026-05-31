@@ -1655,6 +1655,9 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
     expect((await screen.findAllByText(/Preflight 通过/)).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: '确认创建任务' })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
+    expect(await screen.findByText(/任务已创建/)).toBeInTheDocument();
   });
 
   it('Trace Flow 页面展示样本数据、参数来源和队列消息形状', async () => {

@@ -1,4 +1,4 @@
-import { Alert, Button, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Checkbox, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography } from 'antd';
 import { useEffect, useMemo } from 'react';
 
 import type { DatasetSummary, TaskPreflightResult, WorkflowVersion } from '../../types';
@@ -16,6 +16,7 @@ export type TaskCreateFormValues = {
   max_retries?: number;
   retry_backoff_seconds?: number;
   cost_budget?: number;
+  allow_blocked_preflight?: boolean;
 };
 
 type TaskCreateWizardProps = {
@@ -34,10 +35,25 @@ export function TaskCreateWizard({ open, loading, preflightLoading, preflightRes
   const [form] = Form.useForm<TaskCreateFormValues>();
   const watchedWorkflow = Form.useWatch('workflow_version_id', form);
   const watchedDataset = Form.useWatch('dataset_version_id', form);
+  const allowBlockedPreflight = Form.useWatch('allow_blocked_preflight', form);
   const datasetVersions = useMemo(
     () => datasets.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))),
     [datasets],
   );
+  const selectedDatasetVersion = datasetVersions.find((item) => item.version.version_id === watchedDataset)?.version;
+  const preflightMatchesSelection = Boolean(
+    preflightResult
+      && selectedDatasetVersion
+      && preflightResult.workflow_version_id === watchedWorkflow
+      && preflightResult.dataset_id === selectedDatasetVersion.dataset_id
+      && preflightResult.dataset_version === selectedDatasetVersion.version,
+  );
+  const preflightCanContinue = Boolean(
+    preflightMatchesSelection
+      && preflightResult
+      && (preflightResult.status !== 'blocked' || allowBlockedPreflight),
+  );
+  const createDisabled = !watchedWorkflow || !watchedDataset || !preflightCanContinue;
 
   useEffect(() => {
     if (!open) {
@@ -65,7 +81,7 @@ export function TaskCreateWizard({ open, loading, preflightLoading, preflightRes
           key="create"
           type="primary"
           loading={loading}
-          disabled={!watchedWorkflow || !watchedDataset}
+          disabled={createDisabled}
           onClick={() => form.submit()}
         >
           确认创建任务
@@ -88,8 +104,15 @@ export function TaskCreateWizard({ open, loading, preflightLoading, preflightRes
             sample_repeat_times: 1,
             max_retries: 1,
             retry_backoff_seconds: 0,
+            allow_blocked_preflight: false,
           }}
-          onFinish={onSubmit}
+          onFinish={(values) =>
+            onSubmit({
+              ...values,
+              // 强制创建只对 blocked Preflight 生效，避免用户重跑通过后仍带着旧风险标记提交。
+              allow_blocked_preflight: Boolean(preflightResult?.status === 'blocked' && values.allow_blocked_preflight),
+            })
+          }
         >
           <Form.Item name="name" label="任务名称" rules={[{ required: true, message: '请填写任务名称' }]}>
             <Input placeholder="例如：RAG 回归评测 2026-05-31" />
@@ -171,7 +194,23 @@ export function TaskCreateWizard({ open, loading, preflightLoading, preflightRes
               </Form.Item>
             </Col>
           </Row>
-          {preflightResult ? (
+          {watchedWorkflow && watchedDataset && !preflightResult ? (
+            <Alert
+              showIcon
+              type="info"
+              message="请先运行 Preflight"
+              description="创建任务前必须完成预检，避免缺字段、未审批 Skill 或预算配置缺失直接进入执行。"
+            />
+          ) : null}
+          {preflightResult && !preflightMatchesSelection ? (
+            <Alert
+              showIcon
+              type="warning"
+              message="Preflight 结果已过期"
+              description="Dataset Version 或 Workflow Version 已变化，请重新运行 Preflight。"
+            />
+          ) : null}
+          {preflightResult && preflightMatchesSelection ? (
             <Space direction="vertical" className="full-width-control">
               <Alert
                 showIcon
@@ -179,6 +218,11 @@ export function TaskCreateWizard({ open, loading, preflightLoading, preflightRes
                 message={preflightTitle(preflightResult.status)}
                 description={preflightResult.summary}
               />
+              {preflightResult.status === 'blocked' ? (
+                <Form.Item name="allow_blocked_preflight" valuePropName="checked">
+                  <Checkbox>我已确认 Preflight 阻断风险，仍要创建任务</Checkbox>
+                </Form.Item>
+              ) : null}
               <Table
                 size="small"
                 pagination={false}

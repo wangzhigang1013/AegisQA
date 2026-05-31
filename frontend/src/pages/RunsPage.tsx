@@ -88,6 +88,7 @@ export function RunsPage() {
         max_retries: values.max_retries,
         retry_backoff_seconds: values.retry_backoff_seconds,
         cost_budget: values.cost_budget,
+        allow_blocked_preflight: values.allow_blocked_preflight,
       });
     },
     onSuccess: async (task) => {

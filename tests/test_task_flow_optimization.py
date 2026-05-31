@@ -401,6 +401,8 @@ def test_repair_task_dataset_field_action_returns_fix_plan(tmp_path: Path) -> No
             "workflow_version_id": workflow["version_id"],
             "evaluation_goal": "release_gate",
             "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+            # 该用例故意使用缺字段数据来验证字段修复计划，因此显式接受 Preflight 阻断风险。
+            "allow_blocked_preflight": True,
         },
     ).json()
     executed = client.post(f"/tasks/{task['task_id']}/execute").json()

@@ -196,6 +196,7 @@ class TaskCreateRequest(BaseModel):
     retry_backoff_seconds: int | None = None
     cost_budget: float | None = None
     skill_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    allow_blocked_preflight: bool = False
 
 
 class TaskPreflightRequest(BaseModel):

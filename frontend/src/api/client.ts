@@ -370,6 +370,7 @@ export const api = {
     retry_backoff_seconds?: number;
     cost_budget?: number;
     skill_overrides?: Record<string, Record<string, unknown>>;
+    allow_blocked_preflight?: boolean;
   }) =>
     request<TaskRecord>('/tasks', {
       method: 'POST',

@@ -38,8 +38,35 @@ const workflows: WorkflowVersion[] = [
   },
 ];
 
+const passedPreflight = {
+  status: 'passed',
+  summary: '预检通过，可以创建并执行任务。',
+  dataset_id: 'dataset-demo',
+  dataset_version: 1,
+  workflow_version_id: 'wf-demo:v1',
+  checks: [],
+};
+
+const blockedPreflight = {
+  status: 'blocked',
+  summary: '预检阻断：字段缺失。',
+  dataset_id: 'dataset-demo',
+  dataset_version: 1,
+  workflow_version_id: 'wf-demo:v1',
+  checks: [
+    {
+      check_id: 'field_mapping',
+      title: 'Workflow 字段映射',
+      status: 'blocked',
+      message: '数据集缺少字段：reference。',
+      details: {},
+      recommendation: '请修正字段映射。',
+    },
+  ],
+};
+
 describe('TaskCreateWizard', () => {
-  it('必须选择 Dataset Version 和 Workflow Version 后才能创建', async () => {
+  it('必须选择 Dataset、Workflow 并完成可继续的 Preflight 后才能创建', async () => {
     const onSubmit = vi.fn();
     render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
 
@@ -50,12 +77,60 @@ describe('TaskCreateWizard', () => {
     expect(createButton).toBeDisabled();
 
     await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    expect(createButton).toBeDisabled();
+  });
+
+  it('Preflight 阻断时默认不能创建，必须显式确认风险', async () => {
+    const onSubmit = vi.fn();
+    render(
+      <TaskCreateWizard
+        open
+        datasets={datasets}
+        workflows={workflows}
+        loading={false}
+        preflightLoading={false}
+        preflightResult={blockedPreflight}
+        onCancel={vi.fn()}
+        onPreflight={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '强制任务' } });
+    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+
+    const createButton = screen.getByRole('button', { name: '确认创建任务' });
+    expect(createButton).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('我已确认 Preflight 阻断风险，仍要创建任务'));
     expect(createButton).not.toBeDisabled();
+    fireEvent.click(createButton);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ allow_blocked_preflight: true }));
+  });
+
+  it('重新得到可继续 Preflight 后会清除强制创建标记', async () => {
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={blockedPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '重跑 Preflight 任务' } });
+    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    fireEvent.click(screen.getByLabelText('我已确认 Preflight 阻断风险，仍要创建任务'));
+
+    rerender(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={passedPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ allow_blocked_preflight: false }));
   });
 
   it('提交任务参数时包含并发、重试、repeat 和成本预算', async () => {
     const onSubmit = vi.fn();
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={passedPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
 
     fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '严谨化任务' } });
     await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');

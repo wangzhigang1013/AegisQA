@@ -189,3 +189,36 @@ def test_task_lifecycle_report_and_trace_tree(tmp_path: Path) -> None:
     trace_tree = client.get(f"/tasks/{task['task_id']}/trace-tree").json()
     assert trace_tree["run_id"] == next_attempt["run_id"]
     assert trace_tree["items"][0]["children"][0]["skill_ref"] == "llm.call@0.1.0"
+
+
+def test_task_creation_blocks_failed_preflight_unless_explicitly_forced(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "missing_reference.jsonl"
+    rows = [{"question": "缺少 reference 字段", "expected_label": "pass"}]
+    with data_path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    dataset = client.post("/datasets/from-path", json={"name": "missing_reference", "path": str(data_path)}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    task_payload = {
+        "name": "缺字段任务",
+        "dataset_id": dataset["dataset_id"],
+        "dataset_version": dataset["version"],
+        "workflow_version_id": workflow["version_id"],
+        "evaluation_goal": "release_gate",
+        "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+        "cost_budget": 1.0,
+    }
+
+    blocked = client.post("/tasks", json=task_payload)
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "TASK_PREFLIGHT_BLOCKED"
+    assert blocked.json()["details"]["preflight_result"]["status"] == "blocked"
+    assert blocked.json()["details"]["blocked_checks"][0]["check_id"] == "field_mapping"
+
+    forced = client.post("/tasks", json={**task_payload, "allow_blocked_preflight": True}).json()
+    assert forced["status"] == "queued"
+    assert forced["preflight_result"]["status"] == "blocked"
+    assert forced["execution_config"]["allow_blocked_preflight"] is True

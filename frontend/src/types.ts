@@ -292,6 +292,7 @@ export type TaskRecord = {
     };
     cost_budget?: number | null;
     skill_overrides?: Record<string, Record<string, unknown>>;
+    allow_blocked_preflight?: boolean;
   };
   current_attempt?: number;
   attempts?: {

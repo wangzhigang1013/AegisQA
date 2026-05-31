@@ -115,6 +115,8 @@ async function createAndExecuteTask(page: Page, datasetName: string, workflowNam
   await selectModalOption(page, 'Dataset Version', datasetName);
   await selectModalOption(page, 'Workflow Version', workflowName);
 
+  await page.getByRole('button', { name: /运行 Preflight/ }).click();
+  await expect(page.getByText(/Preflight 完成/)).toBeVisible();
   await page.getByRole('button', { name: '确认创建任务' }).click();
   await expect(page.getByText(new RegExp(`任务已创建：${escapeRegExp(taskName)}`))).toBeVisible();
 

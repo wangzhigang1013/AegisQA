@@ -9,7 +9,7 @@
 
 ## 最近一次交互验证
 
-- `npm test`：55 个前端交互/API client/图模型/任务创建向导/Preflight/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/参数预览/报告评测结论/报告根因诊断/Repair Task 生成、工作台、动作闭环、复跑对比、上下文修复建议、二级修复任务与修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、候选资产中心审批/拒绝/生成草稿/复跑优先级/批量复跑/复跑对比/三方指标展示/晋升建议/晋升审批/通过晋升后 baseline 与 CI 发布资产/baseline 应用、baseline 影响分析、baseline 回滚门禁、baseline 变更提醒确认、候选资产负责人工作量/批量指派/负责人容量限制/批量指派参数配置/终态候选归档/SLA 逾期升级/批量审批、Workflow 草稿创建/报告风险治理/Experiment/CI Gate/Annotation Queue/Judge 偏差趋势/治理边界测试通过。
+- `npm test`：57 个前端交互/API client/图模型/任务创建向导/Preflight 创建门禁/首页任务工作台/任务详情驾驶舱/Dataset Lineage/Trace Flow/Trace Tree/Workflow 字段映射/参数预览/报告评测结论/报告根因诊断/Repair Task 生成、工作台、动作闭环、复跑对比、上下文修复建议、二级修复任务与修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、候选资产中心审批/拒绝/生成草稿/复跑优先级/批量复跑/复跑对比/三方指标展示/晋升建议/晋升审批/通过晋升后 baseline 与 CI 发布资产/baseline 应用、baseline 影响分析、baseline 回滚门禁、baseline 变更提醒确认、候选资产负责人工作量/批量指派/负责人容量限制/批量指派参数配置/终态候选归档/SLA 逾期升级/批量审批、Workflow 草稿创建/报告风险治理/Experiment/CI Gate/Annotation Queue/Judge 偏差趋势/治理边界测试通过。
 - `npm run e2e`：8 个 Playwright E2E 通过，覆盖“上传数据 -> 上传并审批 Skill -> 发布 Workflow -> 创建任务 -> 执行 -> 查看任务详情驾驶舱 -> 查看任务报告 -> 纠错 Badcase -> 查看 Trace Flow 参数来源”主链路、CI Gate 创建配置与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、删除后重连、键盘删除、保存草稿回放、试运行回填、校验、发布。
 - `npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Workflow 画布 E2E 通过；曾发现草稿深链加载覆盖用户本地删除边状态，已通过加载态和单草稿缓存修复。
 - SQLite 轻量仓储后端已通过 `tests/test_sqlite_store_adapter.py`，前端交互仍通过完整 Playwright；报告页 E2E 定位已收紧到任务摘要行，避免任务名同时出现在摘要和跨任务表格时触发严格模式误判。
@@ -49,7 +49,7 @@
 | Workflow 画布 | 校验 | 可用，提交当前画布 graph；前端已抽出图模型转换，避免提交静态 demo graph | `POST /workflow-graphs/validate` | 前端图模型单测与 Playwright E2E 覆盖 |
 | Workflow 画布 | 试运行 | 可用，要求先选择 Dataset Version，会回填 step trace 并提示队列消息只携带 `item_id` | `POST /workflow-graphs/dry-run` | 后端契约测试与 Playwright E2E 覆盖 |
 | Workflow 画布 | 发布 | 可用，提交当前画布 graph；后端发布阻断错误会回填到 Console“错误与建议” | `POST /workflow-graphs/publish` | 后端发布阻断测试、前端发布失败测试与 Playwright E2E 覆盖 |
-| 执行中心 | 创建任务 | 可用，独立向导选择 Dataset Version 和 Workflow Version；未选择时禁用创建；支持评测目的、质量门槛、Preflight 检查表、分片大小、并发、repeat、最大重试、重试退避、成本预算，并保存到任务快照 | `POST /tasks/preflight`、`POST /tasks`、`GET /workflows`、`GET /datasets` | `TaskCreateWizard` 单测覆盖必选校验和参数提交；目标前端测试覆盖评测目的、质量门槛和 Preflight；后端测试覆盖 `evaluation_goal`、`quality_gate`、`preflight_result`、`execution_config` 落库；Playwright E2E 覆盖真实创建 |
+| 执行中心 | 创建任务 | 可用，独立向导选择 Dataset Version 和 Workflow Version；未选择时禁用创建；必须先运行与当前选择匹配的 Preflight，结果过期会提示重跑；Preflight passed/warning 才能直接创建，blocked 时默认禁用创建，必须勾选风险确认才会携带 `allow_blocked_preflight=true` 创建；重跑后如果 Preflight 不再 blocked，会自动清除旧强制创建标记；支持评测目的、质量门槛、Preflight 检查表、分片大小、并发、repeat、最大重试、重试退避、成本预算，并保存到任务快照 | `POST /tasks/preflight`、`POST /tasks`、`GET /workflows`、`GET /datasets` | `TaskCreateWizard` 单测覆盖必选校验、Preflight 创建门禁、阻断风险确认、重跑后清除旧强制创建标记和参数提交；目标前端测试覆盖执行中心先运行 Preflight 后创建；后端测试覆盖 `TASK_PREFLIGHT_BLOCKED`、`allow_blocked_preflight`、`evaluation_goal`、`quality_gate`、`preflight_result`、`execution_config` 落库；Playwright E2E 覆盖真实创建前运行 Preflight |
 | 执行中心 | 执行/暂停/恢复/取消/重试 | 可用，动作绑定任务并刷新列表；completed/running/canceled 等非法状态会被后端拒绝，前端按钮按状态禁用并显示原因 | `POST /tasks/{task_id}/execute|pause|resume|cancel|retry-failed` | `npm test` 覆盖执行状态刷新和完成态禁用；Playwright E2E 覆盖真实执行；P0 后端测试覆盖状态机 |
 | 执行中心 | 任务详情驾驶舱 | 可用，按概览、样本、Trace、Badcase、Attempts、参数组织；参数页展示任务冻结参数、Skill 参数来源和 Secret 脱敏说明；已完成任务可新建 Attempt 且不覆盖旧报告 | `GET /tasks`、`GET /tasks/{task_id}/trace-tree`、`GET /tasks/{task_id}/trace-flow`、`GET /tasks/{task_id}/report`、`POST /tasks/{task_id}/attempts` | 后端测试覆盖历史报告保留；前端测试覆盖驾驶舱页签；Playwright 覆盖任务执行后查看驾驶舱 |
 | Trace Flow | 样本级数据流 | 可用，从任务详情和报告页进入；展示 Dataset、Workflow、Attempt、队列消息形状、样本列表、Step Timeline、Row、Context、Metrics、Input、参数来源、Output、Error 和 Badcase 状态 | `GET /tasks/{task_id}/trace-flow` | `tests/test_trace_flow_api.py`、`npm test` 和 Playwright 主链路覆盖 |
@@ -106,6 +106,6 @@
 ## 当前仍需增强
 
 - Workflow 画布已通过 Playwright 覆盖进入画布、新增节点、聚合策略、创建连线、删除节点、删除下游连线、键盘删除、保存草稿回放、试运行与发布；字段映射表格和参数预览已进入 Vitest，后续需要进一步拆分组件并补真实浏览器中的字段映射编辑 E2E。
-- Task 创建向导已加入必选校验、评测目的、质量门槛、Preflight、并发/重试/repeat 和成本预算，任务详情已升级为驾驶舱页签；后续需要继续接入实验 baseline 对比、权限检查和更细粒度执行参数模板。
+- Task 创建向导已加入必选校验、评测目的、质量门槛、Preflight 创建门禁、阻断风险确认、并发/重试/repeat 和成本预算，任务详情已升级为驾驶舱页签；后续需要继续接入实验 baseline 对比、权限检查和更细粒度执行参数模板。
 - 报告中心、Trace Flow、修复任务、实验中心、CI Gate、Annotation Queue 和候选资产中心已覆盖任务报告、评测结论、根因诊断、Repair Task 生成、领取/完成/重开、指派负责人、截止时间、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、候选资产审批、候选资产负责人工作量、批量指派、负责人容量限制、终态候选归档、SLA 逾期升级、批量审批、复跑优先级计划、批量复跑执行、Workflow 草稿创建、候选草稿发布后复跑对比、晋升建议、Workflow 晋升审批、晋升通过后的 baseline 替换建议与 CI Gate 发布记录、baseline 应用/回滚、baseline 变更影响分析、baseline 变更提醒确认、回滚前门禁复测、发起人工审核、CI Gate 复测、修复后复跑对比、上下文修复建议、二级修复任务、修复树进度、样本级数据流、跨任务 Score Analytics、红队扫描、成本预算、Experiment baseline/A-B 对比、质量门禁阻断评估与历史趋势、人工审核回流和批量审核候选资产沉淀；后续需要接入真实成本账单、更复杂的趋势筛选、容量阈值配置化、提醒分派策略和外部审批流集成。
 - Judge 审计已补齐多 Judge 一致性和偏差趋势最小闭环；后续需要按业务标签、模型版本和时间窗口继续细分偏差归因。

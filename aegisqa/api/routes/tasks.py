@@ -72,6 +72,14 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 skill_overrides=request.skill_overrides,
             ),
         )
+        if preflight_result.get("status") == "blocked" and not request.allow_blocked_preflight:
+            blocked_checks = [check for check in preflight_result.get("checks", []) if check.get("status") == "blocked"]
+            raise AegisQAError(
+                "TASK_PREFLIGHT_BLOCKED",
+                "Preflight 存在阻断项，必须修复后再创建任务；如确需创建，请显式开启强制创建并保留审计证据。",
+                status_code=409,
+                details={"preflight_result": preflight_result, "blocked_checks": blocked_checks},
+            )
         run = ctx.runner.create_run(
             RunRequest(
                 workflow=workflow,
@@ -84,6 +92,8 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                     "evaluation_goal": request.evaluation_goal,
                     "quality_gate": request.quality_gate,
                     "skill_overrides": request.skill_overrides,
+                    # 强制创建属于风险接受动作，必须进入 Run 快照，后续报告才能解释来源。
+                    "allow_blocked_preflight": request.allow_blocked_preflight,
                 },
             )
         )
@@ -99,6 +109,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             },
             "cost_budget": request.cost_budget,
             "skill_overrides": request.skill_overrides,
+            "allow_blocked_preflight": request.allow_blocked_preflight,
         }
         task = _build_task_record(
             request.name,
@@ -111,7 +122,12 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             preflight_result=preflight_result,
         )
         _save_record(ctx.store, "tasks", "task_id", task)
-        ctx.audit_service.record(actor="api", action="task.create", target=task["task_id"], detail={"run_id": run.run_id})
+        ctx.audit_service.record(
+            actor="api",
+            action="task.create",
+            target=task["task_id"],
+            detail={"run_id": run.run_id, "allow_blocked_preflight": request.allow_blocked_preflight},
+        )
         return task
 
     @app.post("/tasks/preflight")
