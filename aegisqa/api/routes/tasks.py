@@ -41,6 +41,7 @@ from aegisqa.api.app import (
 )
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
+from aegisqa.core.security import redact_secrets
 from aegisqa.engine.runner import RunRecord, RunRequest
 from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments, compare_reports
 from aegisqa.reports.diagnostics import build_task_diagnostics
@@ -220,6 +221,8 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             result = _repair_action_create_followup_tasks(ctx, record)
         elif action == "fix_dataset_fields":
             result = _repair_action_fix_dataset_fields(ctx, record)
+        elif action == "plan_workflow_parameter_changes":
+            result = _repair_action_plan_workflow_parameter_changes(ctx, record)
         elif action in {"open_trace_flow", "open_parameter_governance", "open_dataset_lineage"}:
             result = _repair_action_link_target(record, action)
         else:
@@ -236,6 +239,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                         "generate_remediation_plan",
                         "create_followup_repair_tasks",
                         "fix_dataset_fields",
+                        "plan_workflow_parameter_changes",
                         "open_trace_flow",
                         "open_parameter_governance",
                         "open_dataset_lineage",
@@ -1046,6 +1050,121 @@ def _build_dataset_field_fix_actions(data_quality: dict[str, Any]) -> list[dict[
     return sorted(actions, key=lambda value: (not bool(value["required_by_workflow"]), str(value["field"])))
 
 
+def _repair_action_plan_workflow_parameter_changes(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+    """生成 Workflow 参数 diff 与回滚计划。
+
+    参数风险通常来自 task_override、运行时表达式或 secret_ref。这里不直接修改 Workflow
+    或任务覆盖，因为参数改动会影响后续评测可复现性；API 只返回“当前执行证据 vs
+    Workflow 默认配置”的差异和建议补丁，交给用户确认后再发布新 Workflow 版本或重建任务。
+    """
+
+    task = _get_record(ctx.store, "tasks", str(repair_task.get("source_task_id")))
+    run_id = _repair_latest_run_id(repair_task, task)
+    run = ctx.runner.get_run(run_id)
+    governance = _build_parameter_governance(task, run)
+    parameter_diffs = _build_workflow_parameter_diffs(task, run, governance)
+    rollback_plan = {
+        "skill_overrides_remove": [
+            {"step_id": item["step_id"], "parameter": item["parameter"]}
+            for item in parameter_diffs
+            if item.get("source") == "task_override"
+        ],
+        "runtime_expression_review": [
+            {"step_id": item["step_id"], "parameter": item["parameter"], "expression_path": item.get("expression_path")}
+            for item in parameter_diffs
+            if item.get("source") == "runtime_expression"
+        ],
+        "secret_ref_review": [
+            {"step_id": item["step_id"], "parameter": item["parameter"], "secret_ref": item.get("secret_ref")}
+            for item in parameter_diffs
+            if item.get("source") == "secret_ref"
+        ],
+    }
+    return {
+        "status": "planned",
+        "source_task_id": task["task_id"],
+        "run_id": run.run_id,
+        "workflow": {
+            "workflow_id": run.workflow.workflow_id,
+            "version_id": run.workflow.version_id,
+            "name": run.workflow.name,
+            "snapshot_hash": run.workflow.snapshot_hash,
+        },
+        "target_url": f"/reports?task_id={task['task_id']}&panel=parameter-governance",
+        "parameter_diffs": parameter_diffs,
+        "rollback_plan": rollback_plan,
+        "next_steps": [
+            "先在参数治理页确认 task_override、runtime_expression 和 secret_ref 是否符合本次评测目标。",
+            "如果任务覆盖只是临时实验，移除对应 skill_overrides 后重建任务或触发复跑对比。",
+            "如果覆盖值是新基线，把确认后的配置发布为新的 Workflow 版本，再用同一 Dataset 重新创建 Task。",
+        ],
+    }
+
+
+def _build_workflow_parameter_diffs(task: dict[str, Any], run: RunRecord, governance: dict[str, Any]) -> list[dict[str, Any]]:
+    execution_config = task.get("execution_config", {})
+    task_overrides = execution_config.get("skill_overrides", {}) if isinstance(execution_config, dict) else {}
+    if not isinstance(task_overrides, dict):
+        task_overrides = {}
+    sources_by_step = {
+        str(item.get("step_id")): item.get("parameters", {})
+        for item in governance.get("parameter_sources", [])
+        if isinstance(item, dict)
+    }
+    diffs: list[dict[str, Any]] = []
+    for step in run.workflow.steps:
+        step_sources = sources_by_step.get(step.step_id, {})
+        if not isinstance(step_sources, dict):
+            continue
+        step_overrides = task_overrides.get(step.step_id, {})
+        if not isinstance(step_overrides, dict):
+            step_overrides = {}
+        for parameter, trace in sorted(step_sources.items()):
+            if not isinstance(trace, dict):
+                continue
+            source = str(trace.get("source") or "unknown")
+            if source not in {"task_override", "runtime_expression", "secret_ref"}:
+                continue
+            workflow_value = step.config.get(parameter)
+            override_value = step_overrides.get(parameter)
+            diffs.append(
+                {
+                    "step_id": step.step_id,
+                    "skill_ref": step.skill_ref,
+                    "parameter": parameter,
+                    "source": source,
+                    "workflow_value_preview": redact_secrets(workflow_value),
+                    "task_override_value_preview": redact_secrets(override_value) if parameter in step_overrides else None,
+                    "current_value_preview": trace.get("value_preview"),
+                    "expression_path": trace.get("expression_path"),
+                    "secret_ref": trace.get("secret_ref"),
+                    "recommended_action": _workflow_parameter_recommended_action(source),
+                    "recommendation": _workflow_parameter_recommendation(source),
+                }
+            )
+    return diffs
+
+
+def _workflow_parameter_recommended_action(source: str) -> str:
+    if source == "task_override":
+        return "remove_task_override_or_promote_to_workflow"
+    if source == "runtime_expression":
+        return "stabilize_expression_or_freeze_value"
+    if source == "secret_ref":
+        return "verify_secret_scope_and_rotation"
+    return "review_parameter_source"
+
+
+def _workflow_parameter_recommendation(source: str) -> str:
+    if source == "task_override":
+        return "任务覆盖了 Workflow 默认值，请移除覆盖或将确认后的值发布到新 Workflow 版本。"
+    if source == "runtime_expression":
+        return "运行时表达式依赖样本路径，请确认该路径在所有样本中稳定存在，必要时冻结为 Workflow 配置。"
+    if source == "secret_ref":
+        return "Secret 参数已脱敏，请确认引用范围、轮换策略和本次评测使用的环境一致。"
+    return "请确认该参数来源是否符合本次评测目标。"
+
+
 def _repair_recommendations_from_last_result(ctx: RouteContext, repair_task: dict[str, Any]) -> list[dict[str, Any]]:
     last_action = repair_task.get("last_action_result") or {}
     if isinstance(last_action, dict) and last_action.get("action") == "generate_remediation_plan":
@@ -1137,7 +1256,7 @@ def _build_repair_remediation_recommendations(
                 "确认修复是否进入当前 Attempt",
                 f"最近复跑状态为 {comparison_status}，需要先确认 Prompt、模型参数、task_override 和 secret_ref 是否被新 Attempt 使用。",
                 f"/reports?task_id={task_id}&panel=parameter-governance",
-                "open_parameter_governance",
+                "plan_workflow_parameter_changes",
                 "high" if comparison_status == "regressed" else "medium",
                 [f"comparison_status={comparison_status}"],
             )
@@ -1179,7 +1298,7 @@ def _build_repair_remediation_recommendations(
                 "审查 Workflow 参数来源",
                 "检查 schema_default、workflow_config、task_override、runtime_expression、secret_ref 的优先级是否符合本次评测目标。",
                 f"/reports?task_id={task_id}&panel=parameter-governance",
-                "open_parameter_governance",
+                "plan_workflow_parameter_changes",
                 "medium",
                 parameter_risks.get("warnings", []),
             )
@@ -1268,6 +1387,8 @@ def _repair_action_summary(action: str, result: dict[str, Any]) -> str:
         return f"已创建 {result.get('created_count', 0)} 个后续修复任务，复用 {result.get('reused_count', 0)} 个。"
     if action == "fix_dataset_fields":
         return f"已生成 {len(result.get('field_actions', []))} 条字段修复建议。"
+    if action == "plan_workflow_parameter_changes":
+        return f"已生成 {len(result.get('parameter_diffs', []))} 条参数 diff 和回滚建议。"
     if result.get("url"):
         return f"已打开证据入口：{result['url']}"
     return "动作已记录。"

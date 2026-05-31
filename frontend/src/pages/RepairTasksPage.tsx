@@ -359,6 +359,16 @@ export function RepairTasksPage() {
                       字段修复计划
                     </Button>
                   ) : null}
+                  {hasRepairAction(record, 'plan_workflow_parameter_changes') ? (
+                    <Button
+                      size="small"
+                      icon={<FileSearchOutlined />}
+                      loading={actionMutation.isPending}
+                      onClick={() => runAction(record, 'plan_workflow_parameter_changes')}
+                    >
+                      参数 diff/回滚
+                    </Button>
+                  ) : null}
                   <Button size="small" href={`/reports?task_id=${record.source_task_id}&panel=parameter-governance`}>
                     参数治理
                   </Button>
@@ -522,6 +532,19 @@ function RecentActionResult({ record }: { record: RepairTaskRecord }) {
       </Space>
     );
   }
+  const parameterDiffs = extractParameterDiffs(record);
+  if (parameterDiffs.length) {
+    return (
+      <Space direction="vertical" size={2}>
+        <Typography.Text type="secondary">参数 diff/回滚计划</Typography.Text>
+        {parameterDiffs.slice(0, 3).map((item) => (
+          <Typography.Text key={`${item.step_id}-${item.parameter}`} type={item.source === 'task_override' ? 'warning' : 'secondary'}>
+            {item.step_id}.{item.parameter}：当前 {String(item.current_value_preview ?? '-')}，Workflow 默认 {String(item.workflow_value_preview ?? '-')}。{item.recommendation}
+          </Typography.Text>
+        ))}
+      </Space>
+    );
+  }
   const recommendations = extractRecommendations(record);
   if (recommendations.length) {
     return (
@@ -663,6 +686,39 @@ function extractFieldFixActions(record: RepairTaskRecord): { field: string; acti
       };
     })
     .filter((item): item is { field: string; action: string; recommendation: string; required_by_workflow: boolean } => Boolean(item));
+}
+
+function extractParameterDiffs(record: RepairTaskRecord): {
+  step_id: string;
+  parameter: string;
+  source: string;
+  current_value_preview: unknown;
+  workflow_value_preview: unknown;
+  recommendation: string;
+}[] {
+  const result = record.last_action_result?.result;
+  const diffs = result?.parameter_diffs;
+  if (!Array.isArray(diffs)) return [];
+  return diffs
+    .map((item) => {
+      if (!isRecord(item) || typeof item.step_id !== 'string' || typeof item.parameter !== 'string') return null;
+      return {
+        step_id: item.step_id,
+        parameter: item.parameter,
+        source: typeof item.source === 'string' ? item.source : 'unknown',
+        current_value_preview: item.current_value_preview,
+        workflow_value_preview: item.workflow_value_preview,
+        recommendation: typeof item.recommendation === 'string' ? item.recommendation : '请确认该参数来源是否符合本次评测目标。',
+      };
+    })
+    .filter((item): item is {
+      step_id: string;
+      parameter: string;
+      source: string;
+      current_value_preview: unknown;
+      workflow_value_preview: unknown;
+      recommendation: string;
+    } => Boolean(item));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

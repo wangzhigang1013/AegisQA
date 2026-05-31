@@ -97,7 +97,7 @@ const demoRepairTask = {
   affected_items: 12,
   evidence: ['scene=payment 通过率 40%，Badcase 12 条。'],
   recommendation: '优先复核 payment 场景的失败样本，补充 Golden 后再调整 Workflow。',
-  next_actions: ['open_trace_flow', 'seed_annotation_queue', 'evaluate_ci_gate', 'open_parameter_governance', 'fix_dataset_fields'],
+  next_actions: ['open_trace_flow', 'seed_annotation_queue', 'evaluate_ci_gate', 'open_parameter_governance', 'fix_dataset_fields', 'plan_workflow_parameter_changes'],
   action_history: [],
   owner: null,
   created_at: '2026-05-31T00:00:00Z',
@@ -573,7 +573,7 @@ describe('AegisQA 前端工作台', () => {
               due_at: '2000-01-01T00:00:00+00:00',
               overdue: true,
               recommendation: '检查 task_override 和 Prompt 参数是否进入新 Attempt。',
-              recommended_action: 'open_parameter_governance',
+              recommended_action: 'plan_workflow_parameter_changes',
               target_url: '/reports?task_id=task-demo&panel=parameter-governance',
             },
           ],
@@ -595,7 +595,7 @@ describe('AegisQA 前端工作台', () => {
                 owner: 'dataset_owner',
                 due_at: '2000-01-01T00:00:00+00:00',
                 overdue: true,
-                recommended_action: 'open_parameter_governance',
+                recommended_action: 'plan_workflow_parameter_changes',
                 target_url: '/reports?task_id=task-demo&panel=parameter-governance',
               },
             ],
@@ -683,7 +683,7 @@ describe('AegisQA 前端工作台', () => {
                   cause_type: 'workflow_parameters',
                   title: '确认修复是否进入当前 Attempt',
                   recommendation: '检查 task_override 和 Prompt 参数是否进入新 Attempt。',
-                  recommended_action: 'open_parameter_governance',
+                  recommended_action: 'plan_workflow_parameter_changes',
                   target_url: '/reports?task_id=task-demo&panel=parameter-governance',
                 },
               ],
@@ -730,6 +730,49 @@ describe('AegisQA 前端工作台', () => {
                       required_by_workflow: true,
                       missing_count: 100,
                       recommendation: '这是 Workflow 必需字段，请补充该列，或在 Workflow 画布把输入映射到已有等价字段。',
+                    },
+                  ],
+                },
+              },
+            },
+          });
+        }
+        if (body.action === 'plan_workflow_parameter_changes') {
+          return jsonResponse({
+            action: 'plan_workflow_parameter_changes',
+            result: {
+              status: 'planned',
+              target_url: '/reports?task_id=task-demo&panel=parameter-governance',
+              parameter_diffs: [
+                {
+                  step_id: 'answer',
+                  skill_ref: 'llm.call@0.1.0',
+                  parameter: 'model',
+                  source: 'task_override',
+                  workflow_value_preview: 'flow-model',
+                  current_value_preview: 'task-quality-model',
+                  recommended_action: 'remove_task_override_or_promote_to_workflow',
+                  recommendation: '任务覆盖了 Workflow 默认值，请移除覆盖或将确认后的值发布到新 Workflow 版本。',
+                },
+              ],
+              rollback_plan: { skill_overrides_remove: [{ step_id: 'answer', parameter: 'model' }] },
+            },
+            repair_task: {
+              ...demoRepairTask,
+              action_history: [{ action: 'plan_workflow_parameter_changes', status: 'planned', result_summary: '已生成 1 条参数 diff 和回滚建议。' }],
+              last_action_result: {
+                action: 'plan_workflow_parameter_changes',
+                result: {
+                  status: 'planned',
+                  parameter_diffs: [
+                    {
+                      step_id: 'answer',
+                      parameter: 'model',
+                      source: 'task_override',
+                      workflow_value_preview: 'flow-model',
+                      current_value_preview: 'task-quality-model',
+                      recommended_action: 'remove_task_override_or_promote_to_workflow',
+                      recommendation: '任务覆盖了 Workflow 默认值，请移除覆盖或将确认后的值发布到新 Workflow 版本。',
                     },
                   ],
                 },
@@ -1526,7 +1569,7 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('低通过率分层修复建议')).toBeInTheDocument();
     expect(screen.getByText('确认修复是否进入当前 Attempt')).toBeInTheDocument();
     expect(screen.getByText('seed_annotation_queue')).toBeInTheDocument();
-    expect(screen.getByText('open_parameter_governance')).toBeInTheDocument();
+    expect(screen.getByText('plan_workflow_parameter_changes')).toBeInTheDocument();
   });
 
   it('修复任务工作台支持查看修复树进度', async () => {
@@ -1538,7 +1581,7 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/已完成 1 \/ 2/)).toBeInTheDocument();
     expect(screen.getByText('低通过率分层修复建议')).toBeInTheDocument();
     expect(screen.getAllByText('确认修复是否进入当前 Attempt').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('open_parameter_governance').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('plan_workflow_parameter_changes').length).toBeGreaterThan(0);
   });
 
   it('修复任务工作台支持指派负责人并在修复树提示逾期', async () => {
@@ -1567,6 +1610,18 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('fix_dataset_fields')).toBeInTheDocument();
     expect(screen.getByText(/reference/)).toBeInTheDocument();
     expect(screen.getByText(/这是 Workflow 必需字段/)).toBeInTheDocument();
+  });
+
+  it('修复任务工作台支持生成 Workflow 参数 diff 和回滚建议', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    fireEvent.click(await screen.findByRole('button', { name: /参数 diff\/回滚/ }));
+
+    expect(await screen.findByText(/已生成 1 条参数 diff 和回滚建议/)).toBeInTheDocument();
+    expect(screen.getByText('plan_workflow_parameter_changes')).toBeInTheDocument();
+    expect(screen.getByText(/answer.model/)).toBeInTheDocument();
+    expect(screen.getByText(/task-quality-model/)).toBeInTheDocument();
+    expect(screen.getByText(/移除覆盖或将确认后的值发布到新 Workflow 版本/)).toBeInTheDocument();
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {

@@ -254,7 +254,7 @@ def _build_root_causes(
                 int(parameter_risks["override_count"] + parameter_risks["expression_count"] + parameter_risks["secret_ref_count"]),
                 parameter_risks["warnings"] or ["任务存在参数覆盖或运行时表达式，建议确认是否符合本次评测预期。"],
                 "检查任务冻结参数和参数来源，确认 task_override、runtime_expression、secret_ref 是否来自预期配置。",
-                ["open_parameter_governance"],
+                ["open_parameter_governance", "plan_workflow_parameter_changes"],
             )
         )
 

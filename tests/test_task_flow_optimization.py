@@ -277,7 +277,7 @@ def test_repair_task_can_split_remediation_plan_into_followup_tasks(tmp_path: Pa
     assert result["result"]["reused_count"] == 0
     assert result["repair_task"]["action_history"][-1]["action"] == "create_followup_repair_tasks"
     followups = [item for item in client.get(f"/repair-tasks?source_task_id={executed['task_id']}").json() if item.get("parent_repair_task_id") == repair["repair_task_id"]]
-    assert {item["recommended_action"] for item in followups}.issuperset({"seed_annotation_queue", "open_parameter_governance"})
+    assert {item["recommended_action"] for item in followups}.issuperset({"seed_annotation_queue", "plan_workflow_parameter_changes"})
     assert all(item["target_url"] for item in followups)
 
     duplicate = client.post(
@@ -415,3 +415,40 @@ def test_repair_task_dataset_field_action_returns_fix_plan(tmp_path: Path) -> No
     assert payload["result"]["target_url"] == f"/datasets?dataset_id={dataset['dataset_id']}&version={dataset['version']}"
     assert payload["repair_task"]["action_history"][-1]["action"] == "fix_dataset_fields"
     assert payload["repair_task"]["last_action_result"]["result"]["field_actions"]
+
+
+def test_repair_task_workflow_parameter_action_returns_diff_and_rollback_plan(tmp_path: Path) -> None:
+    client, dataset, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "参数回滚任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+            "skill_overrides": {"answer": {"model": "task-quality-model", "temperature": 0.7}},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair_tasks = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"]
+    parameter_repair = next(item for item in repair_tasks if item["cause_type"] == "parameter_risk")
+
+    result = client.post(
+        f"/repair-tasks/{parameter_repair['repair_task_id']}/actions",
+        json={"action": "plan_workflow_parameter_changes"},
+    )
+
+    assert result.status_code == 200
+    payload = result.json()
+    assert payload["action"] == "plan_workflow_parameter_changes"
+    assert payload["result"]["status"] == "planned"
+    model_diff = next(item for item in payload["result"]["parameter_diffs"] if item["step_id"] == "answer" and item["parameter"] == "model")
+    assert model_diff["source"] == "task_override"
+    assert model_diff["workflow_value_preview"] == "flow-model"
+    assert model_diff["current_value_preview"] == "task-quality-model"
+    assert model_diff["recommended_action"] == "remove_task_override_or_promote_to_workflow"
+    assert {"step_id": "answer", "parameter": "model"} in payload["result"]["rollback_plan"]["skill_overrides_remove"]
+    assert payload["result"]["target_url"] == f"/reports?task_id={executed['task_id']}&panel=parameter-governance"
+    assert payload["repair_task"]["action_history"][-1]["action"] == "plan_workflow_parameter_changes"
