@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Task List Search”已完成并通过全量验证。本批次继续优化执行中心主流程可用性：任务主表在服务端分页和状态筛选基础上接入 `q` 搜索，输入任务名、数据源或 Workflow 关键词会请求 `GET /tasks?q=...&page=1&page_size=8` 并回到第 1 页，避免历史任务只能靠翻页查找。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Task / Report Search E2E Coverage”已完成并通过全量验证。本批次继续优化全流程稳定性：Playwright 主链路不仅覆盖创建并执行任务，还会在真实浏览器中输入任务名，捕获执行中心 `/api/tasks?q=...&page=1&page_size=8` 和报告中心 `/api/tasks?q=...&page_size=20` 请求，避免搜索入口只在组件测试里成立。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -87,6 +87,7 @@
 - 执行中心任务主表已支持任务名/数据源/Workflow 搜索；搜索时会请求 `GET /tasks?q=...&page=1&page_size=8` 并回到第 1 页，可与状态筛选组合使用。
 - 报告中心任务选择器已改为分页加载最近任务；深链 `task_id` 不在最近列表时，会按需调用 `GET /tasks/{task_id}` 加载单任务，加载完成前不会请求最近列表第一条任务报告，报告、Score Analytics、导出、Badcase 和 Trace 入口继续围绕目标任务工作。
 - 报告中心任务选择器已支持远程搜索历史任务，输入关键词会请求 `GET /tasks?q=...&page=1&page_size=20`，选择任务后清空搜索词，保持报告页围绕目标 Task 工作。
+- Playwright 主链路已补执行中心搜索和报告中心远程搜索请求捕获，确保真实浏览器中 Ant Design Input/Select 能触发后端 `q` 查询。
 - Experiment 快照已补齐 Dataset/Workflow 元数据、延迟指标和失败分布；Experiment 页面支持 Dataset/Workflow 过滤，并新增 A/B 对比面板展示通过率、Badcase、P95 耗时、成本和失败分布差异。
 - README 已把主启动路径明确为 FastAPI + React，并将 Streamlit 保留为 legacy demo；文档明确 Task 是用户主对象，Run 是底层执行 Attempt。
 - 治理页已移除容易误导的 MySQL/Redis/Celery 状态清单，改为指向 README 和 PRD 验收矩阵的生产适配边界提示。
@@ -131,10 +132,11 @@
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心深链任务|报告中心 Score Analytics"`：先 RED 后 GREEN，最终 2 passed，确认报告中心深链任务会请求最近任务分页和 `GET /tasks/{task_id}` 单任务接口，不会请求最近列表第一条任务报告；Score Analytics 继续按当前任务 Dataset + Workflow 作用域分页请求。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心任务选择器支持远程搜索|报告中心深链任务|报告中心 Score Analytics"`：先 RED 后 GREEN，最终 3 passed，确认报告中心任务选择器搜索“历史任务”会请求 `q=历史任务&page=1&page_size=20`，深链和 Score Analytics 没有回归。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心任务列表使用服务端分页"`：先 RED 后 GREEN，最终 1 passed，确认执行中心从第 2 页搜索任务会请求 `q=分页任务 11&page=1&page_size=8`，并保留状态筛选请求。
+- `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`：1 passed，确认真实浏览器主链路能在执行中心搜索任务、报告中心搜索任务报告，并捕获带 `q` 的 `/api/tasks` 请求。
 - `python -m pytest -q`：通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：6 个测试文件，85 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
-- `cd frontend && npm run build`：通过，`RunsPage` chunk 正常生成。
+- `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：8 passed，主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
 - `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - `python -m pytest tests\test_task_center_api.py -q -k "tasks_support_server_side_pagination"`：先 RED 后 GREEN，最终 1 passed，确认 `/tasks` legacy 数组响应、状态筛选和分页响应。
@@ -456,6 +458,34 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Task / Report Search E2E Coverage
+
+- 改动摘要：Playwright 主链路新增执行中心任务搜索和报告中心任务选择器远程搜索验证；测试会捕获真实浏览器发出的 `/api/tasks?q={taskName}&page=1&page_size=8` 与 `/api/tasks?q={taskName}&page_size=20` 请求，避免搜索入口只在组件测试里可用。
+- 变更文件：
+  - `frontend/e2e/task-flow.spec.ts`
+  - `docs/superpowers/plans/2026-06-01-task-report-search-e2e.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 定向 Playwright：1 passed。
+  - 后端全量：通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端全量：6 个测试文件，85 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
+  - 前端 build：通过。
+  - Playwright E2E：8 passed。
+  - 空白检查：仅有 CRLF 换行转换 warning，未发现空白错误。
+- 下一步：
+  - 继续从用户主链路找剩余摩擦点，优先考虑报告页组件拆分、前端大测试耗时压缩，以及把任务详情搜索/筛选能力继续拉到浏览器级验证。
 
 ### 2026-06-01 Task List Search
 

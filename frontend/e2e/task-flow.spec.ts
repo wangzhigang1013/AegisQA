@@ -32,6 +32,7 @@ test('上传数据、审批 Skill、发布 Workflow、执行任务并沉淀 Badc
   await expect(page.getByText(workflowName)).toBeVisible();
 
   await createAndExecuteTask(page, datasetName, workflowName, taskName);
+  await verifyTaskSearch(page, taskName);
   await verifyReportAndCorrectBadcase(page, taskName);
 
   expect(workflow.version_id).toContain(':v');
@@ -133,6 +134,12 @@ async function createAndExecuteTask(page: Page, datasetName: string, workflowNam
 async function verifyReportAndCorrectBadcase(page: Page, taskName: string) {
   await page.goto('/reports');
   await openSelectByLabel(page, '选择报告任务');
+  const reportSearchRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname.endsWith('/api/tasks') && url.searchParams.get('q') === taskName && url.searchParams.get('page_size') === '20';
+  });
+  await page.getByRole('combobox', { name: '选择报告任务' }).fill(taskName);
+  await reportSearchRequest;
   await page
     .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content')
     .filter({ hasText: `${taskName} / completed` })
@@ -155,6 +162,17 @@ async function verifyReportAndCorrectBadcase(page: Page, taskName: string) {
   await page.getByRole('tab', { name: 'Steps' }).click();
   await page.getByRole('tab', { name: '参数' }).first().click();
   await expect(page.getByText(/parameter_trace|workflow_config|schema_default/)).toBeVisible();
+}
+
+async function verifyTaskSearch(page: Page, taskName: string) {
+  await page.goto('/runs');
+  const taskSearchRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname.endsWith('/api/tasks') && url.searchParams.get('q') === taskName && url.searchParams.get('page') === '1' && url.searchParams.get('page_size') === '8';
+  });
+  await page.getByPlaceholder('搜索任务名 / 数据源 / Workflow').fill(taskName);
+  await taskSearchRequest;
+  await expect(page.locator('tr').filter({ hasText: taskName })).toBeVisible();
 }
 
 async function selectModalOption(page: Page, label: string, searchText: string) {
