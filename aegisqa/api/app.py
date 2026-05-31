@@ -213,6 +213,11 @@ class RepairTaskStartRequest(BaseModel):
     owner: str
 
 
+class RepairTaskAssignRequest(BaseModel):
+    owner: str
+    due_at: str | None = None
+
+
 class RepairTaskResolveRequest(BaseModel):
     resolution_note: str
 

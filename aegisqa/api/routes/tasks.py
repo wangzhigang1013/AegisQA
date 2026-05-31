@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -8,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from aegisqa.api.app import (
     CIGateRuleRequest,
     RepairTaskActionRequest,
+    RepairTaskAssignRequest,
     RepairTaskReopenRequest,
     RepairTaskResolveRequest,
     RepairTaskStartRequest,
@@ -141,6 +143,34 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         )
         return record
 
+    @app.post("/repair-tasks/{repair_task_id}/assign")
+    def assign_repair_task(repair_task_id: str, request: RepairTaskAssignRequest) -> dict[str, Any]:
+        record = _get_record(ctx.store, "repair_tasks", repair_task_id)
+        if record.get("status") == "resolved":
+            raise AegisQAError(
+                "REPAIR_TASK_ASSIGN_RESOLVED",
+                "已完成的修复任务不能重新指派，请先重开任务。",
+                status_code=409,
+                details={"repair_task_id": repair_task_id, "status": record.get("status")},
+            )
+        record.update(
+            {
+                "owner": request.owner,
+                "due_at": request.due_at,
+                "assigned_at": _now(),
+                "overdue": _repair_task_is_overdue(request.due_at, str(record.get("status") or "open")),
+                "updated_at": _now(),
+            }
+        )
+        _save_record(ctx.store, "repair_tasks", "repair_task_id", record)
+        ctx.audit_service.record(
+            actor="api",
+            action="repair_task.assign",
+            target=repair_task_id,
+            detail={"owner": request.owner, "due_at": request.due_at, "overdue": record.get("overdue")},
+        )
+        return record
+
     @app.post("/repair-tasks/{repair_task_id}/resolve")
     def resolve_repair_task(repair_task_id: str, request: RepairTaskResolveRequest) -> dict[str, Any]:
         record = _transition_repair_task(
@@ -150,6 +180,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             updates={
                 "status": "resolved",
                 "resolution_note": request.resolution_note,
+                "overdue": False,
                 "resolved_at": _now(),
                 "updated_at": _now(),
             },
@@ -640,6 +671,7 @@ def _build_repair_task_tree_summary(root: dict[str, Any], children: list[dict[st
     resolved_children = sum(1 for item in children if item.get("status") == "resolved")
     in_progress_children = sum(1 for item in children if item.get("status") == "in_progress")
     open_children = sum(1 for item in children if item.get("status") == "open")
+    overdue_task_ids = [str(item["repair_task_id"]) for item in children if _repair_task_is_overdue(item.get("due_at"), str(item.get("status") or "open"))]
     if total_children:
         completion_rate = resolved_children / total_children
         overall_status = "resolved" if resolved_children == total_children else "in_progress" if in_progress_children else "open"
@@ -657,6 +689,8 @@ def _build_repair_task_tree_summary(root: dict[str, Any], children: list[dict[st
         "completion_rate": round(completion_rate, 4),
         "overall_status": overall_status,
         "blocking_children": blocking_children,
+        "overdue_children": len(overdue_task_ids),
+        "overdue_task_ids": overdue_task_ids,
         "next_actions": next_actions,
         "selected_repair_task_id": selected_repair_task_id,
     }
@@ -676,7 +710,22 @@ def _repair_task_next_action(record: dict[str, Any]) -> dict[str, Any]:
         "recommended_action": record.get("recommended_action") or fallback_action,
         "target_url": record.get("target_url"),
         "owner": record.get("owner"),
+        "due_at": record.get("due_at"),
+        "overdue": _repair_task_is_overdue(record.get("due_at"), str(record.get("status") or "open")),
     }
+
+
+def _repair_task_is_overdue(due_at: Any, status: str) -> bool:
+    if status == "resolved" or not due_at:
+        return False
+    try:
+        normalized = str(due_at).replace("Z", "+00:00")
+        due_time = datetime.fromisoformat(normalized)
+        if due_time.tzinfo is None:
+            due_time = due_time.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+    return due_time < datetime.now(timezone.utc)
 
 
 def _transition_repair_task(

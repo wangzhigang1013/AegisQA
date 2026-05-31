@@ -349,6 +349,9 @@ export type RepairTaskRecord = {
   recommended_action?: string | null;
   target_url?: string | null;
   remediation_area?: string | null;
+  due_at?: string | null;
+  assigned_at?: string | null;
+  overdue?: boolean;
   action_history?: {
     action: string;
     status: string;
@@ -377,6 +380,8 @@ export type RepairTaskTreeNextAction = {
   recommended_action?: string | null;
   target_url?: string | null;
   owner?: string | null;
+  due_at?: string | null;
+  overdue?: boolean;
 };
 
 export type RepairTaskTreeSummary = {
@@ -387,6 +392,8 @@ export type RepairTaskTreeSummary = {
   completion_rate: number;
   overall_status: string;
   blocking_children: string[];
+  overdue_children?: number;
+  overdue_task_ids?: string[];
   next_actions: RepairTaskTreeNextAction[];
   selected_repair_task_id?: string;
 };

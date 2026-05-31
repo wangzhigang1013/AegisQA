@@ -326,3 +326,54 @@ def test_repair_task_tree_summarizes_followup_progress(tmp_path: Path) -> None:
     assert result["summary"]["blocking_children"]
     assert result["summary"]["next_actions"]
     assert result["children"][0]["parent_repair_task_id"] == repair["repair_task_id"]
+
+
+def test_repair_task_assignment_due_date_and_overdue_are_traceable(tmp_path: Path) -> None:
+    client, dataset, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "修复协作任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"][0]
+    client.post(f"/repair-tasks/{repair['repair_task_id']}/actions", json={"action": "retest_and_compare"})
+    client.post(f"/repair-tasks/{repair['repair_task_id']}/actions", json={"action": "generate_remediation_plan"})
+    split = client.post(
+        f"/repair-tasks/{repair['repair_task_id']}/actions",
+        json={"action": "create_followup_repair_tasks"},
+    ).json()
+    followup = split["result"]["repair_tasks"][0]
+
+    assigned = client.post(
+        f"/repair-tasks/{followup['repair_task_id']}/assign",
+        json={"owner": "dataset_owner", "due_at": "2000-01-01T00:00:00+00:00"},
+    )
+
+    assert assigned.status_code == 200
+    assigned_payload = assigned.json()
+    assert assigned_payload["owner"] == "dataset_owner"
+    assert assigned_payload["due_at"] == "2000-01-01T00:00:00+00:00"
+    assert assigned_payload["overdue"] is True
+
+    tree = client.get(f"/repair-tasks/{repair['repair_task_id']}/tree").json()
+    assert tree["summary"]["overdue_children"] == 1
+    assert followup["repair_task_id"] in tree["summary"]["overdue_task_ids"]
+    next_action = next(item for item in tree["summary"]["next_actions"] if item["repair_task_id"] == followup["repair_task_id"])
+    assert next_action["owner"] == "dataset_owner"
+    assert next_action["due_at"] == "2000-01-01T00:00:00+00:00"
+    assert next_action["overdue"] is True
+
+    resolved = client.post(
+        f"/repair-tasks/{followup['repair_task_id']}/resolve",
+        json={"resolution_note": "已完成参数治理复核。"},
+    )
+
+    assert resolved.status_code == 200
+    assert resolved.json()["overdue"] is False

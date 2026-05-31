@@ -15,18 +15,26 @@ type ReopenValues = {
   reason: string;
 };
 
+type AssignValues = {
+  owner: string;
+  due_at?: string;
+};
+
 export function RepairTasksPage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [sourceTaskId, setSourceTaskId] = useState<string | undefined>();
   const [resolveTask, setResolveTask] = useState<RepairTaskRecord | null>(null);
   const [reopenTask, setReopenTask] = useState<RepairTaskRecord | null>(null);
+  const [assignTask, setAssignTask] = useState<RepairTaskRecord | null>(null);
   const [treeTask, setTreeTask] = useState<RepairTaskRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [resolveForm] = Form.useForm<ResolveValues>();
   const [reopenForm] = Form.useForm<ReopenValues>();
+  const [assignForm] = Form.useForm<AssignValues>();
   const resolutionNote = Form.useWatch('resolution_note', resolveForm);
   const reopenReason = Form.useWatch('reason', reopenForm);
+  const assignOwner = Form.useWatch('owner', assignForm);
 
   const repairTasksQuery = useQuery({
     queryKey: ['repair-tasks', sourceTaskId],
@@ -73,6 +81,22 @@ export function RepairTasksPage() {
     onError: (error) => setNotice(`完成失败：${formatApiError(error)}`),
   });
 
+  const assignMutation = useMutation({
+    mutationFn: (values: AssignValues) => {
+      if (!assignTask) throw new Error('请选择需要指派的修复任务。');
+      return api.assignRepairTask(assignTask.repair_task_id, { owner: values.owner, due_at: values.due_at || null });
+    },
+    onSuccess: async (record) => {
+      setAssignTask(null);
+      assignForm.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ['repair-tasks'] });
+      await queryClient.invalidateQueries({ queryKey: ['repair-task-tree'] });
+      mergeRepairTasks([record]);
+      setNotice(`修复任务已指派给：${record.owner}${record.overdue ? '，当前已逾期。' : '。'}`);
+    },
+    onError: (error) => setNotice(`指派失败：${formatApiError(error)}`),
+  });
+
   const reopenMutation = useMutation({
     mutationFn: (values: ReopenValues) => {
       if (!reopenTask) throw new Error('请选择需要重开的修复任务。');
@@ -114,6 +138,11 @@ export function RepairTasksPage() {
   function openReopen(record: RepairTaskRecord) {
     setReopenTask(record);
     reopenForm.setFieldsValue({ reason: record.reopen_reason ?? '' });
+  }
+
+  function openAssign(record: RepairTaskRecord) {
+    setAssignTask(record);
+    assignForm.setFieldsValue({ owner: record.owner ?? '', due_at: record.due_at ?? '' });
   }
 
   function mergeRepairTasks(updatedTasks: RepairTaskRecord[]) {
@@ -256,7 +285,7 @@ export function RepairTasksPage() {
                 </Space>
               ),
             },
-            { title: '负责人', dataIndex: 'owner', width: 120, render: (value) => value || '未领取' },
+            { title: '负责人', dataIndex: 'owner', width: 150, render: (_, record) => <RepairOwner record={record} onAssign={() => openAssign(record)} /> },
             {
               title: '操作',
               fixed: 'right',
@@ -271,6 +300,14 @@ export function RepairTasksPage() {
                   </Button>
                   <Button size="small" onClick={() => setTreeTask(record)}>
                     查看进度
+                  </Button>
+                  <Button
+                    size="small"
+                    aria-label={`指派修复任务：${record.title}`}
+                    onClick={() => openAssign(record)}
+                    disabled={record.status === 'resolved'}
+                  >
+                    指派
                   </Button>
                   <Button
                     size="small"
@@ -401,6 +438,37 @@ export function RepairTasksPage() {
         </Form>
       </Modal>
 
+      <Modal
+        title="指派修复任务"
+        open={Boolean(assignTask)}
+        forceRender
+        onCancel={() => setAssignTask(null)}
+        footer={[
+          <Button key="cancel" onClick={() => setAssignTask(null)}>取消</Button>,
+          <Button
+            key="submit"
+            type="primary"
+            disabled={!assignOwner}
+            loading={assignMutation.isPending}
+            onClick={() => assignForm.submit()}
+          >
+            确认指派
+          </Button>,
+        ]}
+      >
+        <Space direction="vertical" className="drawer-stack">
+          <Typography.Text type="secondary">修复任务：{assignTask?.title}</Typography.Text>
+          <Form form={assignForm} layout="vertical" onFinish={(values) => assignMutation.mutate(values)}>
+            <Form.Item name="owner" label="负责人" rules={[{ required: true, message: '请填写负责人' }]}>
+              <Input placeholder="例如：dataset_owner" />
+            </Form.Item>
+            <Form.Item name="due_at" label="截止时间">
+              <Input placeholder="例如：2026-06-01T00:00:00+00:00" />
+            </Form.Item>
+          </Form>
+        </Space>
+      </Modal>
+
       <RepairTaskTreeDrawer
         tree={repairTaskTreeQuery.data}
         loading={repairTaskTreeQuery.isLoading}
@@ -447,6 +515,20 @@ function RecentActionResult({ record }: { record: RepairTaskRecord }) {
   return <Typography.Text type="secondary">{summary ?? '暂无结果'}</Typography.Text>;
 }
 
+function RepairOwner({ record, onAssign }: { record: RepairTaskRecord; onAssign: () => void }) {
+  return (
+    <Space direction="vertical" size={0}>
+      <Typography.Text>{record.owner || '未领取'}</Typography.Text>
+      {record.due_at ? <Typography.Text type={record.overdue ? 'danger' : 'secondary'}>{record.overdue ? '已逾期' : '截止'}：{record.due_at}</Typography.Text> : null}
+      {record.status !== 'resolved' ? (
+        <Button size="small" aria-label={`快速指派负责人：${record.title}`} onClick={onAssign}>
+          指派
+        </Button>
+      ) : null}
+    </Space>
+  );
+}
+
 function RepairTaskTreeDrawer({
   tree,
   loading,
@@ -472,6 +554,9 @@ function RepairTaskTreeDrawer({
             已完成 {summary?.resolved_children ?? 0} / {summary?.total_children ?? 0}
           </Typography.Text>
           <Typography.Text type="secondary">阻塞子任务 {summary?.blocking_children.length ?? 0} 个</Typography.Text>
+          <Typography.Text type={(summary?.overdue_children ?? 0) > 0 ? 'danger' : 'secondary'}>
+            逾期子任务 {summary?.overdue_children ?? 0} 个
+          </Typography.Text>
         </Space>
         <Progress percent={percent} status={percent === 100 ? 'success' : 'active'} />
 
@@ -485,6 +570,8 @@ function RepairTaskTreeDrawer({
           columns={[
             { title: '子任务', dataIndex: 'title' },
             { title: '状态', dataIndex: 'status', width: 110, render: renderStatus },
+            { title: '负责人', dataIndex: 'owner', width: 120, render: (value) => value || '未领取' },
+            { title: '截止时间', dataIndex: 'due_at', width: 210, render: (value, record) => value ? <Typography.Text type={record.overdue ? 'danger' : 'secondary'}>{value}</Typography.Text> : '-' },
             { title: '推荐动作', dataIndex: 'recommended_action', width: 180 },
             {
               title: '入口',
@@ -508,6 +595,7 @@ function RepairTaskTreeDrawer({
             { title: '根因', dataIndex: 'cause_type', width: 140, render: renderCauseType },
             { title: '推荐动作', dataIndex: 'recommended_action', width: 180, render: (value) => value || '-' },
             { title: '负责人', dataIndex: 'owner', width: 120, render: (value) => value || '未领取' },
+            { title: '截止时间', dataIndex: 'due_at', width: 210, render: (value, record) => value ? <Typography.Text type={record.overdue ? 'danger' : 'secondary'}>{value}</Typography.Text> : '-' },
           ]}
         />
       </Space>

@@ -296,6 +296,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  assignRepairTask: (repairTaskId: string, body: { owner: string; due_at?: string | null }) =>
+    request<RepairTaskRecord>(`/repair-tasks/${encodeURIComponent(repairTaskId)}/assign`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   resolveRepairTask: (repairTaskId: string, body: { resolution_note: string }) =>
     request<RepairTaskRecord>(`/repair-tasks/${encodeURIComponent(repairTaskId)}/resolve`, {
       method: 'POST',

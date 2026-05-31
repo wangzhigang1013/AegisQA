@@ -538,6 +538,15 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/repair-tasks/repair-demo/reopen')) {
         return jsonResponse({ ...demoRepairTask, status: 'open', reopen_reason: '复测仍未通过。', reopened_at: '2026-05-31T03:00:00Z' });
       }
+      if (url.endsWith('/repair-tasks/repair-demo/assign')) {
+        return jsonResponse({
+          ...demoRepairTask,
+          owner: 'dataset_owner',
+          due_at: '2000-01-01T00:00:00+00:00',
+          overdue: true,
+          assigned_at: '2026-05-31T04:00:00Z',
+        });
+      }
       if (url.endsWith('/repair-tasks/repair-demo/tree')) {
         return jsonResponse({
           repair_task: demoRepairTask,
@@ -560,6 +569,9 @@ describe('AegisQA 前端工作台', () => {
               cause_type: 'workflow_parameters',
               title: '确认修复是否进入当前 Attempt',
               status: 'open',
+              owner: 'dataset_owner',
+              due_at: '2000-01-01T00:00:00+00:00',
+              overdue: true,
               recommendation: '检查 task_override 和 Prompt 参数是否进入新 Attempt。',
               recommended_action: 'open_parameter_governance',
               target_url: '/reports?task_id=task-demo&panel=parameter-governance',
@@ -573,11 +585,16 @@ describe('AegisQA 前端工作台', () => {
             completion_rate: 0.5,
             overall_status: 'open',
             blocking_children: ['repair-followup-parameters'],
+            overdue_children: 1,
+            overdue_task_ids: ['repair-followup-parameters'],
             next_actions: [
               {
                 repair_task_id: 'repair-followup-parameters',
                 title: '确认修复是否进入当前 Attempt',
                 status: 'open',
+                owner: 'dataset_owner',
+                due_at: '2000-01-01T00:00:00+00:00',
+                overdue: true,
                 recommended_action: 'open_parameter_governance',
                 target_url: '/reports?task_id=task-demo&panel=parameter-governance',
               },
@@ -1479,6 +1496,23 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('低通过率分层修复建议')).toBeInTheDocument();
     expect(screen.getAllByText('确认修复是否进入当前 Attempt').length).toBeGreaterThan(0);
     expect(screen.getAllByText('open_parameter_governance').length).toBeGreaterThan(0);
+  });
+
+  it('修复任务工作台支持指派负责人并在修复树提示逾期', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    await screen.findByText('[warning] 复盘低通过率分层');
+    fireEvent.click(await screen.findByRole('button', { name: /指派修复任务/ }));
+    expect(await screen.findByText('指派修复任务')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('例如：dataset_owner'), { target: { value: 'dataset_owner' } });
+    fireEvent.change(screen.getByPlaceholderText('例如：2026-06-01T00:00:00+00:00'), { target: { value: '2000-01-01T00:00:00+00:00' } });
+    fireEvent.click(screen.getByRole('button', { name: /确认指派/ }));
+
+    expect(await screen.findByText(/修复任务已指派给：dataset_owner/)).toBeInTheDocument();
+    expect(screen.getAllByText('dataset_owner').length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /查看进度/ }));
+    expect(await screen.findByText(/逾期子任务 1 个/)).toBeInTheDocument();
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {
