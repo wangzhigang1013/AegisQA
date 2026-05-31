@@ -363,6 +363,13 @@ export type RepairTaskRecord = {
     result: Record<string, unknown>;
     created_at?: string;
   } | null;
+  version_compare_plan?: {
+    candidate_actions?: Record<string, unknown>[];
+    baseline_candidates?: Record<string, unknown>[];
+    current_versions?: Record<string, unknown>[];
+    updated_at?: string;
+    [key: string]: unknown;
+  } | null;
   owner?: string | null;
   started_at?: string | null;
   resolved_at?: string | null;

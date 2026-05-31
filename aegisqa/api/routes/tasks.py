@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -37,6 +38,7 @@ from aegisqa.api.app import (
     _now,
     _refresh_task_from_run,
     _save_record,
+    _save_workflow_draft,
     _task_attempts,
 )
 from aegisqa.api.routes.context import RouteContext
@@ -225,6 +227,10 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             result = _repair_action_plan_workflow_parameter_changes(ctx, record)
         elif action == "compare_prompt_skill_versions":
             result = _repair_action_compare_prompt_skill_versions(ctx, record)
+        elif action == "create_prompt_skill_candidate":
+            result = _repair_action_create_prompt_skill_candidate(ctx, record)
+        elif action == "create_workflow_draft_from_version_diff":
+            result = _repair_action_create_workflow_draft_from_version_diff(ctx, record)
         elif action in {"open_trace_flow", "open_parameter_governance", "open_dataset_lineage"}:
             result = _repair_action_link_target(record, action)
         else:
@@ -243,6 +249,8 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                         "fix_dataset_fields",
                         "plan_workflow_parameter_changes",
                         "compare_prompt_skill_versions",
+                        "create_prompt_skill_candidate",
+                        "create_workflow_draft_from_version_diff",
                         "open_trace_flow",
                         "open_parameter_governance",
                         "open_dataset_lineage",
@@ -1300,6 +1308,168 @@ def _prompt_skill_version_recommended_action(field: str) -> str:
     return "compare_model_or_parameter_version"
 
 
+def _repair_action_create_prompt_skill_candidate(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+    """把版本对比结果沉淀为候选配置资产。
+
+    这里不直接改 Prompt 或 Skill 注册表，因为候选配置还需要人工确认和复跑验证。
+    先把 baseline、当前版本和 diff 固化成可追踪资产，后续可在实验中心或候选池里审批晋升。
+    """
+
+    plan = _repair_prompt_skill_compare_plan(ctx, repair_task)
+    candidates: list[dict[str, Any]] = []
+    existing = {
+        (item.get("source_repair_task_id"), item.get("baseline_experiment_id")): item
+        for item in _list_records(ctx.store, "prompt_skill_candidates")
+        if item.get("source_repair_task_id") == repair_task.get("repair_task_id")
+    }
+    for baseline in plan.get("baseline_candidates", []):
+        if not isinstance(baseline, dict) or not baseline.get("version_diffs"):
+            continue
+        key = (repair_task.get("repair_task_id"), baseline.get("experiment_id"))
+        candidate = existing.get(key)
+        if candidate is None:
+            candidate = {
+                "candidate_id": f"prompt-skill-candidate-{uuid4().hex[:12]}",
+                "kind": "prompt_skill_version_diff",
+                "status": "candidate",
+                "source_repair_task_id": repair_task.get("repair_task_id"),
+                "source_task_id": plan.get("source_task_id"),
+                "source_run_id": plan.get("run_id"),
+                "baseline_experiment_id": baseline.get("experiment_id"),
+                "baseline_run_id": baseline.get("run_id"),
+                "baseline_metrics": baseline.get("metrics", {}),
+                "current_versions": plan.get("current_versions", []),
+                "version_diffs": baseline.get("version_diffs", []),
+                "recommended_actions": [
+                    diff.get("recommended_action")
+                    for diff in baseline.get("version_diffs", [])
+                    if isinstance(diff, dict) and diff.get("recommended_action")
+                ],
+                "created_at": _now(),
+                "updated_at": _now(),
+            }
+        else:
+            candidate["status"] = "candidate"
+            candidate["current_versions"] = plan.get("current_versions", [])
+            candidate["version_diffs"] = baseline.get("version_diffs", [])
+            candidate["updated_at"] = _now()
+        _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
+        candidates.append(candidate)
+    if not candidates:
+        raise AegisQAError("PROMPT_SKILL_CANDIDATE_EMPTY", "没有可沉淀的 Prompt/Skill 版本差异候选。", status_code=400)
+    return {
+        "status": "created",
+        "created_count": len(candidates),
+        "candidates": candidates,
+        "target_url": f"/experiments?source_task_id={plan.get('source_task_id')}&panel=prompt-skill-candidates",
+    }
+
+
+def _repair_action_create_workflow_draft_from_version_diff(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+    """从版本差异生成可编辑 Workflow 草稿。
+
+    草稿默认把 baseline 的 Prompt/模型/Skill 引用值应用到当前图上，但不发布。
+    这样用户可以在画布中检查映射和参数，再通过正常发布流程进入新的可复现版本。
+    """
+
+    plan = _repair_prompt_skill_compare_plan(ctx, repair_task)
+    baseline = _first_prompt_skill_baseline(plan)
+    task = _get_record(ctx.store, "tasks", str(plan.get("source_task_id") or repair_task.get("source_task_id")))
+    run = ctx.runner.get_run(str(plan.get("run_id") or _repair_latest_run_id(repair_task, task)))
+    graph = _workflow_graph_snapshot(run.workflow)
+    graph["name"] = f"{run.workflow.name}_version_diff_candidate"
+    _apply_version_diffs_to_graph(graph, [item for item in baseline.get("version_diffs", []) if isinstance(item, dict)])
+    now = _now()
+    draft = {
+        "draft_id": f"draft-{uuid4().hex[:12]}",
+        "name": graph["name"],
+        "status": "draft",
+        "graph": graph,
+        "source_repair_task_id": repair_task.get("repair_task_id"),
+        "source_task_id": task.get("task_id"),
+        "baseline_experiment_id": baseline.get("experiment_id"),
+        "version_diffs": baseline.get("version_diffs", []),
+        "created_at": now,
+        "updated_at": now,
+    }
+    _save_workflow_draft(ctx.store, draft)
+    ctx.audit_service.record(actor="api", action="workflow_draft.create_from_version_diff", target=draft["draft_id"], detail={"repair_task_id": repair_task.get("repair_task_id")})
+    return {
+        "status": "created",
+        "draft": draft,
+        "target_url": f"/workflows/designer/{draft['draft_id']}",
+        "next_steps": [
+            "在 Workflow 画布检查 baseline 版本值是否符合本次回滚或候选实验目标。",
+            "保存并发布草稿后，用同一 Dataset 创建新 Task 复跑对比。",
+        ],
+    }
+
+
+def _repair_prompt_skill_compare_plan(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+    plan = repair_task.get("version_compare_plan")
+    if isinstance(plan, dict) and isinstance(plan.get("baseline_candidates"), list):
+        return plan
+    last_action = repair_task.get("last_action_result") or {}
+    result = last_action.get("result") if isinstance(last_action, dict) and last_action.get("action") == "compare_prompt_skill_versions" else None
+    if isinstance(result, dict) and isinstance(result.get("baseline_candidates"), list):
+        return result
+    return _repair_action_compare_prompt_skill_versions(ctx, repair_task)
+
+
+def _first_prompt_skill_baseline(plan: dict[str, Any]) -> dict[str, Any]:
+    for candidate in plan.get("baseline_candidates", []):
+        if isinstance(candidate, dict) and candidate.get("version_diffs"):
+            return candidate
+    raise AegisQAError("PROMPT_SKILL_BASELINE_MISSING", "没有可用于创建 Workflow 草稿的 Prompt/Skill baseline。", status_code=400)
+
+
+def _workflow_graph_snapshot(workflow: Any) -> dict[str, Any]:
+    if isinstance(workflow.graph, dict):
+        return deepcopy(workflow.graph)
+    nodes = [
+        {
+            "node_id": step.step_id,
+            "node_type": "skill",
+            "label": step.step_id,
+            "skill_ref": step.skill_ref,
+            "input_mapping": step.input_mapping,
+            "output_mapping": step.output_mapping,
+            "config": deepcopy(step.config),
+            "cacheable": step.cacheable,
+        }
+        for step in workflow.steps
+    ]
+    edges = [{"source": workflow.steps[index].step_id, "target": workflow.steps[index + 1].step_id} for index in range(len(workflow.steps) - 1)]
+    return {"name": workflow.name, "nodes": nodes, "edges": edges, "runtime": workflow.runtime.model_dump(mode="json")}
+
+
+def _apply_version_diffs_to_graph(graph: dict[str, Any], version_diffs: list[dict[str, Any]]) -> None:
+    nodes = graph.get("nodes", [])
+    if not isinstance(nodes, list):
+        return
+    nodes_by_id = {node.get("node_id"): node for node in nodes if isinstance(node, dict)}
+    for diff in version_diffs:
+        node = nodes_by_id.get(diff.get("step_id"))
+        if not isinstance(node, dict):
+            continue
+        config = node.setdefault("config", {})
+        if not isinstance(config, dict):
+            config = {}
+            node["config"] = config
+        field = diff.get("field")
+        baseline_value = deepcopy(diff.get("baseline_value"))
+        if field == "skill_ref":
+            node["skill_ref"] = baseline_value
+        elif field in {"prompt_version", "model"}:
+            config[str(field)] = baseline_value
+        elif field == "model_params" and isinstance(baseline_value, dict):
+            config.update(baseline_value)
+        elif field == "skill_version":
+            metadata = node.setdefault("metadata", {})
+            if isinstance(metadata, dict):
+                metadata["baseline_skill_version"] = baseline_value
+
+
 def _repair_recommendations_from_last_result(ctx: RouteContext, repair_task: dict[str, Any]) -> list[dict[str, Any]]:
     last_action = repair_task.get("last_action_result") or {}
     if isinstance(last_action, dict) and last_action.get("action") == "generate_remediation_plan":
@@ -1524,6 +1694,8 @@ def _append_repair_task_action(ctx: RouteContext, repair_task: dict[str, Any], a
     repair_task["action_history"] = history
     if action == "generate_remediation_plan":
         repair_task["remediation_plan"] = {"recommendations": result.get("recommendations", []), "updated_at": action_time}
+    if action == "compare_prompt_skill_versions":
+        repair_task["version_compare_plan"] = {**result, "updated_at": action_time}
     repair_task["last_action_result"] = {"action": action, "result": result, "created_at": action_time}
     repair_task["updated_at"] = action_time
     _save_record(ctx.store, "repair_tasks", "repair_task_id", repair_task)
@@ -1548,6 +1720,11 @@ def _repair_action_summary(action: str, result: dict[str, Any]) -> str:
         return f"已生成 {len(result.get('parameter_diffs', []))} 条参数 diff 和回滚建议。"
     if action == "compare_prompt_skill_versions":
         return f"已生成 {len(result.get('baseline_candidates', []))} 个 Prompt/Skill 版本对比候选。"
+    if action == "create_prompt_skill_candidate":
+        return f"已沉淀 {result.get('created_count', 0)} 个 Prompt/Skill 候选配置。"
+    if action == "create_workflow_draft_from_version_diff":
+        draft = result.get("draft") if isinstance(result.get("draft"), dict) else {}
+        return f"已创建 Workflow 草稿：{draft.get('draft_id', 'unknown')}。"
     if result.get("url"):
         return f"已打开证据入口：{result['url']}"
     return "动作已记录。"

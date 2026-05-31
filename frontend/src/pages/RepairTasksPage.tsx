@@ -379,6 +379,26 @@ export function RepairTasksPage() {
                       版本对比
                     </Button>
                   ) : null}
+                  {hasCandidateAction(record, 'create_prompt_skill_candidate') ? (
+                    <Button
+                      size="small"
+                      icon={<FileSearchOutlined />}
+                      loading={actionMutation.isPending}
+                      onClick={() => runAction(record, 'create_prompt_skill_candidate')}
+                    >
+                      沉淀候选
+                    </Button>
+                  ) : null}
+                  {hasCandidateAction(record, 'create_workflow_draft_from_version_diff') ? (
+                    <Button
+                      size="small"
+                      icon={<FileSearchOutlined />}
+                      loading={actionMutation.isPending}
+                      onClick={() => runAction(record, 'create_workflow_draft_from_version_diff')}
+                    >
+                      生成草稿
+                    </Button>
+                  ) : null}
                   <Button size="small" href={`/reports?task_id=${record.source_task_id}&panel=parameter-governance`}>
                     参数治理
                   </Button>
@@ -586,6 +606,14 @@ function RecentActionResult({ record }: { record: RepairTaskRecord }) {
 
 function hasRepairAction(record: RepairTaskRecord, action: string) {
   return record.recommended_action === action || record.next_actions?.includes(action) || record.last_action_result?.action === action;
+}
+
+function hasCandidateAction(record: RepairTaskRecord, action: string) {
+  const candidateSources = [record.last_action_result?.result?.candidate_actions, record.version_compare_plan?.candidate_actions];
+  return candidateSources.some((candidateActions) => {
+    if (!Array.isArray(candidateActions)) return false;
+    return candidateActions.some((item) => isRecord(item) && item.action === action);
+  });
 }
 
 function RepairOwner({ record, onAssign }: { record: RepairTaskRecord; onAssign: () => void }) {

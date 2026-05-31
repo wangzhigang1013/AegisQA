@@ -509,3 +509,61 @@ def test_repair_task_prompt_skill_version_action_compares_with_experiment_baseli
     assert prompt_diff["recommended_action"] == "compare_or_rollback_prompt_version"
     assert payload["result"]["candidate_actions"][0]["action"] == "create_prompt_skill_candidate"
     assert payload["repair_task"]["action_history"][-1]["action"] == "compare_prompt_skill_versions"
+
+
+def test_repair_task_version_diff_actions_materialize_candidate_and_workflow_draft(tmp_path: Path) -> None:
+    client, dataset, _ = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    baseline_workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload_with_answer_prompt("prompt-flow-v0")}).json()
+    baseline_run = client.post(
+        "/runs",
+        json={"workflow": baseline_workflow, "dataset_id": dataset["dataset_id"], "dataset_version": dataset["version"]},
+    ).json()
+    baseline_run = client.post(f"/runs/{baseline_run['run_id']}/execute").json()
+    baseline_experiment = client.post(
+        "/experiments/from-run",
+        json={"run_id": baseline_run["run_id"], "name": "baseline prompt v0"},
+    ).json()
+    current_workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload_with_answer_prompt("prompt-flow-v1")}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "Prompt 版本候选任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": current_workflow["version_id"],
+            "evaluation_goal": "prompt_experiment",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"][0]
+    client.post(
+        f"/repair-tasks/{repair['repair_task_id']}/actions",
+        json={"action": "compare_prompt_skill_versions"},
+    )
+
+    candidate_result = client.post(
+        f"/repair-tasks/{repair['repair_task_id']}/actions",
+        json={"action": "create_prompt_skill_candidate"},
+    )
+    draft_result = client.post(
+        f"/repair-tasks/{repair['repair_task_id']}/actions",
+        json={"action": "create_workflow_draft_from_version_diff"},
+    )
+
+    assert candidate_result.status_code == 200
+    candidate_payload = candidate_result.json()
+    candidate = candidate_payload["result"]["candidates"][0]
+    assert candidate["source_task_id"] == executed["task_id"]
+    assert candidate["baseline_experiment_id"] == baseline_experiment["experiment_id"]
+    assert candidate["version_diffs"][0]["field"] == "prompt_version"
+    assert candidate_payload["repair_task"]["action_history"][-1]["action"] == "create_prompt_skill_candidate"
+
+    assert draft_result.status_code == 200
+    draft_payload = draft_result.json()
+    draft = draft_payload["result"]["draft"]
+    assert draft["status"] == "draft"
+    assert draft["source_repair_task_id"] == repair["repair_task_id"]
+    answer = next(node for node in draft["graph"]["nodes"] if node["node_id"] == "answer")
+    assert answer["config"]["prompt_version"] == "prompt-flow-v0"
+    assert draft_payload["repair_task"]["action_history"][-1]["action"] == "create_workflow_draft_from_version_diff"

@@ -804,7 +804,10 @@ describe('AegisQA 前端工作台', () => {
                   ],
                 },
               ],
-              candidate_actions: [{ action: 'create_prompt_skill_candidate', label: '沉淀 Prompt/Skill 候选配置' }],
+              candidate_actions: [
+                { action: 'create_prompt_skill_candidate', label: '沉淀 Prompt/Skill 候选配置' },
+                { action: 'create_workflow_draft_from_version_diff', label: '从版本差异创建 Workflow 草稿' },
+              ],
             },
             repair_task: {
               ...demoRepairTask,
@@ -828,7 +831,68 @@ describe('AegisQA 前端工作台', () => {
                       ],
                     },
                   ],
+                  candidate_actions: [
+                    { action: 'create_prompt_skill_candidate', label: '沉淀 Prompt/Skill 候选配置' },
+                    { action: 'create_workflow_draft_from_version_diff', label: '从版本差异创建 Workflow 草稿' },
+                  ],
                 },
+              },
+            },
+          });
+        }
+        if (body.action === 'create_prompt_skill_candidate') {
+          return jsonResponse({
+            action: 'create_prompt_skill_candidate',
+            result: {
+              status: 'created',
+              created_count: 1,
+              candidates: [
+                {
+                  candidate_id: 'prompt-skill-candidate-demo',
+                  source_task_id: 'task-demo',
+                  baseline_experiment_id: 'exp-baseline',
+                  version_diffs: [{ step_id: 'answer', field: 'prompt_version', baseline_value: 'prompt-flow-v0', current_value: 'prompt-flow-v1' }],
+                },
+              ],
+            },
+            repair_task: {
+              ...demoRepairTask,
+              action_history: [{ action: 'create_prompt_skill_candidate', status: 'created', result_summary: '已沉淀 1 个 Prompt/Skill 候选配置。' }],
+              version_compare_plan: {
+                candidate_actions: [
+                  { action: 'create_prompt_skill_candidate', label: '沉淀 Prompt/Skill 候选配置' },
+                  { action: 'create_workflow_draft_from_version_diff', label: '从版本差异创建 Workflow 草稿' },
+                ],
+              },
+              last_action_result: {
+                action: 'create_prompt_skill_candidate',
+                result: {
+                  status: 'created',
+                  created_count: 1,
+                  candidates: [{ candidate_id: 'prompt-skill-candidate-demo', baseline_experiment_id: 'exp-baseline' }],
+                },
+              },
+            },
+          });
+        }
+        if (body.action === 'create_workflow_draft_from_version_diff') {
+          return jsonResponse({
+            action: 'create_workflow_draft_from_version_diff',
+            result: {
+              status: 'created',
+              target_url: '/workflows/designer/draft-version-diff',
+              draft: {
+                draft_id: 'draft-version-diff',
+                status: 'draft',
+                name: '可信评测流程_version_diff_candidate',
+              },
+            },
+            repair_task: {
+              ...demoRepairTask,
+              action_history: [{ action: 'create_workflow_draft_from_version_diff', status: 'created', result_summary: '已创建 Workflow 草稿：draft-version-diff。' }],
+              last_action_result: {
+                action: 'create_workflow_draft_from_version_diff',
+                result: { status: 'created', draft: { draft_id: 'draft-version-diff', status: 'draft' }, target_url: '/workflows/designer/draft-version-diff' },
               },
             },
           });
@@ -1687,6 +1751,41 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/answer.prompt_version/)).toBeInTheDocument();
     expect(screen.getByText(/prompt-flow-v0/)).toBeInTheDocument();
     expect(screen.getByText(/prompt-flow-v1/)).toBeInTheDocument();
+  });
+
+  it('修复任务工作台支持把版本对比沉淀为候选配置', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    fireEvent.click(await screen.findByRole('button', { name: /版本对比/ }));
+    expect(await screen.findByText(/已生成 1 个 Prompt\/Skill 版本对比候选/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /沉淀候选/ }));
+
+    expect((await screen.findAllByText(/已沉淀 1 个 Prompt\/Skill 候选配置/)).length).toBeGreaterThan(0);
+    expect(screen.getByText('create_prompt_skill_candidate')).toBeInTheDocument();
+  });
+
+  it('修复任务工作台支持从版本差异创建 Workflow 草稿', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    fireEvent.click(await screen.findByRole('button', { name: /版本对比/ }));
+    expect(await screen.findByText(/已生成 1 个 Prompt\/Skill 版本对比候选/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /生成草稿/ }));
+
+    expect((await screen.findAllByText(/已创建 Workflow 草稿：draft-version-diff/)).length).toBeGreaterThan(0);
+    expect(screen.getByText('create_workflow_draft_from_version_diff')).toBeInTheDocument();
+  });
+
+  it('修复任务工作台沉淀候选后仍可继续生成 Workflow 草稿', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    fireEvent.click(await screen.findByRole('button', { name: /版本对比/ }));
+    expect(await screen.findByText(/已生成 1 个 Prompt\/Skill 版本对比候选/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /沉淀候选/ }));
+    expect((await screen.findAllByText(/已沉淀 1 个 Prompt\/Skill 候选配置/)).length).toBeGreaterThan(0);
+
+    fireEvent.click(await screen.findByRole('button', { name: /生成草稿/ }));
+
+    expect((await screen.findAllByText(/已创建 Workflow 草稿：draft-version-diff/)).length).toBeGreaterThan(0);
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {
