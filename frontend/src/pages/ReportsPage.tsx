@@ -18,6 +18,7 @@ export function ReportsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedBadcaseKeys, setSelectedBadcaseKeys] = useState<Key[]>([]);
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
+  const scoreAnalyticsQuery = useQuery({ queryKey: ['score-analytics'], queryFn: api.scoreAnalytics });
   const selectedTask = tasksQuery.data?.find((task) => task.task_id === selectedTaskId) ?? tasksQuery.data?.[0] ?? null;
   const reportQuery = useQuery({
     queryKey: ['task-report', selectedTask?.task_id],
@@ -40,6 +41,17 @@ export function ReportsPage() {
     },
     onSuccess: () => setNotice('报告导出成功：HTML 内容已由后端生成。'),
     onError: (error) => setNotice(error instanceof Error ? error.message : '报告导出失败'),
+  });
+
+  const redTeamScanMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedTask) {
+        throw new Error('请先选择任务，再运行红队扫描。');
+      }
+      return api.redTeamScan({ task_id: selectedTask.task_id });
+    },
+    onSuccess: (scan) => setNotice(`红队扫描完成：发现 ${scan.summary.risk_count} 个风险。`),
+    onError: (error) => setNotice(error instanceof Error ? `红队扫描失败：${error.message}` : '红队扫描失败'),
   });
 
   const badcaseActionMutation = useMutation({
@@ -101,6 +113,8 @@ export function ReportsPage() {
   const badcases = reportQuery.data?.badcases ?? [];
   const stepDistribution = reportQuery.data?.step_distribution ?? [];
   const qualityDecision = reportQuery.data?.quality_decision;
+  const budgetStatus = reportQuery.data?.budget_status;
+  const scoreAnalytics = scoreAnalyticsQuery.data;
   const latencyData = useMemo(() => {
     if (stepDistribution.length) {
       return Object.fromEntries(stepDistribution.map((step) => [step.step_id, step.average_latency_ms]));
@@ -123,7 +137,14 @@ export function ReportsPage() {
         eyebrow="任务结果"
         title="任务报告"
         description="报告不再孤立展示指标，而是绑定具体任务，展示数据源、Workflow、执行结果、Badcase 和导出入口。"
-        primaryAction={<Space><Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace` : undefined}>查看 Trace Flow</Button><Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace-tree` : undefined}>查看 Trace Tree</Button><Button type="primary" icon={<DownloadOutlined />} loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>导出 HTML / CSV</Button></Space>}
+        primaryAction={
+          <Space>
+            <Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace` : undefined}>查看 Trace Flow</Button>
+            <Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace-tree` : undefined}>查看 Trace Tree</Button>
+            <Button disabled={!selectedTask} loading={redTeamScanMutation.isPending} onClick={() => redTeamScanMutation.mutate()}>运行红队扫描</Button>
+            <Button type="primary" icon={<DownloadOutlined />} loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>导出 HTML / CSV</Button>
+          </Space>
+        }
       />
 
       {notice ? <Alert type={notice.includes('失败') || notice.includes('请先') ? 'warning' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
@@ -157,6 +178,93 @@ export function ReportsPage() {
       {task ? (
         <>
           <ReportSummary task={task} summary={reportQuery.data?.task_summary} versionSnapshot={reportQuery.data?.version_snapshot} />
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} xl={14}>
+              <Card className="flat-card" title="跨任务 Score Analytics" loading={scoreAnalyticsQuery.isLoading}>
+                <Row gutter={[12, 12]}>
+                  <Col xs={12} lg={6}>
+                    <MetricTile title="任务数" value={scoreAnalytics?.summary.task_count ?? 0} icon={<DownloadOutlined />} tone="blue" note="tasks" />
+                  </Col>
+                  <Col xs={12} lg={6}>
+                    <MetricTile title="平均通过率" value={Math.round((scoreAnalytics?.summary.average_pass_rate ?? 0) * 100)} suffix="%" icon={<DownloadOutlined />} tone="green" note="avg pass" />
+                  </Col>
+                  <Col xs={12} lg={6}>
+                    <MetricTile title="Badcase 总数" value={scoreAnalytics?.summary.badcase_count ?? 0} icon={<DownloadOutlined />} tone="red" note="badcase" />
+                  </Col>
+                  <Col xs={12} lg={6}>
+                    <MetricTile title="退化任务" value={scoreAnalytics?.summary.regression_count ?? 0} icon={<DownloadOutlined />} tone="amber" note="regression" />
+                  </Col>
+                </Row>
+                <Table
+                  size="small"
+                  rowKey="task_id"
+                  pagination={{ pageSize: 4 }}
+                  dataSource={scoreAnalytics?.trend ?? []}
+                  columns={[
+                    { title: '任务', dataIndex: 'task_name', render: (value, record) => value ?? record.task_id },
+                    { title: 'Workflow', dataIndex: 'workflow_name' },
+                    { title: '通过率', dataIndex: 'pass_rate', render: (value) => `${Math.round(Number(value ?? 0) * 100)}%` },
+                    { title: 'Badcase', dataIndex: 'badcase_count' },
+                    { title: 'P95', dataIndex: 'p95_latency_ms', render: (value) => `${Math.round(Number(value ?? 0))} ms` },
+                    { title: '估算成本', dataIndex: 'cost_used', render: (value) => Number(value ?? 0).toFixed(4) },
+                  ]}
+                />
+                {scoreAnalytics?.regressions.length ? (
+                  <Alert
+                    className="section-actions"
+                    type="warning"
+                    showIcon
+                    message="退化任务"
+                    description={scoreAnalytics.regressions.map((item) => item.message).join('；')}
+                  />
+                ) : null}
+              </Card>
+            </Col>
+            <Col xs={24} xl={10}>
+              <Card className="flat-card" title="成本预算">
+                {budgetStatus ? (
+                  <Space direction="vertical" className="full-width-control">
+                    <Space wrap>
+                      <Tag color={budgetStatus.status === 'exceeded' ? 'red' : budgetStatus.status === 'warning' ? 'orange' : 'green'}>{budgetStatus.status}</Tag>
+                      <Tag>预算 {budgetStatus.cost_budget ?? '未设置'}</Tag>
+                      <Tag>已用 {budgetStatus.cost_used.toFixed(4)}</Tag>
+                      <Tag>剩余 {budgetStatus.budget_remaining == null ? '未设置' : budgetStatus.budget_remaining.toFixed(4)}</Tag>
+                    </Space>
+                    <Typography.Text>{budgetStatus.message}</Typography.Text>
+                  </Space>
+                ) : (
+                  <Typography.Text type="secondary">当前报告暂未返回预算状态。</Typography.Text>
+                )}
+              </Card>
+              {redTeamScanMutation.data ? (
+                <Card className="flat-card" title="红队扫描结果">
+                  <Space wrap>
+                    <Tag color={redTeamScanMutation.data.summary.status === 'blocked' ? 'red' : 'green'}>{redTeamScanMutation.data.summary.status}</Tag>
+                    <Tag>风险 {redTeamScanMutation.data.summary.risk_count}</Tag>
+                    <Tag>Critical {redTeamScanMutation.data.summary.critical_count}</Tag>
+                  </Space>
+                  <Table
+                    size="small"
+                    rowKey="risk_id"
+                    pagination={false}
+                    dataSource={redTeamScanMutation.data.risks}
+                    columns={[
+                      { title: '风险类型', dataIndex: 'risk_type' },
+                      { title: '级别', dataIndex: 'severity', render: (value) => <Tag color={value === 'critical' ? 'red' : 'orange'}>{value}</Tag> },
+                      { title: '字段', dataIndex: 'field_path' },
+                      { title: '证据', dataIndex: 'evidence' },
+                    ]}
+                  />
+                  <Space direction="vertical" className="section-actions">
+                    {redTeamScanMutation.data.recommendations.map((item) => (
+                      <Alert key={item.action} type="info" showIcon message={item.label} description={item.message} />
+                    ))}
+                  </Space>
+                </Card>
+              ) : null}
+            </Col>
+          </Row>
 
           <Row gutter={[16, 16]}>
             <Col xs={24} sm={12} xl={6}>

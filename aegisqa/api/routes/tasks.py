@@ -8,6 +8,7 @@ from aegisqa.api.app import (
     RunCreateRequest,
     TaskCreateRequest,
     _build_attempt_record,
+    _build_budget_status,
     _build_judge_score_distribution,
     _build_parameter_governance,
     _build_step_distribution,
@@ -160,6 +161,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             "recommendations": [recommendation.model_dump(mode="json") for recommendation in build_report_recommendations(segments)],
             "quality_decision": _build_quality_decision(task, run, report, segments),
             "parameter_governance": parameter_governance,
+            "budget_status": _build_budget_status(task, report),
             "report": report.model_dump(mode="json"),
             "badcases": [badcase.model_dump(mode="json") for badcase in report.badcases],
             "export_links": {

@@ -1,6 +1,6 @@
 import { AuditOutlined, PartitionOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag } from 'antd';
+import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import { useMemo, useState } from 'react';
 
@@ -40,6 +40,7 @@ export function JudgeAuditPage() {
 
   const profilesQuery = useQuery({ queryKey: ['judge-profiles'], queryFn: api.judgeProfiles });
   const auditsQuery = useQuery({ queryKey: ['judge-audits'], queryFn: api.judgeAudits });
+  const trendsQuery = useQuery({ queryKey: ['judge-audit-trends'], queryFn: api.judgeAuditTrends });
   const latestAudit = auditsQuery.data?.[0] ?? null;
 
   const createProfileMutation = useMutation({
@@ -113,6 +114,22 @@ export function JudgeAuditPage() {
     };
   }, [latestAudit]);
 
+  const trendsOption = useMemo(() => {
+    const profile = trendsQuery.data?.profiles[0];
+    const series = profile?.series ?? [];
+    return {
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['Accuracy', 'Kappa'] },
+      grid: { left: 36, right: 20, top: 40, bottom: 32 },
+      xAxis: { type: 'category', data: series.map((item) => item.dataset_version_id) },
+      yAxis: { type: 'value', min: 0, max: 1 },
+      series: [
+        { name: 'Accuracy', type: 'line', data: series.map((item) => item.accuracy), smooth: true },
+        { name: 'Kappa', type: 'line', data: series.map((item) => item.cohen_kappa), smooth: true },
+      ],
+    };
+  }, [trendsQuery.data]);
+
   return (
     <section className="page-stack">
       <PageHeader
@@ -159,6 +176,34 @@ export function JudgeAuditPage() {
           </Card>
         </Col>
       </Row>
+
+      <Card className="flat-card" title="Judge 偏差趋势" loading={trendsQuery.isLoading}>
+        <Row gutter={[16, 16]}>
+          <Col xs={24} lg={12}>
+            <Space wrap>
+              <Tag>审计 {trendsQuery.data?.summary.audit_count ?? 0}</Tag>
+              <Tag>Profile {trendsQuery.data?.summary.profile_count ?? 0}</Tag>
+              <Tag color={(trendsQuery.data?.summary.low_consistency_count ?? 0) > 0 ? 'orange' : 'green'}>低一致性 {trendsQuery.data?.summary.low_consistency_count ?? 0}</Tag>
+            </Space>
+            <ReactECharts option={trendsOption} style={{ height: 280 }} />
+          </Col>
+          <Col xs={24} lg={12}>
+            <Typography.Title level={5}>低一致性 Profile</Typography.Title>
+            <Table
+              size="small"
+              rowKey="profile_id"
+              pagination={false}
+              dataSource={trendsQuery.data?.low_consistency_profiles ?? []}
+              columns={[
+                { title: 'Profile', dataIndex: 'profile_id' },
+                { title: 'Accuracy', dataIndex: 'accuracy', render: (value) => Number(value ?? 0).toFixed(2) },
+                { title: 'Kappa', dataIndex: 'cohen_kappa', render: (value) => Number(value ?? 0).toFixed(2) },
+                { title: '建议', dataIndex: 'message' },
+              ]}
+            />
+          </Col>
+        </Row>
+      </Card>
 
       <Modal title="创建 Judge 审计" open={auditOpen} onCancel={() => setAuditOpen(false)} onOk={() => auditForm.submit()} confirmLoading={createAuditMutation.isPending} okText="开始审计">
         <Form

@@ -15,8 +15,11 @@ import type {
   GraphValidationResult,
   JudgeProfile,
   JudgeCrossValidationResult,
+  JudgeAuditTrends,
+  RedTeamScanResult,
   RunRecord,
   RunReport,
+  ScoreAnalytics,
   SkillContractResult,
   SkillManifest,
   SkillPackageRecord,
@@ -83,6 +86,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<{ status: string; service: string }>('/health'),
   dashboard: () => request<DashboardSummary>('/dashboard/summary'),
+  redTeamScan: (body: { task_id?: string; run_id?: string }) =>
+    request<RedTeamScanResult>('/red-team/scans', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  scoreAnalytics: () => request<ScoreAnalytics>('/score-analytics'),
   experiments: (filters: { dataset_id?: string; workflow_id?: string } = {}) => {
     const query = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => {
@@ -288,6 +297,7 @@ export const api = {
     }),
   judgeProfiles: () => request<JudgeProfile[]>('/judge-profiles'),
   judgeAudits: () => request<StoredJudgeAudit[]>('/judge-audits'),
+  judgeAuditTrends: () => request<JudgeAuditTrends>('/judge-audits/trends'),
   createJudgeProfile: (body: { name: string; model: string; prompt: string; rubric: Record<string, unknown>; threshold: number; output_schema: Record<string, unknown> }) =>
     request<JudgeProfile>('/judge-profiles', {
       method: 'POST',

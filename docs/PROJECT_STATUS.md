@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“可信评测增强”已完成。本批次在已有任务中心化主链路上补齐 Dataset Lineage、Trace Tree 独立页面、Task 参数/Prompt 版本治理、报告质量决策中心和多 Judge 一致性视图，让评测结论不仅能跑出来，还能解释数据来源、参数来源、质量风险和裁判一致性。
+新一轮“风险治理与趋势洞察增强”已完成。本批次在已有任务中心化主链路上继续补齐红队安全扫描、跨任务 Score Analytics、成本预算状态和 Judge 偏差趋势，让一次评测不仅能跑通和出报告，还能发现安全风险、成本风险、趋势退化和裁判偏差。
 
 ## 当前已完成
 
@@ -60,13 +60,17 @@
 - Trace Tree 已新增独立页面 `/tasks/:taskId/trace-tree`，从任务详情和报告中心可进入，按 Item 展开 Skill Step 输入、输出、耗时、缓存和错误。
 - Task Report 已新增 `quality_decision` 和 `parameter_governance`，报告中心展示质量决策中心，后端参数治理 API 展示 Skill/Prompt 版本、模型参数、任务覆盖和 Secret 脱敏策略。
 - Judge 审计已新增多 Judge 一致性 API 与前端弹窗，支持输入多个 Judge 输出并展示两两一致率。
+- 报告中心已新增跨任务 Score Analytics，按 Task 聚合任务数、平均通过率、Badcase、P95、估算成本和退化任务，避免只看单次任务报告。
+- Task Report 已新增 `budget_status`，基于 cost 或 token 估算成本预算状态，输出 ok/warning/exceeded/not_set、预算、已用、剩余和修复建议。
+- 新增红队安全扫描能力，`POST /red-team/scans` 支持按 Task 或 Run 扫描 prompt injection、PII、unsafe content 和 secret exposure，并在报告中心提供“运行红队扫描”入口。
+- Judge 审计已新增偏差趋势，`GET /judge-audits/trends` 按 Profile 聚合 Accuracy/Kappa 趋势和低一致性告警，前端展示趋势图和低一致性 Profile 表。
 
 ## 最近验证
 
-- `python -m pytest -q`：56 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
-- `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v9`，Run `run-67359b417c65` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
+- `python -m pytest -q`：通过，覆盖 60 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v10`，Run `run-b19e6c730cdb` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：4 个测试文件、38 个测试通过。
+- `cd frontend && npm test`：4 个测试文件、40 个测试通过。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：8 个 Playwright E2E 测试通过，覆盖任务主链路、任务报告进入 Trace Flow、参数来源查看、CI Gate 创建与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
 - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Playwright E2E 测试通过，覆盖 Workflow 画布新增节点、聚合策略、删除下游连线、新增 Join、撤销/重做、删除节点、保存草稿回放、试运行回填、校验、发布。
@@ -81,15 +85,59 @@
 - Workflow 画布的 Source/Skill/Join/Output/Aggregator 新增、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行、校验和发布已进入 Playwright；后续需要继续拆分 Palette/Inspector 组件，降低单文件维护成本。
 - Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；Run Attempt、CI Gate、Experiment baseline/A-B 对比和任务报告均已接入基础闭环。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
-- Experiment 快照、CI Gate、Annotation Queue 和 Trace Tree 已有独立产品页；后续需要继续补更细的成本预算、baseline 可视化趋势图和跨任务 Score Analytics。
-- 报告、Badcase、Judge 审计已经接入基础数据与动作，人工审阅队列和多 Judge 一致性已有最小闭环；仍需补齐红队安全扫描和更细的裁判偏差趋势分析。
+- Experiment 快照、CI Gate、Annotation Queue 和 Trace Tree 已有独立产品页；跨任务 Score Analytics 和成本预算状态已接入报告中心，后续需要继续补真实成本账单、更多趋势筛选维度和跨任务对比可视化。
+- 报告、Badcase、Judge 审计已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描和 Judge 偏差趋势已有最小闭环；后续需要按业务标签、模型版本和时间窗口继续细分偏差归因。
 - 本地服务曾出现旧 FastAPI 进程未重启导致新增路由 404 的问题；已重启后端并完成浏览器复测。后续修改后端 API 时必须确认 8000 端口加载的是最新代码。
 
 ## 下一阶段目标
 
-- 后续建议优先进入红队安全扫描、更细的成本预算/趋势图、跨任务 Score Analytics、裁判偏差趋势分析，以及真实 MySQL/Redis/Celery Repository/Worker 接入。
+- 红队规则配置化：把当前内置规则升级为可管理规则集，支持按业务线启用、禁用、阈值和严重级别调整。
+- 成本治理生产化：接入真实 token/cost 账单、模型价格表、预算门禁和成本异常告警。
+- 趋势分析增强：为 Score Analytics 增加 Dataset、Workflow、模型版本、Prompt 版本、时间窗口和标签过滤，并补趋势可视化对比。
+- Judge 偏差归因：按业务标签、样本类型、模型版本和时间窗口拆解 Accuracy/Kappa 退化原因。
+- 生产 Repository/Worker：继续推进真实 MySQL/Redis/Celery Repository/Worker 接入，替换本地 JSON Store 的 demo 边界。
 
 ## 最近改动
+
+### 2026-05-31 风险治理与趋势洞察增强完成
+
+- 改动摘要：根据用户“继续优化直到没有明显优化点”的要求，完成下一批专家级产品化增强；本批次补齐红队安全扫描、跨任务 Score Analytics、成本预算状态和 Judge 偏差趋势，并把能力接入报告中心和 Judge 审计页。
+- 变更文件：
+  - `docs/superpowers/plans/2026-05-31-risk-analytics-hardening.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `tests/test_risk_analytics_hardening.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/productization.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/api/routes/judge.py`
+  - `frontend/src/types.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/pages/JudgeAuditPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+- 验证命令：
+  - `python -m pytest tests\test_risk_analytics_hardening.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Score Analytics|偏差趋势"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `python -m aegisqa.examples.run_mvp_demo`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端新增测试先红灯：4 failed，失败原因为 `/red-team/scans`、`/score-analytics`、`/judge-audits/trends` 404，以及 Task Report 缺少 `budget_status`。
+  - 后端实现后定向复测：4 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端新增测试先红灯：报告中心缺少 Score Analytics、成本预算、红队扫描入口，Judge 审计缺少偏差趋势。
+  - 前端实现后定向复测：2 passed。
+  - 后端全量：通过，覆盖 60 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端全量单测：4 个测试文件、40 passed。
+  - 前端 build：通过。
+  - Demo：Dataset `rag_qa_1000:v10`，Run `run-b19e6c730cdb` completed，1000 条样本完成，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条。
+  - Playwright E2E：8 passed。
+- 下一步：提交本批次 Git 变更；后续可继续做真实成本账单接入、红队规则配置化、跨任务趋势高级筛选、Judge 偏差按业务标签归因，以及真实 MySQL/Redis/Celery Repository/Worker。
 
 ### 2026-05-31 可信评测增强批次完成
 

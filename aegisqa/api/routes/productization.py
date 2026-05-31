@@ -17,9 +17,12 @@ from aegisqa.api.app import (
     CIGateEvaluateRequest,
     CIGateRuleRequest,
     ExperimentFromRunRequest,
+    RedTeamScanRequest,
     _build_annotation_task,
     _build_ci_gate_config,
     _build_experiment_snapshot,
+    _build_red_team_scan,
+    _build_score_analytics,
     _ci_gate_metrics_from_run,
     _ci_gate_metrics_from_task,
     _evaluate_assertion,
@@ -37,6 +40,33 @@ from aegisqa.core.errors import AegisQAError
 
 def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
     """注册围绕产品化闭环的独立功能接口。"""
+
+    @app.post("/red-team/scans")
+    def create_red_team_scan(request: RedTeamScanRequest) -> dict[str, Any]:
+        if request.task_id and request.run_id:
+            raise AegisQAError(
+                "RED_TEAM_TARGET_CONFLICT",
+                "一次红队扫描只能选择 Task 或 Run 中的一种目标。",
+                status_code=400,
+                details={"task_id": request.task_id, "run_id": request.run_id},
+            )
+        if not request.task_id and not request.run_id:
+            raise AegisQAError(
+                "RED_TEAM_TARGET_REQUIRED",
+                "请先选择要扫描的 Task 或 Run。",
+                status_code=400,
+                details={"field": "task_id|run_id"},
+            )
+        task = _get_record(ctx.store, "tasks", request.task_id) if request.task_id else None
+        run = ctx.runner.get_run(task["run_id"] if task else str(request.run_id))
+        scan = _build_red_team_scan(task, run)
+        _save_record(ctx.store, "red_team_scans", "scan_id", scan)
+        ctx.audit_service.record(actor="api", action="red_team.scan", target=scan["scan_id"], detail={"target": scan["target"], "risk_count": scan["summary"]["risk_count"]})
+        return scan
+
+    @app.get("/score-analytics")
+    def get_score_analytics() -> dict[str, Any]:
+        return _build_score_analytics(_list_records(ctx.store, "tasks"), ctx.runner)
 
     @app.post("/experiments/from-run")
     def create_experiment_from_run(request: ExperimentFromRunRequest) -> dict[str, Any]:

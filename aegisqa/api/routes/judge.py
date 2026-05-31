@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from aegisqa.api.app import JudgeAuditRequest, JudgeCrossValidationRequest, JudgeProfileCreateRequest, ProfileAuditRequest
+from aegisqa.api.app import JudgeAuditRequest, JudgeCrossValidationRequest, JudgeProfileCreateRequest, ProfileAuditRequest, _build_judge_audit_trends
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.judge.audit import JudgeAuditResult, audit_judge_profile
 from aegisqa.judge.profiles import JudgeProfile, StoredJudgeAudit
@@ -67,6 +67,10 @@ def register_judge_routes(app: FastAPI, ctx: RouteContext) -> None:
         if profile_id:
             return ctx.judge_profiles.list_audits(profile_id)
         return ctx.judge_profiles.list_all_audits()
+
+    @app.get("/judge-audits/trends")
+    def get_judge_audit_trends() -> dict[str, object]:
+        return _build_judge_audit_trends(ctx.judge_profiles.list_all_audits())
 
     @app.post("/judge-cross-validation")
     def cross_validate_judges(request: JudgeCrossValidationRequest) -> dict[str, object]:

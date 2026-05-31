@@ -358,6 +358,7 @@ export type TaskReport = {
   }[];
   quality_decision?: QualityDecision;
   parameter_governance?: TaskParameterGovernance;
+  budget_status?: BudgetStatus;
   report: RunReport;
   badcases: Record<string, unknown>[];
   export_links: {
@@ -365,6 +366,15 @@ export type TaskReport = {
     csv: string;
     html: string;
   };
+};
+
+export type BudgetStatus = {
+  status: 'ok' | 'warning' | 'exceeded' | 'not_set' | string;
+  cost_budget?: number | null;
+  cost_used: number;
+  budget_remaining?: number | null;
+  usage_ratio?: number | null;
+  message: string;
 };
 
 export type QualityDecision = {
@@ -387,6 +397,104 @@ export type QualityDecision = {
   next_actions: {
     action: string;
     label: string;
+  }[];
+};
+
+export type RedTeamScanResult = {
+  scan_id: string;
+  target: { kind: 'task' | 'run'; id: string };
+  run_id: string;
+  summary: {
+    status: string;
+    risk_count: number;
+    critical_count: number;
+    warning_count: number;
+    scanned_items: number;
+  };
+  risks: {
+    risk_id: string;
+    risk_type: string;
+    severity: string;
+    item_id: string;
+    row_id: string;
+    field_path: string;
+    evidence: string;
+    message: string;
+    recommendation: string;
+  }[];
+  recommendations: {
+    action: string;
+    label: string;
+    message: string;
+  }[];
+  created_at: string;
+};
+
+export type ScoreAnalytics = {
+  summary: {
+    task_count: number;
+    average_pass_rate: number;
+    latest_pass_rate: number;
+    badcase_count: number;
+    regression_count: number;
+  };
+  trend: {
+    task_id: string;
+    task_name?: string;
+    dataset_id?: string;
+    dataset_name?: string;
+    workflow_id?: string;
+    workflow_name?: string;
+    workflow_version_id?: string;
+    status?: string;
+    pass_rate: number;
+    error_rate: number;
+    badcase_count: number;
+    p95_latency_ms: number;
+    average_latency_ms: number;
+    cost_used: number;
+    created_at?: string;
+    updated_at?: string;
+  }[];
+  regressions: {
+    task_id?: string;
+    task_name?: string;
+    baseline_task_id?: string;
+    dataset_id?: string;
+    workflow_id?: string;
+    pass_rate_delta: number;
+    message: string;
+  }[];
+};
+
+export type JudgeAuditTrends = {
+  summary: {
+    audit_count: number;
+    profile_count: number;
+    low_consistency_count: number;
+  };
+  profiles: {
+    profile_id: string;
+    audit_count: number;
+    latest_accuracy: number;
+    latest_kappa: number;
+    series: {
+      audit_id: string;
+      dataset_version_id: string;
+      accuracy: number;
+      precision: number;
+      recall: number;
+      f1: number;
+      cohen_kappa: number;
+      misclassified_count: number;
+      created_at: string;
+    }[];
+  }[];
+  low_consistency_profiles: {
+    profile_id: string;
+    accuracy: number;
+    cohen_kappa: number;
+    message: string;
   }[];
 };
 

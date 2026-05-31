@@ -198,6 +198,77 @@ const demoJudgeCrossValidation = {
   },
 };
 
+const demoScoreAnalytics = {
+  summary: { task_count: 2, average_pass_rate: 0.75, latest_pass_rate: 0.8, badcase_count: 30, regression_count: 1 },
+  trend: [
+    {
+      task_id: 'task-demo',
+      task_name: 'RAG 任务',
+      dataset_id: 'dataset-demo',
+      dataset_name: '问答回归集',
+      workflow_id: 'wf-demo',
+      workflow_name: 'RAG 回归评测',
+      workflow_version_id: 'wf-demo:v1',
+      status: 'completed',
+      pass_rate: 0.8,
+      error_rate: 0,
+      badcase_count: 20,
+      p95_latency_ms: 12,
+      average_latency_ms: 5,
+      cost_used: 0.18,
+      created_at: '2026-05-31T00:00:00Z',
+    },
+    {
+      task_id: 'task-base',
+      task_name: 'Baseline 任务',
+      dataset_id: 'dataset-demo',
+      dataset_name: '问答回归集',
+      workflow_id: 'wf-demo',
+      workflow_name: 'RAG 回归评测',
+      workflow_version_id: 'wf-demo:v1',
+      status: 'completed',
+      pass_rate: 0.7,
+      error_rate: 0,
+      badcase_count: 10,
+      p95_latency_ms: 20,
+      average_latency_ms: 8,
+      cost_used: 0.12,
+      created_at: '2026-05-30T00:00:00Z',
+    },
+  ],
+  regressions: [{ task_id: 'task-base', task_name: 'Baseline 任务', baseline_task_id: 'task-demo', pass_rate_delta: -0.1, message: '通过率下降超过 5 个百分点。' }],
+};
+
+const demoRedTeamScan = {
+  scan_id: 'redscan-demo',
+  target: { kind: 'task', id: 'task-demo' },
+  run_id: 'run-demo',
+  summary: { status: 'blocked', risk_count: 2, critical_count: 2, warning_count: 0, scanned_items: 2 },
+  risks: [
+    { risk_id: 'risk-prompt', risk_type: 'prompt_injection', severity: 'critical', item_id: 'item-demo', row_id: '1', field_path: 'row.question', evidence: '忽略之前', message: '样本包含提示词注入。', recommendation: '加入红队回归集。' },
+    { risk_id: 'risk-pii', risk_type: 'pii_leakage', severity: 'critical', item_id: 'item-demo-2', row_id: '2', field_path: 'row.question', evidence: '13812345678', message: '样本包含敏感信息。', recommendation: '启用脱敏策略。' },
+  ],
+  recommendations: [{ action: 'add_assertion', label: '添加 Prompt Injection 断言', message: '为 Workflow 增加提示词注入检测断言。' }],
+  created_at: '2026-05-31T00:00:00Z',
+};
+
+const demoJudgeAuditTrends = {
+  summary: { audit_count: 2, profile_count: 1, low_consistency_count: 1 },
+  profiles: [
+    {
+      profile_id: 'judge-demo',
+      audit_count: 2,
+      latest_accuracy: 0.75,
+      latest_kappa: 0.5,
+      series: [
+        { audit_id: 'audit-1', dataset_version_id: 'golden:v1', accuracy: 0.9, precision: 0.9, recall: 1, f1: 0.94, cohen_kappa: 0.8, misclassified_count: 1, created_at: '2026-05-30T00:00:00Z' },
+        { audit_id: 'audit-2', dataset_version_id: 'golden:v2', accuracy: 0.75, precision: 0.7, recall: 1, f1: 0.82, cohen_kappa: 0.5, misclassified_count: 3, created_at: '2026-05-31T00:00:00Z' },
+      ],
+    },
+  ],
+  low_consistency_profiles: [{ profile_id: 'judge-demo', accuracy: 0.75, cohen_kappa: 0.5, message: '一致性偏低。' }],
+};
+
 const demoExperiments = [
   {
     experiment_id: 'exp-main',
@@ -462,6 +533,7 @@ describe('AegisQA 前端工作台', () => {
             next_actions: [{ action: 'add_to_annotation_queue', label: '将 Badcase 加入人工审核队列' }],
           },
           parameter_governance: demoParameterGovernance,
+          budget_status: { status: 'warning', cost_budget: 20, cost_used: 16.2, budget_remaining: 3.8, usage_ratio: 0.81, message: '估算成本已接近任务预算。' },
           report: { run_id: 'run-demo', pass_rate: 0.8, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [demoBadcase] },
           badcases: [demoBadcase],
           export_links: { html: '/runs/run-demo/report/export?file_format=html', csv: '/runs/run-demo/report/export?file_format=csv', json: '/runs/run-demo/report/export?file_format=json' },
@@ -481,6 +553,15 @@ describe('AegisQA 前端工作台', () => {
       }
       if (url.endsWith('/judge-cross-validation')) {
         return jsonResponse(demoJudgeCrossValidation);
+      }
+      if (url.endsWith('/red-team/scans')) {
+        return jsonResponse(demoRedTeamScan);
+      }
+      if (url.endsWith('/score-analytics')) {
+        return jsonResponse(demoScoreAnalytics);
+      }
+      if (url.endsWith('/judge-audits/trends')) {
+        return jsonResponse(demoJudgeAuditTrends);
       }
       if (url.endsWith('/datasets')) {
         return jsonResponse([demoDataset]);
@@ -1022,7 +1103,7 @@ describe('AegisQA 前端工作台', () => {
     await renderWorkbench('/reports');
 
     expect(await screen.findByText('任务报告')).toBeInTheDocument();
-    expect(screen.getByText('RAG 任务')).toBeInTheDocument();
+    expect(screen.getAllByText('RAG 任务').length).toBeGreaterThan(0);
     expect(screen.getByText('任务摘要与版本快照')).toBeInTheDocument();
     expect(screen.getByText('Step 分布与耗时')).toBeInTheDocument();
     expect(screen.getByText('分层分析')).toBeInTheDocument();
@@ -1039,6 +1120,21 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/Badcase 已忽略/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /重开/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /加入审阅队列/ })).toBeInTheDocument();
+  });
+
+  it('报告中心展示 Score Analytics、成本预算和红队扫描入口', async () => {
+    await renderWorkbench('/reports');
+
+    expect(await screen.findByText('跨任务 Score Analytics')).toBeInTheDocument();
+    expect(screen.getByText('成本预算')).toBeInTheDocument();
+    expect(screen.getAllByText('退化任务').length).toBeGreaterThan(0);
+    expect(screen.getByText(/估算成本已接近任务预算/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /运行红队扫描/ }));
+
+    expect(await screen.findByText('prompt_injection')).toBeInTheDocument();
+    expect(screen.getByText('pii_leakage')).toBeInTheDocument();
+    expect(screen.getByText('添加 Prompt Injection 断言')).toBeInTheDocument();
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {
@@ -1058,6 +1154,15 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /开始一致性分析/ }));
     expect(await screen.findByText('judge-a|judge-b')).toBeInTheDocument();
     expect(screen.getByText('50%')).toBeInTheDocument();
+  });
+
+  it('Judge 审计展示偏差趋势', async () => {
+    await renderWorkbench('/judge');
+
+    expect(await screen.findByText('Judge 偏差趋势')).toBeInTheDocument();
+    expect(screen.getByText('低一致性 Profile')).toBeInTheDocument();
+    expect(screen.getByText('judge-demo')).toBeInTheDocument();
+    expect(screen.getByText('一致性偏低。')).toBeInTheDocument();
   });
 
   it('治理页面权限矩阵按钮打开矩阵弹窗', async () => {

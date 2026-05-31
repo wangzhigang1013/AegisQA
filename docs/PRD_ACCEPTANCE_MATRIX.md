@@ -17,9 +17,9 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 最近一次验证结果：
 
-- 单元/API/扩展测试：`56 passed`。
-- 端到端 Demo：最新 Dataset `rag_qa_1000:v8`、Run `run-b347762ba048`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
-- 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 38 个交互/API client/图模型/任务创建向导/Run Attempts/Dataset Lineage/Trace Tree/Experiment/CI Gate/Annotation Queue/治理边界测试，Playwright 覆盖 8 条 E2E。
+- 单元/API/扩展测试：`python -m pytest -q` 已通过，覆盖 60 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- 端到端 Demo：最新 Dataset `rag_qa_1000:v10`、Run `run-b19e6c730cdb`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
+- 前端：`npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 已通过；`npm test` 覆盖 40 个交互/API client/图模型/任务创建向导/Run Attempts/Dataset Lineage/Trace Tree/Experiment/CI Gate/Annotation Queue/报告风险治理/Judge 偏差趋势/治理边界测试，Playwright 覆盖 8 条 E2E。
 - 浏览器交互：Headless Chrome CDP 验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden；同时覆盖 CI Gate 创建配置和阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核和候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行回填、校验、发布。
 - 产品化增强：Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree 已有后端 API 测试；首页已展示真实 Dashboard 和产品化增强入口。
@@ -78,10 +78,10 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-EX-06 | 取消、暂停、恢复 | 已实现基础 | `cancel_run/pause_run/resume_run`，`POST /runs/{run_id}/execute|pause|resume|cancel|retry-failed`，React 执行中心已接入；Task 层已增加 completed/running/canceled 状态机保护 |
 | FR-EX-07 | sample_repeat_times | 已实现基础 | Run Item repeat_index 与测试 |
 | FR-EX-08 | Step 级 Evaluation Cache | 已实现基础 | cache_key 与 cache_hit 记录 |
-| FR-RP-05 | 跨 Run 趋势图 | 已实现基础 | `compare_reports` 输出趋势差值；React Experiment 页面提供 A/B 对比入口，复杂跨任务趋势图仍可增强 |
+| FR-RP-05 | 跨 Run/Task 趋势图 | 已实现基础 | `compare_reports` 输出趋势差值；新增 `GET /score-analytics` 按 Task 聚合通过率、错误率、Badcase、P95 耗时、估算成本和退化任务；React 报告中心展示“跨任务 Score Analytics”；Experiment 页面继续提供 A/B 对比入口 |
 | FR-RP-06 | 多次运行聚合视图 | 已实现基础 | `aggregate_repeat_items` 输出多数投票、通过概率、方差、不稳定样本 |
 | FR-RP-07 | 报告导出 | 已实现基础 | `export_report_csv`、`export_report_html`，`GET /runs/{run_id}/report/export?file_format=json|csv|html` |
-| FR-ME-04 | 裁判偏差分析 | 已实现基础 | `JudgeProfileService.bias_analysis` |
+| FR-ME-04 | 裁判偏差分析 | 已实现基础 | `JudgeProfileService.bias_analysis`；新增 `GET /judge-audits/trends` 按 Judge Profile 聚合 Accuracy/Kappa 趋势和低一致性告警；React Judge 审计页展示“Judge 偏差趋势” |
 | FR-ME-05 | 人工纠错反哺候选池 | 已实现基础 | `PromptCandidateService` 可从 Badcase 创建 Prompt 优化候选并评审 |
 | FR-ME-06 | 多裁判交叉验证 | 已实现基础页面 | `JudgeProfileService.cross_validate`，`POST /judge-cross-validation`，React Judge 审计页提供“多 Judge 一致性”弹窗并展示两两一致率 |
 | FR-HL-05 | Badcase 聚类 | 已实现 | `cluster_badcases(method="rule")` 与 `cluster_badcases(method="embedding")` |
@@ -102,6 +102,8 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | Trace Tree | 已实现独立页面 | `GET /runs/{run_id}/trace-tree` 与 `GET /tasks/{task_id}/trace-tree` 展示 Run Item -> Skill Step 输入、输出、耗时、错误、缓存命中；React `/tasks/:taskId/trace-tree` 独立页面展示 Item 调用树 |
 | Task 参数治理 | 已实现基础 | `GET /tasks/{task_id}/parameter-governance` 和 Task Report `parameter_governance` 展示 Skill/Prompt 版本、模型参数、任务覆盖和脱敏 Secret 策略 |
 | 质量决策中心 | 已实现基础 | Task Report `quality_decision` 把通过率、错误率、Badcase 和低分层转为 passed/warning/blocked 决策、风险摘要和下一步动作；React 报告中心展示“质量决策中心” |
+| 成本预算状态 | 已实现基础 | Task Report 新增 `budget_status`，基于报告 cost 或 token 估算成本，输出 ok/warning/exceeded/not_set、预算、已用、剩余和修复建议；React 报告中心展示“成本预算” |
+| 红队安全扫描 | 已实现基础 | `POST /red-team/scans` 支持按 Task/Run 做规则化扫描，识别 prompt injection、PII、unsafe content、secret exposure，保存扫描记录并生成下一步建议；React 报告中心提供“运行红队扫描”入口 |
 | 产品化入口 | 已实现基础 | React 首页读取真实 Dashboard；Workflow 先进入市场，执行与报告围绕 Task 组织 |
 
 ## 生产化边界说明
