@@ -869,9 +869,47 @@ function IssueList({ result }: { result: GraphValidationResult | Record<string, 
   }
   return (
     <Space direction="vertical" className="drawer-stack">
-      {validation.errors.map((error) => (
-        <Alert key={`${error.code}-${error.node_id ?? error.message}`} type="error" showIcon message={error.code} description={error.message} />
-      ))}
+      {validation.errors.map((error) => {
+        const suggestion = issueRepairSuggestion(error);
+        return (
+          <Alert
+            key={`${error.code}-${error.node_id ?? error.message}`}
+            type="error"
+            showIcon
+            message={error.code}
+            description={
+              <Space direction="vertical" size={4}>
+                <Typography.Text>{error.message}</Typography.Text>
+                {suggestion ? <Typography.Text type="secondary">{suggestion}</Typography.Text> : null}
+              </Space>
+            }
+          />
+        );
+      })}
     </Space>
   );
+}
+
+function issueRepairSuggestion(error: { code: string; details?: Record<string, unknown> }) {
+  if (error.code === 'REQUIRED_INPUT_MAPPING_MISSING') {
+    const missingFields = Array.isArray(error.details?.missing_fields) ? error.details.missing_fields.filter((field): field is string => typeof field === 'string') : [];
+    const fieldText = missingFields.length ? `（${missingFields.join('、')}）` : '';
+    return `修复建议：在右侧 Inspector 的字段映射中为缺失字段配置 row/context/metrics 路径${fieldText}，例如 row.question。`;
+  }
+  if (error.code === 'INPUT_MAPPING_PATH_EMPTY') {
+    return '修复建议：清空的输入映射不会参与执行，请补充字段路径或删除该映射行。';
+  }
+  if (error.code === 'OUTPUT_MAPPING_PATH_EMPTY') {
+    return '修复建议：输出写入路径必须指向 context、metrics、artifacts 或 steps，请补充写入位置。';
+  }
+  if (error.code === 'BRANCH_CONDITION_REQUIRED') {
+    return '修复建议：选中 Branch 节点，在条件表达式中填写判断规则，或为每条分支连线配置 condition。';
+  }
+  if (error.code === 'JOIN_REQUIRED') {
+    return '修复建议：多条上游线汇入同一节点前，请先增加 Join 或 Aggregator 节点，避免结果互相覆盖。';
+  }
+  if (error.code === 'SKILL_NOT_AVAILABLE') {
+    return '修复建议：到 Skill 市场或治理页运行合约测试并审批启用该 Skill，或替换为已启用版本。';
+  }
+  return null;
 }

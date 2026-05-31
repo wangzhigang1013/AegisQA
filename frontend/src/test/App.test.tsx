@@ -175,7 +175,14 @@ describe('AegisQA 前端工作台', () => {
           code: 'HTTP_ERROR',
           message: 'Workflow Graph 校验失败',
           details: {
-            errors: [{ code: 'BRANCH_CONDITION_REQUIRED', message: '条件分支必须配置条件表达式。', node_id: 'branch_low_score' }],
+            errors: [
+              {
+                code: 'REQUIRED_INPUT_MAPPING_MISSING',
+                message: 'Skill 必填输入未配置字段映射：prompt',
+                node_id: 'answer',
+                details: { missing_fields: ['prompt'] },
+              },
+            ],
           },
           trace_id: 'trace_test',
         });
@@ -192,8 +199,9 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/发布失败：Workflow Graph 校验失败/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /错误与建议/ }));
-    expect(await screen.findByText('BRANCH_CONDITION_REQUIRED')).toBeInTheDocument();
-    expect(screen.getByText('条件分支必须配置条件表达式。')).toBeInTheDocument();
+    expect(await screen.findByText('REQUIRED_INPUT_MAPPING_MISSING')).toBeInTheDocument();
+    expect(screen.getByText('Skill 必填输入未配置字段映射：prompt')).toBeInTheDocument();
+    expect(screen.getByText(/在右侧 Inspector 的字段映射中为缺失字段配置/)).toBeInTheDocument();
   });
 
   it('Workflow Aggregator 节点支持聚合策略配置', async () => {

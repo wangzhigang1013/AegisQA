@@ -90,6 +90,7 @@ class WorkflowGraphService:
             self._validate_edges(graph, nodes_by_id, errors)
             self._validate_node_shapes(graph, nodes_by_id, incoming, outgoing, errors, warnings)
             self._validate_skill_references(nodes_by_id, errors)
+            self._validate_skill_mappings(nodes_by_id, errors)
 
         try:
             levels = _execution_levels(graph, nodes_by_id) if not errors else []
@@ -200,6 +201,45 @@ class WorkflowGraphService:
             if not self.registry.can_reference_new_workflow(node.skill_ref):
                 errors.append(GraphIssue(code="SKILL_NOT_AVAILABLE", message=f"Skill 不允许被新 Workflow 引用：{node.skill_ref}", node_id=node.node_id))
 
+    def _validate_skill_mappings(self, nodes_by_id: dict[str, WorkflowGraphNode], errors: list[GraphIssue]) -> None:
+        for node in nodes_by_id.values():
+            if node.node_type != "skill" or not node.skill_ref:
+                continue
+            if not self.registry.can_reference_new_workflow(node.skill_ref):
+                continue
+            manifest = self.registry.get_manifest(node.skill_ref)
+            required_inputs = _string_list(manifest.input_schema.get("required", []))
+            missing_inputs = [field for field in required_inputs if not _mapping_path(node.input_mapping.get(field))]
+            if missing_inputs:
+                errors.append(
+                    GraphIssue(
+                        code="REQUIRED_INPUT_MAPPING_MISSING",
+                        message=f"Skill 必填输入未配置字段映射：{', '.join(missing_inputs)}",
+                        node_id=node.node_id,
+                        details={"skill_ref": node.skill_ref, "missing_fields": missing_inputs},
+                    )
+                )
+            empty_inputs = sorted(field for field, path in node.input_mapping.items() if not _mapping_path(path))
+            if empty_inputs:
+                errors.append(
+                    GraphIssue(
+                        code="INPUT_MAPPING_PATH_EMPTY",
+                        message=f"输入映射路径不能为空：{', '.join(empty_inputs)}",
+                        node_id=node.node_id,
+                        details={"skill_ref": node.skill_ref, "fields": empty_inputs},
+                    )
+                )
+            empty_outputs = sorted(field for field, path in node.output_mapping.items() if not _mapping_path(path))
+            if empty_outputs:
+                errors.append(
+                    GraphIssue(
+                        code="OUTPUT_MAPPING_PATH_EMPTY",
+                        message=f"输出写入路径不能为空：{', '.join(empty_outputs)}",
+                        node_id=node.node_id,
+                        details={"skill_ref": node.skill_ref, "fields": empty_outputs},
+                    )
+                )
+
     def _validate_sample_types(
         self,
         graph: WorkflowGraph,
@@ -266,6 +306,19 @@ def _outgoing_edges(graph: WorkflowGraph) -> dict[str, list[WorkflowGraphEdge]]:
     for edge in graph.edges:
         outgoing[edge.source].append(edge)
     return outgoing
+
+
+def _mapping_path(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
 
 
 def _execution_levels(graph: WorkflowGraph, nodes_by_id: dict[str, WorkflowGraphNode]) -> list[list[str]]:

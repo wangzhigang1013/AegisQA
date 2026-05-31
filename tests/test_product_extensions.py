@@ -22,6 +22,17 @@ def _write_jsonl(path: Path) -> None:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def test_builtin_skill_registry_instances_do_not_share_manifest_state() -> None:
+    first = SkillRegistry.with_builtin_skills()
+    second = SkillRegistry.with_builtin_skills()
+
+    first.disable("llm.call@0.1.0", reason="只禁用第一个注册表")
+
+    assert first.can_reference_new_workflow("llm.call@0.1.0") is False
+    assert second.can_reference_new_workflow("llm.call@0.1.0") is True
+    assert second.get_manifest("llm.call@0.1.0").status == "approved"
+
+
 def test_skill_governance_templates_exports_rbac_and_audit(tmp_path: Path) -> None:
     store = JsonStore(tmp_path / "store")
     registry = SkillRegistry.with_builtin_skills()
@@ -101,4 +112,3 @@ def test_badcase_bulk_cluster_and_report_export(tmp_path: Path) -> None:
     report_path = tmp_path / "report.csv"
     export_report_csv(after, report_path)
     assert "pass_rate" in report_path.read_text(encoding="utf-8")
-

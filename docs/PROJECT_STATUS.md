@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Workflow 字段流转与 Skill 参数深度优化”已完成并通过全量验证。本批次聚焦用户真实使用 Workflow 时最容易断裂的两点：字段映射必须能输入自定义路径并随草稿保存回放，Skill 的 `config_schema` 必须能在画布 Inspector 中变成可编辑参数表单，而不是只靠 JSON 黑盒。
+新一轮“Workflow 发布前质量门禁与 Skill 注册表隔离”已完成并通过全量验证。本批次聚焦全流程稳定性：Skill 必填输入映射缺失必须在 Workflow 校验/发布阶段被阻断，不能等到 Task 执行时才失败；内置 Skill manifest 必须按注册表实例隔离，避免禁用/审批状态在测试或多 app 实例之间串扰。
 
 ## 当前已完成
 
@@ -24,7 +24,8 @@
 - Workflow Inspector 已支持“可连接目标”，可以选择未连接的下游节点并创建连线；创建/删除连线都会进入撤销历史并在 Console 给反馈。
 - Workflow Inspector 已支持节点工具栏，提供删除当前节点和自动布局；画布支持 Delete/Backspace 快捷删除选中的节点或连线，输入框编辑时不会误删。
 - Workflow Palette 的 Source、Skill、Join、Output 新增路径已进入 Playwright 自动化，避免后续回归成“按钮能看不能用”。
-- Workflow 发布前校验已用后端测试锁定：未审批或禁用 Skill 不能发布，多对一输入必须使用 Join/Aggregator，Branch 必须配置条件表达式。
+- Workflow 发布前校验已用后端测试锁定：未审批或禁用 Skill 不能发布，多对一输入必须使用 Join/Aggregator，Branch 必须配置条件表达式，Skill `input_schema.required` 必填字段必须配置非空输入映射。
+- 内置 Skill manifest 已在 `BaseSkill` 初始化时深拷贝，Skill 禁用/审批状态不会在不同 `SkillRegistry.with_builtin_skills()` 实例之间共享，避免测试和多 app 实例串扰治理状态。
 - Workflow 发布失败时，前端会把后端 `details.errors` 回填到 Console 的“错误与建议”页签，用户能看到错误码、节点和修复方向。
 - Workflow Inspector 已支持 Aggregator 聚合策略配置，当前覆盖多数投票、均值和一致性三类策略。
 - Workflow 草稿保存后可从 Workflow 市场重新打开并保留流程名称、节点名称等配置；试运行会使用当前选择的数据集并回填 step trace 与队列消息提示。
@@ -135,6 +136,16 @@
 
 ## 最近验证
 
+- `python -m pytest tests\test_workflow_graph_hardening.py -q -k missing_required_skill_input_mapping`：先 RED，确认缺少 `prompt` 输入映射时 `/workflow-graphs/validate` 仍返回 `ok=true`。
+- `python -m pytest tests\test_product_extensions.py -q -k builtin_skill_registry_instances_do_not_share_manifest_state`：先 RED 后 GREEN，确认修复前两个内置 Skill 注册表实例会共享 manifest 禁用状态，修复后隔离。
+- `python -m pytest tests\test_workflow_graph_hardening.py -q`：4 passed，确认禁用 Skill、多对一缺 Join、Branch 缺条件、必填映射缺失均在发布前被阻断。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 发布失败"`：先 RED 后 GREEN，确认发布失败 Console 会对 `REQUIRED_INPUT_MAPPING_MISSING` 展示中文修复建议。
+- `python -m pytest -q`：106 个后端测试通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：9 个测试文件、89 passed。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：9 passed，主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
+- `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - `cd frontend && npm test -- src/test/WorkflowDesignerPage.test.tsx`：先 RED 后 GREEN，最终 1 passed，确认 Skill 参数表单按 `config_schema` 渲染并写入草稿保存 payload。
 - `cd frontend && npm test -- src/test/WorkflowDesignerPage.test.tsx src/test/App.test.tsx -t "Workflow"`：2 个测试文件，12 passed，确认字段映射输入化、参数表单和既有 Workflow 交互没有回归。
 - `cd frontend && npm run typecheck`：通过。
@@ -482,6 +493,38 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Workflow 发布前质量门禁与 Skill 注册表隔离
+
+- 改动摘要：继续优化全流程稳定性，把 Skill 必填输入映射缺失从 Task 执行期前移到 Workflow 校验/发布阶段；同时修复内置 Skill manifest 共享对象导致的治理状态串扰，避免一个测试或 app 实例禁用 Skill 后污染后续实例。
+- 变更文件：
+  - `aegisqa/workflows/graph.py`
+  - `aegisqa/skills/base.py`
+  - `tests/test_workflow_graph_hardening.py`
+  - `tests/test_product_extensions.py`
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q -k missing_required_skill_input_mapping`
+  - `python -m pytest tests\test_product_extensions.py -q -k builtin_skill_registry_instances_do_not_share_manifest_state`
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 发布失败"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - RED：缺失必填输入映射测试最初失败，确认 `/workflow-graphs/validate` 没有在无 sample row 时阻断缺失 `prompt` 映射。
+  - RED：Skill 注册表隔离测试最初失败，确认内置 Skill 的 class-level manifest 会在两个注册表实例间共享禁用状态。
+  - GREEN：注册表隔离测试通过；Workflow hardening 4 passed。
+  - GREEN：Workflow 发布失败前端定向测试通过，错误与建议页签会展示 `REQUIRED_INPUT_MAPPING_MISSING` 的具体修复路径。
+  - 全量：后端 106 passed，前端 typecheck 通过，前端 89 passed，构建通过，Playwright 9 passed；后端仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- 下一步：继续拆分 Workflow 画布组件，并增强字段映射的数据依赖分析，例如提示某个下游必填字段没有任何上游输出或 Dataset 字段来源。
 
 ### 2026-06-01 Workflow 字段流转与 Skill 参数深度优化
 

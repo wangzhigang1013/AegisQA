@@ -35,6 +35,8 @@ def _base_graph() -> dict:
 
 
 def _error_codes(response_json: dict) -> list[str]:
+    if "errors" in response_json:
+        return [item["code"] for item in response_json["errors"]]
     return [item["code"] for item in response_json["details"]["errors"]]
 
 
@@ -92,3 +94,20 @@ def test_publish_rejects_branch_without_condition(tmp_path) -> None:
 
     assert response.status_code == 400
     assert "BRANCH_CONDITION_REQUIRED" in _error_codes(response.json())
+
+
+def test_publish_rejects_missing_required_skill_input_mapping(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    graph = _base_graph()
+    graph["nodes"][0]["input_mapping"] = {}
+
+    validate_response = client.post("/workflow-graphs/validate", json={"graph": graph})
+    publish_response = client.post("/workflow-graphs/publish", json={"graph": graph})
+
+    assert validate_response.status_code == 200
+    validation = validate_response.json()
+    assert validation["ok"] is False
+    assert "REQUIRED_INPUT_MAPPING_MISSING" in _error_codes(validation)
+    assert publish_response.status_code == 400
+    assert "REQUIRED_INPUT_MAPPING_MISSING" in _error_codes(publish_response.json())

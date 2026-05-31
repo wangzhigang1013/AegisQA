@@ -18,10 +18,10 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 最近一次验证结果：
 
-- 单元/API/扩展测试：`python -m pytest -q` 已通过，覆盖 104 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- 单元/API/扩展测试：`python -m pytest -q` 已通过，覆盖 106 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - SQLite 轻量仓储：`python -m pytest tests\test_sqlite_store_adapter.py -q` 已通过，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
 - 端到端 Demo：最新 Dataset `rag_qa_1000:v13`、Run `run-e46e560e1885`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
-- 前端：`npm run typecheck`、`npm test`、`npm run build` 已通过；`npm test` 当前为 9 个测试文件、89 个测试，覆盖交互/API client/图模型/Workflow 深度交互/任务创建向导/Preflight 创建门禁/关键参数签名新鲜度/Preflight 证据展示/执行参数模板/模板 ID 创建提交/Run Attempts/Dataset Lineage/Trace Tree/Experiment/CI Gate/Annotation Queue/候选资产中心审批/拒绝/生成草稿/复跑优先级/批量复跑/复跑对比/三方指标展示/晋升建议/晋升审批/通过晋升后 baseline 与 CI 发布资产/baseline 应用、baseline 影响分析、baseline 回滚门禁、baseline 变更提醒确认、候选资产批量指派/负责人工作量/负责人容量限制/批量指派参数配置/终态候选归档/SLA 逾期升级/批量审批、报告评测结论/Repair Task 生成、工作台、动作闭环、复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、Workflow 草稿创建/Judge 偏差趋势/治理边界和任务创建向导生命周期测试；`App.test.tsx` 已抽出共享 harness，并把修复任务工作台、报告中心与 Workflow 深度交互迁移到独立测试文件；最近一次 Playwright 覆盖 9 条 E2E，E2E 默认使用独立后端端口 8010 并通过 Vite `/api` 代理访问后端。
+- 前端：`npm run typecheck`、`npm test`、`npm run build` 已通过；`npm test` 当前为 9 个测试文件、89 个测试，覆盖交互/API client/图模型/Workflow 深度交互/任务创建向导/Preflight 创建门禁/Workflow 发布失败错误建议/关键参数签名新鲜度/Preflight 证据展示/执行参数模板/模板 ID 创建提交/Run Attempts/Dataset Lineage/Trace Tree/Experiment/CI Gate/Annotation Queue/候选资产中心审批/拒绝/生成草稿/复跑优先级/批量复跑/复跑对比/三方指标展示/晋升建议/晋升审批/通过晋升后 baseline 与 CI 发布资产/baseline 应用、baseline 影响分析、baseline 回滚门禁、baseline 变更提醒确认、候选资产批量指派/负责人工作量/负责人容量限制/批量指派参数配置/终态候选归档/SLA 逾期升级/批量审批、报告评测结论/Repair Task 生成、工作台、动作闭环、复跑对比、上下文修复建议、二级修复任务、修复树进度、负责人指派、逾期提醒、Dataset 字段修复计划、Workflow 参数 diff/回滚计划、Prompt/Skill 版本对比、候选资产沉淀、Workflow 草稿创建/Judge 偏差趋势/治理边界和任务创建向导生命周期测试；`App.test.tsx` 已抽出共享 harness，并把修复任务工作台、报告中心与 Workflow 深度交互迁移到独立测试文件；最近一次 Playwright 覆盖 9 条 E2E，E2E 默认使用独立后端端口 8010 并通过 Vite `/api` 代理访问后端。
 - 浏览器交互：Headless Chrome CDP 验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
 - Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、执行中心搜索任务、报告中心远程搜索任务报告、导出报告、Badcase 加入 Golden；同时覆盖 CI Gate 创建配置和阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核和候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、删除后重连、节点工具栏、键盘删除、撤销/重做、自定义字段映射保存回放、保存草稿回放、试运行回填、校验、发布。
 - 产品化增强：Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree、Task Preflight、Repair Task 工作台、动作闭环、复跑对比、上下文修复建议与二级修复任务已有后端 API 测试；首页已展示真实 Dashboard 和产品化增强入口。
@@ -38,7 +38,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-SK-08 | Skill 插件包上传与审批门禁 | 已实现基础 | `POST /skills/packages/upload`、`GET /skills/packages`、`aegisqa/skills/packages.py`；zip 必须包含 `skill.yaml|skill.json` 和 `handler.py`，默认 `pending_review`，非法 zip 路径会拒绝，插件合约测试默认 5 秒超时并返回 `SKILL_CONTRACT_TIMEOUT`，stdout 超过安全上限返回 `SKILL_PACKAGE_OUTPUT_TOO_LARGE`，运行时 stdout/stderr 会截断并脱敏本地绝对路径，审批记录保存审批人、审批时间和审批备注；测试 `test_skill_package_upload_contract_and_approval_gate`、`test_skill_package_security.py` 和 `test_p0_hardening.py`；Playwright E2E 覆盖真实 zip 上传、合约测试和治理启用 |
 | FR-WF-01 | 创建、编辑、复制、发布、归档 Workflow | 已实现基础 | `WorkflowService.publish/copy_workflow/archive`，`POST /workflow-graphs/publish`，`POST/PUT/DELETE /workflow-drafts`，`GET /workflow-drafts/{draft_id}` 单草稿深链加载，React `Workflow 市场` + `Workflow 画布`；市场进入画布会预写单草稿缓存，画布加载完成前显示加载态，避免后台刷新覆盖用户编辑 |
 | FR-WF-02 | 线性步骤列表与图形化编排 | 已实现 | `WorkflowDraft` / `WorkflowStep`，`WorkflowGraph` 保留画布快照；前端图模型已独立测试，Inspector 支持节点工具栏、键盘删除、下游连线可视化、选择目标创建连线、删除连线、删除后重连和 Aggregator 聚合策略，Playwright 覆盖 Source/Skill/Join/Output/Aggregator 新增、创建连线、删除节点、删除下游连线、删除后重连、撤销、重做、保存草稿回放、校验、发布 |
-| FR-WF-03 | 字段映射与强类型校验 | 已实现 | `resolve_input_mapping`，失败不调用 Skill；React Workflow Inspector 字段映射支持可编辑字段名和自定义路径输入，Playwright 覆盖 `row.prompt_text` 保存草稿并从 Workflow 市场重新打开后回放 |
+| FR-WF-03 | 字段映射与强类型校验 | 已实现 | `resolve_input_mapping`，失败不调用 Skill；Workflow 图校验会读取 Skill `input_schema.required`，在校验/发布阶段阻断必填输入映射缺失并返回 `REQUIRED_INPUT_MAPPING_MISSING`；React Workflow Inspector 字段映射支持可编辑字段名和自定义路径输入，Playwright 覆盖 `row.prompt_text` 保存草稿并从 Workflow 市场重新打开后回放 |
 | FR-WF-04 | 试运行 | 已实现基础 | `WorkflowRunner.dry_run` 支持 1-10 条样本，`POST /workflow-graphs/dry-run`，React Console 已接入按钮反馈，Playwright 覆盖选择数据集后试运行回填结果 |
 | FR-DS-01 | CSV/JSONL 上传与流式解析 | 已实现 | `DatasetService.upload_dataset`，API `/datasets/upload` 与 `/datasets/from-path`，React 上传弹窗与禁用反馈已测试；空文件、坏 JSONL 行号、空 CSV 均有结构化错误 |
 | FR-DS-02 | 数据集版本化 | 已实现 | 同名上传递增版本 |
@@ -71,10 +71,10 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 | 编号 | 需求 | 当前状态 | 证据 |
 |---|---|---|---|
-| FR-SK-06 | Skill 启用/禁用/审批/废弃 | 已实现基础 | `SkillRegistry.disable/approve/deprecate`，`POST /skills/{skill_id}/approve|disable|deprecate`，React Skill 市场展示待审批、合约状态、审批人和审批时间；治理页新增审批抽屉展示 Manifest、Schema、测试日志，未通过合约测试的插件不能在前端直接启用 |
+| FR-SK-06 | Skill 启用/禁用/审批/废弃 | 已实现基础 | `SkillRegistry.disable/approve/deprecate`，`POST /skills/{skill_id}/approve|disable|deprecate`，React Skill 市场展示待审批、合约状态、审批人和审批时间；治理页新增审批抽屉展示 Manifest、Schema、测试日志，未通过合约测试的插件不能在前端直接启用；内置 Skill manifest 在实例化时深拷贝，禁用/审批状态不会跨 `SkillRegistry` 实例串扰 |
 | FR-SK-07 | Skill 安全策略声明 | 已实现基础 | `SkillManifest.permissions` |
 | FR-WF-05 | 模板化 Workflow | 已实现基础 | `WorkflowTemplateService`，React Workflow 页面提供示例图 |
-| FR-WF-06 | DAG/条件分支/并行节点 | 已实现基础 | `DAGWorkflow.execution_levels`、`DAGWorkflowExecutor` 支持条件 `exists/not exists` 和按层并行执行；`WorkflowGraphService` 支持画布 DAG 校验、点对多、多对一 Join/Aggregator 规则；发布前阻断测试覆盖未审批 Skill、多对一缺 Join/Aggregator、Branch 缺条件表达式 |
+| FR-WF-06 | DAG/条件分支/并行节点 | 已实现基础 | `DAGWorkflow.execution_levels`、`DAGWorkflowExecutor` 支持条件 `exists/not exists` 和按层并行执行；`WorkflowGraphService` 支持画布 DAG 校验、点对多、多对一 Join/Aggregator 规则；发布前阻断测试覆盖未审批 Skill、多对一缺 Join/Aggregator、Branch 缺条件表达式和必填输入映射缺失 |
 | FR-DS-07 | DBQuery/API/线上抽样 Source Skill | 已实现基础 | `DBQuerySkill` 支持 sqlite SQL，`APIPullSkill` 支持 file/http JSON rows，`OnlineSampleSkill` 支持抽样 |
 | FR-DS-08 | 数据导出 | 已实现基础 | `DatasetService.export_rows` |
 | FR-EX-06 | 取消、暂停、恢复 | 已实现基础 | `cancel_run/pause_run/resume_run`，`POST /runs/{run_id}/execute|pause|resume|cancel|retry-failed`，React 执行中心已接入；Task 层已增加 completed/running/canceled 状态机保护 |

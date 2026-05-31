@@ -54,6 +54,9 @@ class BaseSkill(ABC):
     def __init__(self) -> None:
         if not hasattr(self, "manifest"):
             raise TypeError("Skill 必须声明 manifest")
+        # 内置 Skill 的 manifest 通常写在类属性上；实例化时必须深拷贝，
+        # 否则禁用/审批一个注册表里的 Skill 会污染后续测试或其他 app 实例。
+        self.manifest = self.manifest.model_copy(deep=True)
 
     @abstractmethod
     def run(self, inputs: dict[str, Any], config: dict[str, Any] | None = None) -> SkillResult:
