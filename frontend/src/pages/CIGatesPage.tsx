@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import type { CIGateConfigRecord, CIGateEvaluationRecord, CIGateEvaluationResult } from '../types';
+import type { CIGateConfigRecord, CIGateEvaluationPageResult, CIGateEvaluationRecord, CIGateEvaluationResult } from '../types';
 
 type CIGateCreateValues = {
   name: string;
@@ -26,6 +26,8 @@ export function CIGatesPage() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>();
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>();
   const [evaluation, setEvaluation] = useState<CIGateEvaluationResult | null>(null);
+  const [evaluationPage, setEvaluationPage] = useState(1);
+  const evaluationPageSize = 6;
   const [form] = Form.useForm<CIGateCreateValues>();
   const configName = Form.useWatch('name', form);
 
@@ -41,11 +43,12 @@ export function CIGatesPage() {
   const activeRunId = selectedRunId ?? runs[0]?.run_id;
   const canEvaluate = Boolean(activeConfigId && (targetKind === 'task' ? activeTaskId : activeRunId));
   const evaluationsQuery = useQuery({
-    queryKey: ['ci-gate-evaluations', activeConfigId],
-    queryFn: () => api.ciGateEvaluations(activeConfigId ? { config_id: activeConfigId } : {}),
+    queryKey: ['ci-gate-evaluations', activeConfigId, evaluationPage, evaluationPageSize],
+    queryFn: () => api.ciGateEvaluationsPage({ config_id: activeConfigId, page: evaluationPage, pageSize: evaluationPageSize }),
   });
-  const evaluationHistory = evaluationsQuery.data ?? [];
-  const historySummary = buildHistorySummary(evaluationHistory);
+  const evaluationHistory = evaluationsQuery.data?.items ?? [];
+  const evaluationPagination = evaluationsQuery.data?.pagination;
+  const historySummary = buildHistorySummary(evaluationsQuery.data?.summary, evaluationHistory);
 
   const createMutation = useMutation({
     mutationFn: (values: CIGateCreateValues) =>
@@ -81,6 +84,7 @@ export function CIGatesPage() {
       setCreateOpen(false);
       form.resetFields();
       setSelectedConfigId(config.config_id);
+      setEvaluationPage(1);
       setNotice(`质量门禁配置已创建：${config.name}`);
       await queryClient.invalidateQueries({ queryKey: ['ci-gates'] });
     },
@@ -99,6 +103,7 @@ export function CIGatesPage() {
     },
     onSuccess: async (result) => {
       setEvaluation(result);
+      setEvaluationPage(1);
       setNotice(result.status === 'blocked' ? `质量门禁阻断：${result.blocking_failures} 条阻断规则未通过。` : '质量门禁通过，可以进入后续发布流程。');
       await queryClient.invalidateQueries({ queryKey: ['ci-gate-evaluations'] });
     },
@@ -124,7 +129,10 @@ export function CIGatesPage() {
               className="full-width-control"
               placeholder="选择质量门禁"
               value={activeConfigId}
-              onChange={setSelectedConfigId}
+              onChange={(value) => {
+                setSelectedConfigId(value);
+                setEvaluationPage(1);
+              }}
               options={configs.map((config) => ({ value: config.config_id, label: config.name }))}
             />
           </Col>
@@ -219,7 +227,13 @@ export function CIGatesPage() {
           rowKey="evaluation_id"
           loading={evaluationsQuery.isLoading}
           dataSource={evaluationHistory}
-          pagination={{ pageSize: 6 }}
+          pagination={{
+            current: evaluationPagination?.page ?? evaluationPage,
+            pageSize: evaluationPagination?.page_size ?? evaluationPageSize,
+            total: evaluationPagination?.total_items ?? evaluationHistory.length,
+            showSizeChanger: false,
+            onChange: setEvaluationPage,
+          }}
           columns={[
             { title: '评估 ID', dataIndex: 'evaluation_id', render: (value) => <code>{value}</code> },
             { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'passed' ? 'green' : 'red'}>{value === 'passed' ? '通过' : '阻断'}</Tag> },
@@ -318,7 +332,15 @@ function HistoryTile({ title, value, note }: { title: string; value: number; not
   );
 }
 
-function buildHistorySummary(history: CIGateEvaluationRecord[]) {
+function buildHistorySummary(summary: CIGateEvaluationPageResult['summary'] | undefined, history: CIGateEvaluationRecord[]) {
+  if (summary) {
+    return {
+      total: summary.total_evaluations,
+      blocked: summary.blocked,
+      passed: summary.passed,
+      latestStatus: formatHistoryStatus(summary.latest_status),
+    };
+  }
   const blocked = history.filter((item) => item.status === 'blocked').length;
   const passed = history.filter((item) => item.status === 'passed').length;
   const latest = history[history.length - 1];
@@ -328,6 +350,12 @@ function buildHistorySummary(history: CIGateEvaluationRecord[]) {
     passed,
     latestStatus: latest ? (latest.status === 'passed' ? '通过' : '阻断') : '暂无',
   };
+}
+
+function formatHistoryStatus(status: string): string {
+  if (status === 'passed') return '通过';
+  if (status === 'blocked') return '阻断';
+  return status || '暂无';
 }
 
 function formatTarget(target: CIGateEvaluationRecord['target']): string {

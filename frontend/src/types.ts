@@ -1262,6 +1262,22 @@ export type CIGateEvaluationRecord = CIGateEvaluationResult & {
   created_at: string;
 };
 
+export type CIGateEvaluationPageResult = {
+  items: CIGateEvaluationRecord[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total_items: number;
+    total_pages: number;
+  };
+  summary: {
+    total_evaluations: number;
+    blocked: number;
+    passed: number;
+    latest_status: string;
+  };
+};
+
 export type TraceTree = {
   run_id: string;
   status: string;

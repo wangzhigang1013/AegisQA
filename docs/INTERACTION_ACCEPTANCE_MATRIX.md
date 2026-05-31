@@ -85,7 +85,7 @@
 | 实验中心 | 从 Run 生成实验快照 | 可用，打开创建弹窗，必须选择 Run 和填写名称后才能提交 | `POST /experiments/from-run` | `npm test` 覆盖创建入口和禁用条件 |
 | CI Gate | 创建质量门禁配置 | 可用，弹窗创建发布门槛，默认包含通过率、Badcase 和 P95 耗时规则；未填写名称时禁用保存 | `POST /ci-gates`、`GET /ci-gates` | `npm test` 覆盖创建入口和禁用条件；Playwright E2E 覆盖真实创建 |
 | CI Gate | 对 Task/Run 执行评估 | 可用，可选择门禁配置和 Task/Run；后端自动抽取任务或 Run 指标，返回 blocking 状态、实际值和阈值 | `POST /ci-gates/evaluate`、`GET /tasks`、`GET /runs` | `tests/test_productization_api.py` 覆盖 Task/Run 评估；`npm test` 与 Playwright E2E 覆盖阻断原因 |
-| CI Gate | 评估历史与趋势 | 可用，每次评估保存 history，页面展示历史评估、阻断次数、通过次数、目标和主要原因 | `GET /ci-gates/evaluations?config_id=&task_id=&run_id=` | `tests/test_productization_api.py` 覆盖保存和过滤；`npm test` 覆盖历史趋势展示 |
+| CI Gate | 评估历史与趋势 | 可用，每次评估保存 history，页面展示历史评估、阻断次数、通过次数、目标和主要原因；评估历史表已升级为服务端分页，历史趋势卡读取筛选后全量 summary，避免被当前页误导 | `GET /ci-gates/evaluations?config_id=&task_id=&run_id=&page=&page_size=` | `tests/test_productization_api.py` 覆盖保存、过滤和分页兼容；`npm test` 覆盖历史趋势展示和点击第 2 页重新请求后端 |
 | Annotation Queue | 队列筛选 | 可用，支持状态、负责人、来源任务筛选；来源任务由后端根据 Run 回填；审核队列已升级为服务端分页，筛选变化会重置页码和已选样本 | `GET /annotation-queue?status=&assignee=&source_task_id=&page=&page_size=`、`GET /tasks` | `tests/test_productization_api.py` 覆盖来源任务筛选和服务端分页；`npm test` 覆盖筛选入口与点击第 2 页重新请求后端 |
 | Annotation Queue | 领取/分派/审核 | 可用，支持领取为当前用户、分派给指定负责人、填写人工标签和说明，审核结果可回流 Golden Dataset | `POST /annotation-queue/{task_id}/assign`、`POST /annotation-queue/{task_id}/review` | `npm test` 覆盖领取和审核弹窗；Playwright E2E 覆盖真实领取、审核和回流 Golden |
 | Annotation Queue | 批量审核 | 可用，支持多选待审核样本，批量设置人工标签、说明和是否回流 Golden，提交后刷新队列和候选资产 | `POST /annotation-queue/bulk-review` | `tests/test_productization_api.py` 覆盖批量审核生成候选资产；`npm test` 覆盖批量审核弹窗和成功反馈；Playwright E2E 覆盖真实批量审核 |

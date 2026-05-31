@@ -484,7 +484,9 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         config_id: str | None = Query(default=None),
         task_id: str | None = Query(default=None),
         run_id: str | None = Query(default=None),
-    ) -> list[dict[str, Any]]:
+        page: int | None = Query(default=None, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         evaluations = _list_records(ctx.store, "ci_gate_evaluations")
         if config_id:
             evaluations = [item for item in evaluations if item.get("config_id") == config_id]
@@ -492,6 +494,11 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             evaluations = [item for item in evaluations if item.get("target") == {"kind": "task", "id": task_id}]
         if run_id:
             evaluations = [item for item in evaluations if item.get("target") == {"kind": "run", "id": run_id}]
+        if page is not None:
+            page_result = _paginate_records(evaluations, page=page, page_size=page_size)
+            # 摘要必须基于筛选后的全量历史，而不是当前页，否则历史趋势卡会被分页误导。
+            page_result["summary"] = _ci_gate_evaluation_summary(evaluations)
+            return page_result
         return evaluations
 
     @app.post("/annotation-queue/seed-from-run")
@@ -595,6 +602,16 @@ def _paginate_records(records: list[dict[str, Any]], *, page: int, page_size: in
             "total_items": total_items,
             "total_pages": ceil(total_items / safe_page_size) if total_items else 0,
         },
+    }
+
+
+def _ci_gate_evaluation_summary(evaluations: list[dict[str, Any]]) -> dict[str, Any]:
+    latest = max(evaluations, key=lambda item: str(item.get("created_at") or "")) if evaluations else None
+    return {
+        "total_evaluations": len(evaluations),
+        "blocked": sum(1 for item in evaluations if item.get("status") == "blocked"),
+        "passed": sum(1 for item in evaluations if item.get("status") == "passed"),
+        "latest_status": str(latest.get("status")) if latest else "暂无",
     }
 
 

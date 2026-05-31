@@ -1550,6 +1550,14 @@ describe('AegisQA 前端工作台', () => {
         return jsonResponse(demoCIGates);
       }
       if (url.includes('/ci-gates/evaluations')) {
+        const parsed = new URL(url, 'http://localhost');
+        if (parsed.searchParams.has('page')) {
+          return jsonResponse({
+            items: demoCIGateEvaluations,
+            pagination: { page: Number(parsed.searchParams.get('page') ?? 1), page_size: 6, total_items: demoCIGateEvaluations.length, total_pages: 1 },
+            summary: { total_evaluations: demoCIGateEvaluations.length, blocked: 1, passed: 0, latest_status: 'blocked' },
+          });
+        }
         return jsonResponse(demoCIGateEvaluations);
       }
       if (url.endsWith('/workflow-graphs/validate')) {
@@ -2135,7 +2143,12 @@ describe('AegisQA 前端工作台', () => {
         return jsonResponse(demoCIGateEvaluations[0]);
       }
       if (url.includes('/ci-gates/evaluations')) {
-        return jsonResponse(demoCIGateEvaluations);
+        const parsed = new URL(url, 'http://localhost');
+        return jsonResponse({
+          items: demoCIGateEvaluations,
+          pagination: { page: Number(parsed.searchParams.get('page') ?? 1), page_size: 6, total_items: demoCIGateEvaluations.length, total_pages: 1 },
+          summary: { total_evaluations: demoCIGateEvaluations.length, blocked: 1, passed: 0, latest_status: 'blocked' },
+        });
       }
       if (url.endsWith('/tasks')) {
         return jsonResponse([demoTask]);
@@ -2162,6 +2175,56 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /执行 Gate 评估/ }));
     expect(await screen.findByText('阻断原因')).toBeInTheDocument();
     expect(screen.getAllByText(/质量门禁未通过/).length).toBeGreaterThan(0);
+  });
+
+  it('CI Gate 评估历史使用服务端分页并保留全量摘要', async () => {
+    const manyEvaluations = Array.from({ length: 12 }, (_, index) => ({
+      ...demoCIGateEvaluations[0],
+      evaluation_id: `gateeval-page-${String(index).padStart(2, '0')}`,
+      status: index % 4 === 0 ? 'blocked' : 'passed',
+      blocking_failures: index % 4 === 0 ? 1 : 0,
+      created_at: `2026-06-${String(index + 1).padStart(2, '0')}T00:00:00Z`,
+    }));
+    const evaluationRequests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/ci-gates')) {
+        return jsonResponse(demoCIGates);
+      }
+      if (url.includes('/ci-gates/evaluations')) {
+        const parsed = new URL(url, 'http://localhost');
+        evaluationRequests.push(url);
+        if (!parsed.searchParams.has('page')) {
+          return jsonResponse(manyEvaluations);
+        }
+        const page = Number(parsed.searchParams.get('page') ?? 1);
+        const pageSize = Number(parsed.searchParams.get('page_size') ?? 6);
+        const start = (page - 1) * pageSize;
+        return jsonResponse({
+          items: manyEvaluations.slice(start, start + pageSize),
+          pagination: { page, page_size: pageSize, total_items: manyEvaluations.length, total_pages: Math.ceil(manyEvaluations.length / pageSize) },
+          summary: { total_evaluations: manyEvaluations.length, blocked: 3, passed: 9, latest_status: 'blocked' },
+        });
+      }
+      if (url.endsWith('/tasks')) {
+        return jsonResponse([demoTask]);
+      }
+      if (url.endsWith('/runs')) {
+        return jsonResponse([]);
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/ci-gates');
+
+    expect(await screen.findByText('gateeval-page-00')).toBeInTheDocument();
+    expect(screen.queryByText('gateeval-page-06')).not.toBeInTheDocument();
+    expect(screen.getByText('历史评估')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('2'));
+    await waitFor(() => {
+      expect(evaluationRequests.some((request) => request.includes('page=2') && request.includes('page_size=6'))).toBe(true);
+    });
+    expect(await screen.findByText('gateeval-page-06')).toBeInTheDocument();
   });
 
   it('Annotation Queue 页面支持来源任务筛选、领取和审核回流', async () => {

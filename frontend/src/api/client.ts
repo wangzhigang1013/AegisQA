@@ -7,6 +7,7 @@ import type {
   BadcaseRecord,
   CIGateConfigRecord,
   CIGateEvaluationRecord,
+  CIGateEvaluationPageResult,
   CIGateRule,
   CIGateEvaluationResult,
   DashboardSummary,
@@ -154,6 +155,15 @@ export const api = {
     });
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<CIGateEvaluationRecord[]>(`/ci-gates/evaluations${suffix}`);
+  },
+  ciGateEvaluationsPage: (filters: { config_id?: string; task_id?: string; run_id?: string; page?: number; pageSize?: number } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (!value) return;
+      query.set(key === 'pageSize' ? 'page_size' : key, String(value));
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<CIGateEvaluationPageResult>(`/ci-gates/evaluations${suffix}`);
   },
   annotationQueue: (filters: { status?: string; assignee?: string; source_task_id?: string } = {}) => {
     const query = new URLSearchParams();

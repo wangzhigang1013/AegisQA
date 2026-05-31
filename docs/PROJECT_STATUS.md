@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Candidate Assets Server Pagination”已完成并通过全量验证。本批次继续优化修复/审核后的候选资产治理入口：`GET /prompt-skill-candidates` 无分页参数时保持旧数组响应，带 `page/page_size` 时返回 `{ items, pagination }`；候选资产中心主表已改为服务端分页，批量审批、批量指派、批量归档保持“当前页候选资产”语义。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“CI Gate Evaluation Server Pagination”已完成并通过全量验证。本批次继续优化发布质量门禁历史入口：`GET /ci-gates/evaluations` 无分页参数时保持旧数组响应，带 `page/page_size` 时返回 `{ items, pagination, summary }`；CI Gate 页面评估历史表已改为服务端分页，历史趋势卡读取筛选后全量 summary，避免被当前页误导。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -81,6 +81,7 @@
 - 报告中心已新增“分层分析”组件，围绕低通过率分组展示分组指标和下一步动作建议，避免只看总体通过率。
 - Annotation Queue 已新增批量审核接口和前端多选审核弹窗，支持一次性设置人工标签、说明和 Golden 回流；审核记录会保留 reviewer、reviewed_at、source_task_id，并同步生成 Golden 候选和 Assertion 候选资产。
 - CI Gate 已新增评估历史记录，`POST /ci-gates/evaluate` 会保存 evaluation record，`GET /ci-gates/evaluations` 支持按 config、task、run 过滤；CI Gate 页面展示历史趋势、阻断次数、通过次数和具体阻断原因。
+- CI Gate 评估历史已支持服务端分页，旧数组响应保持兼容；分页响应额外返回基于筛选后全量历史的 summary，React 评估历史表翻页会请求后端。
 - Experiment 快照已补齐 Dataset/Workflow 元数据、延迟指标和失败分布；Experiment 页面支持 Dataset/Workflow 过滤，并新增 A/B 对比面板展示通过率、Badcase、P95 耗时、成本和失败分布差异。
 - README 已把主启动路径明确为 FastAPI + React，并将 Streamlit 保留为 legacy demo；文档明确 Task 是用户主对象，Run 是底层执行 Attempt。
 - 治理页已移除容易误导的 MySQL/Redis/Celery 状态清单，改为指向 README 和 PRD 验收矩阵的生产适配边界提示。
@@ -121,6 +122,16 @@
 
 ## 最近验证
 
+- `python -m pytest tests\test_productization_api.py -q -k "ci_gate_evaluations_support_server_side_pagination"`：先 RED 后 GREEN，最终 1 passed，确认 CI Gate 历史分页响应、legacy 数组响应、筛选后分页和全量 summary。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "CI Gate 评估历史使用服务端分页"`：先 RED 后 GREEN，最终 1 passed，确认点击第 2 页会请求 `page=2&page_size=6`。
+- `python -m pytest tests\test_productization_api.py -q -k "ci_gate"`：4 passed，确认 CI Gate 断言、配置、Task/Run 评估、历史过滤与新增分页兼容。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "CI Gate"`：3 passed，确认 CI Gate 页面既有创建/评估动作与新增分页兼容。
+- `python -m pytest -q`：101 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：6 个测试文件，80 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
+- `cd frontend && npm run build`：通过，CIGatesPage chunk 正常生成。
+- `cd frontend && npm run e2e`：8 passed，主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
+- `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - `python -m pytest tests\test_task_flow_optimization.py -q -k "prompt_skill_candidates_support_server_side_pagination"`：先 RED 后 GREEN，最终 1 passed，确认候选资产分页响应、legacy 数组响应和筛选后分页。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心列表使用服务端分页"`：先 RED 后 GREEN，最终 1 passed，确认点击第 2 页会请求 `page=2&page_size=8`。
 - `python -m pytest tests\test_task_flow_optimization.py -q -k "prompt_skill_candidate"`：8 passed，确认候选资产审批、指派、归档、复跑、晋升与新增分页兼容。
@@ -404,6 +415,41 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 CI Gate Evaluation Server Pagination
+
+- 改动摘要：CI Gate 评估历史从前端本地分页升级为服务端分页；旧 `GET /ci-gates/evaluations` 数组响应保持兼容，带 `page/page_size` 时返回 `items`、`pagination` 和基于筛选后全量历史的 `summary`；React `/ci-gates` 页面历史表使用受控分页，历史趋势卡不再受当前页影响。
+- 变更文件：
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_productization_api.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/CIGatesPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-06-01-ci-gate-evaluation-server-pagination.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_productization_api.py -q -k "ci_gate_evaluations_support_server_side_pagination"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "CI Gate 评估历史使用服务端分页"`
+  - `python -m pytest tests\test_productization_api.py -q -k "ci_gate"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "CI Gate"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 后端分页测试先 RED 后 GREEN，最终 1 passed。
+  - 前端服务端分页测试先 RED 后 GREEN，最终 1 passed。
+  - CI Gate 后端相关回归 4 passed。
+  - CI Gate 前端相关回归 3 passed。
+  - 后端全量 101 passed，仍有 Windows `.pytest_cache` 创建警告。
+  - 前端类型检查通过；前端单测 80 passed，仍有既有 Ant Design `useForm` 测试环境 warning。
+  - 前端构建通过；Playwright E2E 8 passed；`git diff --check` 仅有 CRLF 换行转换 warning。
+- 下一步：继续审查 Repair Task、Score Analytics 和成本账单等长列表/重计算页面的分页、筛选与权限边界。
 
 ### 2026-06-01 Candidate Assets Server Pagination
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from aegisqa.api.app import create_app
+from aegisqa.api.app import _save_record, create_app
 
 
 def _write_jsonl(path: Path) -> None:
@@ -214,6 +214,47 @@ def test_ci_gate_evaluation_history_is_saved_and_filterable(tmp_path: Path) -> N
     assert client.get(f"/ci-gates/evaluations?config_id={config['config_id']}").json()[0]["evaluation_id"] == result["evaluation_id"]
     assert client.get(f"/ci-gates/evaluations?task_id={task['task_id']}").json()[0]["evaluation_id"] == result["evaluation_id"]
     assert client.get("/ci-gates/evaluations?run_id=run-missing").json() == []
+
+
+def test_ci_gate_evaluations_support_server_side_pagination_without_breaking_legacy_list(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    store = client.app.state.store
+    for index in range(12):
+        _save_record(
+            store,
+            "ci_gate_evaluations",
+            "evaluation_id",
+            {
+                "evaluation_id": f"gateeval-page-{index:02d}",
+                "config_id": "gatecfg-page",
+                "status": "blocked" if index % 4 == 0 else "passed",
+                "blocking_failures": 1 if index % 4 == 0 else 0,
+                "target": {"kind": "task", "id": "task-page"},
+                "metrics": {"pass_rate": 0.5 + index / 100},
+                "results": [],
+                "created_at": f"2026-06-{index + 1:02d}T00:00:00+00:00",
+            },
+        )
+
+    legacy = client.get("/ci-gates/evaluations", params={"config_id": "gatecfg-page"}).json()
+    assert isinstance(legacy, list)
+    assert len(legacy) == 12
+
+    page = client.get("/ci-gates/evaluations", params={"config_id": "gatecfg-page", "page": 2, "page_size": 5}).json()
+    assert page["pagination"] == {"page": 2, "page_size": 5, "total_items": 12, "total_pages": 3}
+    assert [item["evaluation_id"] for item in page["items"]] == [item["evaluation_id"] for item in legacy[5:10]]
+    assert page["summary"] == {
+        "total_evaluations": 12,
+        "blocked": 3,
+        "passed": 9,
+        "latest_status": "passed",
+    }
+
+    missing_page = client.get("/ci-gates/evaluations", params={"run_id": "run-missing", "page": 1, "page_size": 5}).json()
+    assert missing_page["pagination"]["total_items"] == 0
+    assert missing_page["items"] == []
+    assert missing_page["summary"]["latest_status"] == "暂无"
 
 
 def test_annotation_queue_supports_assignment_and_review(tmp_path: Path) -> None:
