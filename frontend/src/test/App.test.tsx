@@ -824,6 +824,14 @@ function errorResponse(status: number, payload: unknown) {
   } as Response);
 }
 
+function findComboboxByLabel(label: string) {
+  const combobox = screen.getAllByLabelText(label).find((element) => element.getAttribute('role') === 'combobox');
+  if (!combobox) {
+    throw new Error(`找不到下拉输入框：${label}`);
+  }
+  return combobox;
+}
+
 describe('AegisQA 前端工作台', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -863,7 +871,15 @@ describe('AegisQA 前端工作台', () => {
         return jsonResponse(demoTaskExecutionTemplates);
       }
       if (url.endsWith('/tasks/preflight')) {
-        return jsonResponse(demoPreflightResult);
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        return jsonResponse({
+          ...demoPreflightResult,
+          execution_template_id: body.execution_template_id,
+          evaluation_goal: body.evaluation_goal,
+          quality_gate: body.quality_gate,
+          sample_repeat_times: body.sample_repeat_times,
+          cost_budget: body.cost_budget,
+        });
       }
       if (url.endsWith('/tasks/task-demo/execute')) {
         return jsonResponse({ ...demoTask, status: 'completed', completed_items: 100, pass_rate: 0.8, badcase_count: 20 });
@@ -1683,6 +1699,31 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByRole('button', { name: '确认创建任务' })).not.toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
     expect(await screen.findByText(/任务已创建/)).toBeInTheDocument();
+  });
+
+  it('执行中心选择执行模板后创建任务会提交模板 ID', async () => {
+    await renderWorkbench('/runs');
+
+    fireEvent.click(await screen.findByRole('button', { name: /创建任务/ }));
+    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '模板化上线门禁' } });
+    fireEvent.mouseDown(findComboboxByLabel('执行参数模板'));
+    fireEvent.click(await screen.findByText('上线门禁稳健模板 / 内置'));
+    fireEvent.mouseDown(screen.getAllByLabelText('Dataset Version')[0]);
+    fireEvent.click(await screen.findByText('问答回归集 v1 / 100 条'));
+    fireEvent.mouseDown(screen.getAllByLabelText('Workflow Version')[0]);
+    fireEvent.click(await screen.findByText('RAG 回归评测 v1'));
+
+    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
+    expect((await screen.findAllByText(/Preflight 通过/)).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
+    expect(await screen.findByText(/任务已创建/)).toBeInTheDocument();
+
+    const createTaskCall = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.find(([input, init]) => String(input).endsWith('/tasks') && init?.method === 'POST');
+    const body = JSON.parse(String(createTaskCall?.[1]?.body ?? '{}'));
+    expect(body.execution_template_id).toBe('release_gate_safe');
+    expect(body.preflight_result.execution_template_id).toBe('release_gate_safe');
   });
 
   it('Trace Flow 页面展示样本数据、参数来源和队列消息形状', async () => {

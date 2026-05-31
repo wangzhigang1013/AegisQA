@@ -82,6 +82,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 dataset_id=request.dataset_id,
                 dataset_version=request.dataset_version,
                 workflow_version_id=request.workflow_version_id,
+                execution_template_id=request.execution_template_id,
                 evaluation_goal=request.evaluation_goal,
                 quality_gate=request.quality_gate,
                 cost_budget=request.cost_budget,
@@ -89,6 +90,8 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 skill_overrides=request.skill_overrides,
             ),
         )
+        if request.preflight_result is not None:
+            _ensure_preflight_matches_task_request(preflight_result, request)
         if preflight_result.get("status") == "blocked" and not request.allow_blocked_preflight:
             blocked_checks = [check for check in preflight_result.get("checks", []) if check.get("status") == "blocked"]
             raise AegisQAError(
@@ -533,9 +536,58 @@ def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> d
         "quality_gate": request.quality_gate,
         "sample_repeat_times": request.sample_repeat_times,
         "cost_budget": request.cost_budget,
+        "skill_overrides": request.skill_overrides,
         "checks": checks,
         "created_at": _now(),
     }
+
+
+def _ensure_preflight_matches_task_request(preflight_result: dict[str, Any], request: TaskCreateRequest) -> None:
+    """阻止 API 调用者复用旧 Preflight 创建新参数任务。"""
+
+    quality_gate = preflight_result.get("quality_gate") if isinstance(preflight_result.get("quality_gate"), dict) else {}
+    request_quality_gate = request.quality_gate or {}
+    mismatches: list[dict[str, Any]] = []
+
+    def add_mismatch(field: str, expected: Any, actual: Any, *, numeric: bool = False) -> None:
+        expected_signature = _number_signature(expected) if numeric else _text_signature(expected)
+        actual_signature = _number_signature(actual) if numeric else _text_signature(actual)
+        if expected_signature != actual_signature:
+            mismatches.append({"field": field, "expected": expected, "actual": actual})
+
+    add_mismatch("dataset_id", request.dataset_id, preflight_result.get("dataset_id"))
+    add_mismatch("dataset_version", request.dataset_version, preflight_result.get("dataset_version"), numeric=True)
+    add_mismatch("workflow_version_id", request.workflow_version_id, preflight_result.get("workflow_version_id"))
+    add_mismatch("execution_template_id", request.execution_template_id, preflight_result.get("execution_template_id"))
+    add_mismatch("evaluation_goal", request.evaluation_goal, preflight_result.get("evaluation_goal"))
+    add_mismatch("quality_gate.pass_rate", request_quality_gate.get("pass_rate"), quality_gate.get("pass_rate"), numeric=True)
+    add_mismatch("quality_gate.max_badcase_count", request_quality_gate.get("max_badcase_count"), quality_gate.get("max_badcase_count"), numeric=True)
+    add_mismatch("sample_repeat_times", request.sample_repeat_times, preflight_result.get("sample_repeat_times"), numeric=True)
+    add_mismatch("cost_budget", request.cost_budget, preflight_result.get("cost_budget"), numeric=True)
+    if (request.skill_overrides or {}) != (preflight_result.get("skill_overrides") or {}):
+        mismatches.append({"field": "skill_overrides", "expected": request.skill_overrides or {}, "actual": preflight_result.get("skill_overrides") or {}})
+
+    if mismatches:
+        raise AegisQAError(
+            "TASK_PREFLIGHT_STALE",
+            "Preflight 结果已过期，请基于当前 Dataset、Workflow 和执行参数重新运行预检。",
+            status_code=409,
+            details={"mismatches": mismatches, "preflight_result": preflight_result},
+        )
+
+
+def _text_signature(value: Any) -> str:
+    return "" if value is None or value == "" else str(value)
+
+
+def _number_signature(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    try:
+        number_value = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return str(number_value)
 
 
 def _list_task_execution_templates(ctx: RouteContext) -> list[dict[str, Any]]:

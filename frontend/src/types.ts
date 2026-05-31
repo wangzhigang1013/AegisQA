@@ -357,6 +357,7 @@ export type TaskPreflightResult = {
   quality_gate?: Record<string, unknown>;
   sample_repeat_times?: number | null;
   cost_budget?: number | null;
+  skill_overrides?: Record<string, Record<string, unknown>>;
   checks: TaskPreflightCheck[];
   created_at?: string;
 };

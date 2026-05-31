@@ -81,6 +81,7 @@ export function RunsPage() {
         dataset_id: datasetVersion.dataset_id,
         dataset_version: datasetVersion.version,
         workflow_version_id: values.workflow_version_id,
+        execution_template_id: values.execution_template_id,
         evaluation_goal: values.evaluation_goal,
         quality_gate: qualityGateFromValues(values),
         preflight_result: preflightResult,

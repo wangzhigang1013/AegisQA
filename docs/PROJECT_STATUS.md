@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Task Preflight Signature Freshness”已完成目标实现和全量验证。本批次把任务创建 Preflight 从“只匹配 Dataset/Workflow”升级为“匹配完整关键参数签名”：执行模板、评测目的、质量门槛、repeat 和成本预算变化后，前端会要求重新运行 Preflight，后端 Preflight 响应也返回这些签名字段，避免旧预检结果放行新配置。E2E 已改为使用独立后端端口 `8010` 和 Vite `/api` 代理，避免本地 8000 旧服务污染全流程验证；审计日志接口已支持按 actor/action 过滤并补回归测试。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Task Preflight Server Guard”已完成目标实现和全量验证。本批次把 Preflight 新鲜度从前端交互校验推进到后端强约束：如果 API 调用方提交的 `preflight_result` 与当前 Dataset、Workflow、执行模板、评测目的、质量门槛、repeat、成本预算或 Skill 覆盖不一致，`POST /tasks` 会返回 `TASK_PREFLIGHT_STALE` 并列出 mismatch 字段，避免绕过前端复用旧预检结果。前端创建任务请求也已补传 `execution_template_id`，确保模板化任务的 Preflight、Task 快照和后端签名一致。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -31,6 +31,7 @@
 - 执行中心已抽出 `TaskCreateWizard`，创建任务前必须选择 Dataset Version 和 Workflow Version；任务参数支持分片大小、并发、repeat、最大重试、重试退避和成本预算。
 - Task Preflight 已升级为创建门禁：后端阻断 blocked Preflight，前端要求先运行匹配当前 Dataset/Workflow 的 Preflight；确需创建坏数据诊断任务时必须显式确认风险，并把 `allow_blocked_preflight` 写入 Run/Task 快照。
 - Task Preflight 已增加关键参数签名新鲜度校验：`execution_template_id`、`evaluation_goal`、`quality_gate`、`sample_repeat_times`、`cost_budget` 变化都会让创建按钮重新进入“需重跑 Preflight”状态，避免模板或质量门槛被修改后沿用旧预检结果。
+- Task 创建 API 已增加服务端 Preflight 过期校验：传入旧 `preflight_result` 时会按 Dataset、Workflow、执行模板、评测目的、质量门槛、repeat、成本预算和 Skill 覆盖逐项比对，不一致时返回 `TASK_PREFLIGHT_STALE`。
 - Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
@@ -96,6 +97,13 @@
 
 ## 最近验证
 
+- `python -m pytest tests\test_task_center_api.py -q -k "stale_preflight or execution_templates"`：2 passed，覆盖后端拒绝过期 Preflight 签名，以及执行模板进入 Preflight/Task 快照。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心选择执行模板"`：1 passed，覆盖前端选择执行参数模板后创建任务请求会提交 `execution_template_id`，并携带匹配的 `preflight_result`。
+- `python -m pytest -q`：89 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：4 个测试文件、61 passed。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
 - `python -m pytest tests\test_api.py -q -k audit_events`：先失败后通过，确认 `/audit-events?actor=&action=` 不再因服务签名不匹配返回 500，并能按 actor/action 过滤审计事件。
 - `python -m pytest tests\test_task_center_api.py -q -k "execution_templates"`：1 passed，覆盖 Task Preflight 返回执行模板、repeat 和成本预算签名字段。
 - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`：7 passed，覆盖执行模板填充、Preflight 创建门禁、阻断风险确认、关键参数变更要求重跑 Preflight、完整默认执行参数提交和任务参数提交。
@@ -204,6 +212,35 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Task Preflight Server Guard
+
+- 改动摘要：后端 `POST /tasks` 增加 Preflight 结果与当前请求的签名比对，阻止直接 API 调用复用旧预检；前端创建任务 mutation 补传 `execution_template_id`，确保模板化任务不会被后端视为过期预检。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_center_api.py`
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/superpowers/plans/2026-05-31-task-preflight-server-guard.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q -k stale_preflight`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心选择执行模板"`
+  - `python -m pytest tests\test_task_center_api.py -q -k "stale_preflight or execution_templates"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端全量：89 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：4 个测试文件、61 passed。
+  - TypeScript 与生产构建：通过。
+  - Playwright E2E：8 passed。
+- 下一步：继续评估是否需要把 Preflight 签名持久化为不可变 `preflight_id`，并引入模板审批/共享范围，进一步提升多人协作下的可追溯性。
 
 ### 2026-05-31 Task Preflight Signature Freshness
 

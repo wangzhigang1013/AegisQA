@@ -224,6 +224,49 @@ def test_task_creation_blocks_failed_preflight_unless_explicitly_forced(tmp_path
     assert forced["execution_config"]["allow_blocked_preflight"] is True
 
 
+def test_task_creation_rejects_stale_preflight_signature(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "task_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "task_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    preflight = client.post(
+        "/tasks/preflight",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+            "sample_repeat_times": 1,
+            "cost_budget": 10,
+        },
+    ).json()
+    assert preflight["status"] in {"passed", "warning"}
+
+    response = client.post(
+        "/tasks",
+        json={
+            "name": "过期预检任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.96, "max_badcase_count": 0},
+            "sample_repeat_times": 1,
+            "cost_budget": 10,
+            "preflight_result": preflight,
+        },
+    )
+
+    assert response.status_code == 409
+    error = response.json()
+    assert error["code"] == "TASK_PREFLIGHT_STALE"
+    assert error["details"]["mismatches"][0]["field"] == "quality_gate.pass_rate"
+
+
 def test_task_execution_templates_can_be_listed_created_and_snapshotted(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)
