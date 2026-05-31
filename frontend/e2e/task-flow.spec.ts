@@ -132,7 +132,7 @@ async function createAndExecuteTask(page: Page, datasetName: string, workflowNam
 
 async function verifyReportAndCorrectBadcase(page: Page, taskName: string) {
   await page.goto('/reports');
-  await page.locator('.ant-select').first().click();
+  await page.getByRole('combobox', { name: '选择报告任务' }).click();
   await page
     .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content')
     .filter({ hasText: `${taskName} / completed` })

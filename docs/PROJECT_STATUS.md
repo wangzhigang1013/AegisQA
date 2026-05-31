@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Report Export Audit History”已完成目标实现和全量验证。本批次继续补齐报告导出后的可追溯性：`GET /audit-events` 支持按 `target` 过滤，报告中心会按当前 Task 拉取 `task.report.export` 审计事件并展示导出历史，用户能直接看到导出事件、格式、Run、Preflight ID、操作者和时间；导出成功后会刷新当前任务的导出历史。验证中发现并修复治理页把带参数的 `api.auditEvents` 直接传给 React Query 导致审计日志数据形状异常的问题，现已改为显式 `() => api.auditEvents()`。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Report Export Permission Gate”已完成并通过全量验证。本批次继续补齐报告外发治理：RBAC 新增 `report:export` 权限，Task Report Export 默认以 `Evaluator` 角色导出，`Viewer` 只有 `report:read` 不能导出；后端对无权限角色返回 `REPORT_EXPORT_FORBIDDEN` 并写入 `task.report.export.denied` 审计；报告中心新增“报告导出角色”选择器，切到 Viewer 时直接禁用 HTML/CSV/JSON 导出按钮并提示只读角色不能外发报告。验证中发现新增角色下拉会让 Playwright 主链路误点到第一个 Select，已给“选择报告任务”补稳定语义标签并收紧 E2E 选择器。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -42,6 +42,8 @@
 - Task Report 导出内容已加深：CSV 包含任务指标、Preflight 检查、质量决策、分层分析和 Badcase 明细；HTML 按章节展示任务摘要、质量决策、Preflight 检查、分层分析、Badcase 明细和完整 Report。
 - Task Report 导出成功后会记录 `task.report.export` 审计事件，事件 detail 包含 `run_id`、`file_format` 和 `preflight_id`。
 - 报告中心已展示当前 Task 的报告导出历史，基于 `GET /audit-events?action=task.report.export&target={task_id}` 追踪导出格式、Run、Preflight ID、操作者和时间。
+- 报告导出已接入 RBAC 门禁：`Evaluator`、`Reviewer`、`Admin` 可导出，`Viewer` 只能查看不能外发；后端拒绝无权限导出并写入 `task.report.export.denied` 审计，前端报告页按角色禁用导出按钮。
+- 报告中心任务选择器已补 `aria-label="选择报告任务"`，Playwright 主链路不再依赖页面 Select 顺序，避免新增角色、筛选器或分页控件后误选下拉。
 - Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
@@ -116,6 +118,8 @@
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：8 passed。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
+- `python -m pytest tests\test_task_center_api.py -q -k preflight_is_persisted`：先 RED 后 GREEN，最终 1 passed，覆盖 Viewer 导出 Task Report 被 `REPORT_EXPORT_FORBIDDEN` 阻断。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：先 RED 后 GREEN，最终 1 passed，覆盖报告中心“报告导出角色”选择器、Viewer 只读提示和导出按钮禁用。
 - `python -m pytest -q`：92 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、62 passed。
@@ -290,6 +294,46 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Report Export Permission Gate
+
+- 改动摘要：补齐报告外发权限门禁。`AccessControl` 新增 `report:export` 权限，Evaluator、Reviewer、Admin 可以导出，Viewer 保留只读；Task Report Export 增加 `role` 参数并在无权限时返回 `REPORT_EXPORT_FORBIDDEN`，同时记录 `task.report.export.denied` 审计；报告中心新增“报告导出角色”选择器，切到 Viewer 后直接显示只读提示并禁用 HTML/CSV/JSON 导出按钮。
+- 变更文件：
+  - `aegisqa/security/access.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_center_api.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/styles.css`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/e2e/task-flow.spec.ts`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-report-export-permission-gate.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q -k preflight_is_persisted`（RED 后 GREEN）
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`（RED 后 GREEN）
+  - `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端 RED：Viewer 调用 Task Report Export 最初仍返回 200。
+  - 后端 GREEN：1 passed，Viewer 被 403 阻断并返回 `REPORT_EXPORT_FORBIDDEN`。
+  - 前端 RED：报告中心缺少“报告导出角色”。
+  - 前端 GREEN：1 passed，覆盖角色选择、只读提示和导出按钮禁用。
+  - Playwright 主链路首次全量验证 1 failed：新增“报告导出角色”下拉后，旧 E2E 用 `.ant-select.first()` 打开了角色下拉，等不到任务选项。
+  - E2E 修复：任务 Select 增加“选择报告任务”语义标签，主链路按 `combobox` 名称选择任务；`npm run e2e -- e2e/task-flow.spec.ts`：1 passed。
+  - 后端全量：92 passed，仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端单测：4 个测试文件、62 passed。
+  - 前端 build：通过。
+  - Playwright 全量：8 passed。
+- 下一步：继续评估报告导出签名链接、外部审批流、真实成本账单和更细的趋势筛选；同时继续拆分超长报告页测试，降低前端测试耗时。
 
 ### 2026-05-31 Report Export Audit History
 

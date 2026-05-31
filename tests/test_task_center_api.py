@@ -364,6 +364,10 @@ def test_task_preflight_is_persisted_and_task_references_preflight_id(tmp_path: 
     assert report["preflight_evidence"]["checks"][0]["check_id"] == "dataset_non_empty"
     json_export = client.get(f"/tasks/{task['task_id']}/report/export", params={"file_format": "json"}).json()
     assert json_export["content"]["preflight_evidence"]["preflight_id"] == preflight["preflight_id"]
+    denied_export = client.get(f"/tasks/{task['task_id']}/report/export", params={"file_format": "json", "role": "Viewer"})
+    assert denied_export.status_code == 403
+    assert denied_export.json()["code"] == "REPORT_EXPORT_FORBIDDEN"
+    assert denied_export.json()["details"]["required_permission"] == "report:export"
     csv_export = client.get(f"/tasks/{task['task_id']}/report/export", params={"file_format": "csv"}).json()
     assert f"preflight_id,{preflight['preflight_id']}" in csv_export["content"]
     assert "quality_decision,status" in csv_export["content"]

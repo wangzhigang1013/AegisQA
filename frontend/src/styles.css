@@ -212,6 +212,10 @@ pre {
   min-width: 260px;
 }
 
+.role-select {
+  min-width: 168px;
+}
+
 .task-progress-cell {
   min-width: 120px;
 }

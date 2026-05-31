@@ -10,8 +10,8 @@ import type { SkillManifest, SkillPackageRecord } from '../types';
 
 const permissionRows = [
   { key: 'admin', role: 'admin', permissions: 'workflow:publish, run:control, skill:governance, audit:read' },
-  { key: 'evaluator', role: 'evaluator', permissions: 'dataset:write, workflow:write, run:create, report:read' },
-  { key: 'reviewer', role: 'reviewer', permissions: 'badcase:correct, judge:audit, report:read' },
+  { key: 'evaluator', role: 'evaluator', permissions: 'dataset:write, workflow:write, run:create, report:read, report:export' },
+  { key: 'reviewer', role: 'reviewer', permissions: 'badcase:correct, judge:audit, report:read, report:export' },
 ];
 
 export function GovernancePage() {

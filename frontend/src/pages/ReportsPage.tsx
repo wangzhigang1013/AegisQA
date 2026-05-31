@@ -1,6 +1,6 @@
 import { DownloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Empty, Row, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, Empty, Row, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import { useEffect, useMemo, useState, type Key } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -15,12 +15,20 @@ import { ReportSegmentAnalysis } from './report/ReportSegmentAnalysis';
 import { ReportSummary } from './report/ReportSummary';
 
 type ReportExportFormat = 'html' | 'csv' | 'json';
+type ReportExportRole = 'Evaluator' | 'Reviewer' | 'Admin' | 'Viewer';
 
 const reportExportMimeTypes: Record<string, string> = {
   html: 'text/html;charset=utf-8',
   csv: 'text/csv;charset=utf-8',
   json: 'application/json;charset=utf-8',
 };
+
+const reportExportRoles: { value: ReportExportRole; label: string; canExport: boolean }[] = [
+  { value: 'Evaluator', label: 'Evaluator（评测负责人）', canExport: true },
+  { value: 'Reviewer', label: 'Reviewer（审核员）', canExport: true },
+  { value: 'Admin', label: 'Admin（管理员）', canExport: true },
+  { value: 'Viewer', label: 'Viewer（只读）', canExport: false },
+];
 
 export function ReportsPage() {
   const queryClient = useQueryClient();
@@ -29,6 +37,7 @@ export function ReportsPage() {
   const taskIdFromUrl = searchParams.get('task_id');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [exportRole, setExportRole] = useState<ReportExportRole>('Evaluator');
   const [pendingDiagnosticAction, setPendingDiagnosticAction] = useState<string | null>(null);
   const [selectedBadcaseKeys, setSelectedBadcaseKeys] = useState<Key[]>([]);
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
@@ -65,7 +74,7 @@ export function ReportsPage() {
       if (!selectedTask) {
         throw new Error('请先选择任务，再导出报告。');
       }
-      const exported = await api.exportTaskReport(selectedTask.task_id, format);
+      const exported = await api.exportTaskReport(selectedTask.task_id, format, exportRole);
       return { exported, task: selectedTask };
     },
     onSuccess: async ({ exported, task }) => {
@@ -194,6 +203,7 @@ export function ReportsPage() {
   const diagnostics = reportQuery.data?.diagnostics;
   const scoreAnalytics = scoreAnalyticsQuery.data;
   const exportHistory: AuditEvent[] = exportHistoryQuery.data ?? [];
+  const canExportReport = reportExportRoles.find((item) => item.value === exportRole)?.canExport ?? false;
   const latencyData = useMemo(() => {
     if (stepDistribution.length) {
       return Object.fromEntries(stepDistribution.map((step) => [step.step_id, step.average_latency_ms]));
@@ -245,19 +255,28 @@ export function ReportsPage() {
             <Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace` : undefined}>查看 Trace Flow</Button>
             <Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace-tree` : undefined}>查看 Trace Tree</Button>
             <Button disabled={!selectedTask} loading={redTeamScanMutation.isPending} onClick={() => redTeamScanMutation.mutate()}>运行红队扫描</Button>
+            <Select
+              aria-label="报告导出角色"
+              className="role-select"
+              value={exportRole}
+              onChange={setExportRole}
+              options={reportExportRoles.map((role) => ({ value: role.value, label: role.label }))}
+            />
             <Space.Compact>
+              <Tooltip title={!canExportReport ? '当前角色没有 report:export 权限' : ''}>
+                <Button
+                  type="primary"
+                  icon={<DownloadOutlined />}
+                  disabled={!selectedTask || exportMutation.isPending || !canExportReport}
+                  loading={exportMutation.isPending && exportMutation.variables === 'html'}
+                  onClick={() => exportMutation.mutate('html')}
+                >
+                  导出 HTML
+                </Button>
+              </Tooltip>
               <Button
-                type="primary"
                 icon={<DownloadOutlined />}
-                disabled={!selectedTask || exportMutation.isPending}
-                loading={exportMutation.isPending && exportMutation.variables === 'html'}
-                onClick={() => exportMutation.mutate('html')}
-              >
-                导出 HTML
-              </Button>
-              <Button
-                icon={<DownloadOutlined />}
-                disabled={!selectedTask || exportMutation.isPending}
+                disabled={!selectedTask || exportMutation.isPending || !canExportReport}
                 loading={exportMutation.isPending && exportMutation.variables === 'csv'}
                 onClick={() => exportMutation.mutate('csv')}
               >
@@ -265,7 +284,7 @@ export function ReportsPage() {
               </Button>
               <Button
                 icon={<DownloadOutlined />}
-                disabled={!selectedTask || exportMutation.isPending}
+                disabled={!selectedTask || exportMutation.isPending || !canExportReport}
                 loading={exportMutation.isPending && exportMutation.variables === 'json'}
                 onClick={() => exportMutation.mutate('json')}
               >
@@ -277,11 +296,13 @@ export function ReportsPage() {
       />
 
       {notice ? <Alert type={notice.includes('失败') || notice.includes('请先') ? 'warning' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
+      {!canExportReport ? <Alert type="warning" showIcon message="当前角色只有报告查看权限，不能导出或外发报告。" /> : null}
 
       <Card className="flat-card" title="报告列表">
         <Row gutter={[12, 12]} align="middle">
           <Col xs={24} lg={8}>
             <Select
+              aria-label="选择报告任务"
               placeholder="选择任务"
               className="full-width-control"
               value={selectedTask?.task_id}

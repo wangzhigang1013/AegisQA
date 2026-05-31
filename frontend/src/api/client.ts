@@ -451,8 +451,8 @@ export const api = {
   cancelTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/cancel`, { method: 'POST' }),
   retryFailedTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/retry-failed`, { method: 'POST' }),
   taskReport: (taskId: string) => request<TaskReport>(`/tasks/${taskId}/report`),
-  exportTaskReport: (taskId: string, file_format: 'json' | 'csv' | 'html') =>
-    request<Record<string, unknown>>(`/tasks/${taskId}/report/export?file_format=${file_format}`),
+  exportTaskReport: (taskId: string, file_format: 'json' | 'csv' | 'html', role = 'Evaluator') =>
+    request<Record<string, unknown>>(`/tasks/${taskId}/report/export?file_format=${file_format}&role=${encodeURIComponent(role)}`),
   taskDiagnostics: (taskId: string) => request<TaskDiagnostics>(`/tasks/${taskId}/diagnostics`),
   taskParameterGovernance: (taskId: string) => request<TaskParameterGovernance>(`/tasks/${taskId}/parameter-governance`),
   taskTraceTree: (taskId: string) => request<TraceTree>(`/tasks/${taskId}/trace-tree`),

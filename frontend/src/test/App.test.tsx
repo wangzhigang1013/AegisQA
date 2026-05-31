@@ -1375,13 +1375,13 @@ describe('AegisQA 前端工作台', () => {
           export_links: { html: '/runs/run-demo/report/export?file_format=html', csv: '/runs/run-demo/report/export?file_format=csv', json: '/runs/run-demo/report/export?file_format=json' },
         });
       }
-      if (url.endsWith('/tasks/task-demo/report/export?file_format=html')) {
+      if (url.includes('/tasks/task-demo/report/export?file_format=html')) {
         return jsonResponse({ task_id: 'task-demo', file_format: 'html', content: '<html>preflight-demo</html>' });
       }
-      if (url.endsWith('/tasks/task-demo/report/export?file_format=csv')) {
+      if (url.includes('/tasks/task-demo/report/export?file_format=csv')) {
         return jsonResponse({ task_id: 'task-demo', file_format: 'csv', content: 'metric,value\npreflight_id,preflight-demo' });
       }
-      if (url.endsWith('/tasks/task-demo/report/export?file_format=json')) {
+      if (url.includes('/tasks/task-demo/report/export?file_format=json')) {
         return jsonResponse({ task_id: 'task-demo', file_format: 'json', content: { preflight_evidence: { preflight_id: 'preflight-demo' } } });
       }
       if (url.includes('/audit-events?action=task.report.export') && url.includes('target=task-demo')) {
@@ -2187,6 +2187,7 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('audit-export-html')).toBeInTheDocument();
     expect(screen.getByText('html')).toBeInTheDocument();
     expect(screen.getAllByText('preflight-demo').length).toBeGreaterThan(0);
+    expect(findComboboxByLabel('报告导出角色')).toBeInTheDocument();
     expect(screen.getByText('评测结论')).toBeInTheDocument();
     expect(screen.getByText('能否发布')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /生成修复任务/ })).toBeInTheDocument();
@@ -2223,6 +2224,11 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /导出 JSON/ }));
     expect(await screen.findByText(/报告导出成功：RAG_任务.json 已开始下载/)).toBeInTheDocument();
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/report/export?file_format=json'), expect.anything());
+
+    fireEvent.mouseDown(findComboboxByLabel('报告导出角色'));
+    fireEvent.click(await screen.findByText('Viewer（只读）'));
+    expect(await screen.findByText(/当前角色只有报告查看权限，不能导出或外发报告/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /导出 HTML/ })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: /忽略/ }));
     expect(await screen.findByText(/Badcase 已忽略/)).toBeInTheDocument();

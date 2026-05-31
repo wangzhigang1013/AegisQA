@@ -404,7 +404,22 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         return _build_task_report_payload(ctx, task_id)
 
     @app.get("/tasks/{task_id}/report/export")
-    def export_task_report(task_id: str, file_format: str = "json") -> dict[str, Any]:
+    def export_task_report(task_id: str, file_format: str = "json", role: str = "Evaluator") -> dict[str, Any]:
+        if not ctx.access_control.can(role, "report:export"):
+            ctx.audit_service.record(
+                actor=role,
+                action="task.report.export.denied",
+                target=task_id,
+                detail={"file_format": file_format, "required_permission": "report:export"},
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "REPORT_EXPORT_FORBIDDEN",
+                    "message": "当前角色没有导出报告权限",
+                    "details": {"role": role, "required_permission": "report:export"},
+                },
+            )
         payload = _build_task_report_payload(ctx, task_id)
         task = payload["task"]
         preflight = payload.get("preflight_evidence") or {}
@@ -417,10 +432,10 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         else:
             raise HTTPException(status_code=400, detail={"message": "file_format 仅支持 json/csv/html"})
         ctx.audit_service.record(
-            actor="api",
+            actor=role,
             action="task.report.export",
             target=task_id,
-            detail={"run_id": task.get("run_id"), "file_format": file_format, "preflight_id": preflight.get("preflight_id")},
+            detail={"run_id": task.get("run_id"), "file_format": file_format, "preflight_id": preflight.get("preflight_id"), "role": role},
         )
         return {"task_id": task_id, "run_id": task.get("run_id"), "file_format": file_format, "content": content}
 
