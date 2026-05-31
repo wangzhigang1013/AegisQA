@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Workflow 发布前质量门禁与 Skill 注册表隔离”已完成并通过全量验证。本阶段聚焦全流程稳定性：Skill 必填输入映射缺失、未知 Skill 引用都必须在 Workflow 校验/发布阶段被结构化阻断，不能等到 Task 执行时才失败；内置 Skill manifest 必须按注册表实例隔离，避免禁用/审批状态在测试或多 app 实例之间串扰。
+新一轮“Workflow 线性兼容入口与 Task Preflight 深度门禁”已完成并通过全量验证。本阶段聚焦全流程稳定性：React Flow 图发布、线性兼容发布入口、历史已发布 Workflow 和 Task 创建前预检都必须能发现 Skill 必填映射缺失，不能把配置错误拖到 Task 执行期才失败。
 
 ## 当前已完成
 
@@ -25,12 +25,14 @@
 - Workflow Inspector 已支持节点工具栏，提供删除当前节点和自动布局；画布支持 Delete/Backspace 快捷删除选中的节点或连线，输入框编辑时不会误删。
 - Workflow Palette 的 Source、Skill、Join、Output 新增路径已进入 Playwright 自动化，避免后续回归成“按钮能看不能用”。
 - Workflow 发布前校验已用后端测试锁定：未知 Skill、未审批或禁用 Skill 不能发布，多对一输入必须使用 Join/Aggregator，Branch 必须配置条件表达式，Skill `input_schema.required` 必填字段必须配置非空输入映射。
+- 线性兼容发布入口 `/workflows/publish` 已复用 Step 合约校验，缺少 Skill 必填输入映射的 WorkflowDraft 不能再直接发布。
 - 内置 Skill manifest 已在 `BaseSkill` 初始化时深拷贝，Skill 禁用/审批状态不会在不同 `SkillRegistry.with_builtin_skills()` 实例之间共享，避免测试和多 app 实例串扰治理状态。
 - Workflow 发布失败时，前端会把后端 `details.errors` 回填到 Console 的“错误与建议”页签，用户能看到错误码、节点和修复方向。
 - Workflow Inspector 已支持 Aggregator 聚合策略配置，当前覆盖多数投票、均值和一致性三类策略。
 - Workflow 草稿保存后可从 Workflow 市场重新打开并保留流程名称、节点名称等配置；试运行会使用当前选择的数据集并回填 step trace 与队列消息提示。
 - 执行中心已抽出 `TaskCreateWizard`，创建任务前必须选择 Dataset Version 和 Workflow Version；任务参数支持分片大小、并发、repeat、最大重试、重试退避和成本预算。
 - Task Preflight 已升级为创建门禁：后端阻断 blocked Preflight，前端要求先运行匹配当前 Dataset/Workflow 的 Preflight；确需创建坏数据诊断任务时必须显式确认风险，并把 `allow_blocked_preflight` 写入 Run/Task 快照。
+- Task Preflight 已新增 `workflow_schema_mapping` 检查项，会对历史坏 Workflow 或兼容入口发布的 Workflow 重新校验 Skill 必填入参、空输入映射和空输出写入路径，避免任务创建后才在执行期失败。
 - Task Preflight 已增加关键参数签名新鲜度校验：`execution_template_id`、`evaluation_goal`、`quality_gate`、`sample_repeat_times`、`cost_budget` 变化都会让创建按钮重新进入“需重跑 Preflight”状态，避免模板或质量门槛被修改后沿用旧预检结果。
 - Task 创建 API 已增加服务端 Preflight 过期校验：传入旧 `preflight_result` 时会按 Dataset、Workflow、执行模板、评测目的、质量门槛、repeat、成本预算和 Skill 覆盖逐项比对，不一致时返回 `TASK_PREFLIGHT_STALE`。
 - Task 创建 API 已改为服务端重算 Preflight 作为事实源：客户端提交的 `preflight_result` 即使伪造为 passed，也不能绕过真实字段映射、Skill 审批、Golden 覆盖、质量门槛和预算检查。
@@ -136,6 +138,16 @@
 
 ## 最近验证
 
+- `python -m pytest tests\test_workflow_graph_hardening.py -q -k linear_workflow_publish`：先 RED 后 GREEN，确认 `/workflows/publish` 不再允许发布缺少 Skill 必填输入映射的线性 Workflow。
+- `python -m pytest tests\test_task_center_api.py -q -k historical_workflow_missing_required_skill_mapping`：先 RED 后 GREEN，确认 Task Preflight 会通过 `workflow_schema_mapping` 阻断历史坏 Workflow，并让任务创建返回 `TASK_PREFLIGHT_BLOCKED`。
+- `python -m pytest tests\test_workflow_graph_hardening.py -q`：6 passed，覆盖图发布、未知 Skill、必填映射和线性发布入口门禁。
+- `python -m pytest tests\test_task_center_api.py -q`：12 passed，覆盖 Task 创建、Preflight、导出审批、插件包、任务分页和历史坏 Workflow 阻断。
+- `python -m pytest -q`：109 个后端测试通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：9 个测试文件、89 passed。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：9 passed，任务主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
+- `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - `python -m pytest tests\test_workflow_graph_hardening.py -q -k missing_required_skill_input_mapping`：先 RED，确认缺少 `prompt` 输入映射时 `/workflow-graphs/validate` 仍返回 `ok=true`。
 - `python -m pytest tests\test_product_extensions.py -q -k builtin_skill_registry_instances_do_not_share_manifest_state`：先 RED 后 GREEN，确认修复前两个内置 Skill 注册表实例会共享 manifest 禁用状态，修复后隔离。
 - `python -m pytest tests\test_workflow_graph_hardening.py -q`：4 passed，确认禁用 Skill、多对一缺 Join、Branch 缺条件、必填映射缺失均在发布前被阻断。
@@ -501,6 +513,36 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Workflow 线性兼容入口与 Task Preflight 深度门禁
+
+- 改动摘要：补齐 React Flow 图发布之外的稳定性缺口。新增 `aegisqa/workflows/validation.py`，把线性 Workflow Step 合约校验抽成共享逻辑；`/workflows/publish` 发布前会阻断缺少 Skill 必填输入映射的 WorkflowDraft；Task Preflight 新增 `workflow_schema_mapping` 检查项，即使历史已发布 Workflow 或兼容入口绕过了图校验，创建任务前仍会给出 blocked 结果、具体 issue 和修复建议。
+- 变更文件：
+  - `aegisqa/workflows/validation.py`
+  - `aegisqa/workflows/service.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_workflow_graph_hardening.py`
+  - `tests/test_task_center_api.py`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q -k linear_workflow_publish`
+  - `python -m pytest tests\test_task_center_api.py -q -k historical_workflow_missing_required_skill_mapping`
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q`
+  - `python -m pytest tests\test_task_center_api.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - RED：`/workflows/publish` 最初返回 200，确认线性兼容入口会发布坏映射 Workflow。
+  - RED：Task Preflight 最初没有 `workflow_schema_mapping` 检查项，确认历史坏 Workflow 创建任务前不会被 schema 映射门禁阻断。
+  - GREEN：两个定向测试均已通过。
+  - 全量：后端 109 passed，前端 typecheck 通过，前端 89 passed，构建通过，Playwright 9 passed；后端仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- 下一步：继续增强字段映射的数据依赖分析，例如提示某个下游必填字段没有任何上游输出或 Dataset 字段来源。
 
 ### 2026-06-01 Workflow 未知 Skill 引用结构化校验
 

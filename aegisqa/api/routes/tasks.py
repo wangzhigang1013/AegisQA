@@ -57,6 +57,7 @@ from aegisqa.engine.runner import RunRecord, RunRequest
 from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments, compare_reports
 from aegisqa.reports.diagnostics import build_task_diagnostics
 from aegisqa.reports.trace_flow import build_task_trace_flow
+from aegisqa.workflows.validation import validate_workflow_step_contracts
 
 
 REPORT_EXPORT_FORMATS = {"json", "csv", "html"}
@@ -636,6 +637,7 @@ def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> d
             },
             "请修正数据集字段，或在 Workflow 画布中调整 input_mapping。",
         ),
+        _workflow_schema_mapping_check(ctx, workflow),
         _golden_coverage_check(request.evaluation_goal, dataset.model_dump(mode="json")),
         _skill_approval_check(ctx, workflow),
         _quality_gate_check(request.quality_gate),
@@ -1260,6 +1262,19 @@ def _collect_required_row_fields(workflow: Any) -> set[str]:
             if field:
                 fields.add(field)
     return fields
+
+
+def _workflow_schema_mapping_check(ctx: RouteContext, workflow: Any) -> dict[str, Any]:
+    issues = validate_workflow_step_contracts(ctx.registry, list(workflow.steps), include_skill_availability=False)
+    mapping_issues = [issue for issue in issues if issue.get("code") in {"REQUIRED_INPUT_MAPPING_MISSING", "INPUT_MAPPING_PATH_EMPTY", "OUTPUT_MAPPING_PATH_EMPTY"}]
+    return _preflight_check(
+        "workflow_schema_mapping",
+        "Skill 入参映射",
+        "blocked" if mapping_issues else "passed",
+        "Workflow 的 Skill 必填入参和输出写入路径均完整。" if not mapping_issues else "Workflow 存在未配置或为空的 Skill 字段映射。",
+        {"issues": mapping_issues},
+        "请在 Workflow 画布中选中对应节点，补齐字段映射或输出写入路径后重新发布。",
+    )
 
 
 def _golden_coverage_check(evaluation_goal: str | None, dataset: dict[str, Any]) -> dict[str, Any]:

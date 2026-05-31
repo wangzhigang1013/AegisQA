@@ -6,6 +6,7 @@ from uuid import uuid4
 from aegisqa.skills.registry import SkillRegistry
 from aegisqa.storage.json_store import JsonStore
 from aegisqa.workflows.models import WorkflowDraft, WorkflowVersion
+from aegisqa.workflows.validation import validate_workflow_step_contracts
 
 
 class WorkflowService:
@@ -16,9 +17,10 @@ class WorkflowService:
         self.registry = registry
 
     def publish(self, draft: WorkflowDraft) -> WorkflowVersion:
-        for step in draft.steps:
-            if not self.registry.can_reference_new_workflow(step.skill_ref):
-                raise ValueError(f"Skill 不允许被新 Workflow 引用：{step.skill_ref}")
+        issues = validate_workflow_step_contracts(self.registry, draft.steps, include_skill_availability=True)
+        if issues:
+            first = issues[0]
+            raise ValueError(str(first.get("message") or first.get("code") or "Workflow Step 合约校验失败"))
         version = draft.publish()
         self._save(version)
         return version

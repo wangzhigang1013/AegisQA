@@ -128,3 +128,29 @@ def test_validate_reports_unknown_skill_as_graph_issue(tmp_path) -> None:
     assert "SKILL_NOT_FOUND" in _error_codes(validation)
     assert publish_response.status_code == 400
     assert "SKILL_NOT_FOUND" in _error_codes(publish_response.json())
+
+
+def test_linear_workflow_publish_rejects_missing_required_skill_input_mapping(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    response = client.post(
+        "/workflows/publish",
+        json={
+            "name": "兼容入口坏映射 Workflow",
+            "steps": [
+                {
+                    "step_id": "answer",
+                    "skill_ref": "llm.call@0.1.0",
+                    "input_mapping": {},
+                    "output_mapping": {"answer": "context.answer"},
+                    "config": {"model": "demo-model"},
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["code"] == "BAD_REQUEST"
+    assert "Skill 必填输入未配置字段映射" in payload["message"]

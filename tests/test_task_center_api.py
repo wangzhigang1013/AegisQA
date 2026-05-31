@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from aegisqa.api.app import create_app
+from aegisqa.workflows.models import WorkflowDraft, WorkflowStep
 
 
 def _plugin_zip(*, include_manifest: bool = True, include_handler: bool = True, handler_body: str | None = None) -> str:
@@ -253,6 +254,59 @@ def test_task_creation_blocks_failed_preflight_unless_explicitly_forced(tmp_path
     assert forced["status"] == "queued"
     assert forced["preflight_result"]["status"] == "blocked"
     assert forced["execution_config"]["allow_blocked_preflight"] is True
+
+
+def test_task_preflight_blocks_historical_workflow_missing_required_skill_mapping(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "task_dataset.jsonl"
+    _write_jsonl(data_path)
+    dataset = client.post("/datasets/from-path", json={"name": "task_dataset", "path": str(data_path)}).json()
+    workflow = WorkflowDraft(
+        name="历史坏映射 Workflow",
+        steps=[
+            WorkflowStep(
+                step_id="answer",
+                skill_ref="llm.call@0.1.0",
+                input_mapping={},
+                output_mapping={"answer": "context.answer"},
+                config={"model": "demo-model"},
+            )
+        ],
+    ).publish()
+    client.app.state.workflow_service._save(workflow)
+
+    preflight = client.post(
+        "/tasks/preflight",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow.version_id,
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+        },
+    ).json()
+    schema_check = next(check for check in preflight["checks"] if check["check_id"] == "workflow_schema_mapping")
+
+    assert preflight["status"] == "blocked"
+    assert schema_check["status"] == "blocked"
+    assert schema_check["details"]["issues"][0]["code"] == "REQUIRED_INPUT_MAPPING_MISSING"
+    assert schema_check["details"]["issues"][0]["missing_fields"] == ["prompt"]
+
+    blocked = client.post(
+        "/tasks",
+        json={
+            "name": "历史坏映射任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow.version_id,
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+        },
+    )
+
+    assert blocked.status_code == 409
+    assert blocked.json()["details"]["blocked_checks"][0]["check_id"] == "workflow_schema_mapping"
 
 
 def test_task_creation_rejects_stale_preflight_signature(tmp_path: Path) -> None:
