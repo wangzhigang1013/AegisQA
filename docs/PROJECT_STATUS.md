@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“App Test Harness 拆分”已完成并通过全量验证。本批次把 `App.test.tsx` 的 demo 数据、默认 fetch mock 和 `renderWorkbench` 抽到共享 harness，并把修复任务工作台 14 条测试迁移到独立文件，开始让 Vitest 文件级并行真正生效。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Report Page Test 拆分跟进”已完成并通过全量验证。本批次沿用 `workbenchTestHarness.tsx`，把报告中心 10 条测试迁移到独立文件，让 `App.test.tsx` 继续聚焦主工作台和剩余页面入口。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -91,6 +91,7 @@
 - 执行中心任务创建向导已改为打开时才挂载 Form，关闭状态不会提前创建或操作未连接的 Ant Design form 实例；前端回归测试锁定 `useForm` 未连接警告不再出现。
 - 前端 AppShell 已在 Vitest 环境关闭 Ant Design motion token，降低 jsdom 下 Modal/Drawer/Tabs/Button loading 等组件的无效动画计时器噪声；生产和 E2E 环境不受影响。
 - 前端工作台测试已抽出 `workbenchTestHarness.tsx`，修复任务工作台 14 条测试已迁移到 `RepairTasksPage.test.tsx`；`App.test.tsx` 从 3128 行降到约 1334 行，拆分后的目标测试命令从约 95s 降到约 79s。
+- 报告中心 10 条测试已迁移到 `ReportsPage.test.tsx`；`App.test.tsx` 进一步降到约 1072 行，主工作台 + 报告中心目标命令约 56.63s。
 - Experiment 快照已补齐 Dataset/Workflow 元数据、延迟指标和失败分布；Experiment 页面支持 Dataset/Workflow 过滤，并新增 A/B 对比面板展示通过率、Badcase、P95 耗时、成本和失败分布差异。
 - README 已把主启动路径明确为 FastAPI + React，并将 Streamlit 保留为 legacy demo；文档明确 Task 是用户主对象，Run 是底层执行 Attempt。
 - 治理页已移除容易误导的 MySQL/Redis/Celery 状态清单，改为指向 README 和 PRD 验收矩阵的生产适配边界提示。
@@ -136,9 +137,10 @@
 - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`：8 passed，确认任务创建向导的必选校验、Preflight、模板填充、风险确认、参数提交和关闭生命周期稳定。
 - `cd frontend && npm test -- src/test/App.test.tsx`：70 passed，`App.test.tsx` 单跑测试体耗时约 91.05s；Vitest 环境 motion 降噪后主集成文件仍通过。
 - `cd frontend && npm test -- src/test/App.test.tsx src/test/RepairTasksPage.test.tsx`：2 个测试文件，70 passed；拆分后目标命令约 78.94s，`App.test.tsx` 保留 56 条测试，`RepairTasksPage.test.tsx` 覆盖 14 条修复任务测试。
+- `cd frontend && npm test -- src/test/App.test.tsx src/test/ReportsPage.test.tsx`：2 个测试文件，56 passed；`App.test.tsx` 46 passed，`ReportsPage.test.tsx` 10 passed，目标命令约 56.63s。
 - `python -m pytest -q`：104 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：7 个测试文件，86 passed；拆分后全量墙钟约 89.48s，`App.test.tsx` 56 passed，`RepairTasksPage.test.tsx` 14 passed。
+- `cd frontend && npm test`：8 个测试文件，86 passed；全量墙钟约 70.41s，`App.test.tsx` 46 passed，`ReportsPage.test.tsx` 10 passed，`RepairTasksPage.test.tsx` 14 passed。
 - `cd frontend && npm run build`：通过，RunsPage chunk 正常生成。
 - `cd frontend && npm run e2e`：8 passed，主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
 - `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
@@ -471,6 +473,33 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Report Page Test 拆分跟进
+
+- 改动摘要：报告中心 10 条测试迁移到 `ReportsPage.test.tsx`，继续复用 `workbenchTestHarness.tsx`；`App.test.tsx` 只保留主工作台和剩余页面入口测试，行数降到约 1072 行。
+- 变更文件：
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/ReportsPage.test.tsx`
+  - `docs/superpowers/plans/2026-06-01-report-page-test-split-followup.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx src/test/ReportsPage.test.tsx`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 拆分目标测试：2 个测试文件，56 passed；`App.test.tsx` 46 passed，`ReportsPage.test.tsx` 10 passed，目标命令耗时约 56.63s。
+  - 前端 typecheck：通过。
+  - 后端全量：104 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：8 个测试文件，86 passed；全量墙钟约 70.41s。
+  - 前端 build：通过。
+  - Playwright E2E：8 passed。
+  - 空白检查：仅有 CRLF 换行转换 warning，未发现空白错误。
+- 下一步：
+  - 提交本批次。后续可继续把 Workflow 和候选资产中心拆成独立测试文件。
 
 ### 2026-06-01 App Test Harness 拆分
 
