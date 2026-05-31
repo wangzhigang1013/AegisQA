@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“SQLite 轻量仓储适配”已完成。本批次根据用户要求先不用 MySQL，已接入轻量 SQLite 元数据仓储：Task、Run、Workflow、Judge、审计等 JSON 文档进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径，避免大对象破坏评测流式读取；默认仍保持 JSON Store，SQLite 可通过参数或环境变量启用。
+新一轮“Repair Task Workbench + Workflow 深链稳定性”已完成。本批次把报告诊断生成的修复任务从接口返回结果升级为可管理工作台：后端支持领取、完成、重开状态流转并记录审计，前端新增“修复任务”导航页，可查看证据、来源任务、负责人和回到报告/Trace 的操作入口。同时修复 Workflow 画布深链加载竞态：从 Workflow 市场进入画布时预写单草稿缓存，画布在草稿加载完成前显示加载态，避免用户刚删除/连线的改动被后台草稿刷新覆盖。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -59,6 +59,8 @@
 - Dataset Version 已记录 `created_at`、`source_type`、`source_ref`，并提供 Lineage API 和前端抽屉，能解释数据来源、字段路径、预览和下游任务。
 - Trace Tree 已新增独立页面 `/tasks/:taskId/trace-tree`，从任务详情和报告中心可进入，按 Item 展开 Skill Step 输入、输出、耗时、缓存和错误。
 - Task Report 已新增 `quality_decision` 和 `parameter_governance`，报告中心展示质量决策中心，后端参数治理 API 展示 Skill/Prompt 版本、模型参数、任务覆盖和 Secret 脱敏策略。
+- Repair Task 已从“报告页生成结果”升级为可管理工作台：`POST /repair-tasks/{repair_task_id}/start|resolve|reopen` 支持领取、完成、重开状态流转；React `/repair-tasks` 页面支持状态/来源任务筛选、查看证据、领取、完成、重开，并可跳回来源报告和 Trace。
+- Workflow 市场进入画布时会把当前草稿写入 `['workflow-draft', draft_id]` 单草稿缓存；画布深链在草稿未加载时显示加载态，异常 graph 结构会给出中文错误提示而不是白屏。
 - Judge 审计已新增多 Judge 一致性 API 与前端弹窗，支持输入多个 Judge 输出并展示两两一致率。
 - 报告中心已新增跨任务 Score Analytics，按 Task 聚合任务数、平均通过率、Badcase、P95、估算成本和退化任务，避免只看单次任务报告。
 - Task Report 已新增 `budget_status`，基于 cost 或 token 估算成本预算状态，输出 ok/warning/exceeded/not_set、预算、已用、剩余和修复建议。
@@ -69,13 +71,17 @@
 ## 最近验证
 
 - `python -m pytest tests\test_sqlite_store_adapter.py -q`：3 passed，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
-- `python -m pytest -q`：通过，覆盖 63 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m pytest tests\test_task_flow_optimization.py -q`：3 passed，覆盖 Task Preflight、Repair Task 生成查询和 Repair Task 领取/完成/重开状态流转。
+- `python -m pytest -q`：通过，覆盖 68 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v11`，Run `run-a0392226decb` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：4 个测试文件、40 个测试通过。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`：1 passed，覆盖修复任务工作台查看证据、领取和完成。
+- `cd frontend && npm test`：4 个测试文件、41 个测试通过。
 - `cd frontend && npm run build`：通过。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow"`：10 passed，覆盖 Workflow 市场、画布、撤销/重做、连线删除/重连、发布失败反馈、Aggregator 和参数预览。
+- `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 passed，覆盖 Workflow 画布新增节点、删除/重连、撤销/重做、删除节点、保存草稿回放、试运行、校验、发布。
 - `cd frontend && npm run e2e`：8 个 Playwright E2E 测试通过，覆盖任务主链路、任务报告进入 Trace Flow、参数来源查看、CI Gate 创建与阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核与候选资产摘要，以及 Workflow 画布 Source/Skill/Join/Output/Aggregator 新增、聚合策略、创建连线、删除下游连线、节点工具栏、键盘删除、删除节点、保存草稿回放、试运行回填、校验、发布。
-- `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`：5 个 Playwright E2E 测试通过，覆盖 Workflow 画布新增节点、聚合策略、删除下游连线、新增 Join、撤销/重做、删除节点、保存草稿回放、试运行回填、校验、发布。
+- Playwright 曾暴露 Workflow 画布“删除连线后重连”超时：根因为新建草稿进入画布时先显示默认图，随后单草稿 API 返回并覆盖用户刚做的删除操作；已通过画布加载态和市场页单草稿缓存修复，复跑全量 E2E 8 passed。
 - `http://127.0.0.1:8000/health`：FastAPI 页面健康检查通过。
 - `http://127.0.0.1:5173`：React 前端可访问。
 - 无头 Chrome 页面验证：`/`、`/skills`、`/workflows`、`/workflows/designer/draft-test`、`/runs`、`/reports` 均能打开并展示关键入口。
@@ -84,11 +90,11 @@
 
 ## 当前问题
 
-- Workflow 画布的 Source/Skill/Join/Output/Aggregator 新增、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行、校验和发布已进入 Playwright；后续需要继续拆分 Palette/Inspector 组件，降低单文件维护成本。
+- Workflow 画布的 Source/Skill/Join/Output/Aggregator 新增、创建连线、删除节点、删除下游连线、删除后重连、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行、校验和发布已进入 Playwright；草稿加载覆盖编辑的竞态已修复。后续需要继续拆分 Palette/Inspector 组件，降低单文件维护成本。
 - Task 已成为前端主线，完整端到端 UI 流程已由 Playwright 覆盖；Run Attempt、CI Gate、Experiment baseline/A-B 对比和任务报告均已接入基础闭环。
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
 - Experiment 快照、CI Gate、Annotation Queue 和 Trace Tree 已有独立产品页；跨任务 Score Analytics 和成本预算状态已接入报告中心，后续需要继续补真实成本账单、更多趋势筛选维度和跨任务对比可视化。
-- 报告、Badcase、Judge 审计已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描和 Judge 偏差趋势已有最小闭环；后续需要按业务标签、模型版本和时间窗口继续细分偏差归因。
+- 报告、Badcase、Judge 审计和 Repair Task 已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描、Judge 偏差趋势和修复任务状态流转已有最小闭环；后续需要把 Repair Task 与 Annotation Queue、CI Gate、Dataset 修复和 Workflow 参数审查做双向联动。
 - SQLite 轻量仓储已接入元数据路径；后续如果要进入多用户生产环境，仍需要正式 Repository 层、数据库迁移、索引治理、权限隔离和 Worker 队列接入。
 - 本地服务曾出现旧 FastAPI 进程未重启导致新增路由 404 的问题；已重启后端并完成浏览器复测。后续修改后端 API 时必须确认 8000 端口加载的是最新代码。
 
@@ -1507,3 +1513,80 @@
 - 提交记录：
   - `feat: 优化任务全流程闭环`
 - 下一步：继续增强 Repair Task 的管理页面、负责人/状态流转、与 Annotation Queue / CI Gate / Dataset 修复任务的双向联动，并补更真实的成本账单和趋势筛选。
+
+### 2026-05-31 Repair Task Workbench 启动
+
+- 改动摘要：继续围绕“全流程便利性、稳定性、可解释性”优化，补齐报告生成 Repair Task 之后的管理断点；本批次已完成后端状态流转 API、前端修复任务工作台、导航入口、报告页 `task_id` 深链选择，以及文档矩阵同步。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/types.ts`
+  - `frontend/src/pages/RepairTasksPage.tsx`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/superpowers/plans/2026-05-31-repair-task-workbench.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "修复任务工作台"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+- 测试结果：
+  - RED：新增状态流转测试 1 failed，确认 start API 尚不存在。
+  - GREEN：3 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 RED：`/repair-tasks` 最初无路由和导航，目标测试失败。
+  - 前端目标测试：修复任务工作台 1 passed。
+  - 报告页长测试单独复跑通过但耗时接近 10 秒；已确认根因是测试覆盖面过大导致全量环境下超时抖动，并为该长测试设置 20 秒超时窗口，断言未放宽。
+  - 后端全量：68 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端全量：4 个测试文件、41 passed。
+  - 前端 build：通过。
+- 下一步：继续把 Repair Task 与 Annotation Queue、CI Gate、Dataset 修复和 Workflow 参数审查双向联动，并拆分超长报告页测试，降低前端测试总耗时。
+
+### 2026-05-31 Repair Task Workbench 完成与 Workflow 深链稳定化
+
+- 改动摘要：完成 Repair Task Workbench 批次的最终收口，并修复验证中暴露的 Workflow 画布深链竞态。画布现在通过 `GET /workflow-drafts/{draft_id}` 加载单草稿，市场页进入画布前会把草稿写入 TanStack Query 单草稿缓存；画布在草稿未加载完成前显示加载态，异常 graph 结构会显示中文错误提示，避免默认 demo 图先渲染、用户开始编辑后又被后台草稿刷新覆盖。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_flow_optimization.py`
+  - `frontend/src/App.tsx`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/types.ts`
+  - `frontend/src/pages/RepairTasksPage.tsx`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/pages/WorkflowMarketPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/e2e/task-flow.spec.ts`
+  - `docs/superpowers/plans/2026-05-31-repair-task-workbench.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow"`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e -- e2e/workflow-designer.spec.ts`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端定向：3 passed。
+  - 后端全量：68 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 Workflow 定向：10 passed。
+  - 前端全量：4 个测试文件、41 passed。
+  - 前端 typecheck/build：通过。
+  - Playwright Workflow 定向：5 passed。
+  - Playwright 全量：8 passed。
+  - 调试过程：首次全量 E2E 为 7 passed、1 failed，失败在“删除 `answer -> judge_a` 后重连”步骤；根因为草稿深链加载晚于用户编辑并覆盖本地边状态。加载态与单草稿缓存修复后，Workflow 定向和全量 E2E 均通过。
+- 下一步：把 Repair Task 与 Annotation Queue、CI Gate、Dataset 修复和 Workflow 参数审查做双向联动，并拆分超长报告页测试与超大的 WorkflowDesigner 页面组件。

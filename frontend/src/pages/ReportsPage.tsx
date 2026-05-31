@@ -4,6 +4,7 @@ import { Alert, Button, Card, Col, Empty, Row, Select, Space, Table, Tag, Typogr
 import ReactECharts from 'echarts-for-react';
 import { useEffect, useMemo, useState, type Key } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 
 import { api } from '../api/client';
 import { MetricTile } from '../components/MetricTile';
@@ -16,6 +17,8 @@ import { ReportSummary } from './report/ReportSummary';
 export function ReportsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const taskIdFromUrl = searchParams.get('task_id');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingDiagnosticAction, setPendingDiagnosticAction] = useState<string | null>(null);
@@ -30,10 +33,19 @@ export function ReportsPage() {
   });
 
   useEffect(() => {
+    if (taskIdFromUrl && taskIdFromUrl !== selectedTaskId && tasksQuery.data?.some((task) => task.task_id === taskIdFromUrl)) {
+      setSelectedTaskId(taskIdFromUrl);
+      return;
+    }
     if (!selectedTaskId && tasksQuery.data?.[0]) {
       setSelectedTaskId(tasksQuery.data[0].task_id);
     }
-  }, [tasksQuery.data, selectedTaskId]);
+  }, [taskIdFromUrl, tasksQuery.data, selectedTaskId]);
+
+  function changeSelectedTask(nextTaskId: string) {
+    setSelectedTaskId(nextTaskId);
+    setSearchParams(nextTaskId ? { task_id: nextTaskId } : {});
+  }
 
   const exportMutation = useMutation({
     mutationFn: () => {
@@ -229,7 +241,7 @@ export function ReportsPage() {
               className="full-width-control"
               value={selectedTask?.task_id}
               loading={tasksQuery.isLoading}
-              onChange={setSelectedTaskId}
+              onChange={changeSelectedTask}
               options={(tasksQuery.data ?? []).map((item) => ({ value: item.task_id, label: `${item.name} / ${item.status}` }))}
             />
           </Col>

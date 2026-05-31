@@ -23,9 +23,10 @@ import {
   useEdgesState,
   useNodesState,
   type Connection,
+  type Edge,
 } from '@xyflow/react';
 import { Alert, Button, Card, Col, Divider, Form, Input, InputNumber, Row, Segmented, Select, Space, Tabs, Tag, Typography } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { ApiError, api, formatApiError } from '../api/client';
@@ -60,9 +61,13 @@ function WorkflowDesignerContent() {
   const navigate = useNavigate();
   const { draftId: routeDraftId } = useParams();
   const queryClient = useQueryClient();
+  const loadedRouteDraftId = useRef<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(graphToNodes(demoWorkflowGraph));
   const [edges, setEdges, onEdgesChange] = useEdgesState(graphToEdges(demoWorkflowGraph));
   const [workflowName, setWorkflowName] = useState(demoWorkflowGraph.name);
+  const workflowNameRef = useRef(demoWorkflowGraph.name);
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
   const [draftId, setDraftId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(demoWorkflowGraph.nodes[0]?.node_id ?? null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
@@ -76,16 +81,43 @@ function WorkflowDesignerContent() {
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
   const templatesQuery = useQuery({ queryKey: ['workflow-templates'], queryFn: api.templates });
   const draftsQuery = useQuery({ queryKey: ['workflow-drafts'], queryFn: api.workflowDrafts });
+  const routeDraftQuery = useQuery({
+    queryKey: ['workflow-draft', routeDraftId],
+    queryFn: () => api.workflowDraft(routeDraftId ?? ''),
+    enabled: Boolean(routeDraftId),
+    refetchOnMount: 'always',
+    staleTime: 0,
+  });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows });
   const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets });
 
   useEffect(() => {
-    if (!routeDraftId || draftId === routeDraftId) return;
-    const draft = draftsQuery.data?.find((item) => item.draft_id === routeDraftId);
-    if (draft) {
-      loadGraph(draft.graph, draft.draft_id);
+    workflowNameRef.current = workflowName;
+  }, [workflowName]);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
+
+  useEffect(() => {
+    if (!routeDraftId) {
+      loadedRouteDraftId.current = null;
+      return;
     }
-  }, [draftId, draftsQuery.data, routeDraftId]);
+    if (loadedRouteDraftId.current === routeDraftId) return;
+    if (routeDraftQuery.data) {
+      loadedRouteDraftId.current = routeDraftId;
+      if (isWorkflowGraph(routeDraftQuery.data.graph)) {
+        loadGraph(routeDraftQuery.data.graph, routeDraftQuery.data.draft_id);
+        return;
+      }
+      setConsoleText('草稿加载失败：后端返回的 Workflow Graph 结构不完整，请从 Workflow 市场重新打开或复制草稿。');
+    }
+  }, [routeDraftId, routeDraftQuery.data, routeDraftQuery.isFetching]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -129,11 +161,16 @@ function WorkflowDesignerContent() {
   });
 
   const saveDraftMutation = useMutation({
-    mutationFn: () => (draftId ? api.updateWorkflowDraft(draftId, { name: workflowName, graph }) : api.createWorkflowDraft({ name: workflowName, graph })),
+    mutationFn: () => {
+      const currentName = workflowNameRef.current;
+      const currentGraph = buildWorkflowGraph(currentName, nodesRef.current, edgesRef.current);
+      return draftId ? api.updateWorkflowDraft(draftId, { name: currentName, graph: currentGraph }) : api.createWorkflowDraft({ name: currentName, graph: currentGraph });
+    },
     onSuccess: async (draft) => {
       setDraftId(draft.draft_id);
       setConsoleResult(draft);
       setConsoleText(`草稿已保存：${draft.name}`);
+      queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
       await queryClient.invalidateQueries({ queryKey: ['workflow-drafts'] });
       navigate('/workflows');
     },
@@ -175,10 +212,27 @@ function WorkflowDesignerContent() {
     onError: (error) => setConsoleText(error instanceof Error ? `试运行失败：${error.message}` : '试运行失败'),
   });
 
+  function changeWorkflowName(nextName: string) {
+    workflowNameRef.current = nextName;
+    setWorkflowName(nextName);
+  }
+
+  function updateNodes(updater: FlowNode[] | ((current: FlowNode[]) => FlowNode[])) {
+    const nextNodes = typeof updater === 'function' ? updater(nodesRef.current) : updater;
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
+  }
+
+  function updateEdges(updater: Edge[] | ((current: Edge[]) => Edge[])) {
+    const nextEdges = typeof updater === 'function' ? updater(edgesRef.current) : updater;
+    edgesRef.current = nextEdges;
+    setEdges(nextEdges);
+  }
+
   function loadGraph(nextGraph: WorkflowGraph, nextDraftId: string | null = null) {
-    setWorkflowName(nextGraph.name);
-    setNodes(graphToNodes(nextGraph));
-    setEdges(graphToEdges(nextGraph));
+    changeWorkflowName(nextGraph.name);
+    updateNodes(graphToNodes(nextGraph));
+    updateEdges(graphToEdges(nextGraph));
     setSelectedNodeId(nextGraph.nodes[0]?.node_id ?? null);
     setSelectedEdgeId(null);
     setDraftId(nextDraftId);
@@ -186,6 +240,13 @@ function WorkflowDesignerContent() {
     setHistoryFuture([]);
     setConsoleResult(nextGraph);
     setConsoleText(`已加载流程：${nextGraph.name}`);
+  }
+
+  function isWorkflowGraph(value: unknown): value is WorkflowGraph {
+    // 路由深链可能遇到旧草稿、缓存脏数据或异常 API 响应；这里先拦截，避免整个画布白屏。
+    if (!value || typeof value !== 'object') return false;
+    const graph = value as Partial<WorkflowGraph>;
+    return typeof graph.name === 'string' && Array.isArray(graph.nodes) && Array.isArray(graph.edges);
   }
 
   function addSkillNode(skill: SkillManifest) {
@@ -201,7 +262,7 @@ function WorkflowDesignerContent() {
       config: skill.example_config,
       cacheable: skill.cacheable,
     };
-    setNodes((current) => [...current, graphNodeToFlowNode(graphNode, { x: 160 + current.length * 36, y: 120 + current.length * 28 })]);
+    updateNodes((current) => [...current, graphNodeToFlowNode(graphNode, { x: 160 + current.length * 36, y: 120 + current.length * 28 })]);
     setSelectedNodeId(id);
   }
 
@@ -216,22 +277,22 @@ function WorkflowDesignerContent() {
       output_mapping: {},
       config: {},
     };
-    setNodes((current) => [...current, graphNodeToFlowNode(graphNode, { x: 240 + current.length * 32, y: 180 + current.length * 24 })]);
+    updateNodes((current) => [...current, graphNodeToFlowNode(graphNode, { x: 240 + current.length * 32, y: 180 + current.length * 24 })]);
     setSelectedNodeId(id);
   }
 
   function deleteSelected() {
     if (selectedNodeId) {
       rememberGraph();
-      setNodes((current) => current.filter((node) => node.id !== selectedNodeId));
-      setEdges((current) => current.filter((edge) => edge.source !== selectedNodeId && edge.target !== selectedNodeId));
+      updateNodes((current) => current.filter((node) => node.id !== selectedNodeId));
+      updateEdges((current) => current.filter((edge) => edge.source !== selectedNodeId && edge.target !== selectedNodeId));
       setSelectedNodeId(null);
       setConsoleText(`已删除节点：${selectedNodeId}`);
       return;
     }
     if (selectedEdgeId) {
       rememberGraph();
-      setEdges((current) => current.filter((edge) => edge.id !== selectedEdgeId));
+      updateEdges((current) => current.filter((edge) => edge.id !== selectedEdgeId));
       setSelectedEdgeId(null);
       setConsoleText(`已删除连线：${selectedEdgeId}`);
       return;
@@ -241,7 +302,7 @@ function WorkflowDesignerContent() {
 
   function deleteEdgeById(edgeIdValue: string) {
     rememberGraph();
-    setEdges((current) => current.filter((edge) => edge.id !== edgeIdValue));
+    updateEdges((current) => current.filter((edge) => edge.id !== edgeIdValue));
     setSelectedEdgeId(null);
     setConsoleText(`已删除连线：${edgeIdValue}`);
   }
@@ -250,7 +311,7 @@ function WorkflowDesignerContent() {
     if (!selectedNodeId) return;
     const id = edgeId(selectedNodeId, targetNodeId);
     rememberGraph();
-    setEdges((current) => {
+    updateEdges((current) => {
       if (current.some((edge) => (edge.id || edgeId(edge.source, edge.target)) === id)) {
         return current;
       }
@@ -263,7 +324,7 @@ function WorkflowDesignerContent() {
   function updateSelectedNode(patch: Partial<WorkflowGraphNode>) {
     if (!selectedNodeId) return;
     rememberGraph();
-    setNodes((current) =>
+    updateNodes((current) =>
       current.map((node) => {
         if (node.id !== selectedNodeId) return node;
         const nextGraphNode = { ...node.data.graphNode, ...patch };
@@ -280,7 +341,7 @@ function WorkflowDesignerContent() {
 
   function autoLayout() {
     rememberGraph();
-    setNodes((current) =>
+    updateNodes((current) =>
       current.map((node, index) => ({
         ...node,
         position: { x: 80 + (index % 4) * 240, y: 100 + Math.floor(index / 4) * 150 },
@@ -290,15 +351,15 @@ function WorkflowDesignerContent() {
   }
 
   function rememberGraph() {
-    const snapshot = buildWorkflowGraph(workflowName, nodes, edges);
+    const snapshot = buildWorkflowGraph(workflowNameRef.current, nodesRef.current, edgesRef.current);
     setHistoryPast((current) => [...current.slice(-19), snapshot]);
     setHistoryFuture([]);
   }
 
   function restoreGraphSnapshot(snapshot: WorkflowGraph) {
-    setWorkflowName(snapshot.name);
-    setNodes(graphToNodes(snapshot));
-    setEdges(graphToEdges(snapshot));
+    changeWorkflowName(snapshot.name);
+    updateNodes(graphToNodes(snapshot));
+    updateEdges(graphToEdges(snapshot));
     setSelectedNodeId(snapshot.nodes[0]?.node_id ?? null);
     setSelectedEdgeId(null);
     setConsoleResult(snapshot);
@@ -306,7 +367,7 @@ function WorkflowDesignerContent() {
 
   function undoGraph() {
     if (!historyPast.length) return;
-    const current = buildWorkflowGraph(workflowName, nodes, edges);
+    const current = buildWorkflowGraph(workflowNameRef.current, nodesRef.current, edgesRef.current);
     const previous = historyPast[historyPast.length - 1];
     setHistoryPast((items) => items.slice(0, -1));
     setHistoryFuture((items) => [current, ...items].slice(0, 20));
@@ -316,12 +377,39 @@ function WorkflowDesignerContent() {
 
   function redoGraph() {
     if (!historyFuture.length) return;
-    const current = buildWorkflowGraph(workflowName, nodes, edges);
+    const current = buildWorkflowGraph(workflowNameRef.current, nodesRef.current, edgesRef.current);
     const next = historyFuture[0];
     setHistoryFuture((items) => items.slice(1));
     setHistoryPast((items) => [...items.slice(-19), current]);
     restoreGraphSnapshot(next);
     setConsoleText('已重做上一步画布操作。');
+  }
+
+  const isWaitingForRouteDraft = Boolean(routeDraftId && !routeDraftQuery.data && routeDraftQuery.isFetching);
+  if (isWaitingForRouteDraft) {
+    return (
+      <section className="page-stack">
+        <PageHeader
+          eyebrow="流程编排"
+          title="Workflow 设计器"
+          description="正在加载草稿快照，加载完成后再允许编辑，避免用户改动被后台刷新覆盖。"
+        />
+        <Card className="flat-card" loading title="正在加载 Workflow 草稿" />
+      </section>
+    );
+  }
+
+  if (routeDraftId && routeDraftQuery.isError) {
+    return (
+      <section className="page-stack">
+        <PageHeader
+          eyebrow="流程编排"
+          title="Workflow 设计器"
+          description="草稿加载失败，请回到 Workflow 市场重新打开或复制草稿。"
+        />
+        <Alert type="error" showIcon message="草稿加载失败" description={formatApiError(routeDraftQuery.error)} />
+      </section>
+    );
   }
 
   return (
@@ -392,7 +480,7 @@ function WorkflowDesignerContent() {
           </Col>
           <Col xs={12} lg={4}>
             <Typography.Text type="secondary">流程名称</Typography.Text>
-            <Input value={workflowName} onChange={(event) => setWorkflowName(event.target.value)} />
+            <Input value={workflowName} onChange={(event) => changeWorkflowName(event.target.value)} />
           </Col>
         </Row>
       </Card>
@@ -439,7 +527,7 @@ function WorkflowDesignerContent() {
               onEdgesChange={onEdgesChange}
               onConnect={(connection: Connection) => {
                 rememberGraph();
-                setEdges((current) => addEdge({ ...connection, markerEnd: { type: MarkerType.ArrowClosed } }, current));
+                updateEdges((current) => addEdge({ ...connection, markerEnd: { type: MarkerType.ArrowClosed } }, current));
               }}
               onNodeClick={(_, node) => {
                 setSelectedNodeId(node.id);

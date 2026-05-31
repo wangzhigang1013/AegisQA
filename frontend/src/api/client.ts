@@ -67,6 +67,7 @@ export function formatApiError(error: unknown): string {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
+    cache: init?.cache ?? 'no-store',
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers ?? {}),
@@ -199,6 +200,7 @@ export const api = {
   templates: () => request<Record<string, unknown>[]>('/workflow-templates'),
   workflows: () => request<WorkflowVersion[]>('/workflows'),
   workflowDrafts: () => request<WorkflowDraftRecord[]>('/workflow-drafts'),
+  workflowDraft: (draftId: string) => request<WorkflowDraftRecord>(`/workflow-drafts/${encodeURIComponent(draftId)}`),
   createWorkflowDraft: (body: { name: string; graph: WorkflowGraph }) =>
     request<WorkflowDraftRecord>('/workflow-drafts', {
       method: 'POST',
@@ -287,6 +289,21 @@ export const api = {
   },
   createRepairTasksFromDiagnostics: (taskId: string) =>
     request<{ source_task_id: string; created_count: number; reused_count: number; repair_tasks: RepairTaskRecord[] }>(`/tasks/${taskId}/repair-tasks/from-diagnostics`, { method: 'POST' }),
+  startRepairTask: (repairTaskId: string, body: { owner: string }) =>
+    request<RepairTaskRecord>(`/repair-tasks/${encodeURIComponent(repairTaskId)}/start`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  resolveRepairTask: (repairTaskId: string, body: { resolution_note: string }) =>
+    request<RepairTaskRecord>(`/repair-tasks/${encodeURIComponent(repairTaskId)}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  reopenRepairTask: (repairTaskId: string, body: { reason: string }) =>
+    request<RepairTaskRecord>(`/repair-tasks/${encodeURIComponent(repairTaskId)}/reopen`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   executeTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/execute`, { method: 'POST' }),
   createTaskAttempt: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/attempts`, { method: 'POST' }),
   pauseTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/pause`, { method: 'POST' }),

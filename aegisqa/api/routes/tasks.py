@@ -6,6 +6,9 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 
 from aegisqa.api.app import (
+    RepairTaskReopenRequest,
+    RepairTaskResolveRequest,
+    RepairTaskStartRequest,
     RunCreateRequest,
     TaskCreateRequest,
     TaskPreflightRequest,
@@ -29,6 +32,7 @@ from aegisqa.api.app import (
     _task_attempts,
 )
 from aegisqa.api.routes.context import RouteContext
+from aegisqa.core.errors import AegisQAError
 from aegisqa.engine.runner import RunRecord, RunRequest
 from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments
 from aegisqa.reports.diagnostics import build_task_diagnostics
@@ -109,6 +113,54 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         if source_task_id:
             records = [record for record in records if record.get("source_task_id") == source_task_id]
         return sorted(records, key=lambda item: str(item.get("created_at", "")), reverse=True)
+
+    @app.post("/repair-tasks/{repair_task_id}/start")
+    def start_repair_task(repair_task_id: str, request: RepairTaskStartRequest) -> dict[str, Any]:
+        record = _transition_repair_task(
+            ctx,
+            repair_task_id,
+            allowed_statuses={"open"},
+            updates={
+                "status": "in_progress",
+                "owner": request.owner,
+                "started_at": _now(),
+                "updated_at": _now(),
+            },
+            audit_action="repair_task.start",
+        )
+        return record
+
+    @app.post("/repair-tasks/{repair_task_id}/resolve")
+    def resolve_repair_task(repair_task_id: str, request: RepairTaskResolveRequest) -> dict[str, Any]:
+        record = _transition_repair_task(
+            ctx,
+            repair_task_id,
+            allowed_statuses={"open", "in_progress"},
+            updates={
+                "status": "resolved",
+                "resolution_note": request.resolution_note,
+                "resolved_at": _now(),
+                "updated_at": _now(),
+            },
+            audit_action="repair_task.resolve",
+        )
+        return record
+
+    @app.post("/repair-tasks/{repair_task_id}/reopen")
+    def reopen_repair_task(repair_task_id: str, request: RepairTaskReopenRequest) -> dict[str, Any]:
+        record = _transition_repair_task(
+            ctx,
+            repair_task_id,
+            allowed_statuses={"resolved"},
+            updates={
+                "status": "open",
+                "reopen_reason": request.reason,
+                "reopened_at": _now(),
+                "updated_at": _now(),
+            },
+            audit_action="repair_task.reopen",
+        )
+        return record
 
     @app.get("/tasks/{task_id}")
     def get_task(task_id: str) -> dict[str, Any]:
@@ -509,6 +561,39 @@ def _create_repair_tasks_from_diagnostics(ctx: RouteContext, task: dict[str, Any
         "repair_tasks": created + reused,
         "diagnostics_summary": diagnostics.get("summary", {}),
     }
+
+
+def _transition_repair_task(
+    ctx: RouteContext,
+    repair_task_id: str,
+    *,
+    allowed_statuses: set[str],
+    updates: dict[str, Any],
+    audit_action: str,
+) -> dict[str, Any]:
+    """更新修复任务状态，并在非法状态时返回稳定错误。
+
+    Repair Task 是从诊断根因沉淀出的工作项，状态变更必须可追踪且不能跳跃，
+    否则后续很难解释某个问题是否真的被处理过。
+    """
+
+    record = _get_record(ctx.store, "repair_tasks", repair_task_id)
+    current_status = str(record.get("status") or "open")
+    if current_status not in allowed_statuses:
+        raise AegisQAError(
+            "REPAIR_TASK_INVALID_TRANSITION",
+            "当前修复任务状态不允许执行该操作。",
+            status_code=409,
+            details={
+                "repair_task_id": repair_task_id,
+                "current_status": current_status,
+                "allowed_statuses": sorted(allowed_statuses),
+            },
+        )
+    record.update(updates)
+    _save_record(ctx.store, "repair_tasks", "repair_task_id", record)
+    ctx.audit_service.record(actor="api", action=audit_action, target=repair_task_id, detail={"status": record.get("status")})
+    return record
 
 
 def _build_repair_task_record(task: dict[str, Any], cause: dict[str, Any]) -> dict[str, Any]:

@@ -9,6 +9,7 @@ import {
   FileSearchOutlined,
   PlayCircleOutlined,
   SafetyCertificateOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConfigProvider, Layout, Menu, theme } from 'antd';
@@ -23,6 +24,7 @@ import { ExperimentsPage } from './pages/ExperimentsPage';
 import { GovernancePage } from './pages/GovernancePage';
 import { JudgeAuditPage } from './pages/JudgeAuditPage';
 import { OverviewPage } from './pages/OverviewPage';
+import { RepairTasksPage } from './pages/RepairTasksPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { RunsPage } from './pages/RunsPage';
 import { SkillsPage } from './pages/SkillsPage';
@@ -50,6 +52,7 @@ const navItems: MenuProps['items'] = [
   { key: '/workflows', icon: <ApartmentOutlined />, label: <NavLink to="/workflows">Workflow 市场</NavLink> },
   { key: '/runs', icon: <PlayCircleOutlined />, label: <NavLink to="/runs">执行中心</NavLink> },
   { key: '/reports', icon: <BarChartOutlined />, label: <NavLink to="/reports">报告中心</NavLink> },
+  { key: '/repair-tasks', icon: <ToolOutlined />, label: <NavLink to="/repair-tasks">修复任务</NavLink> },
   { key: '/experiments', icon: <ExperimentOutlined />, label: <NavLink to="/experiments">实验中心</NavLink> },
   { key: '/ci-gates', icon: <ControlOutlined />, label: <NavLink to="/ci-gates">CI Gate</NavLink> },
   { key: '/annotation-queue', icon: <FileSearchOutlined />, label: <NavLink to="/annotation-queue">人工审核</NavLink> },
@@ -101,6 +104,7 @@ export function AppShell() {
                 <Route path="/tasks/:taskId/trace" element={<TraceFlowPage />} />
                 <Route path="/tasks/:taskId/trace-tree" element={<TraceTreePage />} />
                 <Route path="/reports" element={<ReportsPage />} />
+                <Route path="/repair-tasks" element={<RepairTasksPage />} />
                 <Route path="/experiments" element={<ExperimentsPage />} />
                 <Route path="/ci-gates" element={<CIGatesPage />} />
                 <Route path="/annotation-queue" element={<AnnotationQueuePage />} />

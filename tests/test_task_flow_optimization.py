@@ -106,3 +106,35 @@ def test_task_stores_goal_gate_preflight_and_creates_repair_tasks(tmp_path: Path
 
     assert repair["created_count"] >= 1
     assert client.get(f"/repair-tasks?source_task_id={executed['task_id']}").json()[0]["source_task_id"] == executed["task_id"]
+
+
+def test_repair_task_status_flow_is_traceable(tmp_path: Path) -> None:
+    client, dataset, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "修复闭环任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"][0]
+
+    started = client.post(f"/repair-tasks/{repair['repair_task_id']}/start", json={"owner": "qa_owner"}).json()
+    assert started["status"] == "in_progress"
+    assert started["owner"] == "qa_owner"
+    assert started["started_at"]
+
+    resolved = client.post(f"/repair-tasks/{repair['repair_task_id']}/resolve", json={"resolution_note": "已修复 prompt 并补充 Golden。"}).json()
+    assert resolved["status"] == "resolved"
+    assert resolved["resolution_note"] == "已修复 prompt 并补充 Golden。"
+    assert resolved["resolved_at"]
+
+    reopened = client.post(f"/repair-tasks/{repair['repair_task_id']}/reopen", json={"reason": "复测仍未通过。"}).json()
+    assert reopened["status"] == "open"
+    assert reopened["reopen_reason"] == "复测仍未通过。"
+    assert reopened["reopened_at"]

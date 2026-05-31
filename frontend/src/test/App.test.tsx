@@ -86,6 +86,23 @@ const demoBadcase = {
   updated_at: '2026-05-31T00:00:00Z',
 };
 
+const demoRepairTask = {
+  repair_task_id: 'repair-demo',
+  source_task_id: 'task-demo',
+  source_run_id: 'run-demo',
+  cause_type: 'weak_segment',
+  severity: 'warning',
+  title: '[warning] 复盘低通过率分层',
+  status: 'open',
+  affected_items: 12,
+  evidence: ['scene=payment 通过率 40%，Badcase 12 条。'],
+  recommendation: '优先复核 payment 场景的失败样本，补充 Golden 后再调整 Workflow。',
+  next_actions: ['open_trace_flow', 'seed_annotation_queue'],
+  owner: null,
+  created_at: '2026-05-31T00:00:00Z',
+  updated_at: '2026-05-31T00:00:00Z',
+};
+
 const demoTraceFlow = {
   task: demoTask,
   dataset: { dataset_id: 'dataset-demo', name: '问答回归集', version: 1, version_id: 'dataset-demo:v1' },
@@ -484,6 +501,9 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/workflow-templates')) {
         return jsonResponse([{ template_id: 'rag_regression', name: 'RAG 回归评测', description: 'LLMCall + Judge', scenario: 'rag' }]);
       }
+      if (url.endsWith('/workflow-drafts/draft-test')) {
+        return jsonResponse({ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' });
+      }
       if (url.endsWith('/workflow-drafts')) {
         if (init?.method === 'POST') {
           return jsonResponse({ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' });
@@ -507,6 +527,18 @@ describe('AegisQA 前端工作台', () => {
       }
       if (url.endsWith('/tasks/task-demo/repair-tasks/from-diagnostics')) {
         return jsonResponse({ source_task_id: 'task-demo', created_count: 1, reused_count: 0, repair_tasks: [{ repair_task_id: 'repair-demo', source_task_id: 'task-demo', cause_type: 'weak_segment', status: 'open' }] });
+      }
+      if (url.endsWith('/repair-tasks/repair-demo/start')) {
+        return jsonResponse({ ...demoRepairTask, status: 'in_progress', owner: 'qa_owner', started_at: '2026-05-31T01:00:00Z' });
+      }
+      if (url.endsWith('/repair-tasks/repair-demo/resolve')) {
+        return jsonResponse({ ...demoRepairTask, status: 'resolved', owner: 'qa_owner', resolution_note: '已补充 Golden 并调整 Prompt。', resolved_at: '2026-05-31T02:00:00Z' });
+      }
+      if (url.endsWith('/repair-tasks/repair-demo/reopen')) {
+        return jsonResponse({ ...demoRepairTask, status: 'open', reopen_reason: '复测仍未通过。', reopened_at: '2026-05-31T03:00:00Z' });
+      }
+      if (url.endsWith('/repair-tasks')) {
+        return jsonResponse([demoRepairTask]);
       }
       if (url.endsWith('/tasks/task-demo/report')) {
         return jsonResponse({
@@ -1209,7 +1241,7 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看参数治理' }));
     expect(await screen.findByText('Trace Flow')).toBeInTheDocument();
     expect(await screen.findByText('问答回归集')).toBeInTheDocument();
-  });
+  }, 20_000);
 
   it('报告中心展示 Score Analytics、成本预算和红队扫描入口', async () => {
     await renderWorkbench('/reports');
@@ -1224,6 +1256,26 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText('prompt_injection')).toBeInTheDocument();
     expect(screen.getByText('pii_leakage')).toBeInTheDocument();
     expect(screen.getByText('添加 Prompt Injection 断言')).toBeInTheDocument();
+  });
+
+  it('修复任务工作台支持查看证据、领取和完成', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    expect(screen.getByRole('link', { name: /修复任务/ })).toBeInTheDocument();
+    expect(await screen.findByText('修复任务工作台')).toBeInTheDocument();
+    expect(screen.getByText('[warning] 复盘低通过率分层')).toBeInTheDocument();
+    expect(screen.getByText('scene=payment 通过率 40%，Badcase 12 条。')).toBeInTheDocument();
+    expect(screen.getByText('task-demo')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /查看报告/ })).toHaveAttribute('href', '/reports?task_id=task-demo');
+
+    fireEvent.click(screen.getByRole('button', { name: /领取/ }));
+    expect(await screen.findByText(/修复任务已领取：qa_owner/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /完成/ }));
+    expect(await screen.findByText('完成修复任务')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('说明本次修复做了什么、如何验证'), { target: { value: '已补充 Golden 并调整 Prompt。' } });
+    fireEvent.click(screen.getByRole('button', { name: /确认完成/ }));
+    expect(await screen.findByText(/修复任务已完成/)).toBeInTheDocument();
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {

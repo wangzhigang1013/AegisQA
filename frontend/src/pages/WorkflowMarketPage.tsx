@@ -24,7 +24,11 @@ export function WorkflowMarketPage() {
         status: draft.status,
         version: '-',
         updated_at: draft.updated_at,
-        action: () => navigate(`/workflows/designer/${draft.draft_id}`),
+        action: () => {
+          // 市场页已经拿到了草稿图，进入画布前先写入单草稿缓存，避免画布短暂显示默认模板后再被接口刷新覆盖。
+          queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
+          navigate(`/workflows/designer/${draft.draft_id}`);
+        },
       })),
       ...(workflowsQuery.data ?? []).map((workflow) => ({
         key: `workflow-${workflow.version_id}`,
@@ -43,6 +47,7 @@ export function WorkflowMarketPage() {
   const createDraftMutation = useMutation({
     mutationFn: () => api.createWorkflowDraft({ name: '未命名 Workflow', graph: { ...demoWorkflowGraph, name: '未命名 Workflow' } }),
     onSuccess: async (draft) => {
+      queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
       await queryClient.invalidateQueries({ queryKey: ['workflow-drafts'] });
       navigate(`/workflows/designer/${draft.draft_id}`);
     },
@@ -98,9 +103,12 @@ export function WorkflowMarketPage() {
                     <Typography.Text type="secondary">{String(template.description ?? '')}</Typography.Text>
                     <Button
                       icon={<PlusOutlined />}
-                      onClick={() =>
-                        api.createWorkflowDraft({ name: String(template.name), graph: { ...demoWorkflowGraph, name: String(template.name) } }).then((draft) => navigate(`/workflows/designer/${draft.draft_id}`))
-                      }
+                      onClick={() => {
+                        api.createWorkflowDraft({ name: String(template.name), graph: { ...demoWorkflowGraph, name: String(template.name) } }).then((draft) => {
+                          queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
+                          navigate(`/workflows/designer/${draft.draft_id}`);
+                        });
+                      }}
                     >
                       从样例创建
                     </Button>

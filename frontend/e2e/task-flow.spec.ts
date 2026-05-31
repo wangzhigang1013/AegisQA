@@ -112,8 +112,8 @@ async function createAndExecuteTask(page: Page, datasetName: string, workflowNam
   await page.getByRole('button', { name: /创建任务/ }).click();
   await page.getByPlaceholder('例如：RAG 回归评测 2026-05-31').fill(taskName);
 
-  await selectModalOption(page, 0, datasetName);
-  await selectModalOption(page, 1, workflowName);
+  await selectModalOption(page, 'Dataset Version', datasetName);
+  await selectModalOption(page, 'Workflow Version', workflowName);
 
   await page.getByRole('button', { name: '确认创建任务' }).click();
   await expect(page.getByText(new RegExp(`任务已创建：${escapeRegExp(taskName)}`))).toBeVisible();
@@ -155,12 +155,14 @@ async function verifyReportAndCorrectBadcase(page: Page, taskName: string) {
   await expect(page.getByText(/parameter_trace|workflow_config|schema_default/)).toBeVisible();
 }
 
-async function selectModalOption(page: Page, selectIndex: number, searchText: string) {
-  await page.locator('.ant-modal .ant-select').nth(selectIndex).click();
-  await page.keyboard.type(searchText);
+async function selectModalOption(page: Page, label: string, searchText: string) {
+  const combobox = page.getByRole('dialog').getByRole('combobox', { name: label });
+  await combobox.click();
+  await combobox.fill(searchText);
   await page
     .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content')
     .filter({ hasText: searchText })
+    .first()
     .click();
 }
 

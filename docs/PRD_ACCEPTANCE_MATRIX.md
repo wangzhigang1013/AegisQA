@@ -18,12 +18,12 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 
 最近一次验证结果：
 
-- 单元/API/扩展测试：`python -m pytest -q` 已通过，覆盖 67 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- 单元/API/扩展测试：`python -m pytest -q` 已通过，覆盖 68 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - SQLite 轻量仓储：`python -m pytest tests\test_sqlite_store_adapter.py -q` 已通过，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
 - 端到端 Demo：最新 Dataset `rag_qa_1000:v12`、Run `run-298dd7e6bb5b`，1000 条 JSONL 样本状态 `completed`，队列消息字段仅 `item_id`，报告 `pass_rate=0.8`、`error_rate=0.0`、Badcase 200 条，Judge 审计输出 Accuracy / Precision / Recall / F1 / Cohen's Kappa / Confusion Matrix。
-- 前端：`npm run typecheck`、`npm test`、`npm run build` 已通过；`npm test` 覆盖 40 个交互/API client/图模型/任务创建向导/Preflight/Run Attempts/Dataset Lineage/Trace Tree/Experiment/CI Gate/Annotation Queue/报告评测结论/Repair Task 生成/Judge 偏差趋势/治理边界测试；最近一次 Playwright 覆盖 8 条 E2E。
+- 前端：`npm run typecheck`、`npm test`、`npm run build` 已通过；`npm test` 覆盖 41 个交互/API client/图模型/任务创建向导/Preflight/Run Attempts/Dataset Lineage/Trace Tree/Experiment/CI Gate/Annotation Queue/报告评测结论/Repair Task 生成与工作台/Judge 偏差趋势/治理边界测试；最近一次 Playwright 覆盖 8 条 E2E。
 - 浏览器交互：Headless Chrome CDP 验证概览、Skill 市场、Workflow 市场、Workflow 画布、任务列表、任务报告均能打开并展示关键入口。
-- Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden；同时覆盖 CI Gate 创建配置和阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核和候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行回填、校验、发布。
+- Playwright E2E：真实覆盖上传 JSONL 数据集、上传 zip Skill 插件包、运行合约测试、治理启用 Skill、发布 Workflow、创建并执行 Task、查看任务报告、导出报告、Badcase 加入 Golden；同时覆盖 CI Gate 创建配置和阻断评估、Annotation Queue 领取/审核/回流 Golden、批量审核和候选资产摘要，以及 Workflow 画布新增 Source/Skill/Join/Output/Aggregator、聚合策略、创建连线、删除节点、删除下游连线、删除后重连、节点工具栏、键盘删除、撤销/重做、保存草稿回放、试运行回填、校验、发布。
 - 产品化增强：Experiment 快照、Assertion DSL、CI Gate、Annotation Queue、Trace Tree、Task Preflight、Repair Task 已有后端 API 测试；首页已展示真实 Dashboard 和产品化增强入口。
 
 ## P0 功能覆盖
@@ -36,8 +36,8 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-SK-04 | Skill 版本、作者、依赖、场景、标签 | 已实现 | `SkillManifest` |
 | FR-SK-05 | Skill 合约测试入口 | 已实现 | `BaseSkill.contract_test()`，`POST /skills/{skill_id}/contract-test`，React Skill 详情按钮测试；插件包审批前也必须通过合约测试，插件包记录会保存 `last_contract_ok`、`last_contract_result`、`last_contract_at` |
 | FR-SK-08 | Skill 插件包上传与审批门禁 | 已实现基础 | `POST /skills/packages/upload`、`GET /skills/packages`、`aegisqa/skills/packages.py`；zip 必须包含 `skill.yaml|skill.json` 和 `handler.py`，默认 `pending_review`，非法 zip 路径会拒绝，插件合约测试默认 5 秒超时并返回 `SKILL_CONTRACT_TIMEOUT`，stdout 超过安全上限返回 `SKILL_PACKAGE_OUTPUT_TOO_LARGE`，运行时 stdout/stderr 会截断并脱敏本地绝对路径，审批记录保存审批人、审批时间和审批备注；测试 `test_skill_package_upload_contract_and_approval_gate`、`test_skill_package_security.py` 和 `test_p0_hardening.py`；Playwright E2E 覆盖真实 zip 上传、合约测试和治理启用 |
-| FR-WF-01 | 创建、编辑、复制、发布、归档 Workflow | 已实现基础 | `WorkflowService.publish/copy_workflow/archive`，`POST /workflow-graphs/publish`，`POST/PUT/DELETE /workflow-drafts`，React `Workflow 市场` + `Workflow 画布` |
-| FR-WF-02 | 线性步骤列表与图形化编排 | 已实现 | `WorkflowDraft` / `WorkflowStep`，`WorkflowGraph` 保留画布快照；前端图模型已独立测试，Inspector 支持节点工具栏、键盘删除、下游连线可视化、选择目标创建连线、删除连线和 Aggregator 聚合策略，Playwright 覆盖 Source/Skill/Join/Output/Aggregator 新增、创建连线、删除节点、删除下游连线、撤销、重做、保存草稿回放、校验、发布 |
+| FR-WF-01 | 创建、编辑、复制、发布、归档 Workflow | 已实现基础 | `WorkflowService.publish/copy_workflow/archive`，`POST /workflow-graphs/publish`，`POST/PUT/DELETE /workflow-drafts`，`GET /workflow-drafts/{draft_id}` 单草稿深链加载，React `Workflow 市场` + `Workflow 画布`；市场进入画布会预写单草稿缓存，画布加载完成前显示加载态，避免后台刷新覆盖用户编辑 |
+| FR-WF-02 | 线性步骤列表与图形化编排 | 已实现 | `WorkflowDraft` / `WorkflowStep`，`WorkflowGraph` 保留画布快照；前端图模型已独立测试，Inspector 支持节点工具栏、键盘删除、下游连线可视化、选择目标创建连线、删除连线、删除后重连和 Aggregator 聚合策略，Playwright 覆盖 Source/Skill/Join/Output/Aggregator 新增、创建连线、删除节点、删除下游连线、删除后重连、撤销、重做、保存草稿回放、校验、发布 |
 | FR-WF-03 | 字段映射与强类型校验 | 已实现 | `resolve_input_mapping`，失败不调用 Skill |
 | FR-WF-04 | 试运行 | 已实现基础 | `WorkflowRunner.dry_run` 支持 1-10 条样本，`POST /workflow-graphs/dry-run`，React Console 已接入按钮反馈，Playwright 覆盖选择数据集后试运行回填结果 |
 | FR-DS-01 | CSV/JSONL 上传与流式解析 | 已实现 | `DatasetService.upload_dataset`，API `/datasets/upload` 与 `/datasets/from-path`，React 上传弹窗与禁用反馈已测试；空文件、坏 JSONL 行号、空 CSV 均有结构化错误 |
@@ -106,7 +106,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | Task Preflight | 已实现基础 | `POST /tasks/preflight` 在创建任务前检查数据集非空、Workflow 字段映射、Golden 覆盖、Skill 审批状态、质量门槛和成本预算；React 任务创建向导支持评测目的、质量门槛和 Preflight 检查表 |
 | 质量决策中心 | 已实现基础 | Task Report `quality_decision` 把通过率、错误率、Badcase 和低分层转为 passed/warning/blocked 决策、风险摘要和下一步动作；React 报告中心新增“评测结论”第一屏，先回答“能否发布 / 为什么 / 影响多大 / 下一步” |
 | Task Diagnostics 根因诊断 | 已实现基础 | `GET /tasks/{task_id}/diagnostics` 与 Task Report `diagnostics` 汇总运行时错误、低通过率分层、字段缺失/重复、Step 健康度和参数风险；React 报告中心展示主要根因、证据数、根因表、数据质量和修复动作，且 next_actions 已按钮化，可直接进入 Trace Flow、数据血缘、Judge 审计，或调用 Annotation Queue、CI Gate、失败项重试 |
-| Repair Task 修复闭环 | 已实现基础 | `POST /tasks/{task_id}/repair-tasks/from-diagnostics` 可把诊断 root cause 沉淀为可追踪修复任务，`GET /repair-tasks?source_task_id=` 支持按来源任务查询；React 报告中心可一键生成修复任务并显示创建数量 |
+| Repair Task 修复闭环 | 已实现基础 | `POST /tasks/{task_id}/repair-tasks/from-diagnostics` 可把诊断 root cause 沉淀为可追踪修复任务；`GET /repair-tasks?source_task_id=` 支持按来源任务查询；`POST /repair-tasks/{repair_task_id}/start|resolve|reopen` 支持领取、完成、重开并记录审计；React 报告中心可一键生成修复任务，`/repair-tasks` 工作台支持筛选、查看证据、领取、完成、重开，并跳回来源报告和 Trace |
 | 成本预算状态 | 已实现基础 | Task Report 新增 `budget_status`，基于报告 cost 或 token 估算成本，输出 ok/warning/exceeded/not_set、预算、已用、剩余和修复建议；React 报告中心展示“成本预算” |
 | 红队安全扫描 | 已实现基础 | `POST /red-team/scans` 支持按 Task/Run 做规则化扫描，识别 prompt injection、PII、unsafe content、secret exposure，保存扫描记录并生成下一步建议；React 报告中心提供“运行红队扫描”入口 |
 | 产品化入口 | 已实现基础 | React 首页读取真实 Dashboard；Workflow 先进入市场，执行与报告围绕 Task 组织 |

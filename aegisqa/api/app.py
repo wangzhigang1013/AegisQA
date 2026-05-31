@@ -209,6 +209,18 @@ class TaskPreflightRequest(BaseModel):
     skill_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
+class RepairTaskStartRequest(BaseModel):
+    owner: str
+
+
+class RepairTaskResolveRequest(BaseModel):
+    resolution_note: str
+
+
+class RepairTaskReopenRequest(BaseModel):
+    reason: str
+
+
 class ExperimentFromRunRequest(BaseModel):
     run_id: str
     name: str

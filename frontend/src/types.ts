@@ -346,6 +346,11 @@ export type RepairTaskRecord = {
   recommendation: string;
   next_actions: string[];
   owner?: string | null;
+  started_at?: string | null;
+  resolved_at?: string | null;
+  reopened_at?: string | null;
+  resolution_note?: string | null;
+  reopen_reason?: string | null;
   created_at?: string;
   updated_at?: string;
 };
