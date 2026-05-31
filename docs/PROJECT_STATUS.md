@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Report Task Remote Search”已完成并通过全量验证。本批次继续优化报告中心长期可用性：任务选择器在最近一页 Task 基础上支持远程搜索，输入任务关键词会请求 `GET /tasks?q=...&page=1&page_size=20`，避免历史任务只能靠最近列表或深链打开。上一批深链 `/reports?task_id=...` 的目标任务不在最近列表时，仍会调用 `GET /tasks/{task_id}` 精准加载单任务；目标任务加载完成前不会回退请求最近列表第一条任务报告。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Task List Search”已完成并通过全量验证。本批次继续优化执行中心主流程可用性：任务主表在服务端分页和状态筛选基础上接入 `q` 搜索，输入任务名、数据源或 Workflow 关键词会请求 `GET /tasks?q=...&page=1&page_size=8` 并回到第 1 页，避免历史任务只能靠翻页查找。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -84,6 +84,7 @@
 - CI Gate 评估历史已支持服务端分页，旧数组响应保持兼容；分页响应额外返回基于筛选后全量历史的 summary，React 评估历史表翻页会请求后端。
 - Score Analytics 已支持 Dataset、Workflow、状态过滤和服务端分页；报告中心按当前任务作用域请求同 Dataset + Workflow 的趋势，summary 保持基于筛选后全量历史，趋势表只加载当前页。
 - Task 主列表已支持服务端分页和状态筛选；`GET /tasks` 不带分页参数保持旧数组响应，执行中心主表带 `page/page_size` 请求后端，状态筛选变化回到第 1 页。
+- 执行中心任务主表已支持任务名/数据源/Workflow 搜索；搜索时会请求 `GET /tasks?q=...&page=1&page_size=8` 并回到第 1 页，可与状态筛选组合使用。
 - 报告中心任务选择器已改为分页加载最近任务；深链 `task_id` 不在最近列表时，会按需调用 `GET /tasks/{task_id}` 加载单任务，加载完成前不会请求最近列表第一条任务报告，报告、Score Analytics、导出、Badcase 和 Trace 入口继续围绕目标任务工作。
 - 报告中心任务选择器已支持远程搜索历史任务，输入关键词会请求 `GET /tasks?q=...&page=1&page_size=20`，选择任务后清空搜索词，保持报告页围绕目标 Task 工作。
 - Experiment 快照已补齐 Dataset/Workflow 元数据、延迟指标和失败分布；Experiment 页面支持 Dataset/Workflow 过滤，并新增 A/B 对比面板展示通过率、Badcase、P95 耗时、成本和失败分布差异。
@@ -129,10 +130,11 @@
 
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心深链任务|报告中心 Score Analytics"`：先 RED 后 GREEN，最终 2 passed，确认报告中心深链任务会请求最近任务分页和 `GET /tasks/{task_id}` 单任务接口，不会请求最近列表第一条任务报告；Score Analytics 继续按当前任务 Dataset + Workflow 作用域分页请求。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心任务选择器支持远程搜索|报告中心深链任务|报告中心 Score Analytics"`：先 RED 后 GREEN，最终 3 passed，确认报告中心任务选择器搜索“历史任务”会请求 `q=历史任务&page=1&page_size=20`，深链和 Score Analytics 没有回归。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心任务列表使用服务端分页"`：先 RED 后 GREEN，最终 1 passed，确认执行中心从第 2 页搜索任务会请求 `q=分页任务 11&page=1&page_size=8`，并保留状态筛选请求。
 - `python -m pytest -q`：通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：6 个测试文件，85 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
-- `cd frontend && npm run build`：通过，`ReportsPage` chunk 正常生成。
+- `cd frontend && npm run build`：通过，`RunsPage` chunk 正常生成。
 - `cd frontend && npm run e2e`：8 passed，主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
 - `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - `python -m pytest tests\test_task_center_api.py -q -k "tasks_support_server_side_pagination"`：先 RED 后 GREEN，最终 1 passed，确认 `/tasks` legacy 数组响应、状态筛选和分页响应。
@@ -454,6 +456,35 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Task List Search
+
+- 改动摘要：执行中心任务主表新增搜索框，接入后端 `GET /tasks?q=...`；输入任务名、数据源或 Workflow 关键词会回到第 1 页重新请求服务端，避免任务多时只能翻页查找历史任务。
+- 变更文件：
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/superpowers/plans/2026-06-01-task-list-search.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心任务列表使用服务端分页"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 定向前端：先 RED 后 GREEN，最终 1 passed。
+  - 后端全量：通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端全量：6 个测试文件，85 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
+  - 前端 build：通过。
+  - Playwright E2E：8 passed。
+  - 空白检查：仅有 CRLF 换行转换 warning，未发现空白错误。
+- 下一步：
+  - 继续从用户主链路找剩余摩擦点，优先考虑把报告页组件拆分、压缩前端大测试耗时，以及为任务搜索/报告搜索补浏览器级 E2E。
 
 ### 2026-06-01 Report Task Remote Search
 

@@ -1850,7 +1850,10 @@ describe('AegisQA 前端工作台', () => {
         const page = Number(parsed.searchParams.get('page') ?? 1);
         const pageSize = Number(parsed.searchParams.get('page_size') ?? 8);
         const status = parsed.searchParams.get('status');
-        const filtered = status ? manyTasks.filter((task) => task.status === status) : manyTasks;
+        const q = parsed.searchParams.get('q');
+        const filtered = manyTasks
+          .filter((task) => (status ? task.status === status : true))
+          .filter((task) => (q ? task.name.includes(q) || task.dataset_name.includes(q) || task.workflow_name.includes(q) : true));
         const start = (page - 1) * pageSize;
         return jsonResponse({
           items: filtered.slice(start, start + pageSize),
@@ -1869,6 +1872,12 @@ describe('AegisQA 前端工作台', () => {
       expect(taskRequests.some((request) => request.includes('page=2') && request.includes('page_size=8'))).toBe(true);
     });
     expect(await screen.findByText('分页任务 08')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('搜索任务名 / 数据源 / Workflow'), { target: { value: '分页任务 11' } });
+    await waitFor(() => {
+      expect(taskRequests.some((request) => request.includes('q=%E5%88%86%E9%A1%B5%E4%BB%BB%E5%8A%A1+11') && request.includes('page=1') && request.includes('page_size=8'))).toBe(true);
+    });
+    expect(await screen.findByText('分页任务 11')).toBeInTheDocument();
 
     fireEvent.mouseDown(findComboboxByLabel('任务状态筛选'));
     const completedOptions = await screen.findAllByText('completed');

@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Empty,
+  Input,
   Progress,
   Select,
   Space,
@@ -28,11 +29,13 @@ export function RunsPage() {
   const [preflightResult, setPreflightResult] = useState<TaskPreflightResult | null>(null);
   const [taskPage, setTaskPage] = useState(1);
   const [taskStatusFilter, setTaskStatusFilter] = useState<string | undefined>();
+  const [taskSearch, setTaskSearch] = useState('');
   const taskPageSize = 8;
+  const normalizedTaskSearch = taskSearch.trim();
 
   const tasksQuery = useQuery({
-    queryKey: ['tasks', 'page', taskPage, taskStatusFilter],
-    queryFn: () => api.tasksPage({ page: taskPage, pageSize: taskPageSize, status: taskStatusFilter }),
+    queryKey: ['tasks', 'page', taskPage, taskStatusFilter, normalizedTaskSearch],
+    queryFn: () => api.tasksPage({ page: taskPage, pageSize: taskPageSize, status: taskStatusFilter, q: normalizedTaskSearch || undefined }),
     refetchOnMount: 'always',
   });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
@@ -148,6 +151,21 @@ export function RunsPage() {
 
       <Card className="flat-card" title="任务列表">
         <Space wrap className="section-actions">
+          <Input.Search
+            allowClear
+            aria-label="搜索任务"
+            placeholder="搜索任务名 / 数据源 / Workflow"
+            className="wide-search"
+            value={taskSearch}
+            onChange={(event) => {
+              setTaskSearch(event.target.value);
+              setTaskPage(1);
+            }}
+            onSearch={(value) => {
+              setTaskSearch(value);
+              setTaskPage(1);
+            }}
+          />
           <Select
             allowClear
             aria-label="任务状态筛选"
