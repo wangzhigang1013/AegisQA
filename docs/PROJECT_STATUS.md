@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Chart Component Lazy Loading”已完成并通过全量验证。本批次继续优化全流程使用体验的性能和稳定性：在路由级懒加载基础上，报告中心和 Judge 审计页面不再静态导入 `echarts-for-react`，统一改用 `LazyECharts` 组件异步加载图表库，页面框架、任务选择器和关键结论可以先渲染，图表区域有中文加载态。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Task Detail Badcase Pagination”已完成并通过全量验证。本批次继续优化数据量变大后的全流程稳定性：执行中心任务详情抽屉的 Badcase 页签不再一次性渲染全部坏例，改为每页 8 条，避免用户从任务列表点开详情时被大量 Badcase DOM 拖慢，同时保留任务详情作为快速复盘入口。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -68,6 +68,7 @@
 - Trace Flow 已从 Trace Tree 中独立出来，支持按 Task 查看 Dataset Row、Skill Input、参数来源、Output、Metrics、Badcase 和队列消息形状，帮助解释评测过程中的数据流转。
 - 首页已从产品能力展示调整为任务工作台，优先展示最近任务、待审批 Skill、待审核样本、失败任务和 CI Gate 阻断，并固定“上传数据 -> 选择 Workflow -> 创建任务 -> 查看报告”主流程入口。
 - 任务详情已抽成驾驶舱组件，按概览、样本、Trace、Badcase、Attempts、参数组织，参数页可查看任务冻结参数、Skill 参数来源和 Secret 脱敏说明。
+- 任务详情 Badcase 页签已增加分页，默认每页 8 条，避免大任务在执行中心详情抽屉中一次性渲染全部坏例。
 - Workflow Inspector 已从纯 JSON 编辑升级为字段映射表格，字段路径可从 Dataset `field_paths`、字段 schema 和上游节点 `output_mapping` 自动推导，并保留 JSON 高级模式。
 - Workflow Inspector 已新增“参数预览”Tab，可选择 Dataset Version 调用 `/workflow-graphs/parameter-preview`，展示解析后配置和 default/workflow_config/task_override/expression/secret_ref 来源。
 - Task Report 已新增 `segments` 和 `recommendations`，支持按 `scene`、`expected_label`、`model_version`、`prompt_version` 统计样本量、通过率、Badcase，并给出 Annotation、Golden 候选、CI Gate 建议。
@@ -114,6 +115,13 @@
 
 ## 最近验证
 
+- `cd frontend && npm test -- src/test/App.test.tsx -t "任务详情 Badcase 表分页"`：先 RED 后 GREEN，最终 1 passed，确认 12 条 Badcase 只渲染当前页前 8 条。
+- `cd frontend && npm run typecheck`：通过。
+- `python -m pytest -q`：94 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm test`：6 个测试文件、74 passed；新增任务详情 Badcase 分页测试进入全量。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
+- `git diff --check`：通过，仅有 Windows 换行提示。
 - `cd frontend && npm test -- src/test/lazyCharts.test.tsx`：先 RED 后 GREEN，最终 2 passed；确认导入报告中心和 Judge 审计页面时不会同步加载 `echarts-for-react`。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：6 个测试文件、73 passed；报告中心和 Judge 审计现有交互测试通过。
@@ -339,6 +347,26 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Task Detail Badcase Pagination
+
+- 改动摘要：执行中心任务详情抽屉的 Badcase 表从无分页改为每页 8 条，避免大任务产生大量坏例时一次性渲染全部行；新增前端回归测试，用 12 条 Badcase 证明第 9 条不会出现在第一页。
+- 变更文件：
+  - `frontend/src/pages/task/TaskOperationsDrawer.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/superpowers/plans/2026-06-01-task-detail-badcase-pagination.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "任务详情 Badcase 表分页"`
+- 测试结果：
+  - 先 RED 后 GREEN，最终 1 passed。
+  - 前端 typecheck：通过。
+  - 前端全量：6 个测试文件、74 passed。
+  - 前端构建：通过。
+  - Playwright 全量：8 passed。
+  - 后端全量：94 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - `git diff --check`：通过，仅有 Windows 换行提示。
+- 下一步：继续处理大数据量下的报告页和任务详情性能，优先评估 Task Report 后端分页、Trace Flow 样本分页和 SQLite 查询索引。
 
 ### 2026-06-01 Chart Component Lazy Loading
 

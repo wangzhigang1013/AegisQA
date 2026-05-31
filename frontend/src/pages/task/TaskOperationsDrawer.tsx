@@ -98,7 +98,7 @@ export function TaskOperationsDrawer({
                     <Table
                       size="small"
                       rowKey={(record) => String(record.badcase_id ?? record.item_id)}
-                      pagination={false}
+                      pagination={{ pageSize: 8, showSizeChanger: false }}
                       dataSource={reportQuery.data?.badcases ?? []}
                       columns={[
                         { title: 'Item', dataIndex: 'item_id' },

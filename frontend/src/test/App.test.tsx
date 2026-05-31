@@ -1877,6 +1877,32 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText('Trace Tree')).toBeInTheDocument();
   });
 
+  it('任务详情 Badcase 表分页，避免大任务一次性渲染全部坏例', async () => {
+    const manyBadcases = Array.from({ length: 12 }, (_, index) => ({
+      ...demoBadcase,
+      badcase_id: `badcase-${index}`,
+      item_id: `item-${index}`,
+      reason: `reason-${index}`,
+    }));
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/task-demo/report')) {
+        return jsonResponse({ badcases: manyBadcases });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/runs');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'RAG 任务' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Badcase' }));
+
+    expect(await screen.findByText('item-0')).toBeInTheDocument();
+    expect(screen.getByText('item-7')).toBeInTheDocument();
+    expect(screen.queryByText('item-8')).not.toBeInTheDocument();
+  });
+
   it('完成态任务不能重复执行', async () => {
     vi.mocked(globalThis.fetch).mockImplementation((input) => {
       const url = String(input);
