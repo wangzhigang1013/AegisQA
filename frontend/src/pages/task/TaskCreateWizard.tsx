@@ -3,6 +3,17 @@ import { useMemo } from 'react';
 
 import type { DatasetSummary, TaskExecutionTemplate, TaskPreflightResult, WorkflowVersion } from '../../types';
 
+type SkillOverrideValueType = 'string' | 'number' | 'boolean' | 'json' | 'expression' | 'secret';
+type SkillOverrideConfigValue = string | number | boolean | Record<string, unknown> | unknown[];
+type SkillOverrideConfig = Record<string, Record<string, SkillOverrideConfigValue>>;
+
+export type SkillOverrideRow = {
+  step_id?: string;
+  parameter?: string;
+  value_type?: SkillOverrideValueType;
+  value?: SkillOverrideConfigValue;
+};
+
 export type TaskCreateFormValues = {
   name: string;
   execution_template_id?: string;
@@ -18,6 +29,8 @@ export type TaskCreateFormValues = {
   retry_backoff_seconds?: number;
   cost_budget?: number;
   allow_blocked_preflight?: boolean;
+  skill_override_rows?: SkillOverrideRow[];
+  skill_overrides?: SkillOverrideConfig;
 };
 
 type TaskCreateWizardProps = {
@@ -50,11 +63,14 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
   const watchedMaxBadcase = Form.useWatch('max_badcase_count', form);
   const watchedRepeat = Form.useWatch('sample_repeat_times', form);
   const watchedCostBudget = Form.useWatch('cost_budget', form);
+  const watchedOverrideRows = Form.useWatch('skill_override_rows', form);
   const allowBlockedPreflight = Form.useWatch('allow_blocked_preflight', form);
   const datasetVersions = useMemo(
     () => datasets.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))),
     [datasets],
   );
+  const selectedWorkflow = workflows.find((workflow) => workflow.version_id === watchedWorkflow);
+  const overrideTargets = useMemo(() => skillStepOptions(selectedWorkflow), [selectedWorkflow]);
   const selectedDatasetVersion = datasetVersions.find((item) => item.version.version_id === watchedDataset)?.version;
   const currentExecutionTemplate = watchedTemplate ?? form.getFieldValue('execution_template_id');
   const currentEvaluationGoal = watchedEvaluationGoal ?? form.getFieldValue('evaluation_goal');
@@ -62,6 +78,7 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
   const currentMaxBadcase = watchedMaxBadcase ?? form.getFieldValue('max_badcase_count');
   const currentRepeat = watchedRepeat ?? form.getFieldValue('sample_repeat_times');
   const currentCostBudget = watchedCostBudget ?? form.getFieldValue('cost_budget');
+  const currentSkillOverrides = skillOverridesFromRows(watchedOverrideRows ?? form.getFieldValue('skill_override_rows'));
   const preflightMatchesSelection = Boolean(
     preflightResult
       && selectedDatasetVersion
@@ -75,6 +92,7 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
         maxBadcaseCount: currentMaxBadcase,
         sampleRepeatTimes: currentRepeat,
         costBudget: currentCostBudget,
+        skillOverrides: currentSkillOverrides,
       }),
   );
   const preflightCanContinue = Boolean(
@@ -90,7 +108,7 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
     const config = template.execution_config ?? {};
     const retry = config.retry ?? {};
     const qualityGate = template.quality_gate ?? {};
-    form.setFieldsValue({
+    const templateValues: Partial<TaskCreateFormValues> = {
       execution_template_id: template.template_id,
       evaluation_goal: template.evaluation_goal ?? undefined,
       pass_rate_threshold: numberOrUndefined(qualityGate.pass_rate),
@@ -101,7 +119,9 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
       max_retries: numberOrUndefined(retry.max_retries),
       retry_backoff_seconds: numberOrUndefined(retry.backoff_seconds),
       cost_budget: numberOrUndefined(config.cost_budget),
-    });
+      skill_override_rows: skillOverridesToRows(config.skill_overrides),
+    };
+    form.setFieldsValue(templateValues);
   }
 
   return (
@@ -109,13 +129,14 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
       title="创建任务向导"
       open={open}
       onCancel={onCancel}
+      width={760}
       footer={[
         <Button key="cancel" onClick={onCancel}>取消</Button>,
         <Button
           key="preflight"
           loading={preflightLoading}
           disabled={!watchedWorkflow || !watchedDataset}
-          onClick={() => onPreflight(form.getFieldsValue(true) as TaskCreateFormValues)}
+          onClick={() => onPreflight(normalizeTaskCreateValues(form.getFieldsValue(true) as TaskCreateFormValues))}
         >
           运行 Preflight
         </Button>,
@@ -150,7 +171,7 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
           }}
           onFinish={(values) =>
             onSubmit({
-              ...values,
+              ...normalizeTaskCreateValues(values),
               // 强制创建只对 blocked Preflight 生效，避免用户重跑通过后仍带着旧风险标记提交。
               allow_blocked_preflight: Boolean(preflightResult?.status === 'blocked' && values.allow_blocked_preflight),
             })
@@ -204,6 +225,78 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
               options={workflows.map((workflow) => ({ value: workflow.version_id, label: `${workflow.name} v${workflow.version}` }))}
             />
           </Form.Item>
+          <Typography.Title level={5}>任务级 Skill 参数覆盖</Typography.Title>
+          <Alert
+            showIcon
+            type="info"
+            message="覆盖只影响本次任务"
+            description="适合临时替换模型、温度、阈值或 Secret 引用。覆盖值会进入 Preflight、任务快照和参数治理记录，修改后必须重新运行 Preflight。"
+          />
+          <Form.List name="skill_override_rows">
+            {(fields, { add, remove }) => (
+              <Space direction="vertical" size="small" className="full-width-control">
+                <Button
+                  disabled={!watchedWorkflow || overrideTargets.length === 0}
+                  onClick={() => add({ value_type: 'string' })}
+                >
+                  添加任务级参数覆盖
+                </Button>
+                {fields.map((field) => (
+                  <Row key={field.key} gutter={12} align="bottom">
+                    <Col span={6}>
+                      <Form.Item name={[field.name, 'step_id']} label="覆盖 Step" rules={[{ required: true, message: '请选择 Step' }]}>
+                        <Select
+                          aria-label="覆盖 Step"
+                          showSearch
+                          optionFilterProp="label"
+                          placeholder="选择 Skill Step"
+                          options={overrideTargets}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={5}>
+                      <Form.Item name={[field.name, 'parameter']} label="参数名" rules={[{ required: true, message: '请填写参数名' }]}>
+                        <Input placeholder="例如：model" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={4}>
+                      <Form.Item name={[field.name, 'value_type']} label="值类型" initialValue="string">
+                        <Select
+                          aria-label="覆盖值类型"
+                          options={[
+                            { value: 'string', label: '字符串' },
+                            { value: 'number', label: '数字' },
+                            { value: 'boolean', label: '布尔' },
+                            { value: 'json', label: 'JSON' },
+                            { value: 'expression', label: '表达式路径' },
+                            { value: 'secret', label: 'Secret 引用' },
+                          ]}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item shouldUpdate noStyle>
+                        {({ getFieldValue }) => {
+                          const valueType = (getFieldValue(['skill_override_rows', field.name, 'value_type']) || 'string') as SkillOverrideValueType;
+                          return (
+                            <Form.Item name={[field.name, 'value']} label={overrideValueLabel(valueType)} rules={[{ required: true, message: '请填写覆盖值' }]}>
+                              {overrideValueControl(valueType)}
+                            </Form.Item>
+                          );
+                        }}
+                      </Form.Item>
+                    </Col>
+                    <Col span={3}>
+                      <Button danger onClick={() => remove(field.name)}>删除</Button>
+                    </Col>
+                  </Row>
+                ))}
+                {watchedWorkflow && overrideTargets.length === 0 ? (
+                  <Typography.Text type="secondary">当前 Workflow 没有可覆盖的 Skill Step。</Typography.Text>
+                ) : null}
+              </Space>
+            )}
+          </Form.List>
           <Typography.Title level={5}>质量门槛</Typography.Title>
           <Row gutter={12}>
             <Col span={12}>
@@ -316,6 +409,149 @@ function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function normalizeTaskCreateValues(values: TaskCreateFormValues): TaskCreateFormValues {
+  return {
+    ...values,
+    skill_overrides: skillOverridesFromRows(values.skill_override_rows),
+  };
+}
+
+function skillStepOptions(workflow?: WorkflowVersion) {
+  const graphSkillNodes = workflow?.graph?.nodes
+    ?.filter((node) => node.node_type === 'skill')
+    .map((node) => ({
+      value: node.node_id,
+      label: `${node.label || node.node_id} / ${node.node_id}`,
+    })) ?? [];
+  const stepOptions = workflow?.steps?.map((step) => ({
+    value: step.step_id,
+    label: `${step.step_id} / ${step.skill_ref}`,
+  })) ?? [];
+  const seen = new Set<string>();
+  return [...graphSkillNodes, ...stepOptions].filter((option) => {
+    if (seen.has(option.value)) return false;
+    seen.add(option.value);
+    return true;
+  });
+}
+
+function skillOverridesFromRows(rows: unknown): SkillOverrideConfig {
+  if (!Array.isArray(rows)) return {};
+  return rows.reduce<SkillOverrideConfig>((acc, row) => {
+    if (!isRecord(row)) return acc;
+    const stepId = stringOrEmpty(row.step_id);
+    const parameter = stringOrEmpty(row.parameter);
+    if (!stepId || !parameter) return acc;
+    acc[stepId] = {
+      ...(acc[stepId] ?? {}),
+      [parameter]: normalizeOverrideValue(row.value_type, row.value),
+    };
+    return acc;
+  }, {});
+}
+
+function skillOverridesToRows(overrides: unknown): SkillOverrideRow[] {
+  if (!isRecord(overrides)) return [];
+  return Object.entries(overrides).flatMap(([stepId, params]) => {
+    if (!isRecord(params)) return [];
+    return Object.entries(params).map(([parameter, value]) => {
+      const { valueType, formValue } = overrideValueToForm(value);
+      return {
+        step_id: stepId,
+        parameter,
+        value_type: valueType,
+        value: formValue,
+      };
+    });
+  });
+}
+
+function normalizeOverrideValue(valueType: unknown, value: unknown): SkillOverrideConfigValue {
+  if (valueType === 'number') {
+    const numberValue = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(numberValue) ? numberValue : stringOrEmpty(value);
+  }
+  if (valueType === 'boolean') {
+    return value === true || value === 'true';
+  }
+  if (valueType === 'json') {
+    try {
+      return ensureOverrideConfigValue(JSON.parse(String(value ?? '')));
+    } catch {
+      return stringOrEmpty(value);
+    }
+  }
+  if (valueType === 'expression') {
+    return { type: 'expression', path: stringOrEmpty(value) };
+  }
+  if (valueType === 'secret') {
+    return { type: 'secret', name: stringOrEmpty(value) };
+  }
+  return stringOrEmpty(value);
+}
+
+function overrideValueToForm(value: unknown): { valueType: SkillOverrideValueType; formValue: SkillOverrideRow['value'] } {
+  if (isRecord(value) && value.type === 'expression') {
+    return { valueType: 'expression', formValue: stringOrEmpty(value.path) };
+  }
+  if (isRecord(value) && value.type === 'secret') {
+    return { valueType: 'secret', formValue: stringOrEmpty(value.name) };
+  }
+  if (typeof value === 'number') return { valueType: 'number', formValue: value };
+  if (typeof value === 'boolean') return { valueType: 'boolean', formValue: value };
+  if (isRecord(value) || Array.isArray(value)) return { valueType: 'json', formValue: JSON.stringify(value) };
+  return { valueType: 'string', formValue: stringOrEmpty(value) };
+}
+
+function ensureOverrideConfigValue(value: unknown): SkillOverrideConfigValue {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) return value;
+  if (isRecord(value)) return value;
+  return String(value);
+}
+
+function overrideValueLabel(valueType: SkillOverrideValueType): string {
+  if (valueType === 'expression') return '表达式路径';
+  if (valueType === 'secret') return 'Secret 名称';
+  return '覆盖值';
+}
+
+function overrideValueControl(valueType: SkillOverrideValueType) {
+  if (valueType === 'number') {
+    return <InputNumber className="full-width-control" placeholder="覆盖值" />;
+  }
+  if (valueType === 'boolean') {
+    return (
+      <Select
+        aria-label="覆盖值"
+        options={[
+          { value: true, label: 'true' },
+          { value: false, label: 'false' },
+        ]}
+      />
+    );
+  }
+  if (valueType === 'json') {
+    return <Input.TextArea autoSize={{ minRows: 1, maxRows: 3 }} placeholder='{"temperature": 0.2}' />;
+  }
+  if (valueType === 'expression') {
+    return <Input placeholder="row.temperature" />;
+  }
+  if (valueType === 'secret') {
+    return <Input placeholder="LLM_API_KEY" />;
+  }
+  return <Input placeholder="覆盖值" />;
+}
+
+function stringOrEmpty(value: unknown): string {
+  return value === undefined || value === null ? '' : String(value).trim();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 function preflightSignatureMatches(
   result: TaskPreflightResult,
   current: {
@@ -325,6 +561,7 @@ function preflightSignatureMatches(
     maxBadcaseCount?: number | null;
     sampleRepeatTimes?: number | null;
     costBudget?: number | null;
+    skillOverrides?: SkillOverrideConfig;
   },
 ) {
   const qualityGate = result.quality_gate ?? {};
@@ -335,6 +572,7 @@ function preflightSignatureMatches(
     && numberSignature(qualityGate.max_badcase_count) === numberSignature(current.maxBadcaseCount)
     && numberSignature(result.sample_repeat_times) === numberSignature(current.sampleRepeatTimes)
     && numberSignature(result.cost_budget) === numberSignature(current.costBudget)
+    && stableSignature(result.skill_overrides ?? {}) === stableSignature(current.skillOverrides ?? {})
   );
 }
 
@@ -346,4 +584,17 @@ function numberSignature(value: unknown): string {
   if (value === undefined || value === null || value === '') return '';
   const numberValue = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numberValue) ? String(numberValue) : '';
+}
+
+function stableSignature(value: unknown): string {
+  return JSON.stringify(sortForSignature(value));
+}
+
+function sortForSignature(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortForSignature);
+  if (!isRecord(value)) return value;
+  return Object.keys(value).sort().reduce<Record<string, unknown>>((acc, key) => {
+    acc[key] = sortForSignature(value[key]);
+    return acc;
+  }, {});
 }

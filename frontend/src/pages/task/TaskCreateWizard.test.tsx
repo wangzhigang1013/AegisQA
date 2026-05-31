@@ -34,7 +34,24 @@ const workflows: WorkflowVersion[] = [
     version: 1,
     version_id: 'wf-demo:v1',
     status: 'published',
-    steps: [],
+    graph: {
+      name: 'RAG 回归评测',
+      nodes: [
+        { node_id: 'source', node_type: 'source', label: '数据源' },
+        { node_id: 'answer', node_type: 'skill', label: '生成回答', skill_ref: 'llm.answer@0.1.0' },
+      ],
+      edges: [{ source: 'source', target: 'answer' }],
+    },
+    steps: [
+      {
+        step_id: 'answer',
+        skill_ref: 'llm.answer@0.1.0',
+        input_mapping: { prompt: 'row.question' },
+        output_mapping: { answer: 'context.answer' },
+        config: { model: 'workflow-default' },
+        cacheable: true,
+      },
+    ],
   },
 ];
 
@@ -109,6 +126,11 @@ const customParamPreflight = {
   ...passedPreflight,
   sample_repeat_times: 2,
   cost_budget: 12.5,
+};
+
+const overridePreflight = {
+  ...passedPreflight,
+  skill_overrides: { answer: { model: 'task-model' } },
 };
 
 describe('TaskCreateWizard', () => {
@@ -249,6 +271,61 @@ describe('TaskCreateWizard', () => {
     );
   });
 
+  it('任务级 Skill 参数覆盖会进入 Preflight 和创建请求', async () => {
+    const onPreflight = vi.fn();
+    const onSubmit = vi.fn();
+    const { unmount } = render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={onPreflight} onSubmit={onSubmit} />);
+
+    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
+    await chooseSelectOption('覆盖 Step', '生成回答 / answer');
+    fireEvent.change(screen.getByPlaceholderText('例如：model'), { target: { value: 'model' } });
+    fireEvent.change(screen.getByPlaceholderText('覆盖值'), { target: { value: 'task-model' } });
+    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
+
+    expect(onPreflight).toHaveBeenCalledWith(
+      expect.objectContaining<Partial<TaskCreateFormValues>>({
+        skill_overrides: { answer: { model: 'task-model' } },
+      }),
+    );
+
+    unmount();
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={overridePreflight} onCancel={vi.fn()} onPreflight={onPreflight} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '覆盖参数任务' } });
+    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
+    await chooseSelectOption('覆盖 Step', '生成回答 / answer');
+    fireEvent.change(screen.getByPlaceholderText('例如：model'), { target: { value: 'model' } });
+    fireEvent.change(screen.getByPlaceholderText('覆盖值'), { target: { value: 'task-model' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining<Partial<TaskCreateFormValues>>({
+        skill_overrides: { answer: { model: 'task-model' } },
+      }),
+    );
+  });
+
+  it('Preflight 后修改任务级 Skill 参数覆盖会要求重新运行预检', async () => {
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={overridePreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={vi.fn()} />);
+
+    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
+    await chooseSelectOption('覆盖 Step', '生成回答 / answer');
+    fireEvent.change(screen.getByPlaceholderText('例如：model'), { target: { value: 'model' } });
+    fireEvent.change(screen.getByPlaceholderText('覆盖值'), { target: { value: 'task-model' } });
+    expect(screen.getByRole('button', { name: '确认创建任务' })).not.toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText('覆盖值'), { target: { value: 'changed-model' } });
+
+    expect(screen.getByRole('button', { name: '确认创建任务' })).toBeDisabled();
+    expect(screen.getByText('Preflight 结果已过期')).toBeInTheDocument();
+  });
+
   it('提交任务参数时包含并发、重试、repeat 和成本预算', async () => {
     const onSubmit = vi.fn();
     render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={customParamPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
@@ -288,5 +365,6 @@ async function chooseSelectOption(label: string, optionText: string) {
     throw new Error(`找不到下拉输入框：${label}`);
   }
   fireEvent.mouseDown(selectInput);
-  fireEvent.click(await screen.findByText(optionText));
+  const candidates = await screen.findAllByText(optionText);
+  fireEvent.click(candidates[candidates.length - 1]);
 }

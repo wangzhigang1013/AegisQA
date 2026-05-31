@@ -389,6 +389,35 @@ describe('AegisQA 前端工作台', () => {
     expect(body.preflight_result.execution_template_id).toBe('release_gate_safe');
   });
 
+  it('执行中心创建任务会提交任务级 Skill 参数覆盖', async () => {
+    await renderWorkbench('/runs');
+
+    fireEvent.click(await screen.findByRole('button', { name: /创建任务/ }));
+    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '覆盖参数上线任务' } });
+    fireEvent.mouseDown(screen.getAllByLabelText('Dataset Version')[0]);
+    fireEvent.click(await screen.findByText('问答回归集 v1 / 100 条'));
+    fireEvent.mouseDown(screen.getAllByLabelText('Workflow Version')[0]);
+    fireEvent.click(await screen.findByText('RAG 回归评测 v1'));
+    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
+    fireEvent.mouseDown(findComboboxByLabel('覆盖 Step'));
+    const stepOptions = await screen.findAllByText('生成回答 / answer');
+    fireEvent.click(stepOptions[stepOptions.length - 1]);
+    fireEvent.change(screen.getByPlaceholderText('例如：model'), { target: { value: 'model' } });
+    fireEvent.change(screen.getByPlaceholderText('覆盖值'), { target: { value: 'task-model' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
+    expect((await screen.findAllByText(/Preflight 通过/)).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
+    expect(await screen.findByText(/任务已创建/)).toBeInTheDocument();
+
+    const createTaskCall = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.find(([input, init]) => String(input).endsWith('/tasks') && init?.method === 'POST');
+    const body = JSON.parse(String(createTaskCall?.[1]?.body ?? '{}'));
+    expect(body.skill_overrides).toEqual({ answer: { model: 'task-model' } });
+    expect(body.preflight_result.skill_overrides).toEqual({ answer: { model: 'task-model' } });
+  });
+
   it('Trace Flow 页面展示样本数据、参数来源和队列消息形状', async () => {
     await renderWorkbench('/tasks/task-demo/trace');
 

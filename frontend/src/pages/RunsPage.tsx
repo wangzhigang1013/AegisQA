@@ -76,6 +76,7 @@ export function RunsPage() {
         quality_gate: qualityGateFromValues(values),
         cost_budget: values.cost_budget,
         sample_repeat_times: values.sample_repeat_times,
+        skill_overrides: values.skill_overrides,
       });
     },
     onSuccess: (result) => {
@@ -104,6 +105,7 @@ export function RunsPage() {
         max_retries: values.max_retries,
         retry_backoff_seconds: values.retry_backoff_seconds,
         cost_budget: values.cost_budget,
+        skill_overrides: values.skill_overrides,
         allow_blocked_preflight: values.allow_blocked_preflight,
       });
     },

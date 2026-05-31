@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Skill 参数门禁与 Workflow Console 修复建议”正在收口。本阶段聚焦全流程稳定性与可解释性：React Flow 图发布、线性兼容发布入口和 Task 创建前预检不仅要提前发现 Skill 输入映射与 `config_schema` 参数问题，还要把后端结构化错误码转成前端可操作的中文修复建议，让用户知道应该去 Inspector 参数表单、Dataset 预览样本、任务级 override 或 Secret 引用处修正。
+新一轮“Skill 参数门禁、Workflow Console 修复建议与任务级参数覆盖”正在收口。本阶段聚焦全流程稳定性与可解释性：React Flow 图发布、线性兼容发布入口和 Task 创建前预检不仅要提前发现 Skill 输入映射与 `config_schema` 参数问题，还要把后端结构化错误码转成前端可操作的中文修复建议，并让任务创建向导直接填写本次任务的 Skill 参数覆盖，避免用户只能在 API 层使用 `skill_overrides`。
 
 ## 当前已完成
 
@@ -37,6 +37,7 @@
 - Task Preflight 已新增 `workflow_schema_mapping` 检查项，会对历史坏 Workflow 或兼容入口发布的 Workflow 重新校验 Skill 必填入参、空输入映射和空输出写入路径，避免任务创建后才在执行期失败。
 - Task Preflight 已新增 `skill_config` 检查项，会结合 Dataset 预览样本、Workflow config 和任务级 `skill_overrides` 解析最终 Skill 参数，阻断必填参数缺失、override 类型错误、表达式路径缺失和 Secret 引用声明错误；表达式参数会扫描预览样本并返回出错 `row_index`，避免只看第一条样本导致后续样本执行期失败。
 - Task Preflight 已增加关键参数签名新鲜度校验：`execution_template_id`、`evaluation_goal`、`quality_gate`、`sample_repeat_times`、`cost_budget` 变化都会让创建按钮重新进入“需重跑 Preflight”状态，避免模板或质量门槛被修改后沿用旧预检结果。
+- 任务创建向导已新增任务级 Skill 参数覆盖表格，支持选择 Skill Step、参数名、值类型和值；覆盖值会进入 Preflight、任务创建请求、任务快照和参数治理，且覆盖值变化会让旧 Preflight 过期。
 - Task 创建 API 已增加服务端 Preflight 过期校验：传入旧 `preflight_result` 时会按 Dataset、Workflow、执行模板、评测目的、质量门槛、repeat、成本预算和 Skill 覆盖逐项比对，不一致时返回 `TASK_PREFLIGHT_STALE`。
 - Task 创建 API 已改为服务端重算 Preflight 作为事实源：客户端提交的 `preflight_result` 即使伪造为 passed，也不能绕过真实字段映射、Skill 审批、Golden 覆盖、质量门槛和预算检查。
 - Task Preflight 已支持持久化证据：每次 `POST /tasks/preflight` 会保存 `preflight_id`，任务创建可引用该 ID，后续报告和审计能追踪用户创建前实际看过哪次预检。
@@ -150,9 +151,12 @@
 - `python -m pytest tests\test_task_center_api.py -q`：14 passed，覆盖 Task 创建、Preflight、Skill 参数覆盖、表达式参数预览样本扫描、导出审批、插件包、任务分页和历史坏 Workflow 阻断。
 - `python -m pytest tests\test_skill_parameter_resolution.py -q`：3 passed，确认参数解析优先级、参数追踪和参数预览仍正常。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 发布失败"`：先 RED 后 GREEN，最终 1 passed、45 skipped，确认 Workflow Console 对 `CONFIG_REQUIRED_MISSING`、`CONFIG_VALUE_INVALID`、`CONFIG_EXPRESSION_PATH_MISSING` 和 `CONFIG_SECRET_REF_EMPTY` 给出具体中文修复建议。
+- `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx -t "任务级 Skill 参数覆盖|Preflight 后修改任务级"`：先 RED 后 GREEN，最终 2 passed、8 skipped，确认任务级 Skill 参数覆盖会进入 Preflight 和创建请求，且覆盖值变化会让旧 Preflight 过期。
+- `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`：10 passed，确认任务创建向导既有必选校验、模板填充、阻断风险确认、执行参数和新增 Skill 覆盖入口兼容。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "任务级 Skill 参数覆盖"`：1 passed、46 skipped，确认执行中心真实创建任务请求会提交 `skill_overrides` 和带覆盖值的 `preflight_result`。
 - `python -m pytest -q`：112 个后端测试通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：9 个测试文件、89 passed。
+- `cd frontend && npm test`：9 个测试文件、92 passed。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：9 passed，任务主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
 - `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
@@ -4063,3 +4067,38 @@
   - Playwright E2E：9 passed，覆盖任务主链路、CI Gate、Annotation Queue 和 Workflow 画布。
   - 空白检查：`git diff --check` 仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - 下一步：提交本批次改动。后续可继续评估任务创建向导是否需要开放任务级 Skill override 编辑入口，以及是否把复杂 `config_schema` 联动表单从基础控件升级为 schema-driven 子表单。
+
+### 2026-06-01 任务级 Skill 参数覆盖入口
+
+- 改动摘要：把后端已有的 `skill_overrides` 能力补到执行中心创建任务向导。用户现在可以在创建任务时选择 Workflow 中的 Skill Step，填写参数名、值类型和覆盖值；覆盖支持字符串、数字、布尔、JSON、表达式路径和 Secret 引用。提交 Preflight 和创建任务前会统一转换为后端 `skill_overrides`，并参与 Preflight 新鲜度签名，避免修改任务级参数后沿用旧预检结果。
+- 变更文件：
+  - `frontend/src/pages/task/TaskCreateWizard.tsx`
+  - `frontend/src/pages/task/TaskCreateWizard.test.tsx`
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx -t "任务级 Skill 参数覆盖|Preflight 后修改任务级"`
+  - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "任务级 Skill 参数覆盖"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `python -m pytest -q`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - RED：目标测试最初失败，确认任务创建向导没有“添加任务级参数覆盖”入口，用户无法在 UI 中提交 `skill_overrides`。
+  - GREEN：目标测试最终 2 passed、8 skipped，确认覆盖值进入 Preflight 和创建请求，且覆盖值变化会让旧 Preflight 过期。
+  - TaskCreateWizard 全量：10 passed。
+  - 执行中心集成定向：1 passed、46 skipped，确认 `RunsPage` 会把覆盖参数透传到 `/tasks/preflight` 和 `/tasks`。
+  - 前端 typecheck：通过。
+  - 前端全量：9 个测试文件、92 passed。
+  - 前端构建：通过，Vite 生产包生成完成。
+  - 后端全量：`python -m pytest -q` 通过；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - Playwright E2E：9 passed，覆盖任务主链路、CI Gate、Annotation Queue 和 Workflow 画布。
+  - 空白检查：`git diff --check` 仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
+- 下一步：提交本批次改动。后续可以继续把覆盖表格升级为读取 Skill `config_schema` 的 schema-driven 编辑器，减少手写参数名的出错率。

@@ -940,6 +940,7 @@ export function installDefaultWorkbenchMocks() {
           quality_gate: body.quality_gate,
           sample_repeat_times: body.sample_repeat_times,
           cost_budget: body.cost_budget,
+          skill_overrides: body.skill_overrides,
         });
       }
       if (url.endsWith('/tasks/task-demo/execute')) {
