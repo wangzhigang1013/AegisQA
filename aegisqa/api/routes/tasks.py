@@ -56,6 +56,10 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
     def list_tasks() -> list[dict[str, Any]]:
         return _list_records(ctx.store, "tasks")
 
+    @app.get("/task-preflights/{preflight_id}")
+    def get_task_preflight(preflight_id: str) -> dict[str, Any]:
+        return _get_record(ctx.store, "task_preflights", preflight_id)
+
     @app.get("/task-execution-templates")
     def list_task_execution_templates() -> list[dict[str, Any]]:
         return _list_task_execution_templates(ctx)
@@ -90,8 +94,23 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         # 客户端传来的 Preflight 只能证明用户看过哪组参数，不能作为安全事实源。
         # 创建任务前始终重算一次，防止伪造 passed 结果绕过字段、Skill、预算等阻断检查。
         preflight_result = _build_task_preflight(ctx, preflight_request)
+        client_preflight_id = (request.preflight_result or {}).get("preflight_id")
+        if request.preflight_id and client_preflight_id and request.preflight_id != client_preflight_id:
+            raise AegisQAError(
+                "TASK_PREFLIGHT_STALE",
+                "Preflight ID 不一致，请基于当前参数重新运行预检。",
+                status_code=409,
+                details={"mismatches": [{"field": "preflight_id", "expected": request.preflight_id, "actual": client_preflight_id}]},
+            )
+        preflight_id = request.preflight_id or client_preflight_id
+        if preflight_id:
+            stored_preflight = _get_record(ctx.store, "task_preflights", str(preflight_id))
+            _ensure_preflight_matches_task_request(stored_preflight, request)
+            preflight_result["preflight_id"] = stored_preflight["preflight_id"]
         if request.preflight_result is not None:
             _ensure_preflight_matches_task_request(request.preflight_result, request)
+            if client_preflight_id and not preflight_result.get("preflight_id"):
+                preflight_result["preflight_id"] = client_preflight_id
         if preflight_result.get("status") == "blocked" and not request.allow_blocked_preflight:
             blocked_checks = [check for check in preflight_result.get("checks", []) if check.get("status") == "blocked"]
             raise AegisQAError(
@@ -119,6 +138,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             )
         )
         execution_config = {
+            "preflight_id": preflight_result.get("preflight_id"),
             "execution_template_id": request.execution_template_id,
             "evaluation_goal": request.evaluation_goal,
             "quality_gate": request.quality_gate,
@@ -154,7 +174,8 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/tasks/preflight")
     def task_preflight(request: TaskPreflightRequest) -> dict[str, Any]:
-        return _build_task_preflight(ctx, request)
+        preflight = _build_task_preflight(ctx, request)
+        return _save_task_preflight(ctx, preflight)
 
     @app.get("/repair-tasks")
     def list_repair_tasks(source_task_id: str | None = None) -> list[dict[str, Any]]:
@@ -540,6 +561,22 @@ def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> d
         "checks": checks,
         "created_at": _now(),
     }
+
+
+def _save_task_preflight(ctx: RouteContext, preflight: dict[str, Any]) -> dict[str, Any]:
+    record = {
+        **deepcopy(preflight),
+        "preflight_id": f"preflight-{uuid4().hex[:12]}",
+        "created_at": preflight.get("created_at") or _now(),
+    }
+    _save_record(ctx.store, "task_preflights", "preflight_id", record)
+    ctx.audit_service.record(
+        actor="api",
+        action="task.preflight",
+        target=record["preflight_id"],
+        detail={"status": record.get("status"), "workflow_version_id": record.get("workflow_version_id")},
+    )
+    return record
 
 
 def _ensure_preflight_matches_task_request(preflight_result: dict[str, Any], request: TaskCreateRequest) -> None:

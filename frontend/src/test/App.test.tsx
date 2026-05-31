@@ -60,6 +60,7 @@ const demoTask = {
 };
 
 const demoPreflightResult = {
+  preflight_id: 'preflight-demo',
   status: 'passed',
   summary: 'Preflight 通过：可以创建并执行任务。',
   dataset_id: 'dataset-demo',
@@ -1723,6 +1724,7 @@ describe('AegisQA 前端工作台', () => {
       .mock.calls.find(([input, init]) => String(input).endsWith('/tasks') && init?.method === 'POST');
     const body = JSON.parse(String(createTaskCall?.[1]?.body ?? '{}'));
     expect(body.execution_template_id).toBe('release_gate_safe');
+    expect(body.preflight_id).toBe('preflight-demo');
     expect(body.preflight_result.execution_template_id).toBe('release_gate_safe');
   });
 

@@ -315,6 +315,91 @@ def test_task_creation_recomputes_preflight_instead_of_trusting_client_status(tm
     assert error["details"]["blocked_checks"][0]["check_id"] == "field_mapping"
 
 
+def test_task_preflight_is_persisted_and_task_references_preflight_id(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "task_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "task_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    preflight = client.post(
+        "/tasks/preflight",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+            "sample_repeat_times": 1,
+            "cost_budget": 10,
+        },
+    ).json()
+
+    assert preflight["preflight_id"].startswith("preflight-")
+    stored = client.get(f"/task-preflights/{preflight['preflight_id']}").json()
+    assert stored["preflight_id"] == preflight["preflight_id"]
+    assert stored["workflow_version_id"] == workflow["version_id"]
+
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "引用预检 ID 的任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+            "sample_repeat_times": 1,
+            "cost_budget": 10,
+            "preflight_id": preflight["preflight_id"],
+        },
+    ).json()
+
+    assert task["preflight_result"]["preflight_id"] == preflight["preflight_id"]
+    assert task["execution_config"]["preflight_id"] == preflight["preflight_id"]
+
+
+def test_task_creation_rejects_conflicting_preflight_ids(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "task_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "task_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    preflight = client.post(
+        "/tasks/preflight",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+            "sample_repeat_times": 1,
+        },
+    ).json()
+
+    response = client.post(
+        "/tasks",
+        json={
+            "name": "冲突预检 ID 任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+            "sample_repeat_times": 1,
+            "preflight_id": preflight["preflight_id"],
+            "preflight_result": {**preflight, "preflight_id": "preflight-other"},
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "TASK_PREFLIGHT_STALE"
+    assert response.json()["details"]["mismatches"][0]["field"] == "preflight_id"
+
+
 def test_task_execution_templates_can_be_listed_created_and_snapshotted(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)

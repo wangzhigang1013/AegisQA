@@ -377,6 +377,7 @@ export const api = {
     execution_template_id?: string | null;
     evaluation_goal?: string | null;
     quality_gate?: Record<string, unknown>;
+    preflight_id?: string | null;
     preflight_result?: TaskPreflightResult | null;
     chunk_size?: number;
     concurrency?: number;

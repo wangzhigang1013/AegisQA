@@ -84,6 +84,7 @@ export function RunsPage() {
         execution_template_id: values.execution_template_id,
         evaluation_goal: values.evaluation_goal,
         quality_gate: qualityGateFromValues(values),
+        preflight_id: preflightResult?.preflight_id,
         preflight_result: preflightResult,
         chunk_size: values.chunk_size,
         concurrency: values.concurrency,

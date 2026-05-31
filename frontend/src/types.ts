@@ -347,6 +347,7 @@ export type TaskPreflightCheck = {
 };
 
 export type TaskPreflightResult = {
+  preflight_id?: string;
   status: 'passed' | 'warning' | 'blocked' | string;
   summary: string;
   dataset_id: string;

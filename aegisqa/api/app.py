@@ -189,6 +189,7 @@ class TaskCreateRequest(BaseModel):
     execution_template_id: str | None = None
     evaluation_goal: str | None = None
     quality_gate: dict[str, Any] = Field(default_factory=dict)
+    preflight_id: str | None = None
     preflight_result: dict[str, Any] | None = None
     chunk_size: int | None = None
     concurrency: int | None = None
