@@ -1437,3 +1437,32 @@
   - 前端：`npm run typecheck` 通过，`npm test` 40 passed，`npm run build` 通过。
   - Playwright E2E：8 passed。
 - 下一步：继续把诊断结果做成可操作闭环，例如“一键生成 Annotation Queue / CI Gate / Dataset 修复任务 / Workflow 参数审查任务”，并补真实成本账单、模型版本退化和更细粒度业务分层归因。
+
+### 2026-05-31 Diagnostics Action Loop 深度优化完成
+
+- 改动摘要：把 Task Diagnostics 的 next_actions 从静态文字升级为可点击动作，形成“诊断 -> 定位证据 -> 发起修复流”的闭环。
+- 变更文件：
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/superpowers/plans/2026-05-31-diagnostics-action-loop.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 核心能力：
+  - 根因诊断表的建议动作改成按钮，不再只是文本。
+  - `seed_annotation_queue` 调用 Annotation Queue 真实接口并反馈创建数量。
+  - `create_segment_ci_gate` 调用 CI Gate 即时评估并反馈 blocking/passed 状态。
+  - `retry_failed_items` 调用任务失败项重试。
+  - `open_trace_flow`、`open_parameter_governance`、`open_dataset_lineage`、`fix_dataset_fields`、`audit_judge_profile` 跳转到对应证据或治理页面。
+  - `review_badcases` 给出明确的下方 Badcase 表格复核提示。
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+- 测试结果：
+  - 目标前端测试：1 passed，33 skipped。
+  - 前端全量测试：40 passed。
+  - TypeScript：通过。
+  - 前端构建：通过。
+- 下一步：把诊断动作继续沉淀为可追踪的 Repair Task，例如数据字段修复任务、Prompt 修复任务、Judge 审计任务和 Workflow 参数审查任务。

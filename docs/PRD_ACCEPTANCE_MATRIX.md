@@ -104,7 +104,7 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | Trace Tree | 已实现独立页面 | `GET /runs/{run_id}/trace-tree` 与 `GET /tasks/{task_id}/trace-tree` 展示 Run Item -> Skill Step 输入、输出、耗时、错误、缓存命中；React `/tasks/:taskId/trace-tree` 独立页面展示 Item 调用树 |
 | Task 参数治理 | 已实现基础 | `GET /tasks/{task_id}/parameter-governance` 和 Task Report `parameter_governance` 展示 Skill/Prompt 版本、模型参数、任务覆盖和脱敏 Secret 策略 |
 | 质量决策中心 | 已实现基础 | Task Report `quality_decision` 把通过率、错误率、Badcase 和低分层转为 passed/warning/blocked 决策、风险摘要和下一步动作；React 报告中心展示“质量决策中心” |
-| Task Diagnostics 根因诊断 | 已实现基础 | `GET /tasks/{task_id}/diagnostics` 与 Task Report `diagnostics` 汇总运行时错误、低通过率分层、字段缺失/重复、Step 健康度和参数风险；React 报告中心展示主要根因、证据数、根因表、数据质量和修复动作 |
+| Task Diagnostics 根因诊断 | 已实现基础 | `GET /tasks/{task_id}/diagnostics` 与 Task Report `diagnostics` 汇总运行时错误、低通过率分层、字段缺失/重复、Step 健康度和参数风险；React 报告中心展示主要根因、证据数、根因表、数据质量和修复动作，且 next_actions 已按钮化，可直接进入 Trace Flow、数据血缘、Judge 审计，或调用 Annotation Queue、CI Gate、失败项重试 |
 | 成本预算状态 | 已实现基础 | Task Report 新增 `budget_status`，基于报告 cost 或 token 估算成本，输出 ok/warning/exceeded/not_set、预算、已用、剩余和修复建议；React 报告中心展示“成本预算” |
 | 红队安全扫描 | 已实现基础 | `POST /red-team/scans` 支持按 Task/Run 做规则化扫描，识别 prompt injection、PII、unsafe content、secret exposure，保存扫描记录并生成下一步建议；React 报告中心提供“运行红队扫描”入口 |
 | 产品化入口 | 已实现基础 | React 首页读取真实 Dashboard；Workflow 先进入市场，执行与报告围绕 Task 组织 |

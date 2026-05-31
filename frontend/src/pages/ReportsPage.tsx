@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, Empty, Row, Select, Space, Table, Tag, Typography } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import { useEffect, useMemo, useState, type Key } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
 import { MetricTile } from '../components/MetricTile';
@@ -14,8 +15,10 @@ import { ReportSummary } from './report/ReportSummary';
 
 export function ReportsPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pendingDiagnosticAction, setPendingDiagnosticAction] = useState<string | null>(null);
   const [selectedBadcaseKeys, setSelectedBadcaseKeys] = useState<Key[]>([]);
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
   const scoreAnalyticsQuery = useQuery({ queryKey: ['score-analytics'], queryFn: api.scoreAnalytics });
@@ -108,6 +111,36 @@ export function ReportsPage() {
     onError: (error) => setNotice(error instanceof Error ? `批量处理失败：${error.message}` : '批量处理失败'),
   });
 
+  const diagnosticActionMutation = useMutation({
+    mutationFn: async (action: string) => {
+      if (!task) {
+        throw new Error('请先选择任务，再执行诊断动作。');
+      }
+      if (action === 'seed_annotation_queue') {
+        if (!task.run_id) throw new Error('缺少 Run 信息，无法加入人工审核。');
+        return { action, result: await api.seedAnnotationQueue({ run_id: task.run_id, strategy: 'badcase', limit: Math.min(Math.max(badcases.length, 1), 20) }) };
+      }
+      if (action === 'create_segment_ci_gate') {
+        return { action, result: await api.evaluateCIGates({ task_id: task.task_id }) };
+      }
+      if (action === 'retry_failed_items') {
+        return { action, result: await api.retryFailedTask(task.task_id) };
+      }
+      throw new Error(`当前诊断动作暂不支持：${actionLabel(action)}`);
+    },
+    onSuccess: async ({ action, result }) => {
+      setNotice(formatDiagnosticActionNotice(action, result));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['task-report', selectedTask?.task_id] }),
+        queryClient.invalidateQueries({ queryKey: ['annotation-queue'] }),
+        queryClient.invalidateQueries({ queryKey: ['ci-gate-evaluations'] }),
+      ]);
+    },
+    onError: (error) => setNotice(error instanceof Error ? `诊断动作失败：${error.message}` : '诊断动作失败'),
+    onSettled: () => setPendingDiagnosticAction(null),
+  });
+
   const report = reportQuery.data?.report;
   const task = reportQuery.data?.task ?? selectedTask;
   const badcases = reportQuery.data?.badcases ?? [];
@@ -131,6 +164,30 @@ export function ReportsPage() {
     yAxis: { type: 'value' },
     series: [{ type: 'bar', data: Object.values(latencyData), itemStyle: { color: '#2563eb' } }],
   };
+
+  function handleDiagnosticAction(action: string) {
+    if (!task) {
+      setNotice('请先选择任务，再执行诊断动作。');
+      return;
+    }
+    const routeMap: Record<string, string> = {
+      open_trace_flow: `/tasks/${task.task_id}/trace`,
+      open_parameter_governance: `/tasks/${task.task_id}/trace?panel=parameters`,
+      open_dataset_lineage: `/datasets?dataset_id=${encodeURIComponent(task.dataset_id)}&version=${task.dataset_version}`,
+      fix_dataset_fields: `/datasets?dataset_id=${encodeURIComponent(task.dataset_id)}&version=${task.dataset_version}`,
+      audit_judge_profile: '/judge',
+    };
+    if (routeMap[action]) {
+      navigate(routeMap[action]);
+      return;
+    }
+    if (action === 'review_badcases') {
+      setNotice('请在下方 Badcase 表格复核样本，可加入 Golden、忽略、重开或加入审阅队列。');
+      return;
+    }
+    setPendingDiagnosticAction(action);
+    diagnosticActionMutation.mutate(action);
+  }
 
   return (
     <section className="page-stack">
@@ -354,7 +411,25 @@ export function ReportsPage() {
                   { title: '级别', dataIndex: 'severity', render: (value) => <Tag color={value === 'critical' ? 'red' : value === 'warning' ? 'orange' : 'blue'}>{value}</Tag> },
                   { title: '影响样本', dataIndex: 'affected_items' },
                   { title: '证据', dataIndex: 'evidence', render: (items: string[]) => items?.join('；') },
-                  { title: '建议动作', dataIndex: 'next_actions', render: (items: string[]) => items?.map((item) => actionLabel(item)).join(' / ') },
+                  {
+                    title: '建议动作',
+                    dataIndex: 'next_actions',
+                    render: (items: string[]) => (
+                      <Space wrap>
+                        {(items ?? []).map((item) => (
+                          <Button
+                            key={item}
+                            size="small"
+                            disabled={!task}
+                            loading={diagnosticActionMutation.isPending && pendingDiagnosticAction === item}
+                            onClick={() => handleDiagnosticAction(item)}
+                          >
+                            {actionLabel(item)}
+                          </Button>
+                        ))}
+                      </Space>
+                    ),
+                  },
                 ]}
               />
               <Row gutter={[16, 16]} className="section-actions">
@@ -500,4 +575,19 @@ function actionLabel(value: string) {
     open_parameter_governance: '查看参数治理',
   };
   return labels[value] ?? value;
+}
+
+function formatDiagnosticActionNotice(action: string, result: unknown) {
+  const record = asRecord(result);
+  if (action === 'seed_annotation_queue') {
+    return `诊断动作完成：已创建 ${Number(record?.created_count ?? 0)} 条人工审核任务。`;
+  }
+  if (action === 'create_segment_ci_gate') {
+    const status = String(record?.status ?? (record?.blocking ? 'blocking' : 'passed'));
+    return `CI Gate 即时评估完成：${status}，可进入 CI Gate 页面固化规则。`;
+  }
+  if (action === 'retry_failed_items') {
+    return '失败项已提交重试，任务列表和报告会刷新最新状态。';
+  }
+  return `诊断动作完成：${actionLabel(action)}。`;
 }
