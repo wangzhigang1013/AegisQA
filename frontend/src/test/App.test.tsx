@@ -188,6 +188,30 @@ describe('AegisQA 前端工作台', () => {
                 node_id: 'answer',
                 details: { skill_ref: 'missing.skill@9.9.9' },
               },
+              {
+                code: 'CONFIG_REQUIRED_MISSING',
+                message: 'Skill 必填参数未配置：model',
+                node_id: 'answer',
+                details: { missing_fields: ['model'] },
+              },
+              {
+                code: 'CONFIG_VALUE_INVALID',
+                message: 'Skill 参数 temperature 类型不匹配：期望 number，实际 string',
+                node_id: 'answer',
+                details: { field_path: 'temperature', expected_type: 'number', actual_type: 'string' },
+              },
+              {
+                code: 'CONFIG_EXPRESSION_PATH_MISSING',
+                message: '路径不存在：row.temperature',
+                node_id: 'answer',
+                details: { field_path: 'temperature', row_index: 1 },
+              },
+              {
+                code: 'CONFIG_SECRET_REF_EMPTY',
+                message: 'Skill 参数 api_key 的 Secret 名称不能为空',
+                node_id: 'answer',
+                details: { field_path: 'api_key' },
+              },
             ],
           },
           trace_id: 'trace_test',
@@ -210,6 +234,14 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/在右侧 Inspector 的字段映射中为缺失字段配置/)).toBeInTheDocument();
     expect(screen.getByText('SKILL_NOT_FOUND')).toBeInTheDocument();
     expect(screen.getByText(/到 Skill 市场上传或选择已注册的 Skill/)).toBeInTheDocument();
+    expect(screen.getByText('CONFIG_REQUIRED_MISSING')).toBeInTheDocument();
+    expect(screen.getByText(/在右侧 Inspector 的 Skill 参数表单中补齐必填参数/)).toBeInTheDocument();
+    expect(screen.getByText('CONFIG_VALUE_INVALID')).toBeInTheDocument();
+    expect(screen.getByText(/将参数 temperature 改为 number 类型/)).toBeInTheDocument();
+    expect(screen.getByText('CONFIG_EXPRESSION_PATH_MISSING')).toBeInTheDocument();
+    expect(screen.getByText(/检查 Dataset 预览样本第 2 行/)).toBeInTheDocument();
+    expect(screen.getByText('CONFIG_SECRET_REF_EMPTY')).toBeInTheDocument();
+    expect(screen.getByText(/填写 Secret 引用名称/)).toBeInTheDocument();
   });
 
   it('Workflow Aggregator 节点支持聚合策略配置', async () => {

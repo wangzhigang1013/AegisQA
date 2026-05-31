@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Skill 参数门禁与 Task Preflight 参数校验”正在收口。本阶段聚焦全流程稳定性与可解释性：React Flow 图发布、线性兼容发布入口和 Task 创建前预检不仅要发现 Skill 输入映射缺失，也要提前发现 Skill `config_schema` 必填参数缺失、固定值类型错误、任务级 override 类型错误、表达式路径和 Secret 引用声明错误，避免用户把参数问题拖到执行期才发现。
+新一轮“Skill 参数门禁与 Workflow Console 修复建议”正在收口。本阶段聚焦全流程稳定性与可解释性：React Flow 图发布、线性兼容发布入口和 Task 创建前预检不仅要提前发现 Skill 输入映射与 `config_schema` 参数问题，还要把后端结构化错误码转成前端可操作的中文修复建议，让用户知道应该去 Inspector 参数表单、Dataset 预览样本、任务级 override 或 Secret 引用处修正。
 
 ## 当前已完成
 
@@ -29,6 +29,7 @@
 - Workflow 发布前已新增 Skill 参数静态校验：会阻断 `config_schema.required` 必填参数缺失、固定参数类型不匹配、空表达式路径和空 Secret 引用；动态表达式允许在绑定 Dataset 后由 Task Preflight 做样本级解析。
 - 内置 Skill manifest 已在 `BaseSkill` 初始化时深拷贝，Skill 禁用/审批状态不会在不同 `SkillRegistry.with_builtin_skills()` 实例之间共享，避免测试和多 app 实例串扰治理状态。
 - Workflow 发布失败时，前端会把后端 `details.errors` 回填到 Console 的“错误与建议”页签，用户能看到错误码、节点和修复方向。
+- Workflow Console 已覆盖 `CONFIG_REQUIRED_MISSING`、`CONFIG_VALUE_INVALID`、`CONFIG_EXPRESSION_PATH_MISSING`、`CONFIG_EXPRESSION_PATH_EMPTY`、`CONFIG_SECRET_REF_EMPTY`、`CONFIG_DYNAMIC_VALUE_INVALID` 和 `CONFIG_SCHEMA_INVALID` 的中文修复建议，分别指向 Skill 参数表单、任务级 override、Dataset 预览行和 Secret 引用，避免参数门禁只给错误码不告诉用户怎么改。
 - Workflow Inspector 已支持 Aggregator 聚合策略配置，当前覆盖多数投票、均值和一致性三类策略。
 - Workflow 草稿保存后可从 Workflow 市场重新打开并保留流程名称、节点名称等配置；试运行会使用当前选择的数据集并回填 step trace 与队列消息提示。
 - 执行中心已抽出 `TaskCreateWizard`，创建任务前必须选择 Dataset Version 和 Workflow Version；任务参数支持分片大小、并发、repeat、最大重试、重试退避和成本预算。
@@ -148,6 +149,7 @@
 - `python -m pytest tests\test_workflow_graph_hardening.py -q`：7 passed，覆盖图发布、未知 Skill、必填映射、Skill 参数必填和线性发布入口门禁。
 - `python -m pytest tests\test_task_center_api.py -q`：14 passed，覆盖 Task 创建、Preflight、Skill 参数覆盖、表达式参数预览样本扫描、导出审批、插件包、任务分页和历史坏 Workflow 阻断。
 - `python -m pytest tests\test_skill_parameter_resolution.py -q`：3 passed，确认参数解析优先级、参数追踪和参数预览仍正常。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 发布失败"`：先 RED 后 GREEN，最终 1 passed、45 skipped，确认 Workflow Console 对 `CONFIG_REQUIRED_MISSING`、`CONFIG_VALUE_INVALID`、`CONFIG_EXPRESSION_PATH_MISSING` 和 `CONFIG_SECRET_REF_EMPTY` 给出具体中文修复建议。
 - `python -m pytest -q`：112 个后端测试通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：9 个测试文件、89 passed。
@@ -4033,3 +4035,31 @@
   - Playwright E2E：9 passed，主链路、CI Gate、Annotation Queue 和 Workflow 画布均通过。
   - 仍有 Windows `.pytest_cache` 创建警告，不影响测试结果。
 - 下一步：继续把参数门禁错误码接入 Workflow Console 的更细修复建议，并评估是否需要在任务创建向导里暴露任务级 Skill override 编辑入口。
+
+### 2026-06-01 Workflow Console 参数错误修复建议
+
+- 改动摘要：把上一批 Skill 参数门禁的后端结构化错误进一步接入前端 Console。Workflow 发布失败时，Console 现在会对 `CONFIG_REQUIRED_MISSING`、`CONFIG_VALUE_INVALID`、`CONFIG_EXPRESSION_PATH_MISSING`、`CONFIG_EXPRESSION_PATH_EMPTY`、`CONFIG_SECRET_REF_EMPTY`、`CONFIG_DYNAMIC_VALUE_INVALID` 和 `CONFIG_SCHEMA_INVALID` 输出中文修复建议，明确告诉用户去右侧 Inspector 参数表单补必填值、修正任务级 override 类型、检查 Dataset 预览样本行、填写表达式路径或 Secret 引用名称。
+- 变更文件：
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 发布失败"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `python -m pytest -q`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - RED：扩展前端发布失败测试后最初失败，确认 Console 只展示通用错误/旧错误建议，没有针对 `CONFIG_*` 参数门禁错误的具体中文修复路径。
+  - GREEN：目标测试最终 1 passed、45 skipped，确认必填参数、类型不匹配、表达式路径缺失和 Secret 引用缺失都能在 Console 中展示对应修复建议。
+  - 前端 typecheck：通过。
+  - 前端全量：9 个测试文件、89 passed。
+  - 前端构建：通过，Vite 生产包生成完成。
+  - 后端全量：`python -m pytest -q` 通过；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - Playwright E2E：9 passed，覆盖任务主链路、CI Gate、Annotation Queue 和 Workflow 画布。
+  - 空白检查：`git diff --check` 仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
+- 下一步：提交本批次改动。后续可继续评估任务创建向导是否需要开放任务级 Skill override 编辑入口，以及是否把复杂 `config_schema` 联动表单从基础控件升级为 schema-driven 子表单。

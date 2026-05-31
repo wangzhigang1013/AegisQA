@@ -914,5 +914,44 @@ function issueRepairSuggestion(error: { code: string; details?: Record<string, u
   if (error.code === 'SKILL_NOT_FOUND') {
     return '修复建议：到 Skill 市场上传或选择已注册的 Skill；如果是旧草稿，请替换为当前可用的 Skill 版本后再发布。';
   }
+  if (error.code === 'CONFIG_REQUIRED_MISSING') {
+    const fields = stringList(error.details?.missing_fields);
+    const fieldText = fields.length ? `（${fields.join('、')}）` : '';
+    return `修复建议：在右侧 Inspector 的 Skill 参数表单中补齐必填参数${fieldText}；如果该参数来自任务级覆盖，请重新运行任务 Preflight 确认覆盖值。`;
+  }
+  if (error.code === 'CONFIG_VALUE_INVALID') {
+    const fieldPath = stringValue(error.details?.field_path, '对应字段');
+    const expectedType = stringValue(error.details?.expected_type, '声明类型');
+    const actualType = stringValue(error.details?.actual_type, '当前类型');
+    return `修复建议：将参数 ${fieldPath} 改为 ${expectedType} 类型；当前检测到 ${actualType}，请在 Skill 参数表单或任务级覆盖中修正。`;
+  }
+  if (error.code === 'CONFIG_EXPRESSION_PATH_MISSING') {
+    const rowHint = rowIndexHint(error.details?.row_index);
+    return `修复建议：检查 Dataset 预览样本${rowHint}是否存在该表达式路径，或把参数改为固定值/有效 row、context、metrics 路径后重新预检。`;
+  }
+  if (error.code === 'CONFIG_EXPRESSION_PATH_EMPTY') {
+    return '修复建议：表达式参数必须填写 path，例如 row.temperature；不需要动态取值时请改为固定参数值。';
+  }
+  if (error.code === 'CONFIG_SECRET_REF_EMPTY') {
+    return '修复建议：填写 Secret 引用名称，例如 LLM_API_KEY；不要把密钥明文写进 Workflow config。';
+  }
+  if (error.code === 'CONFIG_DYNAMIC_VALUE_INVALID' || error.code === 'CONFIG_SCHEMA_INVALID') {
+    return '修复建议：检查 Skill 参数 JSON，动态参数必须使用 { type: "expression", path: "row.xxx" } 或 { type: "secret", name: "SECRET_NAME" } 结构。';
+  }
   return null;
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function stringValue(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value ? value : fallback;
+}
+
+function rowIndexHint(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `第 ${value + 1} 行`;
+  }
+  return '';
 }
