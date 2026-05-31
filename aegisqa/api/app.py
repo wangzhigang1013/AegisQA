@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 from typing import Any
@@ -35,6 +36,7 @@ from aegisqa.skills.base import SkillManifest
 from aegisqa.skills.packages import SubprocessPackageSkill
 from aegisqa.skills.registry import SkillRegistry
 from aegisqa.storage.json_store import JsonStore
+from aegisqa.storage.sqlite_store import SQLiteStore
 from aegisqa.workflows.graph import WorkflowGraph, WorkflowGraphService, WorkflowGraphValidationResult
 from aegisqa.workflows.models import WorkflowDraft, WorkflowVersion
 from aegisqa.workflows.service import WorkflowService
@@ -268,10 +270,10 @@ class RedTeamScanRequest(BaseModel):
     run_id: str | None = None
 
 
-def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
+def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend: str | None = None) -> FastAPI:
     """创建可测试、可嵌入的 FastAPI 应用。"""
 
-    store = JsonStore(store_root)
+    store = _create_store(store_root, storage_backend=storage_backend)
     registry = SkillRegistry.with_builtin_skills()
     _load_skill_packages(store, registry)
     dataset_service = DatasetService(store)
@@ -287,6 +289,7 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
 
     app = FastAPI(title="AegisQA", version="0.1.0")
     app.state.store = store
+    app.state.storage_backend = (storage_backend or os.getenv("AEGISQA_STORAGE_BACKEND") or "json").lower()
     app.state.registry = registry
     app.state.dataset_service = dataset_service
     app.state.runner = runner
@@ -368,6 +371,15 @@ def create_app(store_root: Path | str = "data/aegisqa_store") -> FastAPI:
     return app
 
 
+def _create_store(store_root: Path | str, *, storage_backend: str | None = None) -> JsonStore | SQLiteStore:
+    backend = (storage_backend or os.getenv("AEGISQA_STORAGE_BACKEND") or "json").lower()
+    if backend == "json":
+        return JsonStore(store_root)
+    if backend == "sqlite":
+        return SQLiteStore(store_root)
+    raise ValueError(f"不支持的存储后端：{backend}")
+
+
 def _api_error(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "code": code,
@@ -393,10 +405,7 @@ def _get_workflow_draft(store: JsonStore, draft_id: str) -> dict[str, Any]:
 
 
 def _list_workflow_drafts(store: JsonStore) -> list[dict[str, Any]]:
-    root = store.root / "workflow_drafts"
-    if not root.exists():
-        return []
-    drafts = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(root.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)]
+    drafts = store.list_json(["workflow_drafts"])
     return [draft for draft in drafts if draft.get("status") != "deleted"]
 
 
@@ -412,10 +421,7 @@ def _get_record(store: JsonStore, collection: str, record_id: str) -> dict[str, 
 
 
 def _list_records(store: JsonStore, collection: str) -> list[dict[str, Any]]:
-    root = store.root / collection
-    if not root.exists():
-        return []
-    return [json.loads(path.read_text(encoding="utf-8")) for path in sorted(root.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)]
+    return store.list_json([collection])
 
 
 def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: SkillPackageUploadRequest) -> dict[str, Any]:

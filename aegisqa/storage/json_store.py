@@ -62,6 +62,25 @@ class JsonStore:
                 rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
         yield from rows
 
+    def list_json(self, prefix: Iterable[str], *, recursive: bool = False) -> list[dict[str, Any]]:
+        """按目录前缀列出 JSON 文档。
+
+        过去上层服务直接扫描 `store.root`，这会把业务逻辑绑死在文件系统上。
+        新增该方法后，JsonStore 和 SQLiteStore 可以共享同一套列表语义。
+        """
+
+        root = self.root.joinpath(*prefix)
+        if not root.exists():
+            return []
+        pattern = "**/*.json" if recursive else "*.json"
+        paths = sorted(root.glob(pattern), key=lambda item: item.stat().st_mtime, reverse=True)
+        records: list[dict[str, Any]] = []
+        for path in paths:
+            if path.name.endswith(".lock"):
+                continue
+            records.append(json.loads(path.read_text(encoding="utf-8")))
+        return records
+
     def _lock_path(self, path: Path) -> Path:
         return path.with_name(f"{path.name}.lock")
 

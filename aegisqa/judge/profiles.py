@@ -1,8 +1,6 @@
 """Judge Profile 管理与审计持久化。"""
 
 from __future__ import annotations
-
-import json
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -70,10 +68,7 @@ class JudgeProfileService:
     def list_profiles(self) -> list[JudgeProfile]:
         """列出 Judge Profile，供审计页面选择和治理页面查看状态。"""
 
-        root = self.store.root / "judge_profiles"
-        if not root.exists():
-            return []
-        return [JudgeProfile(**json.loads(path.read_text(encoding="utf-8"))) for path in sorted(root.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)]
+        return [JudgeProfile(**payload) for payload in self.store.list_json(["judge_profiles"])]
 
     def audit_and_store(
         self,
@@ -107,13 +102,11 @@ class JudgeProfileService:
     def list_all_audits(self) -> list[StoredJudgeAudit]:
         """列出全部审计结果，避免前端必须先知道 profile_id 才能展示历史。"""
 
-        root = self.store.root / "judge_audits"
-        if not root.exists():
-            return []
-        audits: list[StoredJudgeAudit] = []
-        for path in sorted(root.glob("audit-*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
-            audits.append(StoredJudgeAudit(**json.loads(path.read_text(encoding="utf-8"))))
-        return audits
+        return [
+            StoredJudgeAudit(**payload)
+            for payload in self.store.list_json(["judge_audits"])
+            if isinstance(payload, dict) and str(payload.get("audit_id", "")).startswith("audit-")
+        ]
 
     def bias_analysis(self, audit_id: str) -> dict[str, Any]:
         audit = StoredJudgeAudit(**self.store.read_json(["judge_audits", f"{audit_id}.json"]))

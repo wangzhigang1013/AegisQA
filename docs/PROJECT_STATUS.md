@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“风险治理与趋势洞察增强”已完成。本批次在已有任务中心化主链路上继续补齐红队安全扫描、跨任务 Score Analytics、成本预算状态和 Judge 偏差趋势，让一次评测不仅能跑通和出报告，还能发现安全风险、成本风险、趋势退化和裁判偏差。
+新一轮“SQLite 轻量仓储适配”已完成。本批次根据用户要求先不用 MySQL，已接入轻量 SQLite 元数据仓储：Task、Run、Workflow、Judge、审计等 JSON 文档进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径，避免大对象破坏评测流式读取；默认仍保持 JSON Store，SQLite 可通过参数或环境变量启用。
 
 ## 当前已完成
 
@@ -64,11 +64,13 @@
 - Task Report 已新增 `budget_status`，基于 cost 或 token 估算成本预算状态，输出 ok/warning/exceeded/not_set、预算、已用、剩余和修复建议。
 - 新增红队安全扫描能力，`POST /red-team/scans` 支持按 Task 或 Run 扫描 prompt injection、PII、unsafe content 和 secret exposure，并在报告中心提供“运行红队扫描”入口。
 - Judge 审计已新增偏差趋势，`GET /judge-audits/trends` 按 Profile 聚合 Accuracy/Kappa 趋势和低一致性告警，前端展示趋势图和低一致性 Profile 表。
+- 已新增 SQLite 轻量元数据仓储：`SQLiteStore` 与 `JsonStore` 共享 `read_json/write_json/list_json/jsonl` 接口，FastAPI 可通过 `create_app(..., storage_backend="sqlite")` 或 `AEGISQA_STORAGE_BACKEND=sqlite` 启用；上层 Dataset、Workflow、Run、Judge 和通用记录列表已停止直接扫描 `store.root`。
 
 ## 最近验证
 
-- `python -m pytest -q`：通过，覆盖 60 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
-- `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v10`，Run `run-b19e6c730cdb` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
+- `python -m pytest tests\test_sqlite_store_adapter.py -q`：3 passed，覆盖 SQLiteStore JSON/JSONL 读写、legacy JSON 回退、FastAPI Task 主链路和列表接口。
+- `python -m pytest -q`：通过，覆盖 63 个后端测试点；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `python -m aegisqa.examples.run_mvp_demo`：1000 条样本端到端完成，最新 Dataset `rag_qa_1000:v11`，Run `run-a0392226decb` completed，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条，Judge 审计 Accuracy/Precision/Recall/F1/Kappa 均为 1.0。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、40 个测试通过。
 - `cd frontend && npm run build`：通过。
@@ -87,6 +89,7 @@
 - Skill 插件包已采用受控子进程执行，默认 5 秒超时已覆盖并发 E2E；后续还需补资源限额、依赖隔离、签名校验和更完整的审批页。
 - Experiment 快照、CI Gate、Annotation Queue 和 Trace Tree 已有独立产品页；跨任务 Score Analytics 和成本预算状态已接入报告中心，后续需要继续补真实成本账单、更多趋势筛选维度和跨任务对比可视化。
 - 报告、Badcase、Judge 审计已经接入基础数据与动作，人工审阅队列、多 Judge 一致性、红队扫描和 Judge 偏差趋势已有最小闭环；后续需要按业务标签、模型版本和时间窗口继续细分偏差归因。
+- SQLite 轻量仓储已接入元数据路径；后续如果要进入多用户生产环境，仍需要正式 Repository 层、数据库迁移、索引治理、权限隔离和 Worker 队列接入。
 - 本地服务曾出现旧 FastAPI 进程未重启导致新增路由 404 的问题；已重启后端并完成浏览器复测。后续修改后端 API 时必须确认 8000 端口加载的是最新代码。
 
 ## 下一阶段目标
@@ -95,9 +98,46 @@
 - 成本治理生产化：接入真实 token/cost 账单、模型价格表、预算门禁和成本异常告警。
 - 趋势分析增强：为 Score Analytics 增加 Dataset、Workflow、模型版本、Prompt 版本、时间窗口和标签过滤，并补趋势可视化对比。
 - Judge 偏差归因：按业务标签、样本类型、模型版本和时间窗口拆解 Accuracy/Kappa 退化原因。
-- 生产 Repository/Worker：继续推进真实 MySQL/Redis/Celery Repository/Worker 接入，替换本地 JSON Store 的 demo 边界。
+- Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 SQLite 轻量仓储适配完成
+
+- 改动摘要：根据用户要求，完成 SQLite 轻量数据库优化批次；新增 `SQLiteStore`，保留 `JsonStore` 为默认模式，FastAPI 可通过 `storage_backend="sqlite"` 或 `AEGISQA_STORAGE_BACKEND=sqlite` 启用 SQLite 元数据仓储。Task、Run、Workflow、Judge、审计等 JSON 文档写入 SQLite，Dataset rows、上传文件和 Skill 插件包继续走本地文件路径。上层列表逻辑已统一改为 `store.list_json(...)`，避免业务代码继续直接扫描 `store.root`。
+- 变更文件：
+  - `aegisqa/storage/json_store.py`
+  - `aegisqa/storage/sqlite_store.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/datasets/service.py`
+  - `aegisqa/workflows/service.py`
+  - `aegisqa/engine/runner.py`
+  - `aegisqa/judge/profiles.py`
+  - `tests/test_sqlite_store_adapter.py`
+  - `frontend/e2e/task-flow.spec.ts`
+  - `README.md`
+  - `docs/superpowers/plans/2026-05-31-sqlite-storage-adapter.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_sqlite_store_adapter.py -q`
+  - `python -m pytest -q`
+  - `python -m aegisqa.examples.run_mvp_demo`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `python -m pytest --collect-only`
+- 测试结果：
+  - SQLite 定向测试先红灯，失败原因为缺少 `aegisqa.storage.sqlite_store`；实现后 3 passed。
+  - 后端全量：63 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - Demo：Dataset `rag_qa_1000:v11`，Run `run-a0392226decb` completed，1000 条样本完成，队列消息仅 `item_id`，`pass_rate=0.8`，`error_rate=0.0`，Badcase 200 条。
+  - 前端 typecheck：通过。
+  - 前端单测：4 个测试文件、40 passed。
+  - 前端 build：通过。
+  - Playwright E2E 首次运行 7 passed、1 failed，失败原因为报告页任务名同时出现在任务摘要和跨任务表格，测试 locator 严格模式命中 2 个 cell；已收紧到任务摘要行后复跑 8 passed。
+- 下一步：进入 Repository/Worker 生产化、SQLite 迁移工具、索引治理、红队规则配置化和真实成本账单接入。
 
 ### 2026-05-31 风险治理与趋势洞察增强完成
 

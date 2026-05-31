@@ -52,7 +52,16 @@ Run 是 Task 的底层执行批次，也可以理解为 Attempt。用户在执�
 - JSONL 追加与读写会通过 `.lock` 文件串行化，降低 Playwright、后端测试或本地多进程同时写入时的数据损坏风险。
 - 锁文件只解决本地文件并发保护，不提供事务、索引、权限隔离、分布式一致性或高可用能力。
 
-生产部署不要继续使用 JSON Store 作为主数据库。生产建议：
+如果希望先用轻量数据库承载元数据，可以启用 SQLite 模式：
+
+```powershell
+$env:AEGISQA_STORAGE_BACKEND="sqlite"
+python -m uvicorn aegisqa.api.app:app --reload --host 127.0.0.1 --port 8000
+```
+
+SQLite 模式会把 Task、Run、Workflow、Judge、审计等 JSON 文档写入 `data/aegisqa_store/aegisqa.sqlite3`。Dataset rows、上传文件和 Skill 插件包仍保留在本地文件路径中，避免大对象进入数据库影响流式评测。这个模式适合单机长期试用、小团队验证和演示环境，不等同于生产级高可用数据库。
+
+生产部署不要继续使用 JSON Store 或单机 SQLite 作为主数据库。生产建议：
 
 - 元数据与任务状态：MySQL/PostgreSQL，使用事务保证 Task、Run、Report、Badcase 状态一致。
 - 执行队列：Redis + Celery，队列消息只携带轻量 `item_id`，Worker 从数据库加载完整上下文。

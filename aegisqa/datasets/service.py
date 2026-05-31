@@ -174,37 +174,36 @@ class DatasetService:
     def list_datasets(self) -> list[dict[str, Any]]:
         """列出数据集及版本摘要，供前端选择器和概览页使用。"""
 
-        root = self.store.root / "datasets"
-        if not root.exists():
-            return []
+        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for payload in self.store.list_json(["datasets"], recursive=True):
+            # `datasets/**` 下同时存在 versions.json 和 metadata.json。这里只接受
+            # DatasetVersion 元数据，避免把版本索引文件误当成可执行数据集版本。
+            if not isinstance(payload, dict) or "version_id" not in payload or "row_store_path" not in payload:
+                continue
+            dataset = DatasetVersion(**payload)
+            grouped[dataset.dataset_id].append(
+                {
+                    **dataset.model_dump(mode="json"),
+                    "field_paths": [f"row.{field}" for field in sorted(dataset.field_schema)],
+                }
+            )
+
         datasets: list[dict[str, Any]] = []
-        for dataset_dir in sorted(path for path in root.iterdir() if path.is_dir()):
-            versions: list[dict[str, Any]] = []
-            for version_dir in sorted(dataset_dir.glob("v*"), key=lambda path: path.name):
-                metadata_path = version_dir / "metadata.json"
-                if not metadata_path.exists():
-                    continue
-                dataset = DatasetVersion(**json.loads(metadata_path.read_text(encoding="utf-8")))
-                versions.append(
-                    {
-                        **dataset.model_dump(mode="json"),
-                        "field_paths": [f"row.{field}" for field in sorted(dataset.field_schema)],
-                    }
-                )
-            if versions:
-                latest = versions[-1]
-                datasets.append(
-                    {
-                        "dataset_id": latest["dataset_id"],
-                        "name": latest["name"],
-                        "latest_version": latest["version"],
-                        "latest_version_id": latest["version_id"],
-                        "row_count": latest["row_count"],
-                        "golden": latest["golden"],
-                        "versions": versions,
-                    }
-                )
-        return datasets
+        for versions in grouped.values():
+            versions.sort(key=lambda item: int(item["version"]))
+            latest = versions[-1]
+            datasets.append(
+                {
+                    "dataset_id": latest["dataset_id"],
+                    "name": latest["name"],
+                    "latest_version": latest["version"],
+                    "latest_version_id": latest["version_id"],
+                    "row_count": latest["row_count"],
+                    "golden": latest["golden"],
+                    "versions": versions,
+                }
+            )
+        return sorted(datasets, key=lambda item: str(item["latest_version_id"]), reverse=True)
 
     def build_lineage(self, dataset_id: str, version: int, downstream_tasks: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """构建 Dataset Version 的数据血缘。

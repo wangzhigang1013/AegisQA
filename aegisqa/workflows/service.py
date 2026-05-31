@@ -1,8 +1,6 @@
 """Workflow 管理服务。"""
 
 from __future__ import annotations
-
-import json
 from uuid import uuid4
 
 from aegisqa.skills.registry import SkillRegistry
@@ -49,14 +47,7 @@ class WorkflowService:
     def list_versions(self) -> list[WorkflowVersion]:
         """列出已发布 Workflow 版本，支撑前端下拉选择与执行中心创建 Run。"""
 
-        root = self.store.root / "workflows"
-        if not root.exists():
-            return []
-        workflows: list[WorkflowVersion] = []
-        for path in sorted(root.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            workflows.append(WorkflowVersion(**payload))
-        return workflows
+        return [WorkflowVersion(**payload) for payload in self.store.list_json(["workflows"])]
 
     def _save(self, workflow: WorkflowVersion) -> None:
         self.store.write_json(["workflows", f"{_safe(workflow.version_id)}.json"], workflow.model_dump(mode="json"))

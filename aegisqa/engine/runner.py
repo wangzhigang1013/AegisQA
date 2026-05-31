@@ -290,13 +290,7 @@ class WorkflowRunner:
     def list_runs(self) -> list[RunRecord]:
         """列出 Run 快照，供执行中心和概览页展示最近状态。"""
 
-        root = self.store.root / "runs"
-        if not root.exists():
-            return []
-        runs: list[RunRecord] = []
-        for path in sorted(root.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
-            runs.append(RunRecord(**json.loads(path.read_text(encoding="utf-8"))))
-        return runs
+        return [RunRecord(**payload) for payload in self.store.list_json(["runs"])]
 
     def _execute_item(self, run: RunRecord, item: RunItem, row: DatasetRow, limiter: InMemoryRateLimiter) -> None:
         item.status = "running"
