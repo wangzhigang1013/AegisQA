@@ -2229,6 +2229,12 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('低通过率分组加入 Annotation')).toBeInTheDocument();
     expect(screen.getAllByText('answer').length).toBeGreaterThan(0);
     expect(screen.getByText('80')).toBeInTheDocument();
+  });
+
+  it('报告中心支持诊断动作、修复任务和分层门禁', async () => {
+    await renderWorkbench('/reports');
+
+    expect(await screen.findByText('根因诊断')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '加入人工审核' }));
     expect(await screen.findByText(/诊断动作完成：已创建 1 条人工审核任务/)).toBeInTheDocument();
@@ -2238,6 +2244,12 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '生成分层门禁' }));
     expect(await screen.findByText(/CI Gate 即时评估完成：blocking/)).toBeInTheDocument();
+  });
+
+  it('报告中心支持任务报告 HTML/CSV/JSON 导出', async () => {
+    await renderWorkbench('/reports');
+
+    expect(await screen.findByText('任务报告')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /导出 HTML/ }));
     expect(await screen.findByText(/报告导出成功：RAG_任务.html 已开始下载/)).toBeInTheDocument();
@@ -2253,6 +2265,12 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /导出 JSON/ }));
     expect(await screen.findByText(/报告导出成功：RAG_任务.json 已开始下载/)).toBeInTheDocument();
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/report/export?file_format=json'), expect.anything());
+  });
+
+  it('报告中心支持导出审批生命周期', async () => {
+    await renderWorkbench('/reports');
+
+    expect(await screen.findByText('任务报告')).toBeInTheDocument();
 
     fireEvent.mouseDown(findComboboxByLabel('报告导出角色'));
     fireEvent.click(await screen.findByText('Viewer（只读）'));
@@ -2284,6 +2302,12 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /撤销申请/ }));
     expect(await screen.findByText(/导出审批已撤销：rex-export-demo/)).toBeInTheDocument();
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/report-export-requests/rex-export-demo/revoke'), expect.anything());
+  });
+
+  it('报告中心支持 Badcase 操作并跳转 Trace Flow', async () => {
+    await renderWorkbench('/reports');
+
+    expect(await screen.findByText('任务报告')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /忽略/ }));
     expect(await screen.findByText(/Badcase 已忽略/)).toBeInTheDocument();
@@ -2293,7 +2317,7 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看参数治理' }));
     expect(await screen.findByText('Trace Flow')).toBeInTheDocument();
     expect(await screen.findByText('问答回归集')).toBeInTheDocument();
-  }, 20_000);
+  });
 
   it('报告中心展示 Score Analytics、成本预算和红队扫描入口', async () => {
     await renderWorkbench('/reports');

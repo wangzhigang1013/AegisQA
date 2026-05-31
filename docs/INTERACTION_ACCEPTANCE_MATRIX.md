@@ -9,6 +9,7 @@
 
 ## 最近一次交互验证
 
+- `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心"`：6 passed，报告中心基础渲染、诊断动作、任务报告导出、导出审批生命周期、Badcase/Trace 跳转和 Score Analytics 已拆成独立测试，去掉原 20 秒特殊超时窗口。
 - `python -m pytest tests\test_task_center_api.py -q -k report_export_request_lifecycle_reject_revoke_and_expire`：1 passed，覆盖报告导出审批拒绝、撤销、过期阻断和生命周期审计。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：1 passed，覆盖报告中心 Admin 拒绝、重新申请、审批后导出和申请人撤销。
 - `python -m pytest tests\test_task_center_api.py -q -k viewer_can_export_task_report_after_admin_approval`：1 passed，覆盖 Viewer 申请导出审批、Reviewer 审批失败、Admin 审批成功、审批后授权导出和审计留痕。

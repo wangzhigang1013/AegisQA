@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Report Export Approval Lifecycle”已完成并通过全量验证。本批次在导出审批闭环之上补齐审批生命周期：Viewer 不能直接导出，但可以创建 Task Report 导出审批请求；Admin 可以批准或拒绝；原申请角色可以撤销待审批或已批准申请；审批请求默认 24 小时过期，过期后不能批准或导出；报告中心展示过期时间、申请、批准、拒绝和撤销入口。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Report Page Test Split”已完成并通过前端全量验证。本批次不改业务行为，专门处理报告中心测试结构风险：把原来约 14 秒的报告页大测试拆成基础报告渲染、诊断动作、任务报告导出、导出审批生命周期、Badcase/Trace 跳转五个聚焦测试，去掉单测 20 秒特殊超时窗口，让后续报告中心功能回归更容易定位。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -45,6 +45,7 @@
 - 报告导出已接入 RBAC 门禁：`Evaluator`、`Reviewer`、`Admin` 可导出，`Viewer` 只能查看不能外发；后端拒绝无权限导出并写入 `task.report.export.denied` 审计，前端报告页按角色禁用导出按钮。
 - 报告中心任务选择器已补 `aria-label="选择报告任务"`，Playwright 主链路不再依赖页面 Select 顺序，避免新增角色、筛选器或分页控件后误选下拉。
 - 报告外发已新增审批闭环：Viewer 可申请 HTML/CSV/JSON 导出审批，Admin 审批通过后可带 `approval_request_id` 导出同一 Task 和同一格式，导出审计会记录审批 ID；审批请求支持拒绝、撤销和过期状态，避免长期悬挂或误用。
+- 报告中心前端大测试已拆分为五个职责测试：基础报告渲染、诊断动作、任务报告导出、导出审批生命周期、Badcase/Trace 跳转；原 20 秒特殊超时窗口已移除。
 - Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
@@ -110,6 +111,11 @@
 
 ## 最近验证
 
+- `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心"`：6 passed，49 skipped；原报告页单测从约 14 秒拆为约 2.1 秒、2.7 秒、2.1 秒、3.3 秒、1.6 秒五个聚焦测试，Score Analytics 测试约 1.4 秒。
+- `cd frontend && npm run typecheck`：通过。
+- `cd frontend && npm test`：4 个测试文件、66 passed；报告中心最长测试为导出审批生命周期，约 6.1 秒。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
 - `python -m pytest tests\test_task_center_api.py -q -k report_export_request_lifecycle_reject_revoke_and_expire`：先 RED 后 GREEN，最终 1 passed，覆盖导出审批拒绝、撤销、过期后不能批准、拒绝/撤销/过期审计事件。
 - `python -m pytest tests\test_task_center_api.py -q -k "report_export_request_lifecycle_reject_revoke_and_expire or viewer_can_export_task_report_after_admin_approval"`：2 passed，确认新增生命周期没有破坏已批准后导出路径。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：先 RED 后 GREEN，最终 1 passed，覆盖报告中心 Admin 拒绝、重新申请、Admin 审批、审批后导出和申请人撤销。
@@ -311,6 +317,28 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Report Page Test Split
+
+- 改动摘要：拆分报告中心超长前端测试。原 `报告中心围绕任务展示报告、质量决策和导出入口` 同时覆盖报告渲染、诊断动作、导出审批、Badcase 和 Trace 跳转，单测耗时约 14 秒且需要 20 秒特殊超时；现在拆成基础报告渲染、诊断动作、任务报告导出、导出审批生命周期、Badcase/Trace 跳转五个职责测试，并去掉特殊超时窗口，失败定位更精确。
+- 变更文件：
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/superpowers/plans/2026-05-31-report-page-test-split.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 定向报告中心：6 passed，49 skipped。
+  - 基础报告渲染约 2.1 秒；诊断动作约 2.7 秒；任务报告导出约 2.1 秒；导出审批生命周期约 3.3 秒；Badcase/Trace 跳转约 1.6 秒；Score Analytics 约 1.4 秒。
+  - 前端 typecheck：通过。
+  - 前端全量：4 个测试文件、66 passed；全量环境下导出审批生命周期约 6.1 秒，仍低于原 14 秒大测试。
+  - 前端 build：通过。
+  - Playwright 全量：8 passed。
+- 下一步：继续评估 App.test 其他长测试，优先拆分候选资产中心和任务创建向导的慢路径。
 
 ### 2026-05-31 Report Export Approval Lifecycle
 
