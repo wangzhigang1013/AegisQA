@@ -22,7 +22,7 @@ export function GovernancePage() {
   const [approvalSkill, setApprovalSkill] = useState<SkillManifest | null>(null);
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
   const packagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
-  const auditEventsQuery = useQuery({ queryKey: ['audit-events'], queryFn: api.auditEvents });
+  const auditEventsQuery = useQuery({ queryKey: ['audit-events'], queryFn: () => api.auditEvents() });
   const packageBySkillId = useMemo(() => indexPackagesBySkillId(packagesQuery.data ?? []), [packagesQuery.data]);
   const filteredSkills = useMemo(() => {
     const query = skillQuery.trim().toLowerCase();

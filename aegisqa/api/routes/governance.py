@@ -47,6 +47,6 @@ def register_governance_routes(app: FastAPI, ctx: RouteContext) -> None:
         return {"allowed": ctx.access_control.can(role, permission)}
 
     @app.get("/audit-events")
-    def list_audit_events(actor: str | None = None, action: str | None = None) -> list[dict[str, Any]]:
-        events = ctx.audit_service.list_events(actor=actor, action=action)
+    def list_audit_events(actor: str | None = None, action: str | None = None, target: str | None = None) -> list[dict[str, Any]]:
+        events = ctx.audit_service.list_events(actor=actor, action=action, target=target)
         return [event.model_dump(mode="json") for event in events]

@@ -1,5 +1,6 @@
 import type {
   AnnotationTask,
+  AuditEvent,
   AnnotationCandidate,
   AssertionEvaluationResult,
   BadcaseRecord,
@@ -502,5 +503,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  auditEvents: () => request<Record<string, unknown>[]>('/audit-events'),
+  auditEvents: (filters: { actor?: string; action?: string; target?: string } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<AuditEvent[]>(`/audit-events${suffix}`);
+  },
 };

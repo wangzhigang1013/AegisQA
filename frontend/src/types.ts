@@ -506,6 +506,15 @@ export type TaskReport = {
   };
 };
 
+export type AuditEvent = {
+  event_id: string;
+  actor: string;
+  action: string;
+  target: string;
+  detail: Record<string, unknown>;
+  created_at: string;
+};
+
 export type TaskDiagnostics = {
   task_id?: string;
   run_id?: string;

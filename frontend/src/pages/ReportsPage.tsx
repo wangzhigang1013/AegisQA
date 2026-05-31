@@ -9,7 +9,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { MetricTile } from '../components/MetricTile';
 import { PageHeader } from '../components/PageHeader';
-import type { TaskRecord } from '../types';
+import type { AuditEvent, TaskRecord } from '../types';
 import { BadcaseTable } from './report/BadcaseTable';
 import { ReportSegmentAnalysis } from './report/ReportSegmentAnalysis';
 import { ReportSummary } from './report/ReportSummary';
@@ -39,6 +39,11 @@ export function ReportsPage() {
     queryFn: () => api.taskReport(selectedTask?.task_id ?? ''),
     enabled: Boolean(selectedTask?.task_id),
   });
+  const exportHistoryQuery = useQuery({
+    queryKey: ['audit-events', 'task.report.export', selectedTask?.task_id],
+    queryFn: () => api.auditEvents({ action: 'task.report.export', target: selectedTask?.task_id ?? '' }),
+    enabled: Boolean(selectedTask?.task_id),
+  });
 
   useEffect(() => {
     if (taskIdFromUrl && taskIdFromUrl !== selectedTaskId && tasksQuery.data?.some((task) => task.task_id === taskIdFromUrl)) {
@@ -63,9 +68,10 @@ export function ReportsPage() {
       const exported = await api.exportTaskReport(selectedTask.task_id, format);
       return { exported, task: selectedTask };
     },
-    onSuccess: ({ exported, task }) => {
+    onSuccess: async ({ exported, task }) => {
       const filename = downloadReportExport(exported, task);
       setNotice(`报告导出成功：${filename} 已开始下载。`);
+      await queryClient.invalidateQueries({ queryKey: ['audit-events', 'task.report.export', task.task_id] });
     },
     onError: (error) => setNotice(error instanceof Error ? error.message : '报告导出失败'),
   });
@@ -187,6 +193,7 @@ export function ReportsPage() {
   const budgetStatus = reportQuery.data?.budget_status;
   const diagnostics = reportQuery.data?.diagnostics;
   const scoreAnalytics = scoreAnalyticsQuery.data;
+  const exportHistory: AuditEvent[] = exportHistoryQuery.data ?? [];
   const latencyData = useMemo(() => {
     if (stepDistribution.length) {
       return Object.fromEntries(stepDistribution.map((step) => [step.step_id, step.average_latency_ms]));
@@ -339,6 +346,25 @@ export function ReportsPage() {
           ) : null}
 
           <ReportSummary task={task} summary={reportQuery.data?.task_summary} versionSnapshot={reportQuery.data?.version_snapshot} preflightEvidence={reportQuery.data?.preflight_evidence} />
+
+          <Card className="flat-card" title="报告导出历史">
+            <Table
+              size="small"
+              rowKey="event_id"
+              loading={exportHistoryQuery.isLoading}
+              pagination={{ pageSize: 4 }}
+              dataSource={exportHistory}
+              locale={{ emptyText: '当前任务还没有导出记录。导出后会记录格式、Preflight ID 和时间。' }}
+              columns={[
+                { title: '审计事件', dataIndex: 'event_id', render: (value) => <code>{value}</code> },
+                { title: '格式', render: (_, event) => <Tag color="blue">{String(asRecord(event.detail)?.file_format ?? '-')}</Tag> },
+                { title: 'Run', render: (_, event) => String(asRecord(event.detail)?.run_id ?? '-') },
+                { title: 'Preflight', render: (_, event) => String(asRecord(event.detail)?.preflight_id ?? '-') },
+                { title: '操作者', dataIndex: 'actor' },
+                { title: '时间', dataIndex: 'created_at', render: (value) => formatAuditTime(String(value ?? '')) },
+              ]}
+            />
+          </Card>
 
           <Row gutter={[16, 16]}>
             <Col xs={24} xl={14}>
@@ -658,6 +684,13 @@ function normalizeExportContent(content: unknown, format: string) {
 function safeReportFileName(name: string) {
   const normalized = name.trim().replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
   return normalized || 'task-report';
+}
+
+function formatAuditTime(value: string) {
+  if (!value) return '-';
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return value;
+  return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
 }
 
 async function ensureBadcaseId(badcase: Record<string, unknown>, task: TaskRecord | null | undefined): Promise<string> {

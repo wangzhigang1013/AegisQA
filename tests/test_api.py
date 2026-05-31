@@ -150,10 +150,11 @@ def test_audit_events_can_be_filtered_by_actor_and_action(tmp_path: Path) -> Non
     client = TestClient(app)
 
     client.app.state.audit_service.record(actor="api", action="task.create", target="task-a")
+    client.app.state.audit_service.record(actor="api", action="task.create", target="task-b")
     client.app.state.audit_service.record(actor="operator", action="skill.approve", target="skill-a")
 
-    response = client.get("/audit-events", params={"actor": "api", "action": "task.create"})
+    response = client.get("/audit-events", params={"actor": "api", "action": "task.create", "target": "task-b"})
 
     assert response.status_code == 200
     events = response.json()
-    assert [event["target"] for event in events] == ["task-a"]
+    assert [event["target"] for event in events] == ["task-b"]

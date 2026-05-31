@@ -118,6 +118,25 @@ const demoBadcase = {
   updated_at: '2026-05-31T00:00:00Z',
 };
 
+const demoReportExportAuditEvents = [
+  {
+    event_id: 'audit-export-html',
+    actor: 'api',
+    action: 'task.report.export',
+    target: 'task-demo',
+    detail: { run_id: 'run-demo', file_format: 'html', preflight_id: 'preflight-demo' },
+    created_at: '2026-05-31T08:00:00Z',
+  },
+  {
+    event_id: 'audit-export-csv',
+    actor: 'api',
+    action: 'task.report.export',
+    target: 'task-demo',
+    detail: { run_id: 'run-demo', file_format: 'csv', preflight_id: 'preflight-demo' },
+    created_at: '2026-05-31T08:05:00Z',
+  },
+];
+
 const demoRepairTask = {
   repair_task_id: 'repair-demo',
   source_task_id: 'task-demo',
@@ -1365,6 +1384,9 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/tasks/task-demo/report/export?file_format=json')) {
         return jsonResponse({ task_id: 'task-demo', file_format: 'json', content: { preflight_evidence: { preflight_id: 'preflight-demo' } } });
       }
+      if (url.includes('/audit-events?action=task.report.export') && url.includes('target=task-demo')) {
+        return jsonResponse(demoReportExportAuditEvents);
+      }
       if (url.endsWith('/tasks/task-demo/trace-flow')) {
         return jsonResponse(demoTraceFlow);
       }
@@ -1798,7 +1820,7 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(await screen.findByRole('tab', { name: '参数' }));
 
     expect(await screen.findByText('创建前 Preflight 证据')).toBeInTheDocument();
-    expect(screen.getByText('preflight-demo')).toBeInTheDocument();
+    expect(screen.getAllByText('preflight-demo').length).toBeGreaterThan(0);
     expect(screen.getByText('预检通过，可以创建并执行任务。')).toBeInTheDocument();
     expect(screen.getByText('数据集非空')).toBeInTheDocument();
     expect(screen.getByText('Workflow 字段映射')).toBeInTheDocument();
@@ -2157,10 +2179,14 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getAllByText('RAG 任务').length).toBeGreaterThan(0);
     expect(screen.getByText('任务摘要与版本快照')).toBeInTheDocument();
     expect(screen.getByText('创建前 Preflight 证据')).toBeInTheDocument();
-    expect(screen.getByText('preflight-demo')).toBeInTheDocument();
+    expect(screen.getAllByText('preflight-demo').length).toBeGreaterThan(0);
     expect(screen.getByText('Step 分布与耗时')).toBeInTheDocument();
     expect(screen.getByText('分层分析')).toBeInTheDocument();
     expect(screen.getByText('质量决策中心')).toBeInTheDocument();
+    expect(await screen.findByText('报告导出历史')).toBeInTheDocument();
+    expect(screen.getByText('audit-export-html')).toBeInTheDocument();
+    expect(screen.getByText('html')).toBeInTheDocument();
+    expect(screen.getAllByText('preflight-demo').length).toBeGreaterThan(0);
     expect(screen.getByText('评测结论')).toBeInTheDocument();
     expect(screen.getByText('能否发布')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /生成修复任务/ })).toBeInTheDocument();
@@ -2188,6 +2214,7 @@ describe('AegisQA 前端工作台', () => {
     expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/report/export?file_format=html'), expect.anything());
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/audit-events?action=task.report.export&target=task-demo'), expect.anything());
 
     fireEvent.click(screen.getByRole('button', { name: /导出 CSV/ }));
     expect(await screen.findByText(/报告导出成功：RAG_任务.csv 已开始下载/)).toBeInTheDocument();

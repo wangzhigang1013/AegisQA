@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Task Report Export Content Depth”已完成目标实现和全量验证。本批次继续补强任务报告交付物深度：Task 级 CSV 导出从少量 metric 行升级为包含任务指标、Preflight 证据、逐项 Preflight 检查、质量决策、分层分析和 Badcase 明细；HTML 导出从简单 JSON dump 升级为“任务摘要 / 质量决策 / Preflight 检查 / 分层分析 / Badcase 明细 / Report”章节化报告。报告导出成功后会写入 `task.report.export` 审计事件，记录任务、Run、导出格式和 Preflight ID，方便治理页追踪报告外发。上一批的报告中心 HTML/CSV/JSON 三个导出按钮仍分别调用对应 `file_format`，下载文件名按格式生成。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Report Export Audit History”已完成目标实现和全量验证。本批次继续补齐报告导出后的可追溯性：`GET /audit-events` 支持按 `target` 过滤，报告中心会按当前 Task 拉取 `task.report.export` 审计事件并展示导出历史，用户能直接看到导出事件、格式、Run、Preflight ID、操作者和时间；导出成功后会刷新当前任务的导出历史。验证中发现并修复治理页把带参数的 `api.auditEvents` 直接传给 React Query 导致审计日志数据形状异常的问题，现已改为显式 `() => api.auditEvents()`。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -41,6 +41,7 @@
 - 报告中心导出格式已拆分为 HTML、CSV、JSON 三个按钮，按钮文案和实际 `file_format` 对齐，避免用户误以为一个按钮会同时导出多种文件。
 - Task Report 导出内容已加深：CSV 包含任务指标、Preflight 检查、质量决策、分层分析和 Badcase 明细；HTML 按章节展示任务摘要、质量决策、Preflight 检查、分层分析、Badcase 明细和完整 Report。
 - Task Report 导出成功后会记录 `task.report.export` 审计事件，事件 detail 包含 `run_id`、`file_format` 和 `preflight_id`。
+- 报告中心已展示当前 Task 的报告导出历史，基于 `GET /audit-events?action=task.report.export&target={task_id}` 追踪导出格式、Run、Preflight ID、操作者和时间。
 - Task 执行参数模板已具备基础闭环：后端提供内置模板和自定义模板接口，前端创建任务时可一键套用 release gate、Prompt 实验、稳定性复跑等执行策略，并把 `execution_template_id` 写入任务快照。
 - 后端 Task 创建已保存 `execution_config`，报告和后续 Run Attempt 可以追溯任务创建时的执行参数。
 - 后端 Task 已支持 `POST /tasks/{task_id}/attempts`，只有当前任务没有活动执行实例时才能创建新 Attempt；旧 Run 报告会保存在 `attempts` 快照里。
@@ -107,6 +108,14 @@
 ## 最近验证
 
 - `python -m pytest tests\test_task_center_api.py -q -k preflight_is_persisted`：先 RED 后 GREEN，最终 1 passed，覆盖 Task Report CSV/HTML 导出包含质量决策、Preflight 检查、分层分析和 Badcase 明细章节，以及导出成功写入 `task.report.export` 审计事件。
+- `python -m pytest tests\test_api.py -q -k audit_events`：先 RED 后 GREEN，最终 1 passed，覆盖 `/audit-events` 支持 `actor/action/target` 组合过滤。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`：先 RED 后 GREEN，最终 1 passed，覆盖报告中心展示当前 Task 的导出历史，并在导出成功后刷新 `task.report.export` 审计查询。
+- `python -m pytest -q`：92 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：首次发现治理页 `api.auditEvents` queryFn 签名回归，修复后通过。
+- `cd frontend && npm test`：首次发现治理页审计日志 `.map is not a function`，修复后 4 个测试文件、62 passed。
+- `cd frontend && npm run build`：通过。
+- `cd frontend && npm run e2e`：8 passed。
+- `git diff --check`：通过，仅有 Windows LF/CRLF 换行提示。
 - `python -m pytest -q`：92 个后端测试全部通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：4 个测试文件、62 passed。
@@ -281,6 +290,33 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-05-31 Report Export Audit History
+
+- 改动摘要：补齐报告导出后的用户可见审计闭环。`AuditService.list_events` 与 `GET /audit-events` 增加 `target` 过滤；前端 API client 支持 actor/action/target 查询；报告中心新增“报告导出历史”表格，按当前 Task 展示 `task.report.export` 事件、导出格式、Run、Preflight ID、操作者和时间，导出成功后自动刷新历史。
+- 变更文件：
+  - `aegisqa/audit/service.py`
+  - `aegisqa/api/routes/governance.py`
+  - `tests/test_api.py`
+  - `frontend/src/types.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/superpowers/plans/2026-05-31-report-export-audit-history.md`
+- 验证命令：
+  - `python -m pytest tests\test_api.py -q -k audit_events`（RED 后 GREEN）
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告中心围绕任务展示报告"`（RED 后 GREEN）
+- 测试结果：
+  - 后端 RED：最初返回 `task-a` 与 `task-b` 两条事件，确认 `/audit-events` 未处理 `target`。
+  - 后端 GREEN：1 passed，仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端 RED：报告中心缺少“报告导出历史”。
+  - 前端 GREEN：1 passed，覆盖导出历史展示、格式/Preflight 信息和导出后刷新审计查询。
+  - 全量验证：`python -m pytest -q` 92 passed；`npm run typecheck` 通过；`npm test` 62 passed；`npm run build` 通过；`npm run e2e` 8 passed；`git diff --check` 通过，仅有 Windows LF/CRLF 换行提示。
+  - 验证中修复：治理页直接把带 filters 参数的 `api.auditEvents` 传给 React Query，导致 query context 被当成过滤参数并引发类型检查和运行时错误；已改为显式无参调用。
+- 下一步：继续评估报告导出权限、签名下载链接、导出历史筛选和外部审批流集成。
 
 ### 2026-05-31 Task Report Export Content Depth
 

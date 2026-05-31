@@ -82,14 +82,14 @@ Headless Chrome CDP 打开 http://127.0.0.1:5173 并点击核心页面按钮
 | FR-EX-08 | Step 级 Evaluation Cache | 已实现基础 | cache_key 与 cache_hit 记录 |
 | FR-RP-05 | 跨 Run/Task 趋势图 | 已实现基础 | `compare_reports` 输出趋势差值；新增 `GET /score-analytics` 按 Task 聚合通过率、错误率、Badcase、P95 耗时、估算成本和退化任务；React 报告中心展示“跨任务 Score Analytics”；Experiment 页面继续提供 A/B 对比入口 |
 | FR-RP-06 | 多次运行聚合视图 | 已实现基础 | `aggregate_repeat_items` 输出多数投票、通过概率、方差、不稳定样本 |
-| FR-RP-07 | 报告导出 | 已实现基础 | `export_report_csv`、`export_report_html`，`GET /runs/{run_id}/report/export?file_format=json|csv|html` 保留 Run 级导出；新增 `GET /tasks/{task_id}/report/export?file_format=json|csv|html` 作为产品主入口，导出 Task、Run Report、Badcase 和创建前 Preflight 证据；CSV 导出包含任务指标、Preflight 检查、质量决策、分层分析和 Badcase 明细；HTML 导出按章节展示任务摘要、质量决策、Preflight 检查、分层分析、Badcase 明细和 Report，并转义任务名和 JSON 内容；导出成功会写入 `task.report.export` 审计事件；报告中心前端会将导出内容转成 Blob 并触发浏览器下载，且 HTML/CSV/JSON 三个按钮分别调用对应格式 |
+| FR-RP-07 | 报告导出 | 已实现基础 | `export_report_csv`、`export_report_html`，`GET /runs/{run_id}/report/export?file_format=json|csv|html` 保留 Run 级导出；新增 `GET /tasks/{task_id}/report/export?file_format=json|csv|html` 作为产品主入口，导出 Task、Run Report、Badcase 和创建前 Preflight 证据；CSV 导出包含任务指标、Preflight 检查、质量决策、分层分析和 Badcase 明细；HTML 导出按章节展示任务摘要、质量决策、Preflight 检查、分层分析、Badcase 明细和 Report，并转义任务名和 JSON 内容；导出成功会写入 `task.report.export` 审计事件；报告中心前端会将导出内容转成 Blob 并触发浏览器下载，且 HTML/CSV/JSON 三个按钮分别调用对应格式；报告中心展示当前 Task 的导出历史，按审计事件追踪格式、Run、Preflight ID、操作者和时间 |
 | FR-ME-04 | 裁判偏差分析 | 已实现基础 | `JudgeProfileService.bias_analysis`；新增 `GET /judge-audits/trends` 按 Judge Profile 聚合 Accuracy/Kappa 趋势和低一致性告警；React Judge 审计页展示“Judge 偏差趋势” |
 | FR-ME-05 | 人工纠错反哺候选池 | 已实现基础 | `PromptCandidateService` 可从 Badcase 创建 Prompt 优化候选并评审 |
 | FR-ME-06 | 多裁判交叉验证 | 已实现基础页面 | `JudgeProfileService.cross_validate`，`POST /judge-cross-validation`，React Judge 审计页提供“多 Judge 一致性”弹窗并展示两两一致率 |
 | FR-HL-05 | Badcase 聚类 | 已实现 | `cluster_badcases(method="rule")` 与 `cluster_badcases(method="embedding")` |
 | FR-HL-06 | 批量处理与导出 | 已实现基础 | `bulk_correct`、`export_badcases`，`POST /badcases/bulk-correct`，`GET /badcases/export`；报告中心支持勾选多条后批量加入 Golden |
 | FR-AU-04 | 角色权限 | 已实现基础 | `AccessControl` |
-| FR-AU-05 | 操作审计 | 已实现基础 | `AuditService`，`GET /audit-events` 支持按 actor/action 过滤，回归测试覆盖过滤不再返回 500 |
+| FR-AU-05 | 操作审计 | 已实现基础 | `AuditService`，`GET /audit-events` 支持按 actor/action/target 过滤，回归测试覆盖过滤不再返回 500，并支持按 Task 追踪报告导出事件 |
 
 ## 市场对标增强覆盖
 
