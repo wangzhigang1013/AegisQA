@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Task Create Wizard 生命周期告警治理”已完成并通过全量验证。本批次聚焦执行中心创建任务链路的测试稳定性：任务创建向导只在弹窗打开时挂载 Form，关闭状态不再提前创建 Ant Design form 实例，避免 `useForm` 未连接警告污染测试输出并掩盖真正 UI 回归。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Frontend Test Motion 降噪”已完成并通过验证。本批次聚焦前端集成测试稳定性：仅在 Vitest `MODE=test` 环境关闭 Ant Design motion token，减少 jsdom 中无真实视觉意义的动画计时器和异步噪声；生产、开发和 Playwright E2E 环境仍保持默认动效。当前单测耗时仍有波动，真正的大幅提速需要继续拆分 `App.test.tsx`。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -89,6 +89,7 @@
 - 报告中心任务选择器已支持远程搜索历史任务，输入关键词会请求 `GET /tasks?q=...&page=1&page_size=20`，选择任务后清空搜索词，保持报告页围绕目标 Task 工作。
 - Playwright 主链路已补执行中心搜索和报告中心远程搜索请求捕获，确保真实浏览器中 Ant Design Input/Select 能触发后端 `q` 查询。
 - 执行中心任务创建向导已改为打开时才挂载 Form，关闭状态不会提前创建或操作未连接的 Ant Design form 实例；前端回归测试锁定 `useForm` 未连接警告不再出现。
+- 前端 AppShell 已在 Vitest 环境关闭 Ant Design motion token，降低 jsdom 下 Modal/Drawer/Tabs/Button loading 等组件的无效动画计时器噪声；生产和 E2E 环境不受影响。
 - Experiment 快照已补齐 Dataset/Workflow 元数据、延迟指标和失败分布；Experiment 页面支持 Dataset/Workflow 过滤，并新增 A/B 对比面板展示通过率、Badcase、P95 耗时、成本和失败分布差异。
 - README 已把主启动路径明确为 FastAPI + React，并将 Streamlit 保留为 legacy demo；文档明确 Task 是用户主对象，Run 是底层执行 Attempt。
 - 治理页已移除容易误导的 MySQL/Redis/Celery 状态清单，改为指向 README 和 PRD 验收矩阵的生产适配边界提示。
@@ -132,9 +133,10 @@
 
 - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心默认展示任务列表并可以创建任务"`：先 RED 后 GREEN，最终 1 passed，确认执行中心创建任务主链路不再触发 `useForm` 未连接警告。
 - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`：8 passed，确认任务创建向导的必选校验、Preflight、模板填充、风险确认、参数提交和关闭生命周期稳定。
+- `cd frontend && npm test -- src/test/App.test.tsx`：70 passed，`App.test.tsx` 单跑测试体耗时约 91.05s；Vitest 环境 motion 降噪后主集成文件仍通过。
 - `python -m pytest -q`：104 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：6 个测试文件，86 passed；本批次已消除既有 Ant Design `useForm` 未连接 warning。
+- `cd frontend && npm test`：6 个测试文件，86 passed；全量中 `App.test.tsx` 测试体耗时约 97.50s，说明 motion 降噪主要是稳定性治理，耗时仍需靠拆分大测试文件解决。
 - `cd frontend && npm run build`：通过，RunsPage chunk 正常生成。
 - `cd frontend && npm run e2e`：8 passed，主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
 - `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
@@ -467,6 +469,34 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Frontend Test Motion 降噪
+
+- 改动摘要：`AppShell` 在 Vitest `MODE=test` 环境下关闭 Ant Design motion token，减少 jsdom 中无真实视觉意义的动画计时器、异步状态更新和潜在 act 噪声；开发、生产构建和 Playwright E2E 环境继续使用默认动效。
+- 变更文件：
+  - `frontend/src/App.tsx`
+  - `docs/superpowers/plans/2026-06-01-frontend-test-motion-noise-reduction.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心默认展示任务列表并可以创建任务"`
+  - `cd frontend && npm test -- src/test/App.test.tsx`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 前端 typecheck：通过。
+  - 执行中心目标测试：1 passed。
+  - `App.test.tsx`：70 passed，单跑测试体耗时约 91.05s；没有重新引入 `useForm` 未连接 warning。
+  - 后端全量：104 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - 前端全量：6 个测试文件，86 passed；全量中 `App.test.tsx` 仍约 97.50s，耗时优化需要继续拆分大测试文件。
+  - 前端 build：通过。
+  - Playwright E2E：8 passed。
+  - 空白检查：仅有 CRLF 换行转换 warning，未发现空白错误。
+- 下一步：
+  - 提交本批次。下一批更大的测试耗时优化应继续拆分 `App.test.tsx`，让 Vitest 文件级并行真正生效。
 
 ### 2026-06-01 Task Create Wizard 生命周期告警治理
 

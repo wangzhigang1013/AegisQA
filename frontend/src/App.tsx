@@ -78,6 +78,8 @@ export function AppShell() {
           colorError: '#dc2626',
           borderRadius: 8,
           fontFamily: 'Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif',
+          // Vitest 的 jsdom 环境不渲染真实动画，关闭 motion 可以减少无意义的计时器等待和 act 噪声；生产环境保持 Ant Design 默认动效。
+          motion: import.meta.env.MODE === 'test' ? false : undefined,
         },
       }}
     >
