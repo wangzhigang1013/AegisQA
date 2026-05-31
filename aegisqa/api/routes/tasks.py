@@ -180,6 +180,8 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             result = _repair_action_retest_and_compare(ctx, record)
         elif action == "generate_remediation_plan":
             result = _repair_action_generate_remediation_plan(ctx, record)
+        elif action == "create_followup_repair_tasks":
+            result = _repair_action_create_followup_tasks(ctx, record)
         elif action in {"open_trace_flow", "open_parameter_governance", "open_dataset_lineage"}:
             result = _repair_action_link_target(record, action)
         else:
@@ -187,7 +189,19 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 "REPAIR_TASK_ACTION_UNSUPPORTED",
                 "当前修复任务动作暂不支持。",
                 status_code=400,
-                details={"action": action, "supported_actions": ["seed_annotation_queue", "evaluate_ci_gate", "retest_and_compare", "generate_remediation_plan", "open_trace_flow", "open_parameter_governance", "open_dataset_lineage"]},
+                details={
+                    "action": action,
+                    "supported_actions": [
+                        "seed_annotation_queue",
+                        "evaluate_ci_gate",
+                        "retest_and_compare",
+                        "generate_remediation_plan",
+                        "create_followup_repair_tasks",
+                        "open_trace_flow",
+                        "open_parameter_governance",
+                        "open_dataset_lineage",
+                    ],
+                },
             )
         updated_record = _append_repair_task_action(ctx, record, action, result)
         return {"action": action, "result": result, "repair_task": updated_record}
@@ -788,6 +802,100 @@ def _repair_action_generate_remediation_plan(ctx: RouteContext, repair_task: dic
     }
 
 
+def _repair_action_create_followup_tasks(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+    """把修复建议拆成可分派的二级 Repair Task。
+
+    建议本身只是一次分析结果，拆成子任务后才具备负责人、状态流转和复跑证据。
+    `retest_and_compare` 不拆成子任务，因为它是父任务上的验证动作，重复拆分会制造噪音。
+    """
+
+    recommendations = _repair_recommendations_from_last_result(ctx, repair_task)
+    repair_task["remediation_plan"] = {"recommendations": recommendations, "updated_at": _now()}
+    existing = _list_records(ctx.store, "repair_tasks")
+    created: list[dict[str, Any]] = []
+    reused: list[dict[str, Any]] = []
+    for recommendation in recommendations:
+        if not isinstance(recommendation, dict):
+            continue
+        if str(recommendation.get("action") or "") == "retest_and_compare":
+            continue
+        title = str(recommendation.get("title") or "").strip()
+        action = str(recommendation.get("action") or "").strip()
+        if not title or not action:
+            continue
+        duplicate = _find_existing_followup_task(existing, repair_task, title, action)
+        if duplicate:
+            reused.append(duplicate)
+            continue
+        record = _build_followup_repair_task_record(repair_task, recommendation)
+        _save_record(ctx.store, "repair_tasks", "repair_task_id", record)
+        existing.append(record)
+        created.append(record)
+    return {
+        "status": "completed",
+        "source_task_id": repair_task.get("source_task_id"),
+        "parent_repair_task_id": repair_task.get("repair_task_id"),
+        "created_count": len(created),
+        "reused_count": len(reused),
+        "repair_tasks": created + reused,
+        "skipped_actions": ["retest_and_compare"],
+    }
+
+
+def _repair_recommendations_from_last_result(ctx: RouteContext, repair_task: dict[str, Any]) -> list[dict[str, Any]]:
+    last_action = repair_task.get("last_action_result") or {}
+    if isinstance(last_action, dict) and last_action.get("action") == "generate_remediation_plan":
+        result = last_action.get("result") or {}
+        if isinstance(result, dict) and isinstance(result.get("recommendations"), list):
+            return [item for item in result["recommendations"] if isinstance(item, dict)]
+    remediation_plan = repair_task.get("remediation_plan") or {}
+    if isinstance(remediation_plan, dict) and isinstance(remediation_plan.get("recommendations"), list):
+        return [item for item in remediation_plan["recommendations"] if isinstance(item, dict)]
+    generated = _repair_action_generate_remediation_plan(ctx, repair_task)
+    recommendations = generated.get("recommendations") or []
+    return [item for item in recommendations if isinstance(item, dict)]
+
+
+def _find_existing_followup_task(existing: list[dict[str, Any]], repair_task: dict[str, Any], title: str, action: str) -> dict[str, Any] | None:
+    parent_id = repair_task.get("repair_task_id")
+    source_task_id = repair_task.get("source_task_id")
+    for record in existing:
+        if record.get("parent_repair_task_id") != parent_id:
+            continue
+        if record.get("source_task_id") != source_task_id:
+            continue
+        if record.get("title") == title and record.get("recommended_action") == action:
+            return record
+    return None
+
+
+def _build_followup_repair_task_record(repair_task: dict[str, Any], recommendation: dict[str, Any]) -> dict[str, Any]:
+    now = _now()
+    area = str(recommendation.get("area") or "remediation")
+    priority = str(recommendation.get("priority") or repair_task.get("severity") or "info")
+    return {
+        "repair_task_id": f"repair-{uuid4().hex[:12]}",
+        "parent_repair_task_id": repair_task.get("repair_task_id"),
+        "source_task_id": repair_task.get("source_task_id"),
+        "source_run_id": repair_task.get("source_run_id"),
+        "cause_type": area,
+        "severity": priority,
+        "title": str(recommendation.get("title") or "后续修复任务"),
+        "status": "open",
+        "affected_items": int(repair_task.get("affected_items") or 0),
+        "evidence": recommendation.get("evidence", []),
+        "recommendation": str(recommendation.get("reason") or ""),
+        "next_actions": [str(recommendation.get("action"))] if recommendation.get("action") else [],
+        "recommended_action": recommendation.get("action"),
+        "target_url": recommendation.get("target_url"),
+        "remediation_area": area,
+        "action_history": [],
+        "owner": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
 def _repair_latest_run_id(repair_task: dict[str, Any], task: dict[str, Any]) -> str:
     last_action = repair_task.get("last_action_result") or {}
     if isinstance(last_action, dict):
@@ -934,6 +1042,8 @@ def _append_repair_task_action(ctx: RouteContext, repair_task: dict[str, Any], a
         }
     )
     repair_task["action_history"] = history
+    if action == "generate_remediation_plan":
+        repair_task["remediation_plan"] = {"recommendations": result.get("recommendations", []), "updated_at": action_time}
     repair_task["last_action_result"] = {"action": action, "result": result, "created_at": action_time}
     repair_task["updated_at"] = action_time
     _save_record(ctx.store, "repair_tasks", "repair_task_id", repair_task)
@@ -950,6 +1060,8 @@ def _repair_action_summary(action: str, result: dict[str, Any]) -> str:
         return f"复跑完成，质量状态 {result.get('comparison_status', 'unknown')}。"
     if action == "generate_remediation_plan":
         return f"已生成 {len(result.get('recommendations', []))} 条修复建议。"
+    if action == "create_followup_repair_tasks":
+        return f"已创建 {result.get('created_count', 0)} 个后续修复任务，复用 {result.get('reused_count', 0)} 个。"
     if result.get("url"):
         return f"已打开证据入口：{result['url']}"
     return "动作已记录。"

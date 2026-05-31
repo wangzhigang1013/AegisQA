@@ -83,7 +83,8 @@ export function RepairTasksPage() {
     mutationFn: ({ record, action }: { record: RepairTaskRecord; action: string }) =>
       api.runRepairTaskAction(record.repair_task_id, { action, assignee: 'qa_owner', limit: 20 }),
     onSuccess: (payload) => {
-      mergeRepairTask(payload.repair_task);
+      const followups = extractRepairTasks(payload.result);
+      mergeRepairTasks([payload.repair_task, ...followups]);
       const history = payload.repair_task.action_history ?? [];
       const summary = history[history.length - 1]?.result_summary ?? `${payload.action} 已执行。`;
       setNotice(summary);
@@ -105,20 +106,26 @@ export function RepairTasksPage() {
     reopenForm.setFieldsValue({ reason: record.reopen_reason ?? '' });
   }
 
-  function mergeRepairTask(updated: RepairTaskRecord) {
-    queryClient.setQueriesData<RepairTaskRecord[]>({ queryKey: ['repair-tasks'] }, (current) => {
+  function mergeRepairTasks(updatedTasks: RepairTaskRecord[]) {
+    queryClient.setQueryData<RepairTaskRecord[]>(['repair-tasks', sourceTaskId], (current) => {
       if (!current) return current;
-      return current.map((item) => {
-        if (item.repair_task_id !== updated.repair_task_id) return item;
+      const byId = new Map(current.map((item) => [item.repair_task_id, item]));
+      updatedTasks.forEach((updated) => {
+        const existing = byId.get(updated.repair_task_id);
+        if (!existing) {
+          byId.set(updated.repair_task_id, updated);
+          return;
+        }
         const seen = new Set<string>();
-        const actionHistory = [...(item.action_history ?? []), ...(updated.action_history ?? [])].filter((entry) => {
+        const actionHistory = [...(existing.action_history ?? []), ...(updated.action_history ?? [])].filter((entry) => {
           const key = `${entry.action}:${entry.created_at ?? ''}:${entry.result_summary ?? ''}`;
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
         });
-        return { ...item, ...updated, action_history: actionHistory };
+        byId.set(updated.repair_task_id, { ...existing, ...updated, action_history: actionHistory });
       });
+      return Array.from(byId.values());
     });
   }
 
@@ -188,6 +195,7 @@ export function RepairTasksPage() {
                 <Space direction="vertical" size={2}>
                   <Typography.Text strong>{value}</Typography.Text>
                   <Typography.Text type="secondary">{record.recommendation}</Typography.Text>
+                  {record.parent_repair_task_id ? <Tag color="purple">子任务</Tag> : null}
                 </Space>
               ),
             },
@@ -207,6 +215,17 @@ export function RepairTasksPage() {
               render: (items: RepairTaskRecord['action_history']) => (
                 <Space direction="vertical" size={2}>
                   {items?.length ? items.map((item) => <Tag key={`${item.action}-${item.created_at ?? item.result_summary}`} color="blue">{item.action}</Tag>) : <Typography.Text type="secondary">未触发</Typography.Text>}
+                </Space>
+              ),
+            },
+            {
+              title: '推荐动作',
+              dataIndex: 'recommended_action',
+              width: 170,
+              render: (value, record) => (
+                <Space direction="vertical" size={2}>
+                  <Typography.Text>{value || record.next_actions?.[0] || '-'}</Typography.Text>
+                  {record.target_url ? <Button size="small" href={record.target_url}>打开入口</Button> : null}
                 </Space>
               ),
             },
@@ -271,6 +290,14 @@ export function RepairTasksPage() {
                     onClick={() => runAction(record, 'generate_remediation_plan')}
                   >
                     生成建议
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<FileSearchOutlined />}
+                    loading={actionMutation.isPending}
+                    onClick={() => runAction(record, 'create_followup_repair_tasks')}
+                  >
+                    拆分子任务
                   </Button>
                   <Button size="small" href={`/reports?task_id=${record.source_task_id}&panel=parameter-governance`}>
                     参数治理
@@ -412,6 +439,12 @@ function extractRecommendations(record: RepairTaskRecord): { area: string; title
     .filter((item): item is { area: string; title: string } => Boolean(item));
 }
 
+function extractRepairTasks(result: Record<string, unknown>): RepairTaskRecord[] {
+  const repairTasks = result.repair_tasks;
+  if (!Array.isArray(repairTasks)) return [];
+  return repairTasks.filter((item): item is RepairTaskRecord => isRecord(item) && typeof item.repair_task_id === 'string');
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -423,6 +456,9 @@ function renderCauseType(value: string) {
     weak_segment: '弱分层风险',
     judge_or_answer_quality: '回答或裁判质量',
     parameter_risk: '参数风险',
+    annotation: '人工审核',
+    workflow_parameters: '参数治理',
+    dataset: '数据修复',
   };
   return labels[value] ?? value;
 }

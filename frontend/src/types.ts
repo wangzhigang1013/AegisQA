@@ -335,6 +335,7 @@ export type TaskPreflightResult = {
 
 export type RepairTaskRecord = {
   repair_task_id: string;
+  parent_repair_task_id?: string | null;
   source_task_id: string;
   source_run_id?: string | null;
   cause_type: string;
@@ -345,6 +346,9 @@ export type RepairTaskRecord = {
   evidence: string[];
   recommendation: string;
   next_actions: string[];
+  recommended_action?: string | null;
+  target_url?: string | null;
+  remediation_area?: string | null;
   action_history?: {
     action: string;
     status: string;

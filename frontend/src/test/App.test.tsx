@@ -595,6 +595,41 @@ describe('AegisQA 前端工作台', () => {
             },
           });
         }
+        if (body.action === 'create_followup_repair_tasks') {
+          return jsonResponse({
+            action: 'create_followup_repair_tasks',
+            result: {
+              status: 'completed',
+              created_count: 2,
+              reused_count: 0,
+              repair_tasks: [
+                {
+                  ...demoRepairTask,
+                  repair_task_id: 'repair-followup-annotation',
+                  parent_repair_task_id: 'repair-demo',
+                  title: '低通过率分层修复建议',
+                  recommendation: 'payment 分层仍未改善，需要抽样复核。',
+                  recommended_action: 'seed_annotation_queue',
+                  target_url: '/annotation-queue?source_task_id=task-demo',
+                },
+                {
+                  ...demoRepairTask,
+                  repair_task_id: 'repair-followup-parameters',
+                  parent_repair_task_id: 'repair-demo',
+                  cause_type: 'workflow_parameters',
+                  title: '确认修复是否进入当前 Attempt',
+                  recommendation: '检查 task_override 和 Prompt 参数是否进入新 Attempt。',
+                  recommended_action: 'open_parameter_governance',
+                  target_url: '/reports?task_id=task-demo&panel=parameter-governance',
+                },
+              ],
+            },
+            repair_task: {
+              ...demoRepairTask,
+              action_history: [{ action: 'create_followup_repair_tasks', status: 'completed', result_summary: '已创建 2 个后续修复任务，复用 0 个。' }],
+            },
+          });
+        }
         return jsonResponse({
           action: 'evaluate_ci_gate',
           result: { status: 'blocked', blocking_failures: 1, target: { kind: 'task', id: 'task-demo' } },
@@ -1372,6 +1407,19 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/已生成 1 条修复建议/)).toBeInTheDocument();
     expect(screen.getByText('低通过率分层修复建议')).toBeInTheDocument();
     expect(screen.getByText('generate_remediation_plan')).toBeInTheDocument();
+  });
+
+  it('修复任务工作台支持把建议拆成可追踪子任务', async () => {
+    await renderWorkbench('/repair-tasks');
+
+    fireEvent.click(await screen.findByRole('button', { name: /拆分子任务/ }));
+
+    expect((await screen.findAllByText(/已创建 2 个后续修复任务/)).length).toBeGreaterThan(0);
+    expect(screen.getByText('create_followup_repair_tasks')).toBeInTheDocument();
+    expect(screen.getByText('低通过率分层修复建议')).toBeInTheDocument();
+    expect(screen.getByText('确认修复是否进入当前 Attempt')).toBeInTheDocument();
+    expect(screen.getByText('seed_annotation_queue')).toBeInTheDocument();
+    expect(screen.getByText('open_parameter_governance')).toBeInTheDocument();
   });
 
   it('Judge 审计创建按钮打开审计表单', async () => {

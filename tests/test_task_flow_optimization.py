@@ -247,3 +247,43 @@ def test_repair_task_can_generate_contextual_remediation_plan_after_retest(tmp_p
     assert result["result"]["recommendations"][0]["target_url"]
     assert result["repair_task"]["last_action_result"]["result"]["recommendations"]
     assert result["repair_task"]["action_history"][-1]["action"] == "generate_remediation_plan"
+
+
+def test_repair_task_can_split_remediation_plan_into_followup_tasks(tmp_path: Path) -> None:
+    client, dataset, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "修复建议拆分任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.95, "max_badcase_count": 0},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    repair = client.post(f"/tasks/{executed['task_id']}/repair-tasks/from-diagnostics").json()["repair_tasks"][0]
+    client.post(f"/repair-tasks/{repair['repair_task_id']}/actions", json={"action": "retest_and_compare"})
+    client.post(f"/repair-tasks/{repair['repair_task_id']}/actions", json={"action": "generate_remediation_plan"})
+
+    result = client.post(
+        f"/repair-tasks/{repair['repair_task_id']}/actions",
+        json={"action": "create_followup_repair_tasks"},
+    ).json()
+
+    assert result["action"] == "create_followup_repair_tasks"
+    assert result["result"]["created_count"] >= 2
+    assert result["result"]["reused_count"] == 0
+    assert result["repair_task"]["action_history"][-1]["action"] == "create_followup_repair_tasks"
+    followups = [item for item in client.get(f"/repair-tasks?source_task_id={executed['task_id']}").json() if item.get("parent_repair_task_id") == repair["repair_task_id"]]
+    assert {item["recommended_action"] for item in followups}.issuperset({"seed_annotation_queue", "open_parameter_governance"})
+    assert all(item["target_url"] for item in followups)
+
+    duplicate = client.post(
+        f"/repair-tasks/{repair['repair_task_id']}/actions",
+        json={"action": "create_followup_repair_tasks"},
+    ).json()
+
+    assert duplicate["result"]["created_count"] == 0
+    assert duplicate["result"]["reused_count"] >= result["result"]["created_count"]
