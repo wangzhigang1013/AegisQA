@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime
+from math import ceil
 from typing import Any
 from uuid import uuid4
 
@@ -507,10 +508,12 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.get("/annotation-queue")
     def list_annotation_queue(
-        status: str | None = None,
-        assignee: str | None = None,
+        status: str | None = Query(default=None),
+        assignee: str | None = Query(default=None),
         source_task_id: str | None = Query(default=None),
-    ) -> list[dict[str, Any]]:
+        page: int | None = Query(default=None, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         tasks = _list_records(ctx.store, "annotation_tasks")
         if status:
             tasks = [task for task in tasks if task.get("status") == status]
@@ -518,6 +521,8 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             tasks = [task for task in tasks if task.get("assignee") == assignee]
         if source_task_id:
             tasks = [task for task in tasks if task.get("source_task_id") == source_task_id]
+        if page is not None:
+            return _paginate_annotation_tasks(tasks, page=page, page_size=page_size)
         return tasks
 
     @app.post("/annotation-queue/{task_id}/assign")
@@ -570,6 +575,22 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         if kind:
             candidates = [candidate for candidate in candidates if candidate.get("kind") == kind]
         return candidates
+
+
+def _paginate_annotation_tasks(tasks: list[dict[str, Any]], *, page: int, page_size: int) -> dict[str, Any]:
+    total_items = len(tasks)
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 1), 100)
+    start = (safe_page - 1) * safe_page_size
+    return {
+        "items": tasks[start : start + safe_page_size],
+        "pagination": {
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "total_items": total_items,
+            "total_pages": ceil(total_items / safe_page_size) if total_items else 0,
+        },
+    }
 
 
 def _review_annotation_task(ctx: RouteContext, task_id: str, request: AnnotationReviewRequest, *, reviewer: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:

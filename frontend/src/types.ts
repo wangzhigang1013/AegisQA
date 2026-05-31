@@ -798,6 +798,16 @@ export type AnnotationTask = {
   updated_at: string;
 };
 
+export type AnnotationQueuePageResult = {
+  items: AnnotationTask[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total_items: number;
+    total_pages: number;
+  };
+};
+
 export type AnnotationCandidate = {
   candidate_id: string;
   kind: 'golden' | 'assertion' | string;

@@ -1462,6 +1462,12 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/dashboard/summary')) {
         return jsonResponse({ dataset_count: 12, skill_count: 34, workflow_count: 5, run_count: 8, latest_run: null, pass_rate: 0.92, badcase_count: 7 });
       }
+      if (url.includes('/annotation-queue?')) {
+        return jsonResponse({
+          items: demoAnnotationTasks,
+          pagination: { page: 1, page_size: 8, total_items: demoAnnotationTasks.length, total_pages: 1 },
+        });
+      }
       if (url.includes('/experiments') || url.endsWith('/annotation-queue')) {
         if (url.endsWith('/annotation-queue')) return jsonResponse(demoAnnotationTasks);
         return jsonResponse(demoExperiments);
@@ -2172,7 +2178,10 @@ describe('AegisQA 前端工作台', () => {
         return jsonResponse(demoAnnotationCandidates);
       }
       if (url.includes('/annotation-queue')) {
-        return jsonResponse(demoAnnotationTasks);
+        return jsonResponse({
+          items: demoAnnotationTasks,
+          pagination: { page: 1, page_size: 8, total_items: demoAnnotationTasks.length, total_pages: 1 },
+        });
       }
       if (url.endsWith('/tasks')) {
         return jsonResponse([demoTask]);
@@ -2208,6 +2217,50 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByLabelText('批量回流 Golden Dataset'));
     fireEvent.click(screen.getByRole('button', { name: /确认批量审核/ }));
     expect(await screen.findByText(/批量审核完成/)).toBeInTheDocument();
+  });
+
+  it('Annotation Queue 审核队列使用服务端分页', async () => {
+    const manyAnnotationTasks = Array.from({ length: 12 }, (_, index) => ({
+      ...demoAnnotationTasks[0],
+      task_id: `anno-page-${index}`,
+      item_id: `anno-item-${index}`,
+      reason: `需要复核 ${index}`,
+    }));
+    const queueRequests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('/annotation-candidates')) {
+        return jsonResponse([]);
+      }
+      if (url.includes('/annotation-queue')) {
+        const parsed = new URL(url, 'http://localhost');
+        queueRequests.push(url);
+        if (!parsed.searchParams.has('page')) {
+          return jsonResponse(manyAnnotationTasks);
+        }
+        const page = Number(parsed.searchParams.get('page') ?? 1);
+        const pageSize = Number(parsed.searchParams.get('page_size') ?? 8);
+        const start = (page - 1) * pageSize;
+        return jsonResponse({
+          items: manyAnnotationTasks.slice(start, start + pageSize),
+          pagination: { page, page_size: pageSize, total_items: manyAnnotationTasks.length, total_pages: Math.ceil(manyAnnotationTasks.length / pageSize) },
+        });
+      }
+      if (url.endsWith('/tasks')) {
+        return jsonResponse([demoTask]);
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/annotation-queue');
+
+    expect(await screen.findByText('anno-item-0')).toBeInTheDocument();
+    expect(screen.queryByText('anno-item-8')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('2'));
+    await waitFor(() => {
+      expect(queueRequests.some((request) => request.includes('page=2') && request.includes('page_size=8'))).toBe(true);
+    });
+    expect(await screen.findByText('anno-item-8')).toBeInTheDocument();
   });
 
   it('候选资产中心支持审批 Prompt/Skill 候选并创建 Workflow 草稿', async () => {

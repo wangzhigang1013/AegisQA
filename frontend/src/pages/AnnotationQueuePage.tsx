@@ -28,6 +28,8 @@ export function AnnotationQueuePage() {
   const [assignTask, setAssignTask] = useState<AnnotationTask | null>(null);
   const [bulkReviewOpen, setBulkReviewOpen] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
+  const [queuePage, setQueuePage] = useState(1);
+  const queuePageSize = 8;
   const [notice, setNotice] = useState<string | null>(null);
   const [reviewForm] = Form.useForm<ReviewValues>();
   const [assignForm] = Form.useForm<AssignValues>();
@@ -37,8 +39,8 @@ export function AnnotationQueuePage() {
   const bulkReviewLabel = Form.useWatch('human_label', bulkReviewForm);
 
   const queueQuery = useQuery({
-    queryKey: ['annotation-queue', statusFilter, assigneeFilter, sourceTaskId],
-    queryFn: () => api.annotationQueue({ status: statusFilter, assignee: assigneeFilter, source_task_id: sourceTaskId }),
+    queryKey: ['annotation-queue', statusFilter, assigneeFilter, sourceTaskId, queuePage, queuePageSize],
+    queryFn: () => api.annotationQueuePage({ status: statusFilter, assignee: assigneeFilter, source_task_id: sourceTaskId, page: queuePage, pageSize: queuePageSize }),
   });
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
   const candidatesQuery = useQuery({
@@ -97,6 +99,13 @@ export function AnnotationQueuePage() {
   });
 
   const candidateSummary = summarizeCandidates(candidatesQuery.data ?? []);
+  const queueItems = queueQuery.data?.items ?? [];
+  const queuePagination = queueQuery.data?.pagination;
+
+  function resetQueuePaging() {
+    setQueuePage(1);
+    setSelectedRowKeys([]);
+  }
 
   function openReview(task: AnnotationTask) {
     setReviewTask(task);
@@ -125,7 +134,10 @@ export function AnnotationQueuePage() {
             className="wide-search"
             placeholder="按状态筛选"
             value={statusFilter}
-            onChange={setStatusFilter}
+            onChange={(value) => {
+              setStatusFilter(value);
+              resetQueuePaging();
+            }}
             options={[
               { value: 'pending', label: '待领取' },
               { value: 'assigned', label: '已分派' },
@@ -137,7 +149,10 @@ export function AnnotationQueuePage() {
             className="wide-search"
             placeholder="按负责人筛选"
             value={assigneeFilter}
-            onChange={(event) => setAssigneeFilter(event.target.value)}
+            onChange={(event) => {
+              setAssigneeFilter(event.target.value);
+              resetQueuePaging();
+            }}
           />
           <Select
             allowClear
@@ -146,7 +161,10 @@ export function AnnotationQueuePage() {
             className="wide-search"
             placeholder="按来源任务筛选"
             value={sourceTaskId}
-            onChange={setSourceTaskId}
+            onChange={(value) => {
+              setSourceTaskId(value);
+              resetQueuePaging();
+            }}
             options={(tasksQuery.data ?? []).map((task) => ({ value: task.task_id, label: `${task.name} / ${task.status}` }))}
           />
         </Space>
@@ -171,9 +189,18 @@ export function AnnotationQueuePage() {
         <Table
           rowKey="task_id"
           loading={queueQuery.isLoading}
-          dataSource={queueQuery.data ?? []}
+          dataSource={queueItems}
           rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys, getCheckboxProps: (record) => ({ disabled: record.status === 'reviewed' }) }}
-          pagination={{ pageSize: 8 }}
+          pagination={{
+            current: queuePagination?.page ?? queuePage,
+            pageSize: queuePagination?.page_size ?? queuePageSize,
+            total: queuePagination?.total_items ?? queueItems.length,
+            showSizeChanger: false,
+            onChange: (page) => {
+              setSelectedRowKeys([]);
+              setQueuePage(page);
+            },
+          }}
           columns={[
             { title: '来源任务', dataIndex: 'source_task_name', render: (value) => value || '-' },
             { title: '样本', dataIndex: 'item_id', render: (value) => <code>{value}</code> },

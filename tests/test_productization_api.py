@@ -16,6 +16,20 @@ def _write_jsonl(path: Path) -> None:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _write_many_jsonl(path: Path, count: int) -> None:
+    rows = [
+        {
+            "question": f"需要人工审核的样本 {index}",
+            "reference": f"参考答案 {index}",
+            "expected_label": "fail",
+        }
+        for index in range(count)
+    ]
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
 def _graph_payload() -> dict:
     return {
         "name": "产品化增强验证 Workflow",
@@ -69,6 +83,15 @@ def _executed_task(client: TestClient, tmp_path: Path) -> dict:
         },
     ).json()
     return client.post(f"/tasks/{task['task_id']}/execute").json()
+
+
+def _executed_run_with_row_count(client: TestClient, tmp_path: Path, count: int) -> dict:
+    data_path = tmp_path / f"productization-{count}.jsonl"
+    _write_many_jsonl(data_path, count)
+    dataset = client.post("/datasets/from-path", json={"name": f"productization_dataset_{count}", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    run = client.post("/runs", json={"workflow": workflow, "dataset_id": dataset["dataset_id"], "dataset_version": dataset["version"]}).json()
+    return client.post(f"/runs/{run['run_id']}/execute").json()
 
 
 def test_experiment_snapshot_and_trace_tree_are_created_from_run(tmp_path: Path) -> None:
@@ -251,3 +274,25 @@ def test_annotation_queue_bulk_review_creates_candidate_assets(tmp_path: Path) -
     candidates = client.get(f"/annotation-candidates?source_task_id={task['task_id']}").json()
     assert {item["kind"] for item in candidates} == {"golden", "assertion"}
     assert {item["reviewer"] for item in candidates} == {"api"}
+
+
+def test_annotation_queue_supports_server_side_pagination_without_breaking_legacy_list(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    run = _executed_run_with_row_count(client, tmp_path, 12)
+
+    seed = client.post("/annotation-queue/seed-from-run", json={"run_id": run["run_id"], "strategy": "all", "limit": 12}).json()
+    assert seed["created_count"] == 12
+
+    legacy = client.get("/annotation-queue").json()
+    assert isinstance(legacy, list)
+    assert len(legacy) == 12
+
+    page = client.get("/annotation-queue", params={"page": 2, "page_size": 5}).json()
+    assert page["pagination"] == {"page": 2, "page_size": 5, "total_items": 12, "total_pages": 3}
+    assert [item["task_id"] for item in page["items"]] == [item["task_id"] for item in legacy[5:10]]
+
+    client.post(f"/annotation-queue/{seed['tasks'][0]['task_id']}/assign", json={"assignee": "qa_owner"})
+    assigned_page = client.get("/annotation-queue", params={"status": "assigned", "page": 1, "page_size": 5}).json()
+    assert assigned_page["pagination"]["total_items"] == 1
+    assert assigned_page["items"][0]["assignee"] == "qa_owner"

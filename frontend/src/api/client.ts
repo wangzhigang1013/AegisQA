@@ -1,5 +1,6 @@
 import type {
   AnnotationTask,
+  AnnotationQueuePageResult,
   AuditEvent,
   AnnotationCandidate,
   AssertionEvaluationResult,
@@ -160,6 +161,15 @@ export const api = {
     });
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<AnnotationTask[]>(`/annotation-queue${suffix}`);
+  },
+  annotationQueuePage: (filters: { status?: string; assignee?: string; source_task_id?: string; page?: number; pageSize?: number } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (!value) return;
+      query.set(key === 'pageSize' ? 'page_size' : key, String(value));
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<AnnotationQueuePageResult>(`/annotation-queue${suffix}`);
   },
   seedAnnotationQueue: (body: { run_id: string; strategy?: string; limit?: number; assignee?: string | null }) =>
     request<{ run_id: string; created_count: number; tasks: AnnotationTask[] }>('/annotation-queue/seed-from-run', {
