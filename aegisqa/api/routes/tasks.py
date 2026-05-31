@@ -8,7 +8,7 @@ from html import escape
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 
 from aegisqa.api.app import (
     CIGateRuleRequest,
@@ -502,9 +502,13 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         return _build_trace_tree(ctx.runner.get_run(task["run_id"]))
 
     @app.get("/tasks/{task_id}/trace-flow")
-    def get_task_trace_flow(task_id: str) -> dict[str, Any]:
+    def get_task_trace_flow(
+        task_id: str,
+        page: int = Query(1, ge=1),
+        page_size: int = Query(50, ge=1, le=100),
+    ) -> dict[str, Any]:
         task = _get_record(ctx.store, "tasks", task_id)
-        return build_task_trace_flow(task, ctx.runner.get_run(task["run_id"]))
+        return build_task_trace_flow(task, ctx.runner.get_run(task["run_id"]), page=page, page_size=page_size)
 
     @app.post("/runs", response_model=RunRecord)
     def create_run(request: RunCreateRequest) -> RunRecord:

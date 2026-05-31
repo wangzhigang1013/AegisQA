@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Trace Flow Sample Pagination”已完成并通过全量验证。本批次继续优化数据量变大后的全流程可解释性和稳定性：Trace Flow 样本列表不再一次性渲染全部样本，改为每页 8 条，让用户在查看 Dataset Row、Skill Input、参数来源、Output、Metrics 和 Badcase 时不会被上千条样本列表拖慢。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
+新一轮“Trace Flow Server Pagination”已完成并通过全量验证。本批次继续优化大任务下的数据流转解释体验：Trace Flow API 已支持 `page/page_size` 服务端分页，前端翻页会重新请求对应页，避免一次性传输和解析全部 Dataset Row、Skill Input、参数来源、Output、Metrics 与 Badcase 明细。SQLite 轻量仓储仍作为当前推荐本地持久化方案：Task、Run、Workflow、Judge、审计、报告导出审批请求等 JSON 文档可进入 SQLite，Dataset rows、上传文件、Skill 插件包继续保留本地文件路径。
 
 ## 当前已完成
 
@@ -67,6 +67,7 @@
 - Skill 参数处理已从各节点散落配置升级为统一解析：`schema_default < workflow_config < task_override < runtime_expression < secret_ref`，Run Step 会保存脱敏后的 `config_snapshot` 和字段级 `parameter_trace`。
 - Trace Flow 已从 Trace Tree 中独立出来，支持按 Task 查看 Dataset Row、Skill Input、参数来源、Output、Metrics、Badcase 和队列消息形状，帮助解释评测过程中的数据流转。
 - Trace Flow 样本列表已增加分页，默认每页 8 条，避免大任务一次性渲染全部样本。
+- Trace Flow API 已支持服务端分页，返回 `pagination` 元数据；页面翻页会请求对应页，避免大任务一次性传输和解析全部样本级数据流。
 - 首页已从产品能力展示调整为任务工作台，优先展示最近任务、待审批 Skill、待审核样本、失败任务和 CI Gate 阻断，并固定“上传数据 -> 选择 Workflow -> 创建任务 -> 查看报告”主流程入口。
 - 任务详情已抽成驾驶舱组件，按概览、样本、Trace、Badcase、Attempts、参数组织，参数页可查看任务冻结参数、Skill 参数来源和 Secret 脱敏说明。
 - 任务详情 Badcase 页签已增加分页，默认每页 8 条，避免大任务在执行中心详情抽屉中一次性渲染全部坏例。
@@ -117,7 +118,14 @@
 ## 最近验证
 
 - `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Flow 样本列表分页"`：先 RED 后 GREEN，最终 1 passed，确认 12 条 Trace Flow 样本只渲染当前页前 8 条。
+- `python -m pytest tests\test_trace_flow_api.py -q`：先 RED 后 GREEN，最终 2 passed，确认 `/tasks/{task_id}/trace-flow?page=2&page_size=5` 只返回 row_index 5 到 9，并返回分页元数据。
+- `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Flow 样本列表使用服务端分页"`：先 RED 后 GREEN，最终 1 passed，确认点击第 2 页会请求 `page=2&page_size=8` 并展示第 9 条样本。
+- `python -m pytest -q`：95 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+- `cd frontend && npm run typecheck`：通过。
 - `cd frontend && npm test`：6 个测试文件，75 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
+- `cd frontend && npm run build`：通过，TraceFlowPage chunk 正常生成。
+- `cd frontend && npm run e2e`：8 passed，主链路和 Workflow 画布 E2E 均通过。
+- `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "任务详情 Badcase 表分页"`：先 RED 后 GREEN，最终 1 passed，确认 12 条 Badcase 只渲染当前页前 8 条。
 - `cd frontend && npm run typecheck`：通过。
 - `python -m pytest -q`：94 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
@@ -353,6 +361,39 @@
 - Repository/Worker 生产化：在 SQLite 轻量模式之上继续推进 Repository 接口抽象、迁移脚本、索引策略、真实 Worker 队列和未来 MySQL/PostgreSQL 适配。
 
 ## 最近改动
+
+### 2026-06-01 Trace Flow Server Pagination
+
+- 改动摘要：Trace Flow 从前端本地分页进一步升级为服务端分页；后端按 `page/page_size` 切片后再构建样本级数据流，返回 `pagination` 元数据；前端分页器由后端 total 驱动，翻页会重新请求对应页，减少大任务首次打开时的网络负载和 JSON 解析成本。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/reports/trace_flow.py`
+  - `tests/test_trace_flow_api.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/TraceFlowPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/types.ts`
+  - `docs/superpowers/plans/2026-06-01-trace-flow-server-pagination.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_trace_flow_api.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Flow 样本列表使用服务端分页"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 后端分页测试先 RED 后 GREEN，最终 2 passed。
+  - 前端服务端分页测试先 RED 后 GREEN，最终 1 passed。
+  - 后端全量：95 passed；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
+  - TypeScript：通过。
+  - 前端全量：6 个测试文件，75 passed；仍有既有 Ant Design `useForm` 测试环境 warning，不影响结果。
+  - 前端构建：通过。
+  - Playwright E2E：8 passed。
+  - 空白检查：仅有 CRLF 换行转换 warning。
+- 下一步：继续从大任务性能和可解释性角度审查 Trace Tree、Task Report、Repair Task 等页面是否仍有全量载入明细的问题。
 
 ### 2026-06-01 Trace Flow Sample Pagination
 

@@ -7,17 +7,23 @@ Trace Tree 适合看调用层级，但评测用户更需要知道一条样本的
 
 from __future__ import annotations
 
+from math import ceil
 from typing import Any
 
 from aegisqa.engine.runner import RunItem, RunRecord, RunItemStep
 from aegisqa.reports.aggregator import aggregate_run_report
 
 
-def build_task_trace_flow(task: dict[str, Any], run: RunRecord) -> dict[str, Any]:
+def build_task_trace_flow(task: dict[str, Any], run: RunRecord, *, page: int = 1, page_size: int = 50) -> dict[str, Any]:
     """构建围绕 Task 的样本级数据流。"""
 
     report = aggregate_run_report(run)
     badcases_by_item_id = {badcase.item_id: badcase for badcase in report.badcases}
+    total_items = len(run.items)
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 1), 100)
+    start = (safe_page - 1) * safe_page_size
+    page_items = run.items[start : start + safe_page_size]
     return {
         "task": task,
         "dataset": {
@@ -41,7 +47,15 @@ def build_task_trace_flow(task: dict[str, Any], run: RunRecord) -> dict[str, Any
         },
         "queue_message_shape": sorted(run.queue_messages[0].keys()) if run.queue_messages else [],
         "data_edges": _data_edges(run),
-        "items": [_item_flow(item, badcases_by_item_id.get(item.item_id)) for item in run.items],
+        # Trace Flow 单条样本包含 row/context/steps/参数追踪，体积明显大于普通列表。
+        # 这里先切片再构建 item flow，避免大任务接口一次性序列化全部样本明细。
+        "items": [_item_flow(item, badcases_by_item_id.get(item.item_id)) for item in page_items],
+        "pagination": {
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "total_items": total_items,
+            "total_pages": ceil(total_items / safe_page_size) if total_items else 0,
+        },
     }
 
 

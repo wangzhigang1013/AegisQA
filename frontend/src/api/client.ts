@@ -487,7 +487,13 @@ export const api = {
   taskDiagnostics: (taskId: string) => request<TaskDiagnostics>(`/tasks/${taskId}/diagnostics`),
   taskParameterGovernance: (taskId: string) => request<TaskParameterGovernance>(`/tasks/${taskId}/parameter-governance`),
   taskTraceTree: (taskId: string) => request<TraceTree>(`/tasks/${taskId}/trace-tree`),
-  taskTraceFlow: (taskId: string) => request<TaskTraceFlow>(`/tasks/${taskId}/trace-flow`),
+  taskTraceFlow: (taskId: string, pagination: { page?: number; pageSize?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (pagination.page) query.set('page', String(pagination.page));
+    if (pagination.pageSize) query.set('page_size', String(pagination.pageSize));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<TaskTraceFlow>(`/tasks/${taskId}/trace-flow${suffix}`);
+  },
   executeRun: (runId: string) => request<RunRecord>(`/runs/${runId}/execute`, { method: 'POST' }),
   pauseRun: (runId: string) => request<RunRecord>(`/runs/${runId}/pause`, { method: 'POST' }),
   resumeRun: (runId: string) => request<RunRecord>(`/runs/${runId}/resume`, { method: 'POST' }),

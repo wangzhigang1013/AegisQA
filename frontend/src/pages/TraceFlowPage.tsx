@@ -9,9 +9,11 @@ import { PageHeader } from '../components/PageHeader';
 
 export function TraceFlowPage() {
   const { taskId } = useParams();
+  const [tracePage, setTracePage] = useState(1);
+  const tracePageSize = 8;
   const traceQuery = useQuery({
-    queryKey: ['task-trace-flow', taskId],
-    queryFn: () => api.taskTraceFlow(taskId ?? ''),
+    queryKey: ['task-trace-flow', taskId, tracePage, tracePageSize],
+    queryFn: () => api.taskTraceFlow(taskId ?? '', { page: tracePage, pageSize: tracePageSize }),
     enabled: Boolean(taskId),
   });
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -69,7 +71,17 @@ export function TraceFlowPage() {
                 <List
                   loading={traceQuery.isLoading}
                   dataSource={traceFlow.items}
-                  pagination={{ pageSize: 8, showSizeChanger: false }}
+                  pagination={{
+                    current: traceFlow.pagination?.page ?? tracePage,
+                    pageSize: traceFlow.pagination?.page_size ?? tracePageSize,
+                    total: traceFlow.pagination?.total_items ?? traceFlow.items.length,
+                    showSizeChanger: false,
+                    onChange: (page) => {
+                      // 翻页后当前样本明细可能已不在新页，清空选择让页面回到新页第一条。
+                      setSelectedItemId(null);
+                      setTracePage(page);
+                    },
+                  }}
                   renderItem={(item) => (
                     <List.Item className={item.item_id === selectedItem?.item_id ? 'selected-list-row' : ''} onClick={() => setSelectedItemId(item.item_id)}>
                       <List.Item.Meta

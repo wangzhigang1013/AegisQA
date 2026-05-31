@@ -6,10 +6,15 @@ from fastapi.testclient import TestClient
 from aegisqa.api.app import create_app
 
 
-def _write_jsonl(path: Path) -> None:
+def _write_jsonl(path: Path, count: int = 2) -> None:
     rows = [
-        {"question": "什么是 Trace?", "reference": "AegisQA", "expected_label": "pass", "scene": "trace"},
-        {"question": "什么是坏例?", "reference": "不存在的参考词", "expected_label": "fail", "scene": "trace"},
+        {
+            "question": "什么是 Trace?" if index == 0 else f"第 {index} 条样本是什么?",
+            "reference": "不存在的参考词" if index % 2 else "AegisQA",
+            "expected_label": "fail" if index % 2 else "pass",
+            "scene": "trace",
+        }
+        for index in range(count)
     ]
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
@@ -83,3 +88,29 @@ def test_task_trace_flow_explains_dataset_step_metrics_and_badcase(tmp_path: Pat
 
     failed_item = next(item for item in trace_flow["items"] if item["badcase"]["is_badcase"])
     assert failed_item["badcase"]["reason"] == "judge_label=fail"
+
+
+def test_task_trace_flow_supports_server_side_pagination(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "trace_many.jsonl"
+    _write_jsonl(data_path, count=12)
+
+    dataset = client.post("/datasets/from-path", json={"name": "trace_dataset_many", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "Trace 分页任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+        },
+    ).json()
+    client.post(f"/tasks/{task['task_id']}/execute")
+
+    trace_flow = client.get(f"/tasks/{task['task_id']}/trace-flow?page=2&page_size=5").json()
+
+    assert trace_flow["pagination"] == {"page": 2, "page_size": 5, "total_items": 12, "total_pages": 3}
+    assert [item["row_index"] for item in trace_flow["items"]] == [5, 6, 7, 8, 9]
+    assert all(item["row_index"] < 10 for item in trace_flow["items"])

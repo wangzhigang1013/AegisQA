@@ -1274,6 +1274,12 @@ export type TaskTraceFlow = {
   };
   queue_message_shape: string[];
   data_edges: { source: string; target: string }[];
+  pagination?: {
+    page: number;
+    page_size: number;
+    total_items: number;
+    total_pages: number;
+  };
   items: {
     item_id: string;
     row_id: string;

@@ -176,6 +176,7 @@ const demoTraceFlow = {
   attempt: { run_id: 'run-demo', status: 'completed', current_attempt: 1, started_at: null, finished_at: null },
   queue_message_shape: ['item_id'],
   data_edges: [{ source: 'dataset.row', target: 'answer.input' }],
+  pagination: { page: 1, page_size: 8, total_items: 1, total_pages: 1 },
   items: [
     {
       item_id: 'item-demo',
@@ -1417,7 +1418,7 @@ describe('AegisQA 前端工作台', () => {
       if (url.includes('/report-export-requests') && url.includes('task_id=task-demo')) {
         return jsonResponse([demoReportExportRequest]);
       }
-      if (url.endsWith('/tasks/task-demo/trace-flow')) {
+      if (url.includes('/tasks/task-demo/trace-flow')) {
         return jsonResponse(demoTraceFlow);
       }
       if (url.endsWith('/tasks/task-demo/trace-tree')) {
@@ -1814,7 +1815,7 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/workflow_config/)).toBeInTheDocument();
   });
 
-  it('Trace Flow 样本列表分页，避免大任务一次性渲染全部样本', async () => {
+  it('Trace Flow 样本列表使用服务端分页，避免大任务一次性传输全部样本', async () => {
     const manyTraceItems = Array.from({ length: 12 }, (_, index) => ({
       ...demoTraceFlow.items[0],
       item_id: `trace-item-${index}`,
@@ -1823,10 +1824,20 @@ describe('AegisQA 前端工作台', () => {
       row: { question: `问题 ${index}`, reference: 'AegisQA' },
     }));
     const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const traceRequests: string[] = [];
     vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
       const url = String(input);
-      if (url.endsWith('/tasks/task-demo/trace-flow')) {
-        return jsonResponse({ ...demoTraceFlow, items: manyTraceItems });
+      if (url.includes('/tasks/task-demo/trace-flow')) {
+        traceRequests.push(url);
+        const parsed = new URL(url, 'http://localhost');
+        const page = Number(parsed.searchParams.get('page') ?? 1);
+        const pageSize = Number(parsed.searchParams.get('page_size') ?? 12);
+        const start = (page - 1) * pageSize;
+        return jsonResponse({
+          ...demoTraceFlow,
+          items: manyTraceItems.slice(start, start + pageSize),
+          pagination: { page, page_size: pageSize, total_items: manyTraceItems.length, total_pages: Math.ceil(manyTraceItems.length / pageSize) },
+        });
       }
       return defaultFetch?.(input, init) ?? jsonResponse([]);
     });
@@ -1836,6 +1847,11 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText('trace-item-0')).toBeInTheDocument();
     expect(screen.getByText('trace-item-7')).toBeInTheDocument();
     expect(screen.queryByText('trace-item-8')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('2'));
+    await waitFor(() => {
+      expect(traceRequests.some((request) => request.includes('page=2') && request.includes('page_size=8'))).toBe(true);
+    });
+    expect(await screen.findByText('trace-item-8')).toBeInTheDocument();
   });
 
   it('Trace Tree 独立页面展示 Item 到 Skill Step 的调用树', async () => {
