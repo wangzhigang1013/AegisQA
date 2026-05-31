@@ -716,6 +716,32 @@ const demoCandidateRetestPlanPayload = {
   generated_at: '2026-05-31T06:00:00Z',
 };
 
+const demoCandidateBulkRetestPayload = {
+  status: 'completed',
+  requested_count: 2,
+  retested_count: 1,
+  skipped_count: 1,
+  results: [
+    {
+      candidate_id: 'candidate-ready',
+      status: 'retested',
+      task_id: 'task-candidate-ready',
+      run_id: 'run-candidate-ready',
+      candidate_experiment_id: 'exp-candidate-ready',
+      target_url: '/reports?task_id=task-candidate-ready',
+    },
+  ],
+  skipped: [
+    {
+      candidate_id: 'candidate-needs-publish',
+      next_action: 'publish_workflow_draft',
+      reason: '当前候选还不满足批量复跑条件，请先完成对应下一步。',
+      target_url: '/workflows/designer/draft-needs-publish',
+    },
+  ],
+  plan_summary: { total_candidates: 2, ready_for_retest: 0, needs_publish: 1, needs_draft: 0, already_retested: 1, overdue: 1, escalated: 1 },
+};
+
 const pendingPackageSkill = {
   ...demoSkills[0],
   skill_id: 'plugin.echo@0.1.0',
@@ -1369,6 +1395,9 @@ describe('AegisQA 前端工作台', () => {
       if (url.endsWith('/prompt-skill-candidates/bulk-review')) {
         return jsonResponse(demoCandidateBulkReviewPayload);
       }
+      if (url.endsWith('/prompt-skill-candidates/bulk-retest')) {
+        return jsonResponse(demoCandidateBulkRetestPayload);
+      }
       if (url.includes('/prompt-skill-candidates')) {
         return jsonResponse([demoPromptSkillCandidate]);
       }
@@ -1914,6 +1943,8 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/候选草稿已发布，可以直接复跑/)).toBeInTheDocument();
     expect(screen.getByText('candidate-needs-publish')).toBeInTheDocument();
     expect(screen.getByText(/候选草稿尚未发布/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /批量复跑可执行候选/ }));
+    expect(await screen.findByText(/批量复跑完成：1 个，跳过 1 个/)).toBeInTheDocument();
     expect(screen.getByText(/未指派：1/)).toBeInTheDocument();
     expect(screen.getAllByText(/逾期：1/).length).toBeGreaterThan(0);
     expect(screen.getByText('prompt-flow-v0')).toBeInTheDocument();

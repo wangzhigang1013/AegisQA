@@ -38,6 +38,9 @@ export function CandidateAssetsPage() {
   const candidates = candidatesQuery.data ?? [];
   const currentCandidateIds = candidates.map((candidate) => candidate.candidate_id);
   const baselineNotifications = mergeBaselineNotifications(lastBaselineNotifications, baselineNotificationsQuery.data ?? []);
+  const retestPlanItems = retestPlanQuery.data?.items ?? [];
+  const retestPlanCandidateIds = retestPlanItems.map((item) => item.candidate_id);
+  const readyRetestCount = retestPlanQuery.data?.summary.ready_for_retest ?? 0;
 
   function invalidateCandidateSummaries() {
     void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidate-workload'] });
@@ -152,6 +155,23 @@ export function CandidateAssetsPage() {
       setNotice(`候选复跑已完成：${payload.task.task_id}`);
     },
     onError: (error) => setNotice(`候选复跑失败：${formatApiError(error)}`),
+  });
+
+  const bulkRetestMutation = useMutation({
+    mutationFn: () =>
+      api.bulkRetestPromptSkillCandidates({
+        candidate_ids: retestPlanCandidateIds,
+        max_count: 10,
+        actor: 'qa_owner',
+      }),
+    onSuccess: (payload) => {
+      void queryClient.invalidateQueries({ queryKey: ['prompt-skill-candidates'] });
+      invalidateCandidateSummaries();
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      void queryClient.invalidateQueries({ queryKey: ['experiments'] });
+      setNotice(`批量复跑完成：${payload.retested_count} 个，跳过 ${payload.skipped_count} 个`);
+    },
+    onError: (error) => setNotice(`批量复跑失败：${formatApiError(error)}`),
   });
 
   const promotionReviewMutation = useMutation({
@@ -359,6 +379,20 @@ export function CandidateAssetsPage() {
             <Tag color="default">已复跑：{retestPlanQuery.data?.summary.already_retested ?? 0}</Tag>
             <Tag color={(retestPlanQuery.data?.summary.overdue ?? 0) > 0 ? 'red' : 'default'}>逾期：{retestPlanQuery.data?.summary.overdue ?? 0}</Tag>
             <Tag color={(retestPlanQuery.data?.summary.escalated ?? 0) > 0 ? 'volcano' : 'default'}>已升级：{retestPlanQuery.data?.summary.escalated ?? 0}</Tag>
+          </Space>
+          <Space wrap>
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              disabled={!readyRetestCount}
+              loading={bulkRetestMutation.isPending}
+              onClick={() => bulkRetestMutation.mutate()}
+            >
+              批量复跑可执行候选
+            </Button>
+            <Typography.Text type="secondary">
+              仅执行“直接复跑”的候选；待发布、待建草稿或已复跑候选会保留为跳过项。
+            </Typography.Text>
           </Space>
           <Table<PromptSkillCandidateRetestPlanItem>
             rowKey="candidate_id"

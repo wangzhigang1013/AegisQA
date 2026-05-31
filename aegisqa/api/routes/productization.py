@@ -60,6 +60,12 @@ class PromptSkillCandidateBulkReviewRequest(BaseModel):
     note: str = ""
 
 
+class PromptSkillCandidateBulkRetestRequest(BaseModel):
+    candidate_ids: list[str] | None = None
+    max_count: int = 10
+    actor: str = "api"
+
+
 class PromptSkillCandidateBulkAssignRequest(BaseModel):
     candidate_ids: list[str]
     owner: str
@@ -174,6 +180,10 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.post("/prompt-skill-candidates/bulk-review")
     def bulk_review_prompt_skill_candidates(request: PromptSkillCandidateBulkReviewRequest) -> dict[str, Any]:
         return _bulk_review_prompt_skill_candidates(ctx, request)
+
+    @app.post("/prompt-skill-candidates/bulk-retest")
+    def bulk_retest_prompt_skill_candidates(request: PromptSkillCandidateBulkRetestRequest) -> dict[str, Any]:
+        return _bulk_retest_prompt_skill_candidates(ctx, request)
 
     @app.post("/prompt-skill-candidates/escalate-overdue")
     def escalate_overdue_prompt_skill_candidates(request: PromptSkillCandidateEscalateRequest) -> dict[str, Any]:
@@ -322,102 +332,7 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         if candidate.get("retest_task_id"):
             return _prompt_skill_candidate_retest_payload(ctx, candidate)
 
-        draft = _prompt_skill_candidate_published_draft(ctx, candidate)
-        source_task_id = candidate.get("source_task_id")
-        if not source_task_id:
-            raise AegisQAError(
-                "PROMPT_SKILL_CANDIDATE_SOURCE_TASK_MISSING",
-                "候选资产缺少来源 Task，无法复用同一数据集进行候选复跑。",
-                status_code=400,
-                details={"candidate_id": candidate_id},
-            )
-        source_task = _get_record(ctx.store, "tasks", str(source_task_id))
-        workflow = ctx.workflow_service.get(str(draft["published_version_id"]))
-        dataset = ctx.dataset_service.get_version(str(source_task["dataset_id"]), int(source_task["dataset_version"]))
-        execution_config = dict(source_task.get("execution_config") or {})
-        run = ctx.runner.create_run(
-            RunRequest(
-                workflow=workflow,
-                dataset_id=dataset.dataset_id,
-                dataset_version=dataset.version,
-                chunk_size=execution_config.get("chunk_size"),
-                concurrency=execution_config.get("concurrency"),
-                sample_repeat_times=execution_config.get("sample_repeat_times"),
-                task_config_snapshot={
-                    "evaluation_goal": source_task.get("evaluation_goal"),
-                    "quality_gate": source_task.get("quality_gate", {}),
-                    "skill_overrides": execution_config.get("skill_overrides", {}),
-                    "candidate_id": candidate_id,
-                },
-            )
-        )
-        task = _build_task_record(
-            f"{source_task.get('name', '候选复跑任务')} - 候选复跑",
-            dataset.model_dump(mode="json"),
-            workflow,
-            run,
-            execution_config={**execution_config, "candidate_id": candidate_id, "source_task_id": source_task_id},
-            evaluation_goal=source_task.get("evaluation_goal"),
-            quality_gate=source_task.get("quality_gate", {}),
-            preflight_result=source_task.get("preflight_result"),
-        )
-        task["source_candidate_id"] = candidate_id
-        task["baseline_task_id"] = source_task_id
-        _save_record(ctx.store, "tasks", "task_id", task)
-        executed_run = ctx.runner.execute_run(run.run_id)
-        task = _refresh_task_from_run(ctx.store, task, executed_run)
-
-        baseline_experiment = _prompt_skill_candidate_baseline_experiment(ctx, candidate)
-        baseline_run = ctx.runner.get_run(str(baseline_experiment["run_id"])) if baseline_experiment else None
-        current_run = ctx.runner.get_run(str(source_task["run_id"]))
-        candidate_experiment = _build_experiment_snapshot(
-            executed_run,
-            name=f"候选复跑 {candidate_id}",
-            baseline_run=baseline_run,
-            tags=["prompt_skill_candidate", candidate_id],
-        )
-        _save_record(ctx.store, "experiments", "experiment_id", candidate_experiment)
-
-        scorecard, comparisons = _prompt_skill_candidate_scorecard(
-            baseline_experiment=baseline_experiment,
-            baseline_run=baseline_run,
-            current_task=source_task,
-            current_run=current_run,
-            candidate_task=task,
-            candidate_run=executed_run,
-        )
-        promotion_recommendation = _prompt_skill_candidate_promotion_recommendation(
-            scorecard=scorecard,
-            comparisons=comparisons,
-            source_task=source_task,
-        )
-        now = _now()
-        candidate["status"] = "retested"
-        candidate["retest_task_id"] = task["task_id"]
-        candidate["candidate_run_id"] = executed_run.run_id
-        candidate["candidate_experiment_id"] = candidate_experiment["experiment_id"]
-        candidate["scorecard"] = scorecard
-        candidate["comparisons"] = comparisons
-        candidate["promotion_recommendation"] = promotion_recommendation
-        candidate["retested_at"] = now
-        candidate["updated_at"] = now
-        _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
-        ctx.audit_service.record(
-            actor="api",
-            action="prompt_skill_candidate.retest",
-            target=candidate_id,
-            detail={"task_id": task["task_id"], "run_id": executed_run.run_id, "candidate_experiment_id": candidate_experiment["experiment_id"]},
-        )
-        return {
-            "status": "retested",
-            "candidate": candidate,
-            "task": task,
-            "candidate_experiment": candidate_experiment,
-            "scorecard": scorecard,
-            "comparisons": comparisons,
-            "promotion_recommendation": promotion_recommendation,
-            "target_url": f"/reports?task_id={task['task_id']}",
-        }
+        return _execute_prompt_skill_candidate_retest(ctx, candidate, actor="api", history_action="retest")
 
     @app.post("/prompt-skill-candidates/{candidate_id}/promotion-review")
     def create_workflow_promotion_review(candidate_id: str, request: WorkflowPromotionReviewRequest | None = None) -> dict[str, Any]:
@@ -809,6 +724,92 @@ def _bulk_review_prompt_skill_candidates(ctx: RouteContext, request: PromptSkill
     return {"reviewed_count": len(reviewed), "skipped_count": len(skipped), "candidates": reviewed, "skipped": skipped}
 
 
+def _bulk_retest_prompt_skill_candidates(ctx: RouteContext, request: PromptSkillCandidateBulkRetestRequest) -> dict[str, Any]:
+    if request.max_count <= 0:
+        raise AegisQAError(
+            "PROMPT_SKILL_CANDIDATE_RETEST_LIMIT_INVALID",
+            "批量复跑数量必须大于 0。",
+            status_code=400,
+            details={"max_count": request.max_count},
+        )
+    now = _now()
+    plan = _build_prompt_skill_candidate_retest_plan(ctx, status=None, now=now)
+    plan_items = {str(item["candidate_id"]): item for item in plan["items"]}
+    candidate_ids = request.candidate_ids or [str(item["candidate_id"]) for item in plan["items"]]
+    retested: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    max_count = min(request.max_count, 50)
+
+    for candidate_id in candidate_ids:
+        try:
+            candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
+        except KeyError:
+            skipped.append({"candidate_id": candidate_id, "reason": "not_found", "next_action": "missing"})
+            continue
+
+        plan_item = plan_items.get(candidate_id) or _prompt_skill_candidate_retest_plan_item(ctx, _with_candidate_sla_status(candidate, now=now), now=now)
+        if plan_item["next_action"] != "retest_candidate":
+            skipped.append(
+                {
+                    "candidate_id": candidate_id,
+                    "next_action": plan_item["next_action"],
+                    "reason": "当前候选还不满足批量复跑条件，请先完成对应下一步。",
+                    "target_url": plan_item.get("target_url"),
+                }
+            )
+            continue
+        if len(retested) >= max_count:
+            skipped.append(
+                {
+                    "candidate_id": candidate_id,
+                    "next_action": "retest_candidate",
+                    "reason": "已达到本次批量复跑数量上限。",
+                    "target_url": plan_item.get("target_url"),
+                }
+            )
+            continue
+        try:
+            payload = _execute_prompt_skill_candidate_retest(ctx, candidate, actor=request.actor, history_action="bulk_retest")
+        except AegisQAError as exc:
+            skipped.append(
+                {
+                    "candidate_id": candidate_id,
+                    "next_action": plan_item["next_action"],
+                    "reason": exc.message,
+                    "code": exc.code,
+                    "details": exc.details,
+                    "target_url": plan_item.get("target_url"),
+                }
+            )
+            continue
+        retested.append(
+            {
+                "candidate_id": candidate_id,
+                "status": payload["status"],
+                "task_id": payload["task"]["task_id"],
+                "run_id": payload["task"]["run_id"],
+                "candidate_experiment_id": payload["candidate_experiment"].get("experiment_id"),
+                "target_url": payload["target_url"],
+            }
+        )
+
+    ctx.audit_service.record(
+        actor=request.actor,
+        action="prompt_skill_candidate.bulk_retest",
+        target="prompt_skill_candidates",
+        detail={"candidate_ids": candidate_ids, "retested_count": len(retested), "skipped_count": len(skipped), "max_count": max_count},
+    )
+    return {
+        "status": "completed",
+        "requested_count": len(candidate_ids),
+        "retested_count": len(retested),
+        "skipped_count": len(skipped),
+        "results": retested,
+        "skipped": skipped,
+        "plan_summary": _build_prompt_skill_candidate_retest_plan(ctx, status=None, now=_now())["summary"],
+    }
+
+
 def _bulk_assign_prompt_skill_candidates(ctx: RouteContext, request: PromptSkillCandidateBulkAssignRequest) -> dict[str, Any]:
     if not request.candidate_ids:
         raise AegisQAError("PROMPT_SKILL_CANDIDATE_IDS_REQUIRED", "请至少选择一个候选资产。", status_code=400)
@@ -1001,6 +1002,120 @@ def _append_candidate_action(candidate: dict[str, Any], *, action: str, actor: s
         payload.update(extra)
     history.append(payload)
     candidate["action_history"] = history
+
+
+def _execute_prompt_skill_candidate_retest(ctx: RouteContext, candidate: dict[str, Any], *, actor: str, history_action: str) -> dict[str, Any]:
+    """执行候选 Workflow 的同数据集复跑，并把结果写回候选资产。
+
+    单条复跑和批量复跑必须共享这一条路径，否则后续指标、Experiment、晋升建议和
+    action_history 很容易出现语义漂移。
+    """
+
+    candidate_id = str(candidate["candidate_id"])
+    draft = _prompt_skill_candidate_published_draft(ctx, candidate)
+    source_task_id = candidate.get("source_task_id")
+    if not source_task_id:
+        raise AegisQAError(
+            "PROMPT_SKILL_CANDIDATE_SOURCE_TASK_MISSING",
+            "候选资产缺少来源 Task，无法复用同一数据集进行候选复跑。",
+            status_code=400,
+            details={"candidate_id": candidate_id},
+        )
+    source_task = _get_record(ctx.store, "tasks", str(source_task_id))
+    workflow = ctx.workflow_service.get(str(draft["published_version_id"]))
+    dataset = ctx.dataset_service.get_version(str(source_task["dataset_id"]), int(source_task["dataset_version"]))
+    execution_config = dict(source_task.get("execution_config") or {})
+    run = ctx.runner.create_run(
+        RunRequest(
+            workflow=workflow,
+            dataset_id=dataset.dataset_id,
+            dataset_version=dataset.version,
+            chunk_size=execution_config.get("chunk_size"),
+            concurrency=execution_config.get("concurrency"),
+            sample_repeat_times=execution_config.get("sample_repeat_times"),
+            task_config_snapshot={
+                "evaluation_goal": source_task.get("evaluation_goal"),
+                "quality_gate": source_task.get("quality_gate", {}),
+                "skill_overrides": execution_config.get("skill_overrides", {}),
+                "candidate_id": candidate_id,
+            },
+        )
+    )
+    task = _build_task_record(
+        f"{source_task.get('name', '候选复跑任务')} - 候选复跑",
+        dataset.model_dump(mode="json"),
+        workflow,
+        run,
+        execution_config={**execution_config, "candidate_id": candidate_id, "source_task_id": source_task_id},
+        evaluation_goal=source_task.get("evaluation_goal"),
+        quality_gate=source_task.get("quality_gate", {}),
+        preflight_result=source_task.get("preflight_result"),
+    )
+    task["source_candidate_id"] = candidate_id
+    task["baseline_task_id"] = source_task_id
+    _save_record(ctx.store, "tasks", "task_id", task)
+    executed_run = ctx.runner.execute_run(run.run_id)
+    task = _refresh_task_from_run(ctx.store, task, executed_run)
+
+    baseline_experiment = _prompt_skill_candidate_baseline_experiment(ctx, candidate)
+    baseline_run = ctx.runner.get_run(str(baseline_experiment["run_id"])) if baseline_experiment else None
+    current_run = ctx.runner.get_run(str(source_task["run_id"]))
+    candidate_experiment = _build_experiment_snapshot(
+        executed_run,
+        name=f"候选复跑 {candidate_id}",
+        baseline_run=baseline_run,
+        tags=["prompt_skill_candidate", candidate_id],
+    )
+    _save_record(ctx.store, "experiments", "experiment_id", candidate_experiment)
+
+    scorecard, comparisons = _prompt_skill_candidate_scorecard(
+        baseline_experiment=baseline_experiment,
+        baseline_run=baseline_run,
+        current_task=source_task,
+        current_run=current_run,
+        candidate_task=task,
+        candidate_run=executed_run,
+    )
+    promotion_recommendation = _prompt_skill_candidate_promotion_recommendation(
+        scorecard=scorecard,
+        comparisons=comparisons,
+        source_task=source_task,
+    )
+    now = _now()
+    candidate["status"] = "retested"
+    candidate["retest_task_id"] = task["task_id"]
+    candidate["candidate_run_id"] = executed_run.run_id
+    candidate["candidate_experiment_id"] = candidate_experiment["experiment_id"]
+    candidate["scorecard"] = scorecard
+    candidate["comparisons"] = comparisons
+    candidate["promotion_recommendation"] = promotion_recommendation
+    candidate["retested_at"] = now
+    candidate["updated_at"] = now
+    _append_candidate_action(
+        candidate,
+        action=history_action,
+        actor=actor,
+        note="候选 Workflow 已使用来源任务同一 Dataset Version 完成复跑。",
+        now=now,
+        extra={"task_id": task["task_id"], "run_id": executed_run.run_id, "candidate_experiment_id": candidate_experiment["experiment_id"]},
+    )
+    _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
+    ctx.audit_service.record(
+        actor=actor,
+        action=f"prompt_skill_candidate.{history_action}",
+        target=candidate_id,
+        detail={"task_id": task["task_id"], "run_id": executed_run.run_id, "candidate_experiment_id": candidate_experiment["experiment_id"]},
+    )
+    return {
+        "status": "retested",
+        "candidate": candidate,
+        "task": task,
+        "candidate_experiment": candidate_experiment,
+        "scorecard": scorecard,
+        "comparisons": comparisons,
+        "promotion_recommendation": promotion_recommendation,
+        "target_url": f"/reports?task_id={task['task_id']}",
+    }
 
 
 def _prompt_skill_candidate_published_draft(ctx: RouteContext, candidate: dict[str, Any]) -> dict[str, Any]:

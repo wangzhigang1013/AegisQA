@@ -833,6 +833,29 @@ export type PromptSkillCandidateRetestPlan = {
   generated_at?: string | null;
 };
 
+export type PromptSkillCandidateBulkRetestResult = {
+  status: string;
+  requested_count: number;
+  retested_count: number;
+  skipped_count: number;
+  results: {
+    candidate_id: string;
+    status: string;
+    task_id: string;
+    run_id?: string | null;
+    candidate_experiment_id?: string | null;
+    target_url?: string | null;
+  }[];
+  skipped: {
+    candidate_id: string;
+    next_action: string;
+    reason: string;
+    code?: string;
+    target_url?: string | null;
+  }[];
+  plan_summary?: PromptSkillCandidateRetestPlan['summary'];
+};
+
 export type PromptSkillCandidateBulkReviewResult = {
   reviewed_count: number;
   skipped_count: number;

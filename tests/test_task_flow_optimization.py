@@ -740,6 +740,81 @@ def test_prompt_skill_candidate_retest_plan_prioritizes_ready_and_overdue_candid
     assert actions["candidate-retested"] == "review_retest_result"
 
 
+def test_prompt_skill_candidate_bulk_retest_runs_ready_candidates_and_skips_blocked(tmp_path: Path) -> None:
+    client, dataset, workflow = _seed_dataset_and_workflow(tmp_path, include_reference=True)
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "候选批量复跑来源任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "prompt_experiment",
+            "quality_gate": {"pass_rate": 0.8, "max_badcase_count": 1},
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    store = client.app.state.store
+    _save_record(
+        store,
+        "workflow_drafts",
+        "draft_id",
+        {"draft_id": "draft-bulk-ready", "name": "可复跑草稿", "status": "published", "published_version_id": workflow["version_id"], "updated_at": "2026-05-31T00:00:00Z"},
+    )
+    _save_record(
+        store,
+        "workflow_drafts",
+        "draft_id",
+        {"draft_id": "draft-bulk-needs-publish", "name": "待发布草稿", "status": "draft", "updated_at": "2026-05-31T00:00:00Z"},
+    )
+    for record in [
+        {
+            "candidate_id": "candidate-bulk-ready",
+            "kind": "prompt_skill_version_diff",
+            "status": "draft_created",
+            "source_task_id": executed["task_id"],
+            "source_run_id": executed["run_id"],
+            "workflow_draft_id": "draft-bulk-ready",
+            "current_versions": [],
+            "version_diffs": [{"step_id": "answer", "field": "prompt_version", "baseline_value": "v0", "current_value": "v1"}],
+            "recommended_actions": ["retest_candidate"],
+            "updated_at": "2026-05-31T01:00:00Z",
+        },
+        {
+            "candidate_id": "candidate-bulk-needs-publish",
+            "kind": "prompt_skill_version_diff",
+            "status": "draft_created",
+            "source_task_id": executed["task_id"],
+            "source_run_id": executed["run_id"],
+            "workflow_draft_id": "draft-bulk-needs-publish",
+            "current_versions": [],
+            "version_diffs": [{"step_id": "answer", "field": "prompt_version", "baseline_value": "v0", "current_value": "v2"}],
+            "recommended_actions": ["publish_workflow_draft"],
+            "updated_at": "2026-05-31T02:00:00Z",
+        },
+    ]:
+        _save_record(store, "prompt_skill_candidates", "candidate_id", record)
+
+    result = client.post(
+        "/prompt-skill-candidates/bulk-retest",
+        json={"candidate_ids": ["candidate-bulk-ready", "candidate-bulk-needs-publish"], "max_count": 10, "actor": "qa_owner"},
+    ).json()
+
+    assert result["retested_count"] == 1
+    assert result["skipped_count"] == 1
+    assert result["results"][0]["candidate_id"] == "candidate-bulk-ready"
+    assert result["results"][0]["task_id"].startswith("task-")
+    assert result["skipped"][0]["candidate_id"] == "candidate-bulk-needs-publish"
+    assert result["skipped"][0]["next_action"] == "publish_workflow_draft"
+    updated = client.get("/prompt-skill-candidates?status=retested").json()[0]
+    assert updated["candidate_id"] == "candidate-bulk-ready"
+    assert updated["action_history"][-1]["action"] == "bulk_retest"
+    plan = client.get("/prompt-skill-candidates/retest-plan").json()
+    actions = {item["candidate_id"]: item["next_action"] for item in plan["items"]}
+    assert actions["candidate-bulk-ready"] == "review_retest_result"
+    assert actions["candidate-bulk-needs-publish"] == "publish_workflow_draft"
+
+
 def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_three_way_metrics(tmp_path: Path) -> None:
     client, dataset, _ = _seed_dataset_and_workflow(tmp_path, include_reference=True)
     baseline_workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload_with_answer_prompt("prompt-flow-v0")}).json()

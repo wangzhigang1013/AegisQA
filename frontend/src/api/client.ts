@@ -21,6 +21,7 @@ import type {
   JudgeAuditTrends,
   PromptSkillCandidate,
   PromptSkillCandidateBulkAssignResult,
+  PromptSkillCandidateBulkRetestResult,
   PromptSkillCandidateBulkReviewResult,
   PromptSkillCandidateEscalationResult,
   PromptSkillCandidateRetestPlan,
@@ -208,6 +209,11 @@ export const api = {
     }),
   bulkReviewPromptSkillCandidates: (body: { candidate_ids: string[]; decision: 'approved' | 'rejected'; reviewer?: string; note?: string }) =>
     request<PromptSkillCandidateBulkReviewResult>('/prompt-skill-candidates/bulk-review', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  bulkRetestPromptSkillCandidates: (body: { candidate_ids?: string[]; max_count?: number; actor?: string } = {}) =>
+    request<PromptSkillCandidateBulkRetestResult>('/prompt-skill-candidates/bulk-retest', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
