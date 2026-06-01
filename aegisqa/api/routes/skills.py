@@ -21,7 +21,21 @@ from aegisqa.skills.base import SkillManifest
 def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.get("/skills", response_model=list[SkillManifest])
     def list_skills() -> list[SkillManifest]:
-        return ctx.registry.list_skills()
+        skills = ctx.registry.list_skills()
+        settings = ctx.store.read_json(["settings", "skill_market.json"], default={}) or {}
+        if not settings.get("hide_builtin_skills"):
+            return skills
+
+        # 清空本地 Skill 市场时不能删除代码里的内置 Skill，否则测试和历史 Workflow
+        # 回放都会受影响；这里仅按当前 store 的上传插件记录过滤展示层。
+        from aegisqa.api.app import _list_records
+
+        package_skill_ids = {
+            str(record.get("manifest", {}).get("skill_id"))
+            for record in _list_records(ctx.store, "skill_packages")
+            if record.get("manifest", {}).get("skill_id")
+        }
+        return [skill for skill in skills if skill.skill_id in package_skill_ids]
 
     @app.get("/skills/packages")
     def list_skill_packages() -> list[dict[str, Any]]:

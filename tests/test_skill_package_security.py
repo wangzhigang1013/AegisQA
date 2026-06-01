@@ -27,6 +27,21 @@ def test_package_skill_timeout_can_be_configured_by_environment(monkeypatch) -> 
     assert resolve_package_skill_timeout_seconds() == DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS
 
 
+def test_skill_market_can_hide_builtin_skills_for_clean_local_store(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    assert client.get("/skills").json()
+
+    # 本地清空 Skill 市场只隐藏 builtin 展示，不删除内置代码；后续上传插件仍会展示。
+    app.state.store.write_json(["settings", "skill_market.json"], {"hide_builtin_skills": True})
+    assert client.get("/skills").json() == []
+
+    client.post("/skills/packages/upload", json={"filename": "echo.zip", "content_base64": _plugin_zip()})
+    skills = client.get("/skills").json()
+    assert [skill["skill_id"] for skill in skills] == ["plugin.echo@0.1.0"]
+
+
 def test_skill_package_records_contract_and_approval_metadata(tmp_path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)

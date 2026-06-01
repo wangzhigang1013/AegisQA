@@ -2,9 +2,42 @@
 
 ## 当前阶段
 
-Skill 插件执行稳定性优化阶段。本阶段在清理并准备示例插件包之后，继续修正插件运行时的真实任务适配问题：默认单次插件执行超时从演示级 5 秒放宽为 60 秒，并支持环境变量配置，避免后续包含模型调用、批处理或循环逻辑的 Skill 被过早杀掉。
+本地工作台数据清空阶段。本阶段按用户要求清空 Workflow 列表、Skill 市场和执行中心，保留数据集与上传原始文件，便于后续从干净状态重新上传 Skill、创建 Workflow、创建任务并验证完整流程。
 
 ## 最近改动
+
+### 2026-06-02 清空 Workflow 列表、Skill 市场与执行中心
+
+- 改动摘要：按用户要求清空本地 AegisQA 工作台的 Workflow 列表、Skill 市场和执行中心。已清空 `workflow_drafts`、`workflows`、`tasks`、`runs`、`task_preflights`、`badcases`、`annotation_tasks`、`annotation_candidates`、`skill_packages`、`uploaded_skill_packages`。数据集目录与原始上传文件未清空，避免误删后续评测需要的数据源。由于 `/skills` 默认会展示代码内置 builtin Skill，本次新增本地 store 展示开关 `data/aegisqa_store/settings/skill_market.json`，在当前本地环境中隐藏 builtin，仅展示用户后续上传的插件包；这样 Skill 市场视觉上可以真正为空，同时不删除内置代码和测试依赖。
+- 变更文件/目录：
+  - `aegisqa/api/routes/skills.py`
+  - `tests/test_skill_package_security.py`
+  - `data/aegisqa_store/settings/skill_market.json`
+  - `data/aegisqa_store/workflow_drafts`：909 条清空为 0。
+  - `data/aegisqa_store/workflows`：558 条清空为 0。
+  - `data/aegisqa_store/tasks`：505 条清空为 0。
+  - `data/aegisqa_store/runs`：639 条清空为 0。
+  - `data/aegisqa_store/task_preflights`：63 条清空为 0。
+  - `data/aegisqa_store/badcases`：142 条清空为 0。
+  - `data/aegisqa_store/annotation_tasks`：445 条清空为 0。
+  - `data/aegisqa_store/annotation_candidates`：426 条清空为 0。
+  - `data/aegisqa_store/skill_packages`：0 条保持 0。
+  - `data/aegisqa_store/uploaded_skill_packages`：1 个目录清空为 0。
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - PowerShell 安全校验目标路径在 `data/aegisqa_store` 下后清空对应目录。
+  - 使用 `fastapi.testclient.TestClient(create_app())` 验证 `/skills`、`/skills/packages`、`/workflow-drafts`、`/workflows`、`/tasks`、`/runs` 均返回 0 条。
+  - `python -m pytest tests\test_skill_package_security.py -q -k "hide_builtin or timeout_can_be_configured"`
+  - `python -m pytest -q`
+  - `git diff --check`
+- 测试结果：
+  - 本地接口验证：`/skills: 0`、`/skills/packages: 0`、`/workflow-drafts: 0`、`/workflows: 0`、`/tasks: 0`、`/runs: 0`。
+  - 目标测试：2 passed。
+  - 后端全量：124 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 空白检查：`git diff --check` 通过，仅输出 Windows CRLF 换行转换 warning。
+- 下一步：
+  - 如果当前前后端服务已启动，需要重启后端并刷新前端，才能让已运行进程加载新的 Skill 市场隐藏 builtin 策略。
+  - 后续可从桌面 `C:\Users\17343\Desktop\skills` 重新上传示例 zip，逐步验证 Skill 上传、合约测试、审批、Workflow 创建和任务执行。
 
 ### 2026-06-02 插件 Skill 单次执行超时放宽并支持配置
 
