@@ -175,6 +175,7 @@ function rowsToMapping(rows: MappingRow[], isOutputMapping: boolean, outputRefer
   return rows.reduce<Record<string, string>>((mapping, row) => {
     const field = row.field.trim();
     if (!field) return mapping;
+    if (!isOutputMapping && !row.path.trim()) return mapping;
     mapping[field] = isOutputMapping ? outputReference(field) : row.path;
     return mapping;
   }, {});

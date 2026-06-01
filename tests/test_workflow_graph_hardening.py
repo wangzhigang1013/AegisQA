@@ -128,6 +128,34 @@ def test_validate_accepts_node_field_reference_without_output_mapping(tmp_path) 
     assert payload["errors"] == []
 
 
+def test_validate_ignores_blank_optional_skill_input_mapping(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    graph = _base_graph()
+    graph["nodes"][0]["input_mapping"]["variables"] = ""
+
+    response = client.post("/workflow-graphs/validate", json={"graph": graph, "sample_row": {"question": "Q", "reference": "AegisQA"}})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["errors"] == []
+
+
+def test_validate_ignores_empty_optional_object_cell(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    graph = _base_graph()
+    graph["nodes"][0]["input_mapping"]["variables"] = "row.variables"
+
+    response = client.post("/workflow-graphs/validate", json={"graph": graph, "sample_row": {"question": "Q", "reference": "AegisQA", "variables": ""}})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["errors"] == []
+
+
 def test_validate_reports_unknown_skill_as_graph_issue(tmp_path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)

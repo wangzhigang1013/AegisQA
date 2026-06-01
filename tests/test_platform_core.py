@@ -98,6 +98,21 @@ def test_resolve_input_mapping_parses_json_object_string_for_object_field() -> N
     assert resolved["variables"] == {"topic": "AegisQA"}
 
 
+def test_resolve_input_mapping_ignores_blank_optional_object_field() -> None:
+    input_schema = {
+        "type": "object",
+        "required": ["prompt"],
+        "properties": {"prompt": {"type": "string"}, "variables": {"type": "object"}},
+    }
+    context = {"row": {"prompt": "生成回答", "variables": ""}, "context": {}, "metrics": {}, "steps": {}}
+
+    blank_path = resolve_input_mapping({"prompt": "row.prompt", "variables": ""}, context, input_schema)
+    blank_cell = resolve_input_mapping({"prompt": "row.prompt", "variables": "row.variables"}, context, input_schema)
+
+    assert blank_path == {"prompt": "生成回答"}
+    assert blank_cell == {"prompt": "生成回答"}
+
+
 def test_workflow_runner_executes_chunked_items_and_generates_report(tmp_path: Path) -> None:
     store = JsonStore(tmp_path / "store")
     dataset_service = DatasetService(store)

@@ -6,6 +6,36 @@
 
 ## 最近改动
 
+### 2026-06-02 可选 object 输入空值误报修复
+
+- 改动摘要：继续修复 `variables` 可选 object 字段误报 `TYPE_MISMATCH` 的问题。根因有两层：前端字段映射表在用户只修改必填字段时，也会把可选字段保存成空字符串映射；后端遇到可选 object/array 字段的空路径或空字符串单元格时，仍继续进入 object 类型校验。现在可选输入字段留空会被视为“不传该字段”，不会写入草稿 `input_mapping`，也不会在发布校验、试运行或执行时触发 `TYPE_MISMATCH`。合法 JSON 对象字符串仍会解析为 object；非空且不是合法 JSON 对象的普通字符串仍会报类型错误，这是符合 JSON Schema 的行为。
+- 变更文件：
+  - `aegisqa/core/mapper.py`
+  - `aegisqa/workflows/graph.py`
+  - `aegisqa/workflows/validation.py`
+  - `frontend/src/pages/workflowDesigner/FieldMappingEditor.tsx`
+  - `frontend/src/test/WorkflowDesignerPage.test.tsx`
+  - `tests/test_platform_core.py`
+  - `tests/test_workflow_graph_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_platform_core.py -q -k "blank_optional_object_field"`
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q -k "blank_optional_skill_input_mapping or empty_optional_object_cell"`
+  - `cd frontend && npm test -- src/test/WorkflowDesignerPage.test.tsx -t "可选输入字段"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+- 测试结果：
+  - RED：新增后端测试最初失败，确认空路径会触发 `MappingPathError`，空字符串单元格会触发 `TYPE_MISMATCH`；新增前端测试最初失败，确认保存草稿 payload 中出现 `variables: ""`。
+  - GREEN：目标后端测试 3 passed；目标前端测试 1 passed。
+  - 后端全量：通过，当前 121 个测试 passed。
+  - 前端 typecheck：通过。
+  - 前端全量：9 个测试文件、102 passed。
+  - 前端构建：通过，Vite 生产包生成完成。
+  - Windows `.pytest_cache` 仍有创建 warning，不影响测试结果。
+- 下一步：如果用户是在已启动的旧后端上复现，需要重启 FastAPI 进程加载本次修复；后续可在页面上增加“可选字段留空不会传入 Skill”的 Tooltip。
+
 ### 2026-06-02 Workflow 输出命名空间与 object 字符串兼容优化
 
 - 改动摘要：按最新反馈收敛 Workflow 输出语义。Skill 输出字段名由 `output_schema` 固定后，前端不再要求用户手写“输出写入路径”，Inspector 只展示下游引用，例如 `answer.answer`；后端执行器和 Graph 校验器会把每个节点输出自动暴露到 `节点ID.字段` 命名空间，`output_mapping` 仅保留为旧 Workflow 的高级别名兼容。字段路径候选也会同时展示节点字段引用。固定 `input_schema/output_schema` 的 Skill 继续锁定字段，只有没有固定 properties 的开放 schema 才能新增字段。另修复 `variables` 等 object 字段来自 CSV/JSONL 字符串时的误报：当 schema 明确要求 object/array 且值是合法 JSON 字符串时，会先解析再校验；普通字符串不会被无条件视为 object。

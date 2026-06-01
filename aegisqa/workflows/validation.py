@@ -62,17 +62,8 @@ def validate_workflow_step_contracts(
                 }
             )
 
-        empty_inputs = sorted(field for field, path in input_mapping.items() if not _mapping_path(path))
-        if empty_inputs:
-            issues.append(
-                {
-                    "code": "INPUT_MAPPING_PATH_EMPTY",
-                    "step_id": step_id,
-                    "skill_ref": skill_ref,
-                    "fields": empty_inputs,
-                    "message": f"输入映射路径不能为空：{', '.join(empty_inputs)}",
-                }
-            )
+        # 可选输入留空代表“不传该字段”，只有 required 字段会通过
+        # REQUIRED_INPUT_MAPPING_MISSING 阻断发布。
 
         empty_outputs = sorted(field for field, path in output_mapping.items() if not _mapping_path(path))
         if empty_outputs:

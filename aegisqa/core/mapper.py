@@ -127,6 +127,39 @@ def _coerce_json_container_string(value: Any, schema: dict[str, Any]) -> Any:
     return value
 
 
+def _schema_properties(schema: dict[str, Any]) -> dict[str, Any]:
+    properties = schema.get("properties", {})
+    return properties if isinstance(properties, dict) else {}
+
+
+def _schema_required_fields(schema: dict[str, Any]) -> set[str]:
+    required = schema.get("required", [])
+    return {str(item) for item in required} if isinstance(required, list) else set()
+
+
+def _has_mapping_path(path: Any) -> bool:
+    return isinstance(path, str) and bool(path.strip())
+
+
+def _is_optional_blank_container_value(field: str, value: Any, input_schema: dict[str, Any]) -> bool:
+    """可选 object/array 字段为空时按未提供处理。
+
+    CSV 单元格和前端可选映射经常会把未填写值表示成空字符串；如果该字段不是
+    required，继续拿空字符串做 object 校验只会制造误报。
+    """
+
+    if field in _schema_required_fields(input_schema):
+        return False
+    if value not in ("", None):
+        return False
+    field_schema = _schema_properties(input_schema).get(field)
+    if not isinstance(field_schema, dict):
+        return False
+    expected = field_schema.get("type")
+    expected_values = expected if isinstance(expected, list) else [expected]
+    return "object" in expected_values or "array" in expected_values or "properties" in field_schema
+
+
 def validate_json_schema(value: Any, schema: dict[str, Any], field_path: str = "$") -> Any:
     """校验最小 JSON Schema 子集。
 
@@ -153,7 +186,7 @@ def validate_json_schema(value: Any, schema: dict[str, Any], field_path: str = "
         for key in required:
             if key not in value:
                 raise TypeMismatchError(f"{field_path}.{key}", "required", "missing", None)
-        for key, child_schema in schema.get("properties", {}).items():
+        for key, child_schema in _schema_properties(schema).items():
             if key in value:
                 child_path = key if field_path == "$" else f"{field_path}.{key}"
                 value[key] = validate_json_schema(value[key], child_schema, child_path)
@@ -171,6 +204,13 @@ def resolve_input_mapping(
 ) -> dict[str, Any]:
     """解析输入映射，并在返回前完成强类型校验。"""
 
-    resolved = {field: get_by_path(context, source_path) for field, source_path in input_mapping.items()}
+    resolved: dict[str, Any] = {}
+    for field, source_path in input_mapping.items():
+        if not _has_mapping_path(source_path):
+            continue
+        value = get_by_path(context, source_path)
+        if _is_optional_blank_container_value(field, value, input_schema):
+            continue
+        resolved[field] = value
     validated = validate_json_schema(resolved, input_schema)
     return validated if isinstance(validated, dict) else resolved
