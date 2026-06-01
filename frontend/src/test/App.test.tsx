@@ -147,6 +147,11 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.change(await screen.findByPlaceholderText('搜索 Skill 名称、描述、标签或 schema'), { target: { value: 'score reference' } });
     expect(await screen.findByText('Deterministic LLM Judge')).toBeInTheDocument();
     expect(screen.getByText(/输入 3 \/ 输出 3/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /查看详情/ }));
+    expect(await screen.findByRole('dialog', { name: /Skill 详情：Deterministic LLM Judge/ })).toBeInTheDocument();
+    expect(screen.getByText('llm.judge@0.1.0')).toBeInTheDocument();
+    expect(screen.getByText('输入 Schema')).toBeInTheDocument();
+    expect(screen.getByText('输出 Schema')).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText('搜索 Skill 名称、描述、标签或 schema'), { target: { value: 'echo plugin' } });
     expect(await screen.findByText('Echo 插件')).toBeInTheDocument();
@@ -350,6 +355,19 @@ describe('AegisQA 前端工作台', () => {
   });
 
   it('Workflow Inspector 支持字段路径选择和参数预览', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/skills')) {
+        return jsonResponse(demoSkills.map((skill) => (
+          skill.skill_id === 'llm.call@0.1.0'
+            ? { ...skill, output_schema: { ...skill.output_schema, required: ['answer'] } }
+            : skill
+        )));
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
     await renderWorkbench('/workflows/designer/draft-test');
 
     expect(await screen.findByText('输入绑定')).toBeInTheDocument();
@@ -357,6 +375,9 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('运行参数')).toBeInTheDocument();
     expect(screen.getByText('输入字段 prompt')).toBeInTheDocument();
     expect(screen.getByText('输出字段 answer')).toBeInTheDocument();
+    expect(screen.getByText('必填输入')).toBeInTheDocument();
+    expect(screen.getByText('Skill 必返输出')).toBeInTheDocument();
+    expect(screen.getByText(/Skill 必返输出表示 handler 会返回该字段/)).toBeInTheDocument();
     expect(screen.getByDisplayValue('row.question')).toBeInTheDocument();
     expect(screen.getByDisplayValue('context.answer')).toBeInTheDocument();
     expect(screen.getByText(/未写入的输出不会传给下游/)).toBeInTheDocument();

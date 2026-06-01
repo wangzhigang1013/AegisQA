@@ -1,5 +1,5 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Input, Space, Table, Typography } from 'antd';
+import { Button, Input, Space, Table, Tag, Tooltip, Typography } from 'antd';
 
 type MappingRow = {
   id: string;
@@ -32,7 +32,12 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
   ];
   const options = buildSelectOptions(pathOptions, rows);
   const lockedBySchema = schemaFields.length > 0;
-  const fieldLabel = title.includes('输出') ? '输出字段' : '输入字段';
+  const isOutputMapping = title.includes('输出');
+  const fieldLabel = isOutputMapping ? '输出字段' : '输入字段';
+  const requiredLabel = isOutputMapping ? 'Skill 必返输出' : '必填输入';
+  const requiredHelp = isOutputMapping
+    ? '来自 output_schema.required，表示 Skill handler 必须返回该字段；是否写给下游由“输出写入”决定。'
+    : '来自 input_schema.required，发布和执行前必须绑定到数据集字段或上游输出。';
 
   function updateRow(row: MappingRow, patch: Partial<MappingRow>) {
     const nextRow = { ...row, ...patch };
@@ -54,6 +59,9 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
       <Space direction="vertical" size={2}>
         <Typography.Text strong>{title}</Typography.Text>
         <Typography.Text type="secondary">{description ?? '从 row、context、metrics 中选择字段路径，避免手写 JSON 出错。'}</Typography.Text>
+        {isOutputMapping ? (
+          <Typography.Text type="secondary">Skill 必返输出表示 handler 会返回该字段；是否写入下游由“输出写入”决定。</Typography.Text>
+        ) : null}
       </Space>
       <Table
         rowKey="id"
@@ -69,7 +77,11 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
               <Space direction="vertical" size={0}>
                 <Typography.Text>{fieldLabel} {row.field}</Typography.Text>
                 <Space size={4}>
-                  {row.required ? <Typography.Text type="danger">required</Typography.Text> : null}
+                  {row.required ? (
+                    <Tooltip title={requiredHelp}>
+                      <Tag color={isOutputMapping ? 'red' : 'volcano'}>{requiredLabel}</Tag>
+                    </Tooltip>
+                  ) : null}
                   {row.fieldType ? <Typography.Text type="secondary">{row.fieldType}</Typography.Text> : null}
                 </Space>
                 {!row.fromSchema ? (

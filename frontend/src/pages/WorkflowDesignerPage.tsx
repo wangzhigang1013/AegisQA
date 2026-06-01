@@ -27,7 +27,7 @@ import {
   type Connection,
   type Edge,
 } from '@xyflow/react';
-import { Alert, Button, Card, Col, Collapse, Descriptions, Divider, Form, Input, InputNumber, Row, Segmented, Select, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Col, Collapse, Descriptions, Divider, Drawer, Form, Input, InputNumber, Row, Segmented, Select, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -646,16 +646,6 @@ function WorkflowDesignerContent() {
                 </Button>
               ))}
             </Space>
-            {activePaletteSkill ? (
-              <Card size="small" title="Skill 详情" extra={<Button size="small" onClick={() => setActivePaletteSkill(null)}>关闭</Button>}>
-                <Space direction="vertical" className="drawer-stack">
-                  <Typography.Text strong>{activePaletteSkill.skill_id}</Typography.Text>
-                  <Typography.Text>{activePaletteSkill.description}</Typography.Text>
-                  <Typography.Text type="secondary">输入字段：{Object.keys(schemaProperties(activePaletteSkill.input_schema)).join(', ') || '-'}</Typography.Text>
-                  <Typography.Text type="secondary">输出字段：{Object.keys(schemaProperties(activePaletteSkill.output_schema)).join(', ') || '-'}</Typography.Text>
-                </Space>
-              </Card>
-            ) : null}
           </Card>
         </Col>
 
@@ -921,6 +911,40 @@ function WorkflowDesignerContent() {
           </Card>
         </Col>
       </Row>
+
+      <Drawer
+        title={activePaletteSkill ? `Skill 详情：${activePaletteSkill.name}` : 'Skill 详情'}
+        open={Boolean(activePaletteSkill)}
+        onClose={() => setActivePaletteSkill(null)}
+        width={560}
+      >
+        {activePaletteSkill ? (
+          <Space direction="vertical" size="large" className="drawer-stack">
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="Skill ID">{activePaletteSkill.skill_id}</Descriptions.Item>
+              <Descriptions.Item label="版本">{activePaletteSkill.version}</Descriptions.Item>
+              <Descriptions.Item label="状态">
+                <Space wrap>
+                  <Tag color={activePaletteSkill.enabled && activePaletteSkill.status === 'approved' ? 'green' : 'orange'}>{activePaletteSkill.status}</Tag>
+                  <Tag>{activePaletteSkill.enabled ? '已启用' : '未启用'}</Tag>
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="描述">{activePaletteSkill.description}</Descriptions.Item>
+              <Descriptions.Item label="标签">{activePaletteSkill.tags.join('、') || '-'}</Descriptions.Item>
+              <Descriptions.Item label="场景">{activePaletteSkill.scenarios.join('、') || '-'}</Descriptions.Item>
+            </Descriptions>
+            <Card size="small" title="输入字段">
+              <Typography.Text type="secondary">{Object.keys(schemaProperties(activePaletteSkill.input_schema)).join('、') || '无'}</Typography.Text>
+            </Card>
+            <Card size="small" title="输出字段">
+              <Typography.Text type="secondary">{Object.keys(schemaProperties(activePaletteSkill.output_schema)).join('、') || '无'}</Typography.Text>
+            </Card>
+            <Card size="small" title="输入 Schema"><pre>{JSON.stringify(activePaletteSkill.input_schema, null, 2)}</pre></Card>
+            <Card size="small" title="输出 Schema"><pre>{JSON.stringify(activePaletteSkill.output_schema, null, 2)}</pre></Card>
+            <Card size="small" title="配置 Schema"><pre>{JSON.stringify(activePaletteSkill.config_schema, null, 2)}</pre></Card>
+          </Space>
+        ) : null}
+      </Drawer>
 
       <Card className="flat-card" title="校验与试运行 Console">
         <Tabs

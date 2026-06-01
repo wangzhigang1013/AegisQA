@@ -6,6 +6,26 @@
 
 ## 最近改动
 
+### 2026-06-01 Workflow Palette 详情与字段标记说明修复
+
+- 改动摘要：修复 Workflow 设计器里 Skill Palette 点击“查看详情”看起来没有反应的问题。原实现把详情塞在左侧栏底部小卡片里，用户不容易发现；现改为右侧抽屉，展示 Skill ID、版本、状态、描述、标签、场景、输入/输出字段以及输入/输出/配置 Schema。同步优化节点 Inspector 的字段标记：输入 schema 的 required 显示为“必填输入”，输出 schema 的 required 显示为“Skill 必返输出”，并在“输出写入”区域说明它只表示 handler 会返回该字段，是否传递给下游仍由输出写入决定，避免被误解为错误。
+- 变更文件：
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/pages/workflowDesigner/FieldMappingEditor.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow Skill Palette|Workflow Inspector 支持字段路径"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test -- src/test/App.test.tsx`
+  - `cd frontend && npm run build`
+  - `git diff --check`
+- 测试结果：
+  - RED：新增测试最初失败，确认 Palette 详情没有明显弹层，Inspector 仍显示英文 `required` 且缺少输出标记解释。
+  - GREEN：目标测试 2 passed；`App.test.tsx` 全量 52 passed；前端 typecheck 通过；前端 build 通过。
+  - 空白检查：`git diff --check` 通过，仅输出 Windows CRLF 换行转换 warning，未发现空白错误。
+- 下一步：如果继续细化 Workflow 体验，可把 Inspector 输入候选按“当前数据集字段 / 直接上游输出 / 远端上下文 / metrics”分组，并把 output_schema.required 与实际 output_mapping 覆盖率做成发布前提示。
+
 ### 2026-06-01 数据集上传 500 根因定位与提示优化
 
 - 改动摘要：定位用户上传数据集时看到“请求失败：500（HTTP_ERROR）”的根因。日志显示 5173 前端开发服务器的 Vite 代理访问 `127.0.0.1:8000` 失败：`connect ECONNREFUSED 127.0.0.1:8000`，不是 DatasetService 解析失败。已重新启动 FastAPI 后端到 `http://127.0.0.1:8000`，并通过 `http://127.0.0.1:5173/api/datasets/upload` 直接验证 JSONL 上传返回 200。前端 API client 增加空 500 识别：当 `/api` 代理返回没有结构化响应的 500 时，提示“后端服务不可用，请确认 FastAPI 已启动在 http://127.0.0.1:8000。”，避免用户只看到泛化 HTTP_ERROR。
