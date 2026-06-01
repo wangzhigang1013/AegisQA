@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { demoWorkflowGraph } from '../../data/demo';
+import { demoSkills, demoWorkflowGraph } from '../../data/demo';
 import {
   buildAvailableFieldPaths,
   buildWorkflowGraph,
@@ -48,6 +48,33 @@ describe('Workflow 画布图模型', () => {
     expect(paths).toContain('context.answer');
     expect(paths).toContain('metrics.tokens');
     expect(paths).not.toContain('metrics.judge_score');
+  });
+
+  it('即使上游节点没有 output_mapping，也用 Skill output_schema 生成输出候选', () => {
+    const graph = {
+      ...demoWorkflowGraph,
+      nodes: demoWorkflowGraph.nodes.map((node) => (node.node_id === 'answer' ? { ...node, output_mapping: {} } : node)),
+    };
+
+    const paths = buildAvailableFieldPaths(
+      {
+        dataset_id: 'dataset-demo',
+        name: '问答集',
+        version: 1,
+        version_id: 'dataset-demo:v1',
+        row_count: 1,
+        field_schema: { question: 'string', reference: 'string' },
+        field_paths: ['row.question', 'row.reference'],
+        preview: [],
+        golden: true,
+      },
+      graph,
+      'judge_a',
+      demoSkills,
+    );
+
+    expect(paths).toContain('answer.answer');
+    expect(paths).toContain('answer.tokens');
   });
 
   it('在前端发现缺 Skill、Branch 条件缺失和坏 JSON 配置', () => {

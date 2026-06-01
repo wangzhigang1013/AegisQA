@@ -34,7 +34,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError, api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { demoSkills, demoWorkflowGraph } from '../data/demo';
-import type { DatasetVersion, GraphValidationResult, SkillManifest, WorkflowGraph, WorkflowGraphNode } from '../types';
+import type { DatasetVersion, GraphIssue, GraphValidationResult, SkillManifest, WorkflowGraph, WorkflowGraphNode } from '../types';
 import { FieldMappingEditor } from './workflowDesigner/FieldMappingEditor';
 import {
   buildAvailableFieldPaths,
@@ -84,6 +84,7 @@ function WorkflowDesignerContent() {
   const [isDirty, setIsDirty] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [skillSearch, setSkillSearch] = useState('');
+  const [datasetFieldSearch, setDatasetFieldSearch] = useState('');
   const [activePaletteSkill, setActivePaletteSkill] = useState<SkillManifest | null>(null);
   const [historyPast, setHistoryPast] = useState<WorkflowGraph[]>([]);
   const [historyFuture, setHistoryFuture] = useState<WorkflowGraph[]>([]);
@@ -160,9 +161,12 @@ function WorkflowDesignerContent() {
   const selectedNode = selectedNodeId ? nodes.find((node) => node.id === selectedNodeId) ?? null : null;
   const selectedGraphNode = selectedNode?.data.graphNode ?? null;
   const selectedSkill = selectedGraphNode?.skill_ref ? skills.find((skill) => skill.skill_id === selectedGraphNode.skill_ref) ?? null : null;
-  const fieldPathOptions = useMemo(() => buildAvailableFieldPaths(selectedDataset, graph, selectedGraphNode?.node_id), [selectedDataset, graph, selectedGraphNode?.node_id]);
+  const fieldPathOptions = useMemo(() => buildAvailableFieldPaths(selectedDataset, graph, selectedGraphNode?.node_id, skills), [selectedDataset, graph, selectedGraphNode?.node_id, skills]);
   const datasetFieldRows = useMemo(() => buildDatasetFieldRows(selectedDataset), [selectedDataset]);
+  const filteredDatasetFieldRows = useMemo(() => filterDatasetFieldRows(datasetFieldRows, datasetFieldSearch), [datasetFieldRows, datasetFieldSearch]);
   const paletteSkills = useMemo(() => searchSkills(skills, skillSearch).slice(0, skillSearch.trim() ? 20 : 5), [skillSearch, skills]);
+  const validationErrors = useMemo(() => validationErrorsFromResult(consoleResult), [consoleResult]);
+  const selectedNodeIssues = useMemo(() => validationErrors.filter((issue) => issue.node_id === selectedNodeId), [validationErrors, selectedNodeId]);
   const selectedOutgoingEdges = selectedNodeId ? edges.filter((edge) => edge.source === selectedNodeId) : [];
   const connectableTargets = selectedNodeId
     ? nodes.filter((node) => node.id !== selectedNodeId && !selectedOutgoingEdges.some((edge) => edge.target === node.id))
@@ -174,6 +178,7 @@ function WorkflowDesignerContent() {
       setConsoleResult(result);
       setConsoleText(result.ok ? '校验通过：DAG 无环，连线和字段映射满足发布要求。' : '校验失败：请查看错误列表并修正节点配置。');
       setConsoleTab(result.ok ? 'summary' : 'issues');
+      if (!result.ok) focusFirstIssueNode(result.errors);
     },
     onError: (error) => setConsoleText(error instanceof Error ? error.message : '校验请求失败'),
   });
@@ -461,6 +466,22 @@ function WorkflowDesignerContent() {
     setConsoleText('已重做上一步画布操作。');
   }
 
+  function selectIssueNode(issue: { node_id?: string }) {
+    if (issue.node_id && nodesRef.current.some((node) => node.id === issue.node_id)) {
+      setSelectedNodeId(issue.node_id);
+      setSelectedEdgeId(null);
+    }
+    setConsoleTab('issues');
+  }
+
+  function focusFirstIssueNode(issues: { node_id?: string }[]) {
+    const firstNodeIssue = issues.find((issue) => issue.node_id && nodesRef.current.some((node) => node.id === issue.node_id));
+    if (firstNodeIssue?.node_id) {
+      setSelectedNodeId(firstNodeIssue.node_id);
+      setSelectedEdgeId(null);
+    }
+  }
+
   const isWaitingForRouteDraft = Boolean(routeDraftId && !routeDraftQuery.data && routeDraftQuery.isFetching);
   if (isWaitingForRouteDraft) {
     return (
@@ -533,6 +554,8 @@ function WorkflowDesignerContent() {
         />
       ) : null}
 
+      <InlineIssueSummary issues={validationErrors} onSelectNode={selectIssueNode} />
+
       <Alert
         type="info"
         showIcon
@@ -588,17 +611,31 @@ function WorkflowDesignerContent() {
         </Row>
         {selectedDataset ? (
           <Card size="small" className="flat-card" title="数据集字段预览">
+            <Space direction="vertical" className="drawer-stack">
+              <Space wrap>
+                <Typography.Text type="secondary">
+                  共 {datasetFieldRows.length} 个字段，已开启搜索和分页；输入绑定里也会按关键词筛选候选路径。
+                </Typography.Text>
+                <Input
+                  allowClear
+                  placeholder="搜索字段路径、类型或示例值"
+                  value={datasetFieldSearch}
+                  onChange={(event) => setDatasetFieldSearch(event.target.value)}
+                  className="wide-search"
+                />
+              </Space>
             <Table
               size="small"
-              pagination={false}
+              pagination={filteredDatasetFieldRows.length > 8 ? { pageSize: 8, size: 'small', showSizeChanger: false } : false}
               rowKey="path"
-              dataSource={datasetFieldRows}
+              dataSource={filteredDatasetFieldRows}
               columns={[
                 { title: '可用路径', dataIndex: 'path' },
                 { title: '字段类型', dataIndex: 'type' },
                 { title: '示例值', dataIndex: 'example', render: (value) => <Typography.Text>{String(value ?? '')}</Typography.Text> },
               ]}
             />
+            </Space>
           </Card>
         ) : null}
       </Card>
@@ -691,8 +728,10 @@ function WorkflowDesignerContent() {
         <Col xs={24} xl={6}>
           <Card className="flat-card full-height" title="节点 Inspector">
             {selectedGraphNode ? (
-              <Tabs
-                items={[
+              <Space direction="vertical" className="drawer-stack">
+                <NodeIssuePanel issues={selectedNodeIssues} />
+                <Tabs
+                  items={[
                   {
                     key: 'basic',
                     label: '基础配置',
@@ -905,8 +944,9 @@ function WorkflowDesignerContent() {
                       />
                     ),
                   },
-                ]}
-              />
+                  ]}
+                />
+              </Space>
             ) : (
               <Alert type="info" showIcon message={selectedEdgeId ? `当前选中连线：${selectedEdgeId}` : '请选择节点后编辑配置。'} />
             )}
@@ -1047,6 +1087,12 @@ function buildDatasetFieldRows(dataset: DatasetVersion | null) {
   });
 }
 
+function filterDatasetFieldRows(rows: ReturnType<typeof buildDatasetFieldRows>, query: string) {
+  const keyword = query.trim().toLowerCase();
+  if (!keyword) return rows;
+  return rows.filter((row) => [row.path, row.type, row.example].some((value) => String(value ?? '').toLowerCase().includes(keyword)));
+}
+
 function searchSkills(skills: SkillManifest[], query: string): SkillManifest[] {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) {
@@ -1122,6 +1168,61 @@ function validationResultFromApiError(error: unknown, graph: WorkflowGraph): Gra
   };
 }
 
+function validationErrorsFromResult(result: GraphValidationResult | Record<string, unknown> | null): GraphIssue[] {
+  if (!result || !('errors' in result) || !Array.isArray(result.errors)) {
+    return [];
+  }
+  return result.errors as GraphIssue[];
+}
+
+function InlineIssueSummary({ issues, onSelectNode }: { issues: GraphIssue[]; onSelectNode: (issue: GraphIssue) => void }) {
+  if (!issues.length) return null;
+  return (
+    <Alert
+      type="error"
+      showIcon
+      message="当前校验问题"
+      description={
+        <Space direction="vertical" className="drawer-stack">
+          {issues.slice(0, 3).map((issue) => (
+            <Space key={`${issue.code}-${issue.node_id ?? issue.message}`} wrap align="start">
+              <Tag color="red">{issue.code}</Tag>
+              <Typography.Text>{issue.message}</Typography.Text>
+              {issue.node_id ? (
+                <Button size="small" onClick={() => onSelectNode(issue)}>
+                  定位节点 {issue.node_id}
+                </Button>
+              ) : null}
+            </Space>
+          ))}
+          {issues.length > 3 ? <Typography.Text type="secondary">还有 {issues.length - 3} 个问题，完整列表在页面底部 Console 的“错误与建议”。</Typography.Text> : null}
+        </Space>
+      }
+    />
+  );
+}
+
+function NodeIssuePanel({ issues }: { issues: GraphIssue[] }) {
+  if (!issues.length) return null;
+  return (
+    <Alert
+      type="error"
+      showIcon
+      message="当前节点问题"
+      description={
+        <Space direction="vertical" size={4}>
+          {issues.map((issue) => (
+            <Space key={`${issue.code}-${issue.message}`} direction="vertical" size={2}>
+              <Typography.Text>{issue.message}</Typography.Text>
+              {issueRepairSuggestion(issue) ? <Typography.Text type="secondary">{issueRepairSuggestion(issue)}</Typography.Text> : null}
+            </Space>
+          ))}
+        </Space>
+      }
+    />
+  );
+}
+
 function IssueList({ result }: { result: GraphValidationResult | Record<string, unknown> | null }) {
   if (!result || !('errors' in result)) {
     return <Typography.Text type="secondary">暂无校验结果。</Typography.Text>;
@@ -1154,6 +1255,16 @@ function IssueList({ result }: { result: GraphValidationResult | Record<string, 
 }
 
 function issueRepairSuggestion(error: { code: string; details?: Record<string, unknown> }) {
+  if (error.code === 'UPSTREAM_OUTPUT_NOT_CONNECTED') {
+    const referencedNode = stringValue(error.details?.referenced_node_id, '被引用节点');
+    const currentNode = stringValue(error.details?.current_node_id, '当前节点');
+    const missingPath = stringValue(error.details?.missing_path, '节点ID.字段');
+    return `修复建议：先从 ${referencedNode} 连接到 ${currentNode}，让画布形成明确数据依赖，再在输入绑定中使用 ${missingPath}；没有连线时执行器不会保证上游先运行。`;
+  }
+  if (error.code === 'MAPPING_PATH_MISSING') {
+    const missingPath = stringValue(error.details?.missing_path, '当前路径');
+    return `修复建议：确认 ${missingPath} 存在于数据集字段、上游节点输出或 context/metrics 中；如果它是节点输出，请先画出对应上游连线。`;
+  }
   if (error.code === 'REQUIRED_INPUT_MAPPING_MISSING') {
     const missingFields = Array.isArray(error.details?.missing_fields) ? error.details.missing_fields.filter((field): field is string => typeof field === 'string') : [];
     const fieldText = missingFields.length ? `（${missingFields.join('、')}）` : '';

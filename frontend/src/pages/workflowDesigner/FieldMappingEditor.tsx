@@ -1,5 +1,5 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import { Button, Input, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { AutoComplete, Button, Input, Space, Table, Tag, Tooltip, Typography } from 'antd';
 
 type MappingRow = {
   id: string;
@@ -41,7 +41,7 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
   const requiredHelp = isOutputMapping
     ? '来自 output_schema.required，表示 Skill handler 必须返回该字段；是否写给下游由“输出写入”决定。'
     : '来自 input_schema.required，发布和执行前必须绑定到数据集字段或上游输出。';
-  const firstOutputReference = rows[0] ? outputReference(rows[0].field) : `${nodeId || '节点ID'}.字段`;
+const firstOutputReference = rows[0] ? outputReference(rows[0].field) : `${nodeId || '节点ID'}.字段`;
 
   function updateRow(row: MappingRow, patch: Partial<MappingRow>) {
     const nextRow = { ...row, ...patch };
@@ -65,6 +65,9 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
         <Typography.Text type="secondary">{description ?? '从 row、context、metrics 中选择字段路径，避免手写 JSON 出错。'}</Typography.Text>
         {isOutputMapping ? (
           <Typography.Text type="secondary">Skill 必返输出表示 handler 会返回该字段；下游节点直接在输入绑定里选择 {firstOutputReference} 这类路径，不需要手写输出路径。</Typography.Text>
+        ) : null}
+        {!isOutputMapping && pathOptions.length > 80 ? (
+          <Typography.Text type="secondary">候选路径较多，输入关键词会搜索；下拉只展示最相关的前 80 条，也可以直接手写路径。</Typography.Text>
         ) : null}
       </Space>
       <Table
@@ -109,15 +112,17 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
                 title: '路径',
                 dataIndex: 'path',
                 render: (_: unknown, row: MappingRow) => (
-                  <Input
-                    aria-label={`字段路径 ${row.field}`}
+                  <AutoComplete
                     value={row.path}
+                    options={options}
                     className="full-width-control"
-                    list={pathListId(title, row.id)}
-                    placeholder="选择 row/context/metrics 路径"
+                    popupMatchSelectWidth={false}
+                    filterOption={(input, option) => String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())}
                     // 字段路径既可能来自当前 Dataset，也可能来自用户刚设计的上游输出；允许自由输入，避免保存成只读模板。
-                    onChange={(event) => updateRow(row, { path: event.target.value })}
-                  />
+                    onChange={(path) => updateRow(row, { path })}
+                  >
+                    <Input aria-label={`字段路径 ${row.field}`} placeholder="搜索或输入 row/context/节点ID.字段" />
+                  </AutoComplete>
                 ),
               },
           {
@@ -130,15 +135,6 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
           },
         ]}
       />
-      {isOutputMapping
-        ? null
-        : rows.map((row) => (
-            <datalist key={row.id} id={pathListId(title, row.id)}>
-              {options.map((option) => (
-                <option key={option.value} value={option.value} />
-              ))}
-            </datalist>
-          ))}
       {lockedBySchema ? null : (
         <Button icon={<PlusOutlined />} aria-label={`${title} ${addButtonLabel}`} onClick={addRow}>
           {addButtonLabel}
@@ -168,7 +164,9 @@ function schemaPropertyType(config: unknown): string {
 }
 
 function buildSelectOptions(pathOptions: string[], rows: MappingRow[]) {
-  return [...new Set([...pathOptions, ...rows.map((row) => row.path).filter(Boolean)])].map((path) => ({ value: path, label: path }));
+  // Dataset 宽表可能有上百列；路径候选只保留当前已填路径和前 80 个候选，避免下拉遮挡画布。
+  const selectedPaths = rows.map((row) => row.path).filter(Boolean);
+  return [...new Set([...selectedPaths, ...pathOptions])].slice(0, 80).map((path) => ({ value: path, label: path }));
 }
 
 function rowsToMapping(rows: MappingRow[], isOutputMapping: boolean, outputReference: (field: string) => string): Record<string, string> {
@@ -190,8 +188,4 @@ function uniqueFieldName(rows: MappingRow[]) {
     field = `field_${index}`;
   }
   return field;
-}
-
-function pathListId(title: string, rowId: string) {
-  return `mapping-path-${title}-${rowId}`.replace(/[^a-zA-Z0-9_-]+/g, '-');
 }

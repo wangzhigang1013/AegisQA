@@ -276,7 +276,19 @@ class WorkflowGraphService:
                     )
                     return
                 except MappingPathError as exc:
-                    errors.append(GraphIssue(code="MAPPING_PATH_MISSING", message=str(exc), node_id=node.node_id))
+                    missing_path = _missing_path_from_error(str(exc))
+                    upstream_issue = _disconnected_upstream_output_issue(graph, nodes_by_id, node, missing_path)
+                    if upstream_issue:
+                        errors.append(upstream_issue)
+                    else:
+                        errors.append(
+                            GraphIssue(
+                                code="MAPPING_PATH_MISSING",
+                                message=str(exc),
+                                node_id=node.node_id,
+                                details={"missing_path": missing_path} if missing_path else {},
+                            )
+                        )
                     return
 
                 # 校验阶段不调用真实 Skill，而是用 schema 占位输出驱动下游类型检查。
@@ -344,6 +356,62 @@ def _execution_levels(graph: WorkflowGraph, nodes_by_id: dict[str, WorkflowGraph
             for deps in remaining.values():
                 deps.discard(node_id)
     return levels
+
+
+def _missing_path_from_error(message: str) -> str | None:
+    prefix = "路径不存在："
+    if prefix not in message:
+        return None
+    return message.split(prefix, 1)[1].strip() or None
+
+
+def _disconnected_upstream_output_issue(
+    graph: WorkflowGraph,
+    nodes_by_id: dict[str, WorkflowGraphNode],
+    current_node: WorkflowGraphNode,
+    missing_path: str | None,
+) -> GraphIssue | None:
+    """把“路径不存在”细分为缺少数据依赖线。
+
+    用户在输入绑定里写 `answer.answer` 时，语义上是“读取 answer 节点的输出”。
+    如果画布没有从 answer 到当前节点的上游路径，执行器不会保证 answer 先运行，
+    这时继续返回泛化的路径不存在会误导用户去改字段名，所以在校验层提前说明缺线。
+    """
+
+    if not missing_path or "." not in missing_path:
+        return None
+    referenced_node_id = missing_path.split(".", 1)[0]
+    if referenced_node_id not in nodes_by_id or referenced_node_id == current_node.node_id:
+        return None
+    upstream_node_ids = _collect_upstream_node_ids(graph, current_node.node_id)
+    if referenced_node_id in upstream_node_ids:
+        return None
+    return GraphIssue(
+        code="UPSTREAM_OUTPUT_NOT_CONNECTED",
+        message=f"输入绑定引用了非上游节点输出：{missing_path}。请先从 {referenced_node_id} 连接到 {current_node.node_id}，再使用该输出。",
+        node_id=current_node.node_id,
+        details={
+            "missing_path": missing_path,
+            "referenced_node_id": referenced_node_id,
+            "current_node_id": current_node.node_id,
+        },
+    )
+
+
+def _collect_upstream_node_ids(graph: WorkflowGraph, selected_node_id: str) -> set[str]:
+    reverse_edges: dict[str, list[str]] = defaultdict(list)
+    for edge in graph.edges:
+        reverse_edges[edge.target].append(edge.source)
+
+    visited: set[str] = set()
+    queue = list(reverse_edges.get(selected_node_id, []))
+    while queue:
+        node_id = queue.pop(0)
+        if node_id in visited:
+            continue
+        visited.add(node_id)
+        queue.extend(reverse_edges.get(node_id, []))
+    return visited
 
 
 def _placeholder_for_schema(schema: dict[str, Any]) -> Any:

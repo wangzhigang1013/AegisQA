@@ -128,6 +128,25 @@ def test_validate_accepts_node_field_reference_without_output_mapping(tmp_path) 
     assert payload["errors"] == []
 
 
+def test_validate_reports_disconnected_upstream_output_reference(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    graph = _base_graph()
+    graph["nodes"][0]["output_mapping"] = {}
+    graph["nodes"][1]["input_mapping"]["answer"] = "answer.answer"
+    graph["edges"] = [{"source": "judge", "target": "report"}]
+
+    response = client.post("/workflow-graphs/validate", json={"graph": graph, "sample_row": {"question": "Q", "reference": "AegisQA"}})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["errors"][0]["code"] == "UPSTREAM_OUTPUT_NOT_CONNECTED"
+    assert payload["errors"][0]["node_id"] == "judge"
+    assert payload["errors"][0]["details"]["missing_path"] == "answer.answer"
+    assert payload["errors"][0]["details"]["referenced_node_id"] == "answer"
+
+
 def test_validate_ignores_blank_optional_skill_input_mapping(tmp_path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)

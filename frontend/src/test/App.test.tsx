@@ -305,19 +305,19 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('发布失败，请查看错误与建议')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /错误与建议/ }));
-    expect(await screen.findByText('REQUIRED_INPUT_MAPPING_MISSING')).toBeInTheDocument();
-    expect(screen.getByText('Skill 必填输入未配置字段映射：prompt')).toBeInTheDocument();
-    expect(screen.getByText(/在右侧 Inspector 的输入绑定中为缺失字段配置/)).toBeInTheDocument();
-    expect(screen.getByText('SKILL_NOT_FOUND')).toBeInTheDocument();
-    expect(screen.getByText(/到 Skill 市场上传或选择已注册的 Skill/)).toBeInTheDocument();
-    expect(screen.getByText('CONFIG_REQUIRED_MISSING')).toBeInTheDocument();
-    expect(screen.getByText(/在右侧 Inspector 的运行参数中补齐必填参数/)).toBeInTheDocument();
-    expect(screen.getByText('CONFIG_VALUE_INVALID')).toBeInTheDocument();
-    expect(screen.getByText(/将参数 temperature 改为 number 类型/)).toBeInTheDocument();
-    expect(screen.getByText('CONFIG_EXPRESSION_PATH_MISSING')).toBeInTheDocument();
-    expect(screen.getByText(/检查 Dataset 预览样本第 2 行/)).toBeInTheDocument();
-    expect(screen.getByText('CONFIG_SECRET_REF_EMPTY')).toBeInTheDocument();
-    expect(screen.getByText(/填写 Secret 引用名称/)).toBeInTheDocument();
+    expect((await screen.findAllByText('REQUIRED_INPUT_MAPPING_MISSING')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Skill 必填输入未配置字段映射：prompt').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/在右侧 Inspector 的输入绑定中为缺失字段配置/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('SKILL_NOT_FOUND').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/到 Skill 市场上传或选择已注册的 Skill/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('CONFIG_REQUIRED_MISSING').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/在右侧 Inspector 的运行参数中补齐必填参数/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('CONFIG_VALUE_INVALID').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/将参数 temperature 改为 number 类型/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('CONFIG_EXPRESSION_PATH_MISSING').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/检查 Dataset 预览样本第 2 行/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('CONFIG_SECRET_REF_EMPTY').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/填写 Secret 引用名称/).length).toBeGreaterThan(0);
   });
 
   it('Workflow 发布成功时优先发布草稿并展示下一步入口', async () => {

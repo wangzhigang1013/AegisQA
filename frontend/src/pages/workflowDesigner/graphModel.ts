@@ -1,6 +1,6 @@
 import { MarkerType, type Edge, type Node } from '@xyflow/react';
 
-import type { DatasetVersion, WorkflowGraph, WorkflowGraphNode } from '../../types';
+import type { DatasetVersion, SkillManifest, WorkflowGraph, WorkflowGraphNode } from '../../types';
 
 export type FlowNodeData = {
   label: string;
@@ -81,8 +81,9 @@ export function validateWorkflowGraphDraft(graph: WorkflowGraph): GraphDraftIssu
   return issues;
 }
 
-export function buildAvailableFieldPaths(dataset: DatasetVersion | null | undefined, graph: WorkflowGraph, selectedNodeId?: string | null): string[] {
+export function buildAvailableFieldPaths(dataset: DatasetVersion | null | undefined, graph: WorkflowGraph, selectedNodeId?: string | null, skills: SkillManifest[] = []): string[] {
   const paths = new Set<string>();
+  const skillsById = new Map(skills.map((skill) => [skill.skill_id, skill]));
   for (const path of dataset?.field_paths ?? []) {
     paths.add(path);
   }
@@ -96,6 +97,10 @@ export function buildAvailableFieldPaths(dataset: DatasetVersion | null | undefi
   const upstreamNodeIds = selectedNodeId ? collectUpstreamNodeIds(graph, selectedNodeId) : new Set(graph.nodes.map((node) => node.node_id));
   for (const node of graph.nodes) {
     if (selectedNodeId && !upstreamNodeIds.has(node.node_id)) continue;
+    const skill = node.skill_ref ? skillsById.get(node.skill_ref) : null;
+    for (const field of Object.keys(schemaProperties(skill?.output_schema))) {
+      paths.add(`${node.node_id}.${field}`);
+    }
     for (const [field, targetPath] of Object.entries(node.output_mapping ?? {})) {
       if (field.trim()) {
         paths.add(`${node.node_id}.${field.trim()}`);
@@ -107,6 +112,10 @@ export function buildAvailableFieldPaths(dataset: DatasetVersion | null | undefi
   }
 
   return [...paths].sort((left, right) => left.localeCompare(right));
+}
+
+function schemaProperties(schema: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  return schema && typeof schema.properties === 'object' && schema.properties ? schema.properties as Record<string, unknown> : {};
 }
 
 function collectUpstreamNodeIds(graph: WorkflowGraph, selectedNodeId: string): Set<string> {

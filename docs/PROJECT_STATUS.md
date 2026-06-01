@@ -6,6 +6,36 @@
 
 ## 最近改动
 
+### 2026-06-02 Workflow 字段候选与校验就近反馈优化
+
+- 改动摘要：修复用户在 Workflow 里让后续 Skill 使用前面节点输出时，校验只提示“路径不存在”而不知道缺少依赖连线的问题。后端现在会把 `answer.answer` 这类节点输出引用识别为数据依赖，如果当前节点没有从 `answer` 连过来的上游路径，会返回 `UPSTREAM_OUTPUT_NOT_CONNECTED`，并给出缺少哪条连线。前端字段路径候选改为由 Skill `output_schema` 生成，即使上游节点不再配置 `output_mapping`，下游也能选择 `节点ID.字段`。同时优化宽表数据集体验：数据集字段预览增加搜索和分页，输入绑定路径改成可搜索候选且最多展示前 80 条，避免候选列表遮挡画布。校验错误不再只放在页面底部 Console，会同步显示在页面顶部摘要和当前节点 Inspector，支持一键定位节点，减少来回滚动。
+- 变更文件：
+  - `aegisqa/workflows/graph.py`
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/pages/workflowDesigner/FieldMappingEditor.tsx`
+  - `frontend/src/pages/workflowDesigner/graphModel.ts`
+  - `frontend/src/pages/workflowDesigner/graphModel.test.ts`
+  - `frontend/src/test/WorkflowDesignerPage.test.tsx`
+  - `tests/test_workflow_graph_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q -k "disconnected_upstream_output_reference or node_field_reference_without_output_mapping"`
+  - `cd frontend && npm test -- src/pages/workflowDesigner/graphModel.test.ts src/test/WorkflowDesignerPage.test.tsx -t "output_schema|校验错误|数据集字段"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `git diff --check`
+- 测试结果：
+  - RED：新增后端测试最初失败，确认仍返回泛化 `MAPPING_PATH_MISSING`；新增前端测试最初失败，确认上游 output_schema 不生成候选、校验问题没有就近展示、宽字段预览没有搜索分页。
+  - GREEN：目标后端测试 2 passed；目标前端测试 3 passed。
+  - 后端全量：通过，当前全量测试全部 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端全量：9 个测试文件、105 passed。
+  - 前端构建：通过，Vite 生产包生成完成。
+  - 空白检查：`git diff --check` 通过，仅输出 Windows CRLF 换行转换 warning，未发现空白错误。
+- 下一步：如果需要进一步减少认知负担，可在用户选择 `节点ID.字段` 时检测是否缺少连线并提供“自动补线”按钮。
+
 ### 2026-06-02 可选 object 输入空值误报修复
 
 - 改动摘要：继续修复 `variables` 可选 object 字段误报 `TYPE_MISMATCH` 的问题。根因有两层：前端字段映射表在用户只修改必填字段时，也会把可选字段保存成空字符串映射；后端遇到可选 object/array 字段的空路径或空字符串单元格时，仍继续进入 object 类型校验。现在可选输入字段留空会被视为“不传该字段”，不会写入草稿 `input_mapping`，也不会在发布校验、试运行或执行时触发 `TYPE_MISMATCH`。合法 JSON 对象字符串仍会解析为 object；非空且不是合法 JSON 对象的普通字符串仍会报类型错误，这是符合 JSON Schema 的行为。
