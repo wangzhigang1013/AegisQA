@@ -2,9 +2,36 @@
 
 ## 当前阶段
 
-本地工作台数据清空阶段。本阶段按用户要求清空 Workflow 列表、Skill 市场和执行中心，保留数据集与上传原始文件，便于后续从干净状态重新上传 Skill、创建 Workflow、创建任务并验证完整流程。
+GitHub 发布准备阶段。本阶段按用户要求补充详细项目介绍文件，并准备把当前代码推送到 `wangzhigang1013/AegisQA.git`。README 已扩展为完整项目说明，覆盖项目定位、技术栈、目录结构、核心概念、执行模型、Skill 插件包、启动方式、API、验证命令和生产化演进建议。
 
 ## 最近改动
+
+### 2026-06-02 README 详细介绍与 GitHub 推送准备
+
+- 改动摘要：按用户要求将项目介绍文件写得更详细，把原本偏简略的 README 重写为完整说明文档。新增内容包括 AegisQA 的产品定位、数据集/Skill/Workflow/Task/RunItem/Step 等核心概念、100 条数据逐条执行 Workflow 的执行模型、Skill 插件包格式与安全边界、前后端启动方式、SQLite 模式、前端页面说明、Workflow 校验规则、常用 API、验证命令和生产化演进建议。当前仓库未安装 `gh` CLI，因此后续按用户要求使用原生 `git` 推送到 GitHub，不创建 PR。
+- 变更文件：
+  - `README.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `git status --short --branch`
+  - `git remote -v`
+  - `git ls-remote https://github.com/wangzhigang1013/AegisQA.git HEAD refs/heads/main refs/heads/master refs/heads/feature/product-hardening-roadmap`
+  - `git diff --check`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - 当前本地分支：`feature/product-hardening-roadmap`。
+  - 本地工作区在 README 改动前为干净状态。
+  - 当前未配置远程仓库。
+  - `gh` CLI 未安装，不能使用 GitHub CLI 创建 PR；本次将直接使用 `git remote add` 与 `git push`。
+  - 远程仓库未返回现有分支引用，按空仓库处理，准备推送到远程 `main`。
+  - 空白检查：`git diff --check` 通过，仅输出 Windows CRLF 换行转换 warning。
+  - 后端全量：124 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+- 下一步：
+  - 提交 README 与状态文件改动。
+  - 添加远程 `origin=https://github.com/wangzhigang1013/AegisQA.git`。
+  - 将当前代码推送到远程 `main`。
 
 ### 2026-06-02 清空 Workflow 列表、Skill 市场与执行中心
 
