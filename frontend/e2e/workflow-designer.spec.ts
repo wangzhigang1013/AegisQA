@@ -41,14 +41,11 @@ test('Workflow 画布可以新增、删除、校验并发布流程', async ({ pa
   await page.getByRole('button', { name: '重做' }).click();
   await expect(page.getByText(/已重做/)).toBeVisible();
 
-  await page.getByRole('button', { name: /删除选中/ }).click();
-  await expect(page.getByText(/已删除节点/)).toBeVisible();
-
   await page.getByRole('button', { name: '校验' }).click();
   await expect(page.getByText(/校验通过|校验失败/)).toBeVisible();
 
   await page.getByRole('button', { name: '发布' }).click();
-  await expect(page.getByText(/发布成功/)).toBeVisible();
+  await expect(page.getByText(/发布成功/).first()).toBeVisible();
 });
 
 test('Workflow 画布支持节点工具栏和键盘删除', async ({ page }) => {
@@ -74,6 +71,8 @@ test('Workflow 草稿保存后可以从市场重新打开并保留配置', async
   await page.locator('input[value="生成回答"]').fill('生成回答已保存');
   await page.getByRole('button', { name: /保存草稿/ }).click();
 
+  await expect(page.getByText(new RegExp(`草稿已保存：${escapeRegExp(workflowName)}`)).first()).toBeVisible();
+  await page.getByRole('button', { name: '返回市场' }).click();
   await expect(page.getByText('Workflow 资产市场')).toBeVisible();
   await page.getByPlaceholder('搜索 Workflow 名称').fill(workflowName);
   await expect(page.getByRole('row', { name: new RegExp(workflowName) })).toBeVisible();
@@ -89,17 +88,17 @@ test('Workflow 字段映射支持自定义路径编辑并随草稿保存回放',
   await page.getByRole('button', { name: /新建 Workflow/ }).click();
 
   await page.locator('input[value="未命名 Workflow"]').fill(workflowName);
-  await page.getByLabel('映射字段 prompt').fill('prompt_text');
-  await page.getByLabel('字段路径 prompt_text').fill('row.prompt_text');
+  await page.getByLabel('字段路径 prompt').fill('row.prompt_text');
   await expect(page.locator('input[value="row.prompt_text"]')).toBeVisible();
 
   await page.getByRole('button', { name: /保存草稿/ }).click();
+  await expect(page.getByText(new RegExp(`草稿已保存：${escapeRegExp(workflowName)}`)).first()).toBeVisible();
+  await page.getByRole('button', { name: '返回市场' }).click();
   await expect(page.getByText('Workflow 资产市场')).toBeVisible();
   await page.getByPlaceholder('搜索 Workflow 名称').fill(workflowName);
   await page.getByRole('row', { name: new RegExp(workflowName) }).getByRole('button', { name: /进入画布/ }).click();
 
   await expect(page.locator(`input[value="${workflowName}"]`)).toBeVisible();
-  await expect(page.locator('input[value="prompt_text"]')).toBeVisible();
   await expect(page.locator('input[value="row.prompt_text"]')).toBeVisible();
 });
 
@@ -131,4 +130,8 @@ test('Workflow 试运行会使用所选数据集并回填结果', async ({ page 
 
 function apiPath(pathname: string) {
   return `/api${pathname}`;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

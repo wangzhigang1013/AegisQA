@@ -80,13 +80,78 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/模板/)).toBeInTheDocument();
   });
 
+  it('Workflow 市场支持删除草稿、复制草稿和按状态筛选', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const requests: { url: string; method?: string; body?: string }[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push({ url, method: init?.method, body: String(init?.body ?? '') });
+      if (url.endsWith('/workflow-drafts/draft-test') && init?.method === 'DELETE') {
+        return jsonResponse({ draft_id: 'draft-test', status: 'deleted', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' });
+      }
+      if (url.endsWith('/workflow-drafts') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        return jsonResponse({ draft_id: 'draft-copy', status: 'draft', name: body.name, graph: body.graph, created_at: '', updated_at: '' });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/workflows');
+
+    await screen.findByText('Workflow 列表');
+    fireEvent.mouseDown(findComboboxByLabel('Workflow 状态筛选'));
+    const draftOption = (await screen.findAllByText('草稿')).find((element) => element.closest('.ant-select-item-option'));
+    expect(draftOption).toBeTruthy();
+    fireEvent.click(draftOption!);
+    expect(await screen.findByText('测试草稿')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /复制草稿/ }));
+    await waitFor(() => {
+      expect(requests.some((request) => request.url.endsWith('/workflow-drafts') && request.method === 'POST' && (request.body ?? '').includes('测试草稿 副本'))).toBe(true);
+    });
+    expect(await screen.findByText(/Workflow 草稿已复制/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /删除草稿/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '确认删除' }));
+    await waitFor(() => {
+      expect(requests.some((request) => request.url.endsWith('/workflow-drafts/draft-test') && request.method === 'DELETE')).toBe(true);
+    });
+    expect(await screen.findByText(/草稿已删除/)).toBeInTheDocument();
+  });
+
   it('Workflow 画布解释点对多和多对一流程', async () => {
     await renderWorkbench('/workflows/designer/draft-test');
 
     expect(await screen.findByText('Skill Palette')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('搜索 Skill 名称、描述、标签或 schema')).toBeInTheDocument();
     expect(screen.getByText('点对多')).toBeInTheDocument();
     expect(screen.getByText('多对一')).toBeInTheDocument();
     expect(screen.getByText('校验与试运行 Console')).toBeInTheDocument();
+  });
+
+  it('Workflow Skill Palette 通过语义搜索添加 Skill，并阻止未启用 Skill', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/skills')) {
+        return jsonResponse([...demoSkills, pendingPackageSkill]);
+      }
+      if (url.endsWith('/workflow-drafts/draft-test')) return jsonResponse({ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' });
+      if (url.endsWith('/workflow-drafts')) return jsonResponse([{ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' }]);
+      if (url.endsWith('/workflows')) return jsonResponse([demoWorkflowVersion]);
+      if (url.endsWith('/workflow-templates') || url.endsWith('/datasets')) return jsonResponse([demoDataset]);
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    fireEvent.change(await screen.findByPlaceholderText('搜索 Skill 名称、描述、标签或 schema'), { target: { value: 'score reference' } });
+    expect(await screen.findByText('Deterministic LLM Judge')).toBeInTheDocument();
+    expect(screen.getByText(/输入 3 \/ 输出 3/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('搜索 Skill 名称、描述、标签或 schema'), { target: { value: 'echo plugin' } });
+    expect(await screen.findByText('Echo 插件')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /添加 Echo 插件/ })).toBeDisabled();
+    expect(screen.getByText(/请先在 Skill 市场运行合约测试并审批启用/)).toBeInTheDocument();
   });
 
   it('数据集上传入口点击后打开上传弹窗', async () => {
@@ -112,8 +177,11 @@ describe('AegisQA 前端工作台', () => {
   it('Workflow 设计器支持选择流程、删除节点和保存草稿入口', async () => {
     await renderWorkbench('/workflows/designer/draft-test');
 
-    expect((await screen.findAllByLabelText('当前 Workflow'))[0]).toBeInTheDocument();
+    expect((await screen.findAllByLabelText('加载已有流程'))[0]).toBeInTheDocument();
+    expect(screen.getByText('当前草稿：draft-test')).toBeInTheDocument();
+    expect(screen.getByText('已保存')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /保存草稿/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /返回市场/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /删除选中/ })).toBeInTheDocument();
 
     const joinCountBefore = screen.getAllByText(/Join/).length;
@@ -167,10 +235,10 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/已删除节点：answer/)).toBeInTheDocument();
   });
 
-  it('Workflow 发布失败时展示后端校验错误和修复入口', async () => {
+  it('Workflow 发布失败时展示后端校验错误、顶部提示和修复入口', async () => {
     vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
       const url = String(input);
-      if (url.endsWith('/workflow-graphs/publish')) {
+      if (url.endsWith('/workflow-drafts/draft-test/publish')) {
         return errorResponse(400, {
           code: 'HTTP_ERROR',
           message: 'Workflow Graph 校验失败',
@@ -217,7 +285,9 @@ describe('AegisQA 前端工作台', () => {
           trace_id: 'trace_test',
         });
       }
+      if (url.endsWith('/workflow-graphs/validate')) return jsonResponse({ ok: true, errors: [], warnings: [], execution_levels: [['answer']], graph_tips: [], node_count: 2, edge_count: 1 });
       if (url.endsWith('/skills')) return jsonResponse(demoSkills);
+      if (url.endsWith('/workflow-drafts/draft-test')) return jsonResponse({ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' });
       if (url.endsWith('/workflow-drafts')) return jsonResponse([{ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' }]);
       if (url.endsWith('/workflows')) return jsonResponse([demoWorkflowVersion]);
       if (url.endsWith('/workflow-templates') || url.endsWith('/datasets')) return jsonResponse([]);
@@ -227,21 +297,46 @@ describe('AegisQA 前端工作台', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /发布/ }));
     expect(await screen.findByText(/发布失败：Workflow Graph 校验失败/)).toBeInTheDocument();
+    expect(screen.getByText('发布失败，请查看错误与建议')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /错误与建议/ }));
     expect(await screen.findByText('REQUIRED_INPUT_MAPPING_MISSING')).toBeInTheDocument();
     expect(screen.getByText('Skill 必填输入未配置字段映射：prompt')).toBeInTheDocument();
-    expect(screen.getByText(/在右侧 Inspector 的字段映射中为缺失字段配置/)).toBeInTheDocument();
+    expect(screen.getByText(/在右侧 Inspector 的输入绑定中为缺失字段配置/)).toBeInTheDocument();
     expect(screen.getByText('SKILL_NOT_FOUND')).toBeInTheDocument();
     expect(screen.getByText(/到 Skill 市场上传或选择已注册的 Skill/)).toBeInTheDocument();
     expect(screen.getByText('CONFIG_REQUIRED_MISSING')).toBeInTheDocument();
-    expect(screen.getByText(/在右侧 Inspector 的 Skill 参数表单中补齐必填参数/)).toBeInTheDocument();
+    expect(screen.getByText(/在右侧 Inspector 的运行参数中补齐必填参数/)).toBeInTheDocument();
     expect(screen.getByText('CONFIG_VALUE_INVALID')).toBeInTheDocument();
     expect(screen.getByText(/将参数 temperature 改为 number 类型/)).toBeInTheDocument();
     expect(screen.getByText('CONFIG_EXPRESSION_PATH_MISSING')).toBeInTheDocument();
     expect(screen.getByText(/检查 Dataset 预览样本第 2 行/)).toBeInTheDocument();
     expect(screen.getByText('CONFIG_SECRET_REF_EMPTY')).toBeInTheDocument();
     expect(screen.getByText(/填写 Secret 引用名称/)).toBeInTheDocument();
+  });
+
+  it('Workflow 发布成功时优先发布草稿并展示下一步入口', async () => {
+    const publishRequests: string[] = [];
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/workflow-drafts/draft-test/publish')) {
+        publishRequests.push(url);
+        return jsonResponse({ ...demoWorkflowVersion, version_id: 'wf-published:v3', version: 3 });
+      }
+      if (url.endsWith('/workflow-graphs/validate')) return jsonResponse({ ok: true, errors: [], warnings: [], execution_levels: [['answer']], graph_tips: [], node_count: 2, edge_count: 1 });
+      return defaultFetch?.(input, init) ?? jsonResponse({});
+    });
+
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    fireEvent.click(await screen.findByRole('button', { name: /发布/ }));
+
+    expect((await screen.findAllByText('发布成功：wf-published:v3')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /去创建任务/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /返回 Workflow 市场/ })).toBeInTheDocument();
+    expect(publishRequests).toEqual(expect.arrayContaining([expect.stringContaining('/workflow-drafts/draft-test/publish')]));
+    expect(vi.mocked(globalThis.fetch).mock.calls.some(([input]) => String(input).endsWith('/workflow-graphs/publish'))).toBe(false);
   });
 
   it('Workflow Aggregator 节点支持聚合策略配置', async () => {
@@ -257,17 +352,44 @@ describe('AegisQA 前端工作台', () => {
   it('Workflow Inspector 支持字段路径选择和参数预览', async () => {
     await renderWorkbench('/workflows/designer/draft-test');
 
-    expect(await screen.findByText('字段映射')).toBeInTheDocument();
+    expect(await screen.findByText('输入绑定')).toBeInTheDocument();
+    expect(screen.getByText('输出写入')).toBeInTheDocument();
+    expect(screen.getByText('运行参数')).toBeInTheDocument();
+    expect(screen.getByText('输入字段 prompt')).toBeInTheDocument();
+    expect(screen.getByText('输出字段 answer')).toBeInTheDocument();
     expect(screen.getByDisplayValue('row.question')).toBeInTheDocument();
     expect(screen.getByDisplayValue('context.answer')).toBeInTheDocument();
+    expect(screen.getByText(/未写入的输出不会传给下游/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('输入映射 JSON')).not.toBeInTheDocument();
+
+    const clickDatasetOption = async () => {
+      const datasetOption = (await screen.findAllByText('问答回归集 v1')).find((element) => element.closest('.ant-select-item-option'));
+      expect(datasetOption).toBeTruthy();
+      fireEvent.click(datasetOption!);
+    };
+
+    fireEvent.mouseDown(findComboboxByLabel('映射预览数据集 / 试运行数据集'));
+    await clickDatasetOption();
+    expect(await screen.findByText('数据集字段预览')).toBeInTheDocument();
+    expect(screen.getByText('row.question')).toBeInTheDocument();
+    expect(screen.getByText('AI 评测平台')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: '参数预览' }));
     fireEvent.mouseDown(screen.getByRole('combobox', { name: '选择参数预览数据集' }));
-    fireEvent.click(await screen.findByText('问答回归集 v1'));
+    await clickDatasetOption();
     fireEvent.click(screen.getByRole('button', { name: /预览参数/ }));
 
     expect(await screen.findByText('mock-model')).toBeInTheDocument();
     expect(screen.getAllByText(/workflow_config/).length).toBeGreaterThan(0);
+  });
+
+  it('Workflow 试运行未选择数据集时禁用并说明用途', async () => {
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    expect(await screen.findByText('映射预览数据集 / 试运行数据集')).toBeInTheDocument();
+    expect(screen.getByText(/选择后会驱动输入绑定候选、参数预览和试运行抽样/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /试运行/ })).toBeDisabled();
+    expect(screen.getByText('请选择映射预览数据集')).toBeInTheDocument();
   });
 
   it('执行中心默认展示任务列表并可以创建任务', async () => {
@@ -649,6 +771,41 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /运行合约测试/ }));
 
     expect(await screen.findByText(/合约测试通过/)).toBeInTheDocument();
+    expect(screen.getByText('合约测试做什么')).toBeInTheDocument();
+    expect(screen.getByText(/使用 Skill manifest 里的 example_input 和 example_config/)).toBeInTheDocument();
+    expect(screen.getByText('测试输入')).toBeInTheDocument();
+    expect(screen.getByText('测试配置')).toBeInTheDocument();
+    expect(screen.getByText('输出结果')).toBeInTheDocument();
+    expect(screen.getByText('耗时')).toBeInTheDocument();
+  });
+
+  it('Skill 合约测试失败时展示修复建议和插件审批步骤', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/skills')) {
+        return jsonResponse([pendingPackageSkill]);
+      }
+      if (url.endsWith('/skills/packages')) {
+        return jsonResponse([pendingSkillPackage]);
+      }
+      if (url.includes('/contract-test')) {
+        return jsonResponse({ ok: false, skill_id: 'plugin.echo@0.1.0', error: 'ValidationError', message: 'output.echo 缺失', code: 'TYPE_MISMATCH' });
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/skills');
+
+    fireEvent.click(await screen.findByRole('button', { name: /查看详情/ }));
+    expect(await screen.findByText('插件启用步骤')).toBeInTheDocument();
+    expect(screen.getByText('第 2 步：运行合约测试')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /运行合约测试/ }));
+
+    expect((await screen.findAllByText(/合约测试失败/)).length).toBeGreaterThan(0);
+    expect(screen.getByText('错误码')).toBeInTheDocument();
+    expect(screen.getByText('TYPE_MISMATCH')).toBeInTheDocument();
+    expect(screen.getByText(/检查 skill.yaml\/skill.json/)).toBeInTheDocument();
+    expect(screen.getByText(/检查 handler.py 的 run\(inputs, config\)/)).toBeInTheDocument();
   });
 
   it('Skill 市场展示插件包审批状态、合约测试状态和审批信息', async () => {

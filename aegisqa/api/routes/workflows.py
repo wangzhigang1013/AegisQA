@@ -37,8 +37,8 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
         return ctx.workflow_service.list_versions()
 
     @app.get("/workflow-drafts")
-    def list_workflow_drafts() -> list[dict[str, Any]]:
-        return _list_workflow_drafts(ctx.store)
+    def list_workflow_drafts(status: str | None = None) -> list[dict[str, Any]]:
+        return _list_workflow_drafts(ctx.store, status=status)
 
     @app.post("/workflow-drafts")
     def create_workflow_draft(request: WorkflowDraftCreateRequest) -> dict[str, Any]:

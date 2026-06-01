@@ -5,10 +5,12 @@ import {
   CodeOutlined,
   DeleteOutlined,
   DeploymentUnitOutlined,
+  InfoCircleOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   RedoOutlined,
   SaveOutlined,
+  SearchOutlined,
   UndoOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -25,7 +27,7 @@ import {
   type Connection,
   type Edge,
 } from '@xyflow/react';
-import { Alert, Button, Card, Col, Divider, Form, Input, InputNumber, Row, Segmented, Select, Space, Tabs, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, Collapse, Descriptions, Divider, Form, Input, InputNumber, Row, Segmented, Select, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -45,6 +47,7 @@ import {
   nodeTypeLabel,
   paletteNodeTypes,
   parseJsonObjectField,
+  validateWorkflowGraphDraft,
   type FlowNode,
 } from './workflowDesigner/graphModel';
 import { ParameterPreviewPanel } from './workflowDesigner/ParameterPreviewPanel';
@@ -76,12 +79,18 @@ function WorkflowDesignerContent() {
   const [sampleSize, setSampleSize] = useState(1);
   const [consoleResult, setConsoleResult] = useState<GraphValidationResult | Record<string, unknown> | null>(null);
   const [consoleText, setConsoleText] = useState('等待校验。推荐先选择模板或草稿，再检查字段映射。');
+  const [consoleTab, setConsoleTab] = useState('summary');
+  const [publishNotice, setPublishNotice] = useState<{ type: 'success' | 'error' | 'info'; message: string; description?: string; versionId?: string } | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [skillSearch, setSkillSearch] = useState('');
+  const [activePaletteSkill, setActivePaletteSkill] = useState<SkillManifest | null>(null);
   const [historyPast, setHistoryPast] = useState<WorkflowGraph[]>([]);
   const [historyFuture, setHistoryFuture] = useState<WorkflowGraph[]>([]);
 
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
   const templatesQuery = useQuery({ queryKey: ['workflow-templates'], queryFn: api.templates });
-  const draftsQuery = useQuery({ queryKey: ['workflow-drafts'], queryFn: api.workflowDrafts });
+  const draftsQuery = useQuery({ queryKey: ['workflow-drafts'], queryFn: () => api.workflowDrafts() });
   const routeDraftQuery = useQuery({
     queryKey: ['workflow-draft', routeDraftId],
     queryFn: () => api.workflowDraft(routeDraftId ?? ''),
@@ -91,6 +100,10 @@ function WorkflowDesignerContent() {
   });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows });
   const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets });
+  const workflowDrafts = Array.isArray(draftsQuery.data) ? draftsQuery.data : [];
+  const workflowVersions = Array.isArray(workflowsQuery.data) ? workflowsQuery.data : [];
+  const workflowTemplates = Array.isArray(templatesQuery.data) ? templatesQuery.data : [];
+  const datasets = Array.isArray(datasetsQuery.data) ? datasetsQuery.data : [];
 
   useEffect(() => {
     workflowNameRef.current = workflowName;
@@ -113,7 +126,7 @@ function WorkflowDesignerContent() {
     if (routeDraftQuery.data) {
       loadedRouteDraftId.current = routeDraftId;
       if (isWorkflowGraph(routeDraftQuery.data.graph)) {
-        loadGraph(routeDraftQuery.data.graph, routeDraftQuery.data.draft_id);
+        loadGraph(routeDraftQuery.data.graph, routeDraftQuery.data.draft_id, routeDraftQuery.data.updated_at);
         return;
       }
       setConsoleText('草稿加载失败：后端返回的 Workflow Graph 结构不完整，请从 Workflow 市场重新打开或复制草稿。');
@@ -139,8 +152,8 @@ function WorkflowDesignerContent() {
 
   const skills = skillsQuery.data?.length ? skillsQuery.data : demoSkills;
   const datasetVersions = useMemo(
-    () => datasetsQuery.data?.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))) ?? [],
-    [datasetsQuery.data],
+    () => datasets.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))),
+    [datasets],
   );
   const selectedDataset = datasetVersions.find((item) => item.version.version_id === selectedDatasetVersion)?.version ?? null;
   const graph = useMemo(() => buildWorkflowGraph(workflowName, nodes, edges), [workflowName, nodes, edges]);
@@ -148,6 +161,8 @@ function WorkflowDesignerContent() {
   const selectedGraphNode = selectedNode?.data.graphNode ?? null;
   const selectedSkill = selectedGraphNode?.skill_ref ? skills.find((skill) => skill.skill_id === selectedGraphNode.skill_ref) ?? null : null;
   const fieldPathOptions = useMemo(() => buildAvailableFieldPaths(selectedDataset, graph, selectedGraphNode?.node_id), [selectedDataset, graph, selectedGraphNode?.node_id]);
+  const datasetFieldRows = useMemo(() => buildDatasetFieldRows(selectedDataset), [selectedDataset]);
+  const paletteSkills = useMemo(() => searchSkills(skills, skillSearch).slice(0, skillSearch.trim() ? 20 : 5), [skillSearch, skills]);
   const selectedOutgoingEdges = selectedNodeId ? edges.filter((edge) => edge.source === selectedNodeId) : [];
   const connectableTargets = selectedNodeId
     ? nodes.filter((node) => node.id !== selectedNodeId && !selectedOutgoingEdges.some((edge) => edge.target === node.id))
@@ -158,6 +173,7 @@ function WorkflowDesignerContent() {
     onSuccess: (result) => {
       setConsoleResult(result);
       setConsoleText(result.ok ? '校验通过：DAG 无环，连线和字段映射满足发布要求。' : '校验失败：请查看错误列表并修正节点配置。');
+      setConsoleTab(result.ok ? 'summary' : 'issues');
     },
     onError: (error) => setConsoleText(error instanceof Error ? error.message : '校验请求失败'),
   });
@@ -170,27 +186,35 @@ function WorkflowDesignerContent() {
     },
     onSuccess: async (draft) => {
       setDraftId(draft.draft_id);
+      setLastSavedAt(draft.updated_at);
+      setIsDirty(false);
       setConsoleResult(draft);
       setConsoleText(`草稿已保存：${draft.name}`);
+      setPublishNotice({ type: 'success', message: `草稿已保存：${draft.name}` });
       queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
       await queryClient.invalidateQueries({ queryKey: ['workflow-drafts'] });
-      navigate('/workflows');
     },
     onError: (error) => setConsoleText(error instanceof Error ? `保存失败：${error.message}` : '保存失败'),
   });
 
   const publishMutation = useMutation({
-    mutationFn: () => api.publishGraph(graph),
+    mutationFn: publishCurrentWorkflow,
     onSuccess: async (workflow) => {
       setConsoleResult(workflow as unknown as Record<string, unknown>);
       setConsoleText(`发布成功：${workflow.version_id}`);
+      setConsoleTab('summary');
+      setPublishNotice({ type: 'success', message: `发布成功：${workflow.version_id}`, description: '已生成可用于创建任务的 Workflow 版本。', versionId: workflow.version_id });
+      setIsDirty(false);
       await queryClient.invalidateQueries({ queryKey: ['workflows'] });
+      await queryClient.invalidateQueries({ queryKey: ['workflow-drafts'] });
     },
     onError: (error) => {
       const validation = validationResultFromApiError(error, graph);
       if (validation) {
         setConsoleResult(validation);
       }
+      setConsoleTab('issues');
+      setPublishNotice({ type: 'error', message: '发布失败，请查看错误与建议', description: formatApiError(error) });
       setConsoleText(`发布失败：${formatApiError(error)}`);
     },
   });
@@ -214,9 +238,10 @@ function WorkflowDesignerContent() {
     onError: (error) => setConsoleText(error instanceof Error ? `试运行失败：${error.message}` : '试运行失败'),
   });
 
-  function changeWorkflowName(nextName: string) {
+  function changeWorkflowName(nextName: string, markDirty = true) {
     workflowNameRef.current = nextName;
     setWorkflowName(nextName);
+    if (markDirty) setIsDirty(true);
   }
 
   function updateNodes(updater: FlowNode[] | ((current: FlowNode[]) => FlowNode[])) {
@@ -231,8 +256,8 @@ function WorkflowDesignerContent() {
     setEdges(nextEdges);
   }
 
-  function loadGraph(nextGraph: WorkflowGraph, nextDraftId: string | null = null) {
-    changeWorkflowName(nextGraph.name);
+  function loadGraph(nextGraph: WorkflowGraph, nextDraftId: string | null = null, nextSavedAt: string | null = null) {
+    changeWorkflowName(nextGraph.name, false);
     updateNodes(graphToNodes(nextGraph));
     updateEdges(graphToEdges(nextGraph));
     setSelectedNodeId(nextGraph.nodes[0]?.node_id ?? null);
@@ -240,6 +265,9 @@ function WorkflowDesignerContent() {
     setDraftId(nextDraftId);
     setHistoryPast([]);
     setHistoryFuture([]);
+    setIsDirty(false);
+    setLastSavedAt(nextSavedAt);
+    setPublishNotice(null);
     setConsoleResult(nextGraph);
     setConsoleText(`已加载流程：${nextGraph.name}`);
   }
@@ -309,6 +337,22 @@ function WorkflowDesignerContent() {
     setConsoleText(`已删除连线：${edgeIdValue}`);
   }
 
+  function loadSelectedWorkflow(value: string) {
+    if (isDirty && !window.confirm('当前画布有未保存修改，加载其他 Workflow 会替换当前画布。是否继续？')) {
+      return;
+    }
+    const [kind, id] = String(value).split(':', 2);
+    if (kind === 'draft') {
+      const draft = workflowDrafts.find((item) => item.draft_id === id);
+      if (draft) loadGraph(draft.graph, draft.draft_id, draft.updated_at);
+    } else if (kind === 'workflow') {
+      const workflow = workflowVersions.find((item) => item.version_id === id);
+      if (workflow?.graph) loadGraph(workflow.graph as WorkflowGraph, null);
+    } else if (kind === 'template') {
+      loadGraph({ ...demoWorkflowGraph, name: `${id}_template` }, null);
+    }
+  }
+
   function connectSelectedNodeTo(targetNodeId: string) {
     if (!selectedNodeId) return;
     const id = edgeId(selectedNodeId, targetNodeId);
@@ -341,6 +385,33 @@ function WorkflowDesignerContent() {
     setConsoleText(`聚合策略已更新：${strategy}`);
   }
 
+  async function publishCurrentWorkflow() {
+    const currentGraph = buildWorkflowGraph(workflowNameRef.current, nodesRef.current, edgesRef.current);
+    const localIssues = validateWorkflowGraphDraft(currentGraph);
+    if (localIssues.length) {
+      const localValidation = graphValidationFromDraftIssues(currentGraph, localIssues);
+      setConsoleResult(localValidation);
+      setConsoleTab('issues');
+      throw new Error('发布前本地校验失败，请先修复错误与建议。');
+    }
+
+    const validation = await api.validateGraph(currentGraph, selectedDataset?.preview[0] ?? { question: '什么是 AegisQA?', reference: 'AegisQA' });
+    setConsoleResult(validation);
+    if (!validation.ok) {
+      setConsoleTab('issues');
+      throw new Error('发布前校验失败，请查看错误与建议。');
+    }
+
+    if (draftId) {
+      return api.publishWorkflowDraft(draftId);
+    }
+    const draft = await api.createWorkflowDraft({ name: workflowNameRef.current, graph: currentGraph });
+    setDraftId(draft.draft_id);
+    setLastSavedAt(draft.updated_at);
+    queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
+    return api.publishWorkflowDraft(draft.draft_id);
+  }
+
   function autoLayout() {
     rememberGraph();
     updateNodes((current) =>
@@ -356,10 +427,13 @@ function WorkflowDesignerContent() {
     const snapshot = buildWorkflowGraph(workflowNameRef.current, nodesRef.current, edgesRef.current);
     setHistoryPast((current) => [...current.slice(-19), snapshot]);
     setHistoryFuture([]);
+    setIsDirty(true);
+    setPublishNotice(null);
   }
 
   function restoreGraphSnapshot(snapshot: WorkflowGraph) {
-    changeWorkflowName(snapshot.name);
+    changeWorkflowName(snapshot.name, false);
+    setIsDirty(true);
     updateNodes(graphToNodes(snapshot));
     updateEdges(graphToEdges(snapshot));
     setSelectedNodeId(snapshot.nodes[0]?.node_id ?? null);
@@ -424,11 +498,40 @@ function WorkflowDesignerContent() {
           <Space wrap>
             <Button icon={<SaveOutlined />} onClick={() => saveDraftMutation.mutate()} loading={saveDraftMutation.isPending}>保存草稿</Button>
             <Button icon={<CheckCircleOutlined />} onClick={() => validateMutation.mutate()} loading={validateMutation.isPending}>校验</Button>
-            <Button icon={<PlayCircleOutlined />} onClick={() => dryRunMutation.mutate()} loading={dryRunMutation.isPending}>试运行</Button>
+            <Tooltip title={!selectedDataset ? '请选择映射预览数据集' : ''}>
+              <Button icon={<PlayCircleOutlined />} disabled={!selectedDataset} onClick={() => dryRunMutation.mutate()} loading={dryRunMutation.isPending}>试运行</Button>
+            </Tooltip>
             <Button type="primary" icon={<DeploymentUnitOutlined />} onClick={() => publishMutation.mutate()} loading={publishMutation.isPending}>发布</Button>
+            <Button onClick={() => navigate('/workflows')}>返回市场</Button>
           </Space>
         }
       />
+
+      <Space wrap>
+        <Tag color={draftId ? 'blue' : 'default'}>当前草稿：{draftId ?? '未保存'}</Tag>
+        <Tag color={isDirty ? 'orange' : 'green'}>{isDirty ? '有未保存修改' : '已保存'}</Tag>
+        <Tag>最近保存：{lastSavedAt || '尚未保存'}</Tag>
+        <Tag color={selectedDataset ? 'green' : 'gold'}>{selectedDataset ? '可试运行' : '请选择映射预览数据集'}</Tag>
+      </Space>
+
+      {publishNotice ? (
+        <Alert
+          type={publishNotice.type}
+          showIcon
+          closable
+          message={publishNotice.message}
+          description={
+            publishNotice.type === 'success' ? (
+              <Space wrap>
+                <Typography.Text>{publishNotice.description}</Typography.Text>
+                <Button size="small" type="primary" onClick={() => navigate('/runs')}>去创建任务</Button>
+                <Button size="small" onClick={() => navigate('/workflows')}>返回 Workflow 市场</Button>
+              </Space>
+            ) : publishNotice.description
+          }
+          onClose={() => setPublishNotice(null)}
+        />
+      ) : null}
 
       <Alert
         type="info"
@@ -437,36 +540,34 @@ function WorkflowDesignerContent() {
         description="每条连线表示数据依赖；一个节点可以点对多连接多个下游；多个上游进入同一节点时，必须先通过 Join 或 Aggregator，避免隐式覆盖 context。"
       />
 
-      <Card className="flat-card" title="流程选择与执行样本">
+      <Card className="flat-card" title="流程加载与数据集映射">
         <Row gutter={[12, 12]} align="middle">
           <Col xs={24} lg={8}>
-            <Typography.Text type="secondary">当前 Workflow</Typography.Text>
+            <Space size={4}>
+              <Typography.Text type="secondary">加载已有流程</Typography.Text>
+              <Tooltip title="用于把草稿、已发布版本或模板加载到当前画布。加载会替换当前未保存画布。">
+                <InfoCircleOutlined />
+              </Tooltip>
+            </Space>
             <Select
-              aria-label="当前 Workflow"
+              aria-label="加载已有流程"
               placeholder="选择草稿、已发布版本或模板"
               className="full-width-control"
-              onChange={(value) => {
-                const [kind, id] = String(value).split(':', 2);
-                if (kind === 'draft') {
-                  const draft = draftsQuery.data?.find((item) => item.draft_id === id);
-                  if (draft) loadGraph(draft.graph, draft.draft_id);
-                } else if (kind === 'workflow') {
-                  const workflow = workflowsQuery.data?.find((item) => item.version_id === id);
-                  if (workflow?.graph) loadGraph(workflow.graph as WorkflowGraph, null);
-                } else if (kind === 'template') {
-                  loadGraph({ ...demoWorkflowGraph, name: `${id}_template` }, null);
-                }
-              }}
+              onChange={loadSelectedWorkflow}
               options={[
-                ...(draftsQuery.data ?? []).map((draft) => ({ value: `draft:${draft.draft_id}`, label: `草稿：${draft.name}` })),
-                ...(workflowsQuery.data ?? []).map((workflow) => ({ value: `workflow:${workflow.version_id}`, label: `已发布：${workflow.name} v${workflow.version}` })),
-                ...(templatesQuery.data ?? []).map((template) => ({ value: `template:${String(template.template_id)}`, label: `模板：${String(template.name)}` })),
+                ...workflowDrafts.map((draft) => ({ value: `draft:${draft.draft_id}`, label: `草稿：${draft.name}` })),
+                ...workflowVersions.map((workflow) => ({ value: `workflow:${workflow.version_id}`, label: `已发布：${workflow.name} v${workflow.version}` })),
+                ...workflowTemplates.map((template) => ({ value: `template:${String(template.template_id)}`, label: `模板：${String(template.name)}` })),
               ]}
             />
           </Col>
           <Col xs={24} lg={8}>
-            <Typography.Text type="secondary">试运行数据集</Typography.Text>
+            <Space direction="vertical" size={0} className="full-width-control">
+              <Typography.Text type="secondary">映射预览数据集 / 试运行数据集</Typography.Text>
+              <Typography.Text type="secondary">选择后会驱动输入绑定候选、参数预览和试运行抽样。</Typography.Text>
+            </Space>
             <Select
+              aria-label="映射预览数据集 / 试运行数据集"
               showSearch
               optionFilterProp="label"
               placeholder="选择 Dataset Version"
@@ -485,17 +586,56 @@ function WorkflowDesignerContent() {
             <Input value={workflowName} onChange={(event) => changeWorkflowName(event.target.value)} />
           </Col>
         </Row>
+        {selectedDataset ? (
+          <Card size="small" className="flat-card" title="数据集字段预览">
+            <Table
+              size="small"
+              pagination={false}
+              rowKey="path"
+              dataSource={datasetFieldRows}
+              columns={[
+                { title: '可用路径', dataIndex: 'path' },
+                { title: '字段类型', dataIndex: 'type' },
+                { title: '示例值', dataIndex: 'example', render: (value) => <Typography.Text>{String(value ?? '')}</Typography.Text> },
+              ]}
+            />
+          </Card>
+        ) : null}
       </Card>
 
       <Row gutter={[16, 16]} className="designer-grid">
         <Col xs={24} xl={5}>
           <Card className="flat-card full-height" title="Skill Palette">
             <Space direction="vertical" className="drawer-stack">
-              {skills.map((skill) => (
-                <Button key={skill.skill_id} icon={<PlusOutlined />} onClick={() => addSkillNode(skill)} block>
-                  {skill.name}
-                </Button>
-              ))}
+              <Input
+                prefix={<SearchOutlined />}
+                placeholder="搜索 Skill 名称、描述、标签或 schema"
+                value={skillSearch}
+                onChange={(event) => setSkillSearch(event.target.value)}
+                allowClear
+              />
+              {paletteSkills.map((skill) => {
+                const disabled = !skill.enabled || skill.status !== 'approved';
+                return (
+                  <Card size="small" key={skill.skill_id}>
+                    <Space direction="vertical" className="drawer-stack">
+                      <Space wrap>
+                        <Typography.Text strong>{skill.name}</Typography.Text>
+                        <Tag color={disabled ? 'orange' : 'green'}>{skill.status}</Tag>
+                      </Space>
+                      <Typography.Text type="secondary">{skill.description}</Typography.Text>
+                      <Typography.Text type="secondary">输入 {schemaFieldCount(skill.input_schema)} / 输出 {schemaFieldCount(skill.output_schema)}</Typography.Text>
+                      {disabled ? <Typography.Text type="secondary">请先在 Skill 市场运行合约测试并审批启用</Typography.Text> : null}
+                      <Space wrap>
+                        <Button icon={<PlusOutlined />} disabled={disabled} onClick={() => addSkillNode(skill)}>
+                          添加 {skill.name}
+                        </Button>
+                        <Button onClick={() => setActivePaletteSkill(skill)}>查看详情</Button>
+                      </Space>
+                    </Space>
+                  </Card>
+                );
+              })}
             </Space>
             <Divider />
             <Typography.Text strong>结构节点</Typography.Text>
@@ -506,6 +646,16 @@ function WorkflowDesignerContent() {
                 </Button>
               ))}
             </Space>
+            {activePaletteSkill ? (
+              <Card size="small" title="Skill 详情" extra={<Button size="small" onClick={() => setActivePaletteSkill(null)}>关闭</Button>}>
+                <Space direction="vertical" className="drawer-stack">
+                  <Typography.Text strong>{activePaletteSkill.skill_id}</Typography.Text>
+                  <Typography.Text>{activePaletteSkill.description}</Typography.Text>
+                  <Typography.Text type="secondary">输入字段：{Object.keys(schemaProperties(activePaletteSkill.input_schema)).join(', ') || '-'}</Typography.Text>
+                  <Typography.Text type="secondary">输出字段：{Object.keys(schemaProperties(activePaletteSkill.output_schema)).join(', ') || '-'}</Typography.Text>
+                </Space>
+              </Card>
+            ) : null}
           </Card>
         </Col>
 
@@ -618,6 +768,7 @@ function WorkflowDesignerContent() {
                         {selectedGraphNode.node_type === 'skill' ? (
                           <>
                             <Divider />
+                            <Typography.Text strong>运行参数</Typography.Text>
                             <SkillConfigEditor
                               skill={selectedSkill}
                               value={selectedGraphNode.config ?? {}}
@@ -626,47 +777,62 @@ function WorkflowDesignerContent() {
                           </>
                         ) : null}
                         <Divider />
-                        <Typography.Text strong>字段映射</Typography.Text>
                         <FieldMappingEditor
-                          title="输入字段映射"
+                          title="输入绑定"
                           value={selectedGraphNode.input_mapping ?? {}}
                           pathOptions={fieldPathOptions}
+                          schema={selectedSkill?.input_schema}
+                          description="把 Skill manifest 固定输入字段绑定到数据集字段或上游节点输出。"
                           onChange={(input_mapping) => updateSelectedNode({ input_mapping })}
                           addButtonLabel="新增输入映射"
                         />
                         <FieldMappingEditor
-                          title="输出字段映射"
+                          title="输出写入"
                           value={selectedGraphNode.output_mapping ?? {}}
                           pathOptions={fieldPathOptions}
+                          schema={selectedSkill?.output_schema}
+                          description="把 Skill 输出写入 context、metrics 或命名输出。未写入的输出不会传给下游。"
                           onChange={(output_mapping) => updateSelectedNode({ output_mapping })}
                           addButtonLabel="新增输出映射"
                         />
-                        <Form layout="vertical">
-                          <Form.Item label="输入映射 JSON">
-                            <Input.TextArea
-                              key={`${selectedGraphNode.node_id}-input-${JSON.stringify(selectedGraphNode.input_mapping ?? {})}`}
-                              rows={4}
-                              defaultValue={JSON.stringify(selectedGraphNode.input_mapping ?? {}, null, 2)}
-                              onBlur={(event) => updateJsonPatch('input_mapping', event.target.value, updateSelectedNode, setConsoleText)}
-                            />
-                          </Form.Item>
-                          <Form.Item label="输出映射 JSON">
-                            <Input.TextArea
-                              key={`${selectedGraphNode.node_id}-output-${JSON.stringify(selectedGraphNode.output_mapping ?? {})}`}
-                              rows={4}
-                              defaultValue={JSON.stringify(selectedGraphNode.output_mapping ?? {}, null, 2)}
-                              onBlur={(event) => updateJsonPatch('output_mapping', event.target.value, updateSelectedNode, setConsoleText)}
-                            />
-                          </Form.Item>
-                          <Form.Item label="配置 JSON">
-                            <Input.TextArea
-                              key={`${selectedGraphNode.node_id}-config`}
-                              rows={4}
-                              defaultValue={JSON.stringify(selectedGraphNode.config ?? {}, null, 2)}
-                              onBlur={(event) => updateJsonPatch('config', event.target.value, updateSelectedNode, setConsoleText)}
-                            />
-                          </Form.Item>
-                        </Form>
+                        <Collapse
+                          items={[
+                            {
+                              key: 'advanced-json',
+                              label: '高级 JSON 模式',
+                              children: (
+                                <Form layout="vertical">
+                                  <Form.Item label="输入映射 JSON">
+                                    <Input.TextArea
+                                      aria-label="输入映射 JSON"
+                                      key={`${selectedGraphNode.node_id}-input-${JSON.stringify(selectedGraphNode.input_mapping ?? {})}`}
+                                      rows={4}
+                                      defaultValue={JSON.stringify(selectedGraphNode.input_mapping ?? {}, null, 2)}
+                                      onBlur={(event) => updateJsonPatch('input_mapping', event.target.value, updateSelectedNode, setConsoleText)}
+                                    />
+                                  </Form.Item>
+                                  <Form.Item label="输出映射 JSON">
+                                    <Input.TextArea
+                                      aria-label="输出映射 JSON"
+                                      key={`${selectedGraphNode.node_id}-output-${JSON.stringify(selectedGraphNode.output_mapping ?? {})}`}
+                                      rows={4}
+                                      defaultValue={JSON.stringify(selectedGraphNode.output_mapping ?? {}, null, 2)}
+                                      onBlur={(event) => updateJsonPatch('output_mapping', event.target.value, updateSelectedNode, setConsoleText)}
+                                    />
+                                  </Form.Item>
+                                  <Form.Item label="配置 JSON">
+                                    <Input.TextArea
+                                      key={`${selectedGraphNode.node_id}-config`}
+                                      rows={4}
+                                      defaultValue={JSON.stringify(selectedGraphNode.config ?? {}, null, 2)}
+                                      onBlur={(event) => updateJsonPatch('config', event.target.value, updateSelectedNode, setConsoleText)}
+                                    />
+                                  </Form.Item>
+                                </Form>
+                              ),
+                            },
+                          ]}
+                        />
                         <Divider />
                         <Typography.Text strong>下游连线</Typography.Text>
                         {selectedOutgoingEdges.length ? (
@@ -758,6 +924,8 @@ function WorkflowDesignerContent() {
 
       <Card className="flat-card" title="校验与试运行 Console">
         <Tabs
+          activeKey={consoleTab}
+          onChange={setConsoleTab}
           items={[
             {
               key: 'summary',
@@ -820,6 +988,75 @@ function defaultOutputMapping(skill: SkillManifest): Record<string, string> {
     mapping[field] = field === 'score' || field === 'tokens' ? `metrics.${field}` : `context.${field}`;
     return mapping;
   }, {});
+}
+
+function graphValidationFromDraftIssues(graph: WorkflowGraph, issues: ReturnType<typeof validateWorkflowGraphDraft>): GraphValidationResult {
+  return {
+    ok: false,
+    errors: issues.map((issue) => ({
+      code: issue.code,
+      message: issue.message,
+      node_id: issue.nodeId,
+      details: issue.field ? { field: issue.field } : {},
+    })),
+    warnings: [],
+    execution_levels: [],
+    graph_tips: [],
+    node_count: graph.nodes.length,
+    edge_count: graph.edges.length,
+  };
+}
+
+function buildDatasetFieldRows(dataset: DatasetVersion | null) {
+  if (!dataset) return [];
+  const preview = dataset.preview?.[0] ?? {};
+  const paths = dataset.field_paths?.length ? dataset.field_paths : Object.keys(dataset.field_schema ?? {}).map((field) => `row.${field}`);
+  return paths.map((path) => {
+    const field = path.replace(/^row\./, '');
+    return {
+      path,
+      type: dataset.field_schema?.[field] ?? 'unknown',
+      example: preview[field],
+    };
+  });
+}
+
+function searchSkills(skills: SkillManifest[], query: string): SkillManifest[] {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) {
+    return [...skills].sort((left, right) => Number(right.enabled) - Number(left.enabled));
+  }
+  return skills
+    .map((skill) => ({ skill, score: skillSearchScore(skill, terms) }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score)
+    .map((item) => item.skill);
+}
+
+function skillSearchScore(skill: SkillManifest, terms: string[]): number {
+  const haystack = [
+    skill.skill_id,
+    skill.name,
+    skill.description,
+    skill.tags.join(' '),
+    skill.scenarios.join(' '),
+    JSON.stringify(skill.input_schema),
+    JSON.stringify(skill.output_schema),
+  ].join(' ').toLowerCase();
+  return terms.reduce((score, term) => {
+    if (!haystack.includes(term)) return score;
+    if (skill.name.toLowerCase().includes(term) || skill.skill_id.toLowerCase().includes(term)) return score + 5;
+    if (skill.description.toLowerCase().includes(term)) return score + 3;
+    return score + 1;
+  }, 0);
+}
+
+function schemaProperties(schema: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  return schema && typeof schema.properties === 'object' && schema.properties ? schema.properties as Record<string, unknown> : {};
+}
+
+function schemaFieldCount(schema: Record<string, unknown> | null | undefined): number {
+  return Object.keys(schemaProperties(schema)).length;
 }
 
 function updateJsonPatch(
@@ -894,7 +1131,7 @@ function issueRepairSuggestion(error: { code: string; details?: Record<string, u
   if (error.code === 'REQUIRED_INPUT_MAPPING_MISSING') {
     const missingFields = Array.isArray(error.details?.missing_fields) ? error.details.missing_fields.filter((field): field is string => typeof field === 'string') : [];
     const fieldText = missingFields.length ? `（${missingFields.join('、')}）` : '';
-    return `修复建议：在右侧 Inspector 的字段映射中为缺失字段配置 row/context/metrics 路径${fieldText}，例如 row.question。`;
+    return `修复建议：在右侧 Inspector 的输入绑定中为缺失字段配置 row/context/metrics 路径${fieldText}，例如 row.question。`;
   }
   if (error.code === 'INPUT_MAPPING_PATH_EMPTY') {
     return '修复建议：清空的输入映射不会参与执行，请补充字段路径或删除该映射行。';
@@ -917,7 +1154,7 @@ function issueRepairSuggestion(error: { code: string; details?: Record<string, u
   if (error.code === 'CONFIG_REQUIRED_MISSING') {
     const fields = stringList(error.details?.missing_fields);
     const fieldText = fields.length ? `（${fields.join('、')}）` : '';
-    return `修复建议：在右侧 Inspector 的 Skill 参数表单中补齐必填参数${fieldText}；如果该参数来自任务级覆盖，请重新运行任务 Preflight 确认覆盖值。`;
+    return `修复建议：在右侧 Inspector 的运行参数中补齐必填参数${fieldText}；如果该参数来自任务级覆盖，请重新运行任务 Preflight 确认覆盖值。`;
   }
   if (error.code === 'CONFIG_VALUE_INVALID') {
     const fieldPath = stringValue(error.details?.field_path, '对应字段');

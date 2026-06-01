@@ -158,3 +158,17 @@ def test_audit_events_can_be_filtered_by_actor_and_action(tmp_path: Path) -> Non
     assert response.status_code == 200
     events = response.json()
     assert [event["target"] for event in events] == ["task-b"]
+
+
+def test_root_endpoint_points_user_to_frontend_and_docs(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["name"] == "AegisQA"
+    assert payload["status"] == "ok"
+    assert payload["frontend_url"] == "http://localhost:5173"
+    assert payload["docs_url"] == "/docs"

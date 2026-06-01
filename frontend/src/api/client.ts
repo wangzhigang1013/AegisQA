@@ -352,7 +352,7 @@ export const api = {
     }),
   templates: () => request<Record<string, unknown>[]>('/workflow-templates'),
   workflows: () => request<WorkflowVersion[]>('/workflows'),
-  workflowDrafts: () => request<WorkflowDraftRecord[]>('/workflow-drafts'),
+  workflowDrafts: (status?: string) => request<WorkflowDraftRecord[]>(`/workflow-drafts${status ? `?status=${encodeURIComponent(status)}` : ''}`),
   workflowDraft: (draftId: string) => request<WorkflowDraftRecord>(`/workflow-drafts/${encodeURIComponent(draftId)}`),
   createWorkflowDraft: (body: { name: string; graph: WorkflowGraph }) =>
     request<WorkflowDraftRecord>('/workflow-drafts', {
@@ -366,6 +366,12 @@ export const api = {
     }),
   deleteWorkflowDraft: (draftId: string) => request<WorkflowDraftRecord>(`/workflow-drafts/${draftId}`, { method: 'DELETE' }),
   publishWorkflowDraft: (draftId: string) => request<WorkflowVersion>(`/workflow-drafts/${draftId}/publish`, { method: 'POST' }),
+  copyWorkflow: (versionId: string, name: string) =>
+    request<WorkflowVersion>(`/workflows/${encodeURIComponent(versionId)}/copy`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  archiveWorkflow: (versionId: string) => request<WorkflowVersion>(`/workflows/${encodeURIComponent(versionId)}/archive`, { method: 'POST' }),
   materializeSource: (body: { name: string; rows: Record<string, unknown>[]; golden?: boolean; label_field?: string }) =>
     request<DatasetVersion>('/datasets/source-materialize', {
       method: 'POST',

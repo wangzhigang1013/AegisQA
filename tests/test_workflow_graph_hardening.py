@@ -189,3 +189,32 @@ def test_workflow_graph_publish_rejects_missing_required_skill_config(tmp_path) 
     error_codes = {error["code"] for error in payload["details"]["errors"]}
     assert "CONFIG_REQUIRED_MISSING" in error_codes
     assert payload["details"]["errors"][0]["details"]["missing_fields"] == ["model"]
+
+
+def test_workflow_draft_delete_is_hidden_by_default_but_filterable(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    created = client.post("/workflow-drafts", json={"name": "可删除草稿", "graph": _base_graph()}).json()
+    deleted = client.delete(f"/workflow-drafts/{created['draft_id']}").json()
+
+    assert deleted["status"] == "deleted"
+    assert client.get("/workflow-drafts").json() == []
+    deleted_rows = client.get("/workflow-drafts", params={"status": "deleted"}).json()
+    assert [row["draft_id"] for row in deleted_rows] == [created["draft_id"]]
+
+
+def test_publish_workflow_draft_returns_structured_validation_errors(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    graph = _base_graph()
+    graph["nodes"][0]["input_mapping"] = {}
+    created = client.post("/workflow-drafts", json={"name": "坏映射草稿", "graph": graph}).json()
+
+    response = client.post(f"/workflow-drafts/{created['draft_id']}/publish")
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["code"] == "HTTP_ERROR"
+    assert payload["message"] == "Workflow Graph 校验失败"
+    assert "REQUIRED_INPUT_MAPPING_MISSING" in {error["code"] for error in payload["details"]["errors"]}

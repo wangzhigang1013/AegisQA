@@ -2,7 +2,50 @@
 
 ## 当前阶段
 
-新一轮“Skill 参数门禁、Workflow Console 修复建议与任务级参数覆盖”继续深化。本阶段聚焦全流程稳定性与可解释性：React Flow 图发布、线性兼容发布入口和 Task 创建前预检不仅要提前发现 Skill 输入映射与 `config_schema` 参数问题，还要把后端结构化错误码转成前端可操作的中文修复建议，并让任务创建向导按 Skill `config_schema` 与 Dataset 字段路径选择并校验本次任务的参数覆盖，避免用户只能手写 `skill_overrides`、参数名、`row.xxx` 表达式路径或非法 JSON。
+新一轮“Workflow 与 Skill 交互闭环”继续深化。本阶段聚焦用户在 Workflow 画布里最容易混淆的 7 个问题：发布必须有明确反馈，Skill 输入/输出/配置参数必须按 schema 区分，数据集字段如何进入 Workflow 必须可见，Workflow 资产要能删除和复制，Skill Palette 需要搜索化，试运行数据集和加载已有流程的语义要讲清楚，Skill 合约测试要展示它到底测试了什么。同时补齐 FastAPI 根路径启动提示，避免打开 `http://127.0.0.1:8000` 时只看到 `{"detail":"Not Found"}`。
+
+## 最近改动
+
+### 2026-06-01 Workflow 与 Skill 交互闭环优化
+
+- 改动摘要：按最新计划修复 Workflow 发布无反馈、字段映射概念混乱、数据集映射说明缺失、Workflow 列表无删除、Skill Palette 信息过载、顶部控件语义不清、Skill 合约测试解释不足和后端根路径 Not Found 等问题。Workflow 设计器现在优先按草稿发布，发布前执行本地校验和后端校验；成功后展示版本号、“去创建任务”和“返回 Workflow 市场”，失败后展示顶部错误提示并聚焦 Console 的错误建议。Inspector 改为“输入绑定 / 输出写入 / 运行参数”，输入输出字段由 Skill schema 生成，JSON 映射降级为高级模式。选择“映射预览数据集 / 试运行数据集”后，会展示字段预览、输入绑定候选和试运行样本来源；未选择数据集时试运行禁用但允许发布结构。Workflow 市场补齐草稿复制/删除、已发布复制/归档和状态筛选。Skill Palette 改为搜索 + 推荐前 5 个，未启用 Skill 不能直接添加。Skill 市场合约测试展示测试输入、配置、输出、耗时、错误码和修复建议。Playwright 默认改用 5174 前端端口，避免和手动启动的 5173 开发服务抢代理配置。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/workflows.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/SkillsPage.tsx`
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/pages/WorkflowMarketPage.tsx`
+  - `frontend/src/pages/workflowDesigner/FieldMappingEditor.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `frontend/e2e/workflow-designer.spec.ts`
+  - `frontend/playwright.config.ts`
+  - `tests/test_api.py`
+  - `tests/test_workflow_graph_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_api.py -q -k root_endpoint`
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q -k "workflow_draft_delete or publish_workflow_draft"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 市场支持删除|Workflow 发布成功|Workflow 发布失败|Skill Palette|字段路径选择|试运行未选择|Skill 合约"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - RED：前端目标测试最初失败，确认发布成功/失败反馈、schema 驱动绑定、数据集预览、Skill Palette 搜索和合约测试结构化结果尚未满足新计划；Playwright 也暴露出 E2E 端口复用会把 `/api` 代理到错误后端的问题。
+  - GREEN：目标前端测试最终 8 passed、44 skipped；后端目标测试 3 passed。
+  - 后端全量：`python -m pytest -q` 通过，当前 115 个测试通过；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端全量：9 个测试文件、100 passed。
+  - 前端构建：通过，Vite 生产包生成完成。
+  - Playwright E2E：9 passed，覆盖任务主链路、CI Gate、Annotation Queue 和 Workflow 画布；默认使用 8010 后端端口和 5174 前端端口，避免复用手动开发服务。
+  - 空白检查：`git diff --check` 通过，仅输出 Windows CRLF 换行转换 warning，未发现空白错误。
+- 下一步：提交本批次改动并收尾；后续如继续深化，可优先把 Workflow 画布的“输入绑定候选”升级为按连线拓扑实时分组展示，并增加更完整的 schema 类型兼容提示。
 
 ## 当前已完成
 

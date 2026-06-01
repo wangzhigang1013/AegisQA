@@ -400,6 +400,20 @@ def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend
     def validation_error_handler(_: Any, exc: RequestValidationError) -> JSONResponse:
         return JSONResponse(status_code=422, content=_api_error("VALIDATION_ERROR", "请求参数校验失败", {"errors": exc.errors()}))
 
+    @app.get("/")
+    def root() -> dict[str, Any]:
+        """给误打开后端端口的用户一个明确入口说明。"""
+
+        return {
+            "name": "AegisQA",
+            "status": "ok",
+            "message": "后端 API 已启动。请打开前端工作台或 API 文档继续使用。",
+            "frontend_url": "http://localhost:5173",
+            "docs_url": "/docs",
+            "health_url": "/health",
+            "storage_backend": app.state.storage_backend,
+        }
+
     from aegisqa.api.routes import (
         register_dataset_routes,
         register_governance_routes,
@@ -472,8 +486,10 @@ def _get_workflow_draft(store: JsonStore, draft_id: str) -> dict[str, Any]:
     return payload
 
 
-def _list_workflow_drafts(store: JsonStore) -> list[dict[str, Any]]:
+def _list_workflow_drafts(store: JsonStore, status: str | None = None) -> list[dict[str, Any]]:
     drafts = store.list_json(["workflow_drafts"])
+    if status and status != "all":
+        return [draft for draft in drafts if draft.get("status") == status]
     return [draft for draft in drafts if draft.get("status") != "deleted"]
 
 

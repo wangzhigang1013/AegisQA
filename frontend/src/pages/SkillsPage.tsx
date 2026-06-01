@@ -1,13 +1,13 @@
 import { CheckCircleOutlined, InboxOutlined, InfoCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Typography, Upload } from 'antd';
+import { Alert, Button, Card, Descriptions, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd';
 import type { UploadFile } from 'antd';
 import { useMemo, useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { demoSkills } from '../data/demo';
-import type { SkillManifest, SkillPackageRecord } from '../types';
+import type { SkillContractResult, SkillManifest, SkillPackageRecord } from '../types';
 
 type UploadFormValues = {
   filename: string;
@@ -22,6 +22,7 @@ export function SkillsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [skillQuery, setSkillQuery] = useState('');
   const [contractResultText, setContractResultText] = useState<string | null>(null);
+  const [contractResult, setContractResult] = useState<SkillContractResult | null>(null);
   const [form] = Form.useForm<UploadFormValues>();
 
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
@@ -61,11 +62,15 @@ export function SkillsPage() {
     mutationFn: (skillId: string) => api.contractTest(skillId),
     onSuccess: (result) => {
       const text = result.ok ? `合约测试通过：${result.skill_id}` : `合约测试失败：${result.message ?? result.error ?? '未知错误'}`;
+      setContractResult(result);
       setContractResultText(text);
       setNotice(text);
       void queryClient.invalidateQueries({ queryKey: ['skill-packages'] });
     },
-    onError: (error) => setContractResultText(`合约测试失败：${formatApiError(error)}`),
+    onError: (error) => {
+      setContractResult(null);
+      setContractResultText(`合约测试失败：${formatApiError(error)}`);
+    },
   });
 
   return (
@@ -152,6 +157,7 @@ export function SkillsPage() {
                   icon={<InfoCircleOutlined />}
                   onClick={() => {
                     setContractResultText(null);
+                    setContractResult(null);
                     setActiveSkill(record);
                   }}
                 >
@@ -167,24 +173,42 @@ export function SkillsPage() {
         {activeSkill ? (
           <Space direction="vertical" size="large" className="drawer-stack">
             <Typography.Paragraph>{activeSkill.description}</Typography.Paragraph>
+            <Card size="small" title="合约测试做什么">
+              <Typography.Paragraph>
+                使用 Skill manifest 里的 example_input 和 example_config 执行一次 Skill，验证输入 schema、输出 schema、handler 返回结构和基础运行是否正常。
+              </Typography.Paragraph>
+            </Card>
             {packageBySkillId[activeSkill.skill_id] ? (
-              <Card size="small" title="插件审批状态">
-                <Space wrap>
-                  <Tag color={packageBySkillId[activeSkill.skill_id].last_contract_ok ? 'green' : 'red'}>
-                    {packageBySkillId[activeSkill.skill_id].last_contract_ok ? '合约已通过' : '合约未通过'}
-                  </Tag>
-                  <Typography.Text>审批人：{packageBySkillId[activeSkill.skill_id].approved_by ?? '未审批'}</Typography.Text>
-                  <Typography.Text>审批时间：{packageBySkillId[activeSkill.skill_id].approved_at ?? '未审批'}</Typography.Text>
-                </Space>
-              </Card>
+              <>
+                <Card size="small" title="插件启用步骤">
+                  <Space direction="vertical">
+                    <Typography.Text>第 1 步：上传插件包</Typography.Text>
+                    <Typography.Text>第 2 步：运行合约测试</Typography.Text>
+                    <Typography.Text>第 3 步：治理页审批启用</Typography.Text>
+                    <Typography.Text>第 4 步：Workflow 画布中搜索并添加</Typography.Text>
+                  </Space>
+                </Card>
+                <Card size="small" title="插件审批状态">
+                  <Space wrap>
+                    <Tag color={packageBySkillId[activeSkill.skill_id].last_contract_ok ? 'green' : 'red'}>
+                      {packageBySkillId[activeSkill.skill_id].last_contract_ok ? '合约已通过' : '合约未通过'}
+                    </Tag>
+                    <Typography.Text>审批人：{packageBySkillId[activeSkill.skill_id].approved_by ?? '未审批'}</Typography.Text>
+                    <Typography.Text>审批时间：{packageBySkillId[activeSkill.skill_id].approved_at ?? '未审批'}</Typography.Text>
+                  </Space>
+                </Card>
+              </>
             ) : null}
             <Card size="small" title="输入 Schema"><pre>{JSON.stringify(activeSkill.input_schema, null, 2)}</pre></Card>
             <Card size="small" title="输出 Schema"><pre>{JSON.stringify(activeSkill.output_schema, null, 2)}</pre></Card>
             <Card size="small" title="配置 Schema"><pre>{JSON.stringify(activeSkill.config_schema, null, 2)}</pre></Card>
             {contractResultText ? <Alert type={contractResultText.includes('通过') ? 'success' : 'error'} showIcon message={contractResultText} /> : null}
-            <Button icon={<CheckCircleOutlined />} type="primary" loading={contractMutation.isPending} onClick={() => contractMutation.mutate(activeSkill.skill_id)}>
-              运行合约测试
-            </Button>
+            {contractResult ? <ContractResultCard result={contractResult} activeSkill={activeSkill} /> : null}
+            <Tooltip title="会用示例输入和示例配置真实执行一次 Skill，并检查输入输出 schema。">
+              <Button icon={<CheckCircleOutlined />} type="primary" loading={contractMutation.isPending} onClick={() => contractMutation.mutate(activeSkill.skill_id)}>
+                运行合约测试
+              </Button>
+            </Tooltip>
           </Space>
         ) : null}
       </Drawer>
@@ -253,4 +277,30 @@ function formatSkillStatus(status: string): string {
     disabled: '已禁用',
     deprecated: '已废弃',
   }[status] ?? status;
+}
+
+function ContractResultCard({ result, activeSkill }: { result: SkillContractResult; activeSkill: SkillManifest }) {
+  const errorCode = typeof (result as unknown as Record<string, unknown>).code === 'string' ? String((result as unknown as Record<string, unknown>).code) : result.error;
+  return (
+    <Card size="small" title="合约测试结果">
+      <Space direction="vertical" className="drawer-stack">
+        <Descriptions size="small" column={1}>
+          <Descriptions.Item label="测试输入"><pre>{JSON.stringify(activeSkill.example_input, null, 2)}</pre></Descriptions.Item>
+          <Descriptions.Item label="测试配置"><pre>{JSON.stringify(activeSkill.example_config, null, 2)}</pre></Descriptions.Item>
+          <Descriptions.Item label="输出结果"><pre>{JSON.stringify(result.output ?? {}, null, 2)}</pre></Descriptions.Item>
+          <Descriptions.Item label="耗时">{result.latency_ms === undefined ? '-' : `${result.latency_ms.toFixed(2)} ms`}</Descriptions.Item>
+          {!result.ok ? <Descriptions.Item label="错误码">{errorCode ?? '-'}</Descriptions.Item> : null}
+          {!result.ok ? <Descriptions.Item label="错误信息">{result.message ?? result.error ?? '-'}</Descriptions.Item> : null}
+        </Descriptions>
+        {!result.ok ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="修复建议"
+            description="检查 skill.yaml/skill.json 中的 schema 是否和 handler 输出一致；检查 handler.py 的 run(inputs, config) 是否返回 output、metrics、logs；如果超时，请减少初始化成本或外部调用。"
+          />
+        ) : null}
+      </Space>
+    </Card>
+  );
 }

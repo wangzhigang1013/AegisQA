@@ -902,7 +902,17 @@ export function installDefaultWorkbenchMocks() {
         return jsonResponse([{ template_id: 'rag_regression', name: 'RAG 回归评测', description: 'LLMCall + Judge', scenario: 'rag' }]);
       }
       if (url.endsWith('/workflow-drafts/draft-test')) {
+        if (init?.method === 'PUT') {
+          const body = JSON.parse(String(init.body ?? '{}'));
+          return jsonResponse({ draft_id: 'draft-test', status: 'draft', name: body.name ?? '测试草稿', graph: body.graph ?? demoWorkflowGraph, created_at: '', updated_at: '2026-06-01T00:00:00Z' });
+        }
+        if (init?.method === 'DELETE') {
+          return jsonResponse({ draft_id: 'draft-test', status: 'deleted', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '2026-06-01T00:00:00Z' });
+        }
         return jsonResponse({ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' });
+      }
+      if (url.endsWith('/workflow-drafts/draft-test/publish')) {
+        return jsonResponse(demoWorkflowVersion);
       }
       if (url.endsWith('/workflow-drafts')) {
         if (init?.method === 'POST') {
