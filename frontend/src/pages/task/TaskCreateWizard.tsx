@@ -146,6 +146,28 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
     form.setFieldsValue(templateValues);
   }
 
+  async function runPreflight() {
+    try {
+      await form.validateFields(
+        [
+          ['dataset_version_id'],
+          ['workflow_version_id'],
+          ['execution_template_id'],
+          ['evaluation_goal'],
+          ['pass_rate_threshold'],
+          ['max_badcase_count'],
+          ['sample_repeat_times'],
+          ['cost_budget'],
+          ['skill_override_rows'],
+        ],
+        { recursive: true },
+      );
+      onPreflight(normalizeTaskCreateValues(form.getFieldsValue(true) as TaskCreateFormValues));
+    } catch {
+      // 表单会在对应字段下展示中文错误，这里只负责阻止无效参数进入 Preflight。
+    }
+  }
+
   return (
     <Modal
       title="创建任务向导"
@@ -158,7 +180,7 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
           key="preflight"
           loading={preflightLoading}
           disabled={!watchedWorkflow || !watchedDataset}
-          onClick={() => onPreflight(normalizeTaskCreateValues(form.getFieldsValue(true) as TaskCreateFormValues))}
+          onClick={() => void runPreflight()}
         >
           运行 Preflight
         </Button>,
@@ -331,7 +353,14 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
                         {({ getFieldValue }) => {
                           const valueType = (getFieldValue(['skill_override_rows', field.name, 'value_type']) || 'string') as SkillOverrideValueType;
                           return (
-                            <Form.Item name={[field.name, 'value']} label={overrideValueLabel(valueType)} rules={[{ required: true, message: '请填写覆盖值' }]}>
+                            <Form.Item
+                              name={[field.name, 'value']}
+                              label={overrideValueLabel(valueType)}
+                              rules={[
+                                { required: true, message: '请填写覆盖值' },
+                                { validator: (_, value) => validateOverrideFormValue(valueType, value) },
+                              ]}
+                            >
                               {overrideValueControl(valueType, expressionPathOptions)}
                             </Form.Item>
                           );
@@ -669,6 +698,16 @@ function overrideValueControl(valueType: SkillOverrideValueType, expressionPathO
     return <Input placeholder="LLM_API_KEY" />;
   }
   return <Input placeholder="覆盖值" />;
+}
+
+function validateOverrideFormValue(valueType: SkillOverrideValueType, value: unknown): Promise<void> {
+  if (valueType !== 'json' || !stringOrEmpty(value)) return Promise.resolve();
+  try {
+    JSON.parse(String(value));
+    return Promise.resolve();
+  } catch {
+    return Promise.reject(new Error('请填写合法 JSON。'));
+  }
 }
 
 function stringOrEmpty(value: unknown): string {
