@@ -29,9 +29,10 @@ GitHub 发布准备阶段。本阶段按用户要求补充详细项目介绍文�
   - 后端全量：124 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
   - 前端类型检查：`tsc -b` 通过。
 - 下一步：
-  - 提交 README 与状态文件改动。
-  - 添加远程 `origin=https://github.com/wangzhigang1013/AegisQA.git`。
-  - 将当前代码推送到远程 `main`。
+  - 已提交 README 与状态文件改动，提交为 `1c01d4b docs: 完善项目介绍文档`。
+  - 已添加远程 `origin=https://github.com/wangzhigang1013/AegisQA.git`。
+  - 已创建本地 `main` 指向当前代码并推送到远程 `main`。
+  - 本条状态更新需要再次提交并推送，保证远程仓库中的项目状态记录也是最新的。
 
 ### 2026-06-02 清空 Workflow 列表、Skill 市场与执行中心
 
