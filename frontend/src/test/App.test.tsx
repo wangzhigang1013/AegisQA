@@ -379,8 +379,9 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('Skill 必返输出')).toBeInTheDocument();
     expect(screen.getByText(/Skill 必返输出表示 handler 会返回该字段/)).toBeInTheDocument();
     expect(screen.getByDisplayValue('row.question')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('context.answer')).toBeInTheDocument();
-    expect(screen.getByText(/未写入的输出不会传给下游/)).toBeInTheDocument();
+    expect(screen.getByText('下游引用 answer.answer')).toBeInTheDocument();
+    expect(screen.queryByLabelText('字段路径 answer')).not.toBeInTheDocument();
+    expect(screen.getByText(/下游节点直接在输入绑定里选择 answer.answer/)).toBeInTheDocument();
     expect(screen.queryByLabelText('输入映射 JSON')).not.toBeInTheDocument();
 
     const clickDatasetOption = async () => {

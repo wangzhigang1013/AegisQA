@@ -80,6 +80,9 @@ class DAGWorkflowExecutor:
                     step_id, result = future.result()
                     context["steps"][step_id] = result
                     if result["status"] == "succeeded":
+                        # DAG 执行器同样暴露 `step_id.field` 标准输出命名空间，
+                        # 让下游节点不必依赖手写 output_mapping 别名。
+                        context[step_id] = result.get("output", {})
                         for target_path, value in result["writes"].items():
                             set_by_path(context, target_path, value)
                         context["metrics"].update(result.get("metrics", {}))

@@ -7,6 +7,7 @@ PRD 明确要求：字段映射不是简单路径搬运。解析出下游 Skill 
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -99,13 +100,41 @@ def _matches_type(value: Any, expected: str) -> bool:
     return False
 
 
-def validate_json_schema(value: Any, schema: dict[str, Any], field_path: str = "$") -> None:
+def _coerce_json_container_string(value: Any, schema: dict[str, Any]) -> Any:
+    """把 CSV/JSONL 中的 JSON 字符串按 schema 还原为对象或数组。
+
+    数据集上传后，CSV 单元格天然容易把 `{"k": "v"}` 这类对象保成字符串。
+    这里仅在 schema 明确要求 object/array 时尝试解析，避免把普通 string 类型
+    悄悄改写成别的值。
+    """
+
+    if not isinstance(value, str):
+        return value
+    expected = schema.get("type")
+    expected_values = expected if isinstance(expected, list) else [expected]
+    expects_object = "object" in expected_values or "properties" in schema
+    expects_array = "array" in expected_values
+    if not expects_object and not expects_array:
+        return value
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return value
+    if expects_object and isinstance(parsed, dict):
+        return parsed
+    if expects_array and isinstance(parsed, list):
+        return parsed
+    return value
+
+
+def validate_json_schema(value: Any, schema: dict[str, Any], field_path: str = "$") -> Any:
     """校验最小 JSON Schema 子集。
 
     MVP 只需要覆盖 PRD 要求的 string、number、boolean、enum、json、array 等类型。
     不引入完整 jsonschema 依赖，是为了保持平台核心轻量；后续可以替换为标准库。
     """
 
+    value = _coerce_json_container_string(value, schema)
     expected = schema.get("type")
     if isinstance(expected, list):
         if not any(_matches_type(value, item) for item in expected):
@@ -127,11 +156,12 @@ def validate_json_schema(value: Any, schema: dict[str, Any], field_path: str = "
         for key, child_schema in schema.get("properties", {}).items():
             if key in value:
                 child_path = key if field_path == "$" else f"{field_path}.{key}"
-                validate_json_schema(value[key], child_schema, child_path)
+                value[key] = validate_json_schema(value[key], child_schema, child_path)
 
     if expected == "array" and isinstance(value, list) and "items" in schema:
         for index, item in enumerate(value):
-            validate_json_schema(item, schema["items"], f"{field_path}[{index}]")
+            value[index] = validate_json_schema(item, schema["items"], f"{field_path}[{index}]")
+    return value
 
 
 def resolve_input_mapping(
@@ -142,6 +172,5 @@ def resolve_input_mapping(
     """解析输入映射，并在返回前完成强类型校验。"""
 
     resolved = {field: get_by_path(context, source_path) for field, source_path in input_mapping.items()}
-    validate_json_schema(resolved, input_schema)
-    return resolved
-
+    validated = validate_json_schema(resolved, input_schema)
+    return validated if isinstance(validated, dict) else resolved

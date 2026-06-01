@@ -96,7 +96,10 @@ export function buildAvailableFieldPaths(dataset: DatasetVersion | null | undefi
   const upstreamNodeIds = selectedNodeId ? collectUpstreamNodeIds(graph, selectedNodeId) : new Set(graph.nodes.map((node) => node.node_id));
   for (const node of graph.nodes) {
     if (selectedNodeId && !upstreamNodeIds.has(node.node_id)) continue;
-    for (const targetPath of Object.values(node.output_mapping ?? {})) {
+    for (const [field, targetPath] of Object.entries(node.output_mapping ?? {})) {
+      if (field.trim()) {
+        paths.add(`${node.node_id}.${field.trim()}`);
+      }
       if (typeof targetPath === 'string' && targetPath.trim()) {
         paths.add(targetPath.trim());
       }

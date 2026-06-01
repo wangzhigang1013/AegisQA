@@ -85,6 +85,19 @@ def test_resolve_input_mapping_rejects_type_mismatch_before_skill_call() -> None
     assert exc.value.actual_type == "int"
 
 
+def test_resolve_input_mapping_parses_json_object_string_for_object_field() -> None:
+    context = {"row": {"prompt": "生成回答", "variables": '{"topic": "AegisQA"}'}, "context": {}, "metrics": {}, "steps": {}}
+    input_schema = {
+        "type": "object",
+        "required": ["prompt"],
+        "properties": {"prompt": {"type": "string"}, "variables": {"type": "object"}},
+    }
+
+    resolved = resolve_input_mapping({"prompt": "row.prompt", "variables": "row.variables"}, context, input_schema)
+
+    assert resolved["variables"] == {"topic": "AegisQA"}
+
+
 def test_workflow_runner_executes_chunked_items_and_generates_report(tmp_path: Path) -> None:
     store = JsonStore(tmp_path / "store")
     dataset_service = DatasetService(store)
@@ -135,6 +148,41 @@ def test_workflow_runner_executes_chunked_items_and_generates_report(tmp_path: P
     assert len(report.badcases) >= 1
     assert completed.items[0].steps[0].input_snapshot["prompt"] == "什么是 AegisQA?"
     assert "cache_hit" in completed.items[0].steps[0].model_dump()
+
+
+def test_workflow_runner_exposes_outputs_by_step_id_without_output_mapping(tmp_path: Path) -> None:
+    store = JsonStore(tmp_path / "store")
+    dataset_service = DatasetService(store)
+    registry = SkillRegistry.with_builtin_skills()
+    data_path = tmp_path / "rag-node-output.jsonl"
+    _write_jsonl(data_path, [{"question": "什么是 AegisQA?", "reference": "AegisQA", "expected_label": "pass"}])
+    dataset = dataset_service.upload_dataset("rag_node_output", data_path, golden=True, label_field="expected_label")
+    workflow = WorkflowDraft(
+        name="node_namespace_outputs",
+        steps=[
+            WorkflowStep(
+                step_id="answer",
+                skill_ref="llm.call@0.1.0",
+                input_mapping={"prompt": "row.question"},
+                output_mapping={},
+                config={"model": "demo-model", "temperature": 0},
+            ),
+            WorkflowStep(
+                step_id="judge",
+                skill_ref="llm.judge@0.1.0",
+                input_mapping={"question": "row.question", "answer": "answer.answer", "reference": "row.reference"},
+                output_mapping={},
+                config={"threshold": 0.6, "model": "judge-model"},
+            ),
+        ],
+    ).publish()
+    runner = WorkflowRunner(store, dataset_service, registry)
+
+    run = runner.create_run(RunRequest(workflow=workflow, dataset_id=dataset.dataset_id, dataset_version=dataset.version))
+    completed = runner.execute_run(run.run_id)
+
+    assert completed.status == "completed"
+    assert completed.items[0].steps[1].input_snapshot["answer"].startswith("模型回答：什么是 AegisQA?")
 
 
 def test_failed_type_validation_records_step_log_and_retry_keeps_success_items(tmp_path: Path) -> None:

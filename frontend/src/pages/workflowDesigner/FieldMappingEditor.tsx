@@ -18,40 +18,44 @@ type FieldMappingEditorProps = {
   addButtonLabel?: string;
   schema?: Record<string, unknown> | null;
   description?: string;
+  mode?: 'input' | 'output';
+  nodeId?: string;
 };
 
-export function FieldMappingEditor({ title, value, pathOptions, onChange, addButtonLabel = '新增映射', schema, description }: FieldMappingEditorProps) {
+export function FieldMappingEditor({ title, value, pathOptions, onChange, addButtonLabel = '新增映射', schema, description, mode, nodeId }: FieldMappingEditorProps) {
+  const isOutputMapping = mode ? mode === 'output' : title.includes('输出');
+  const outputReference = (field: string) => `${nodeId || '当前节点'}.${field}`;
   const schemaFields = schemaToRows(schema);
   const schemaFieldSet = new Set(schemaFields.map((row) => row.field));
   const legacyRows: MappingRow[] = Object.entries(value ?? {})
     .filter(([field]) => !schemaFieldSet.has(field))
-    .map(([field, path]) => ({ id: field, field, path, fromSchema: false }));
+    .map(([field, path]) => ({ id: field, field, path: isOutputMapping ? outputReference(field) : path, fromSchema: false }));
   const rows: MappingRow[] = [
-    ...schemaFields.map((row) => ({ ...row, path: value?.[row.field] ?? '' })),
+    ...schemaFields.map((row) => ({ ...row, path: isOutputMapping ? outputReference(row.field) : value?.[row.field] ?? '' })),
     ...legacyRows,
   ];
   const options = buildSelectOptions(pathOptions, rows);
   const lockedBySchema = schemaFields.length > 0;
-  const isOutputMapping = title.includes('输出');
   const fieldLabel = isOutputMapping ? '输出字段' : '输入字段';
   const requiredLabel = isOutputMapping ? 'Skill 必返输出' : '必填输入';
   const requiredHelp = isOutputMapping
     ? '来自 output_schema.required，表示 Skill handler 必须返回该字段；是否写给下游由“输出写入”决定。'
     : '来自 input_schema.required，发布和执行前必须绑定到数据集字段或上游输出。';
+  const firstOutputReference = rows[0] ? outputReference(rows[0].field) : `${nodeId || '节点ID'}.字段`;
 
   function updateRow(row: MappingRow, patch: Partial<MappingRow>) {
     const nextRow = { ...row, ...patch };
     const nextEntries = rows.map((item) => (item.id === row.id ? nextRow : item));
-    onChange(rowsToMapping(nextEntries));
+    onChange(rowsToMapping(nextEntries, isOutputMapping, outputReference));
   }
 
   function deleteRow(row: MappingRow) {
-    onChange(rowsToMapping(rows.filter((item) => item.id !== row.id)));
+    onChange(rowsToMapping(rows.filter((item) => item.id !== row.id), isOutputMapping, outputReference));
   }
 
   function addRow() {
     const nextField = uniqueFieldName(rows);
-    onChange({ ...(value ?? {}), [nextField]: pathOptions[0] ?? '' });
+    onChange({ ...(value ?? {}), [nextField]: isOutputMapping ? outputReference(nextField) : pathOptions[0] ?? '' });
   }
 
   return (
@@ -60,7 +64,7 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
         <Typography.Text strong>{title}</Typography.Text>
         <Typography.Text type="secondary">{description ?? '从 row、context、metrics 中选择字段路径，避免手写 JSON 出错。'}</Typography.Text>
         {isOutputMapping ? (
-          <Typography.Text type="secondary">Skill 必返输出表示 handler 会返回该字段；是否写入下游由“输出写入”决定。</Typography.Text>
+          <Typography.Text type="secondary">Skill 必返输出表示 handler 会返回该字段；下游节点直接在输入绑定里选择 {firstOutputReference} 这类路径，不需要手写输出路径。</Typography.Text>
         ) : null}
       </Space>
       <Table
@@ -95,21 +99,27 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
               </Space>
             ),
           },
-          {
-            title: '路径',
-            dataIndex: 'path',
-            render: (_, row) => (
-              <Input
-                aria-label={`字段路径 ${row.field}`}
-                value={row.path}
-                className="full-width-control"
-                list={pathListId(title, row.id)}
-                placeholder="选择 row/context/metrics 路径"
-                // 字段路径既可能来自当前 Dataset，也可能来自用户刚设计的上游输出；允许自由输入，避免保存成只读模板。
-                onChange={(event) => updateRow(row, { path: event.target.value })}
-              />
-            ),
-          },
+          isOutputMapping
+            ? {
+                title: '下游引用',
+                dataIndex: 'path',
+                render: (_: unknown, row: MappingRow) => <Typography.Text>{`下游引用 ${outputReference(row.field)}`}</Typography.Text>,
+              }
+            : {
+                title: '路径',
+                dataIndex: 'path',
+                render: (_: unknown, row: MappingRow) => (
+                  <Input
+                    aria-label={`字段路径 ${row.field}`}
+                    value={row.path}
+                    className="full-width-control"
+                    list={pathListId(title, row.id)}
+                    placeholder="选择 row/context/metrics 路径"
+                    // 字段路径既可能来自当前 Dataset，也可能来自用户刚设计的上游输出；允许自由输入，避免保存成只读模板。
+                    onChange={(event) => updateRow(row, { path: event.target.value })}
+                  />
+                ),
+              },
           {
             title: '操作',
             key: 'actions',
@@ -120,13 +130,15 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
           },
         ]}
       />
-      {rows.map((row) => (
-        <datalist key={row.id} id={pathListId(title, row.id)}>
-          {options.map((option) => (
-            <option key={option.value} value={option.value} />
+      {isOutputMapping
+        ? null
+        : rows.map((row) => (
+            <datalist key={row.id} id={pathListId(title, row.id)}>
+              {options.map((option) => (
+                <option key={option.value} value={option.value} />
+              ))}
+            </datalist>
           ))}
-        </datalist>
-      ))}
       {lockedBySchema ? null : (
         <Button icon={<PlusOutlined />} aria-label={`${title} ${addButtonLabel}`} onClick={addRow}>
           {addButtonLabel}
@@ -159,11 +171,11 @@ function buildSelectOptions(pathOptions: string[], rows: MappingRow[]) {
   return [...new Set([...pathOptions, ...rows.map((row) => row.path).filter(Boolean)])].map((path) => ({ value: path, label: path }));
 }
 
-function rowsToMapping(rows: MappingRow[]): Record<string, string> {
+function rowsToMapping(rows: MappingRow[], isOutputMapping: boolean, outputReference: (field: string) => string): Record<string, string> {
   return rows.reduce<Record<string, string>>((mapping, row) => {
     const field = row.field.trim();
     if (!field) return mapping;
-    mapping[field] = row.path;
+    mapping[field] = isOutputMapping ? outputReference(field) : row.path;
     return mapping;
   }, {});
 }

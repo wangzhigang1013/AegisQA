@@ -290,6 +290,9 @@ class WorkflowGraphService:
                 # 校验阶段不调用真实 Skill，而是用 schema 占位输出驱动下游类型检查。
                 # 这样前端能在发布前发现映射问题，同时不会产生外部调用成本或副作用。
                 output = {field: _placeholder_for_schema(schema) for field, schema in skill.manifest.output_schema.get("properties", {}).items()}
+                # 每个节点的标准输出命名空间固定为 `node_id.field`，output_mapping 只作为
+                # 兼容旧 Workflow 的额外别名，不再要求用户为每个输出手写路径。
+                context[node.node_id] = deepcopy(output)
                 for output_field, target_path in node.output_mapping.items():
                     if output_field in output:
                         set_by_path(context, target_path, output[output_field])

@@ -356,6 +356,9 @@ class WorkflowRunner:
                         self._cache[cache_key] = {"output": output, "metrics": metrics}
 
                 validate_json_schema(output, skill.manifest.output_schema)
+                # 标准输出命名空间固定为 `step_id.field`，下游映射可直接引用
+                # `answer.answer` 这类路径；output_mapping 仅保留为旧流程的别名写入能力。
+                context[workflow_step.step_id] = output
                 for output_field, target_path in workflow_step.output_mapping.items():
                     if output_field in output:
                         set_by_path(context, target_path, output[output_field])

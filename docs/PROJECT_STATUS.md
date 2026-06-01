@@ -6,6 +6,42 @@
 
 ## 最近改动
 
+### 2026-06-02 Workflow 输出命名空间与 object 字符串兼容优化
+
+- 改动摘要：按最新反馈收敛 Workflow 输出语义。Skill 输出字段名由 `output_schema` 固定后，前端不再要求用户手写“输出写入路径”，Inspector 只展示下游引用，例如 `answer.answer`；后端执行器和 Graph 校验器会把每个节点输出自动暴露到 `节点ID.字段` 命名空间，`output_mapping` 仅保留为旧 Workflow 的高级别名兼容。字段路径候选也会同时展示节点字段引用。固定 `input_schema/output_schema` 的 Skill 继续锁定字段，只有没有固定 properties 的开放 schema 才能新增字段。另修复 `variables` 等 object 字段来自 CSV/JSONL 字符串时的误报：当 schema 明确要求 object/array 且值是合法 JSON 字符串时，会先解析再校验；普通字符串不会被无条件视为 object。
+- 变更文件：
+  - `aegisqa/core/mapper.py`
+  - `aegisqa/engine/runner.py`
+  - `aegisqa/workflows/dag.py`
+  - `aegisqa/workflows/graph.py`
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/pages/workflowDesigner/FieldMappingEditor.tsx`
+  - `frontend/src/pages/workflowDesigner/graphModel.ts`
+  - `frontend/src/pages/workflowDesigner/graphModel.test.ts`
+  - `frontend/src/test/App.test.tsx`
+  - `tests/test_platform_core.py`
+  - `tests/test_workflow_graph_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_platform_core.py -q -k "json_object_string or step_id_without_output_mapping"`
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q -k "node_field_reference_without_output_mapping"`
+  - `python -m pytest tests\test_platform_core.py tests\test_workflow_graph_hardening.py -q -k "json_object_string or step_id_without_output_mapping or node_field_reference_without_output_mapping"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow Inspector 支持字段路径"`
+  - `cd frontend && npm test -- src/pages/workflowDesigner/graphModel.test.ts`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `git diff --check`
+- 测试结果：
+  - RED：新增后端测试最初失败，确认 object 字符串仍触发 `TYPE_MISMATCH`，且没有 output_mapping 时 `answer.answer` 无法驱动下游；新增前端测试最初失败，确认“输出写入”仍展示路径输入框。
+  - GREEN：目标后端测试 3 passed；Workflow Inspector 目标前端测试 1 passed；graphModel 测试 3 passed；前端 typecheck 通过。
+  - 后端全量：通过，当前全量测试全部 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端全量：9 个测试文件、101 passed。
+  - 前端构建：通过，Vite 生产包生成完成。
+  - 空白检查：`git diff --check` 通过，仅输出 Windows CRLF 换行转换 warning，未发现空白错误。
+- 下一步：如果继续细化 Workflow 体验，可把输入绑定候选按“数据集字段 / 上游节点输出 / 兼容别名 / metrics”分组展示，并在保存草稿时提示历史 `context.*` 输出别名会保留但不再推荐。
+
 ### 2026-06-01 Workflow Palette 详情与字段标记说明修复
 
 - 改动摘要：修复 Workflow 设计器里 Skill Palette 点击“查看详情”看起来没有反应的问题。原实现把详情塞在左侧栏底部小卡片里，用户不容易发现；现改为右侧抽屉，展示 Skill ID、版本、状态、描述、标签、场景、输入/输出字段以及输入/输出/配置 Schema。同步优化节点 Inspector 的字段标记：输入 schema 的 required 显示为“必填输入”，输出 schema 的 required 显示为“Skill 必返输出”，并在“输出写入”区域说明它只表示 handler 会返回该字段，是否传递给下游仍由输出写入决定，避免被误解为错误。

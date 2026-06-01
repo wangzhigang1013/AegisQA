@@ -44,6 +44,7 @@ describe('Workflow 画布图模型', () => {
 
     expect(paths).toContain('row.question');
     expect(paths).toContain('row.reference');
+    expect(paths).toContain('answer.answer');
     expect(paths).toContain('context.answer');
     expect(paths).toContain('metrics.tokens');
     expect(paths).not.toContain('metrics.judge_score');

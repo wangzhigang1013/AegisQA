@@ -288,7 +288,7 @@ function WorkflowDesignerContent() {
       label: skill.name,
       skill_ref: skill.skill_id,
       input_mapping: defaultInputMapping(skill),
-      output_mapping: defaultOutputMapping(skill),
+      output_mapping: defaultOutputMapping(skill, id),
       config: skill.example_config,
       cacheable: skill.cacheable,
     };
@@ -781,7 +781,9 @@ function WorkflowDesignerContent() {
                           value={selectedGraphNode.output_mapping ?? {}}
                           pathOptions={fieldPathOptions}
                           schema={selectedSkill?.output_schema}
-                          description="把 Skill 输出写入 context、metrics 或命名输出。未写入的输出不会传给下游。"
+                          description="Skill 输出字段名由 manifest 固定，下游直接引用“当前节点 ID.字段”。"
+                          mode="output"
+                          nodeId={selectedGraphNode.node_id}
                           onChange={(output_mapping) => updateSelectedNode({ output_mapping })}
                           addButtonLabel="新增输出映射"
                         />
@@ -801,7 +803,7 @@ function WorkflowDesignerContent() {
                                       onBlur={(event) => updateJsonPatch('input_mapping', event.target.value, updateSelectedNode, setConsoleText)}
                                     />
                                   </Form.Item>
-                                  <Form.Item label="输出映射 JSON">
+                                  <Form.Item label="输出别名 JSON（高级兼容）">
                                     <Input.TextArea
                                       aria-label="输出映射 JSON"
                                       key={`${selectedGraphNode.node_id}-output-${JSON.stringify(selectedGraphNode.output_mapping ?? {})}`}
@@ -1007,9 +1009,9 @@ function defaultInputMapping(skill: SkillManifest): Record<string, string> {
   }, {});
 }
 
-function defaultOutputMapping(skill: SkillManifest): Record<string, string> {
+function defaultOutputMapping(skill: SkillManifest, nodeId: string): Record<string, string> {
   return Object.keys((skill.output_schema.properties ?? {}) as Record<string, unknown>).reduce<Record<string, string>>((mapping, field) => {
-    mapping[field] = field === 'score' || field === 'tokens' ? `metrics.${field}` : `context.${field}`;
+    mapping[field] = `${nodeId}.${field}`;
     return mapping;
   }, {});
 }
