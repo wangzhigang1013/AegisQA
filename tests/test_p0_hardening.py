@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from aegisqa.api.app import create_app
-from aegisqa.skills.packages import DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS
+from aegisqa.skills.packages import PACKAGE_SKILL_TIMEOUT_ENV
 
 
 def test_dataset_upload_rejects_empty_files_and_reports_jsonl_line(tmp_path: Path) -> None:
@@ -41,7 +41,8 @@ def test_dataset_upload_rejects_empty_files_and_reports_jsonl_line(tmp_path: Pat
     assert empty_csv.json()["code"] == "DATASET_EMPTY"
 
 
-def test_skill_package_rejects_unsafe_paths_and_reports_contract_timeout(tmp_path: Path) -> None:
+def test_skill_package_rejects_unsafe_paths_and_reports_contract_timeout(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv(PACKAGE_SKILL_TIMEOUT_ENV, "1")
     client = TestClient(create_app(store_root=tmp_path / "store"))
 
     unsafe = client.post(
@@ -61,7 +62,7 @@ def test_skill_package_rejects_unsafe_paths_and_reports_contract_timeout(tmp_pat
 import time
 
 def run(inputs, config):
-    time.sleep({DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS + 1})
+    time.sleep(2)
     return {{"output": {{"echo": inputs["text"]}}}}
 """,
             ),
@@ -72,7 +73,7 @@ def run(inputs, config):
     contract = client.post("/skills/plugin.timeout@0.1.0/contract-test").json()
     assert contract["ok"] is False
     assert contract["code"] == "SKILL_CONTRACT_TIMEOUT"
-    assert contract["details"]["timeout_seconds"] == DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS
+    assert contract["details"]["timeout_seconds"] == 1
 
 
 def test_task_actions_reject_invalid_state_transitions(tmp_path: Path) -> None:

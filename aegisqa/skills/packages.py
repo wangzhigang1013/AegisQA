@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -17,9 +18,30 @@ from aegisqa.core.errors import AegisQAError
 from aegisqa.skills.base import BaseSkill, SkillManifest, SkillResult
 
 
-DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS = 5
+PACKAGE_SKILL_TIMEOUT_ENV = "AEGISQA_PACKAGE_SKILL_TIMEOUT_SECONDS"
+DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS = 60
+MAX_PACKAGE_SKILL_TIMEOUT_SECONDS = 600
 MAX_PACKAGE_SKILL_OUTPUT_BYTES = 64 * 1024
 MAX_PACKAGE_SKILL_STREAM_CHARS = 4000
+
+
+def resolve_package_skill_timeout_seconds(timeout_seconds: int | str | None = None) -> int:
+    """解析插件 Skill 的单次执行超时。
+
+    插件可能会做模型调用、批处理或少量循环，5 秒过于偏演示场景；但完全不限制会拖死
+    任务队列。因此默认放宽到 60 秒，并允许部署时通过环境变量调大，同时用上限兜住风险。
+    """
+
+    raw_value = timeout_seconds
+    if raw_value is None:
+        raw_value = os.getenv(PACKAGE_SKILL_TIMEOUT_ENV)
+    if raw_value in (None, ""):
+        return DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS
+    return max(1, min(parsed, MAX_PACKAGE_SKILL_TIMEOUT_SECONDS))
 
 
 class SubprocessPackageSkill(BaseSkill):
@@ -30,14 +52,15 @@ class SubprocessPackageSkill(BaseSkill):
         manifest: SkillManifest,
         handler_path: Path,
         *,
-        timeout_seconds: int = DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS,
+        timeout_seconds: int | None = None,
     ) -> None:
         self.manifest = manifest
         # 子进程会把 cwd 切到插件目录；这里必须提前转成绝对路径，
         # 避免相对路径在子进程中被再次拼接导致 handler.py 找不到。
         self.handler_path = handler_path.resolve()
-        # 合约测试需要覆盖真实 Python 子进程冷启动；1 秒在 Windows 并发 E2E 下会误杀正常插件。
-        self.timeout_seconds = timeout_seconds
+        # 这里是单次 Skill 调用的保护阈值，不是整个任务的总时长限制。
+        # 真实任务可以循环执行很多条样本，但每条样本仍需要可控的最大运行时间。
+        self.timeout_seconds = resolve_package_skill_timeout_seconds(timeout_seconds)
         super().__init__()
 
     def run(self, inputs: dict[str, Any], config: dict[str, Any] | None = None) -> SkillResult:

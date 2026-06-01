@@ -2,9 +2,32 @@
 
 ## 当前阶段
 
-Skill 插件上传试用准备阶段。本阶段先清理本地 AegisQA store 中历史上传产生的杂乱插件包，再在桌面创建一组干净的可上传示例 Skill，用于验证“上传插件包 -> 运行合约测试 -> 审批启用 -> Workflow 搜索使用”的完整流程。后续继续围绕 Workflow 与 Skill 的交互闭环深化。
+Skill 插件执行稳定性优化阶段。本阶段在清理并准备示例插件包之后，继续修正插件运行时的真实任务适配问题：默认单次插件执行超时从演示级 5 秒放宽为 60 秒，并支持环境变量配置，避免后续包含模型调用、批处理或循环逻辑的 Skill 被过早杀掉。
 
 ## 最近改动
+
+### 2026-06-02 插件 Skill 单次执行超时放宽并支持配置
+
+- 改动摘要：针对用户反馈“默认执行超时 5 秒太短，后面可能会循环跑任务”，将上传插件 Skill 的单次子进程执行超时从固定 5 秒升级为可配置策略。默认值改为 60 秒；部署时可通过 `AEGISQA_PACKAGE_SKILL_TIMEOUT_SECONDS` 调整；最大值限制为 600 秒，避免单个插件无限运行拖死任务队列。这里的超时是“单次 Skill 调用”的保护阈值，不是整个任务的总时长限制，任务仍然可以按样本循环执行多次 Skill。
+- 变更文件：
+  - `aegisqa/skills/packages.py`
+  - `tests/test_skill_package_security.py`
+  - `tests/test_p0_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_skill_package_security.py -q -k "timeout_can_be_configured"`
+  - `python -m pytest tests\test_skill_package_security.py tests\test_p0_hardening.py -q -k "skill_package or timeout"`
+  - `python -m pytest -q`
+  - `git diff --check`
+- 测试结果：
+  - RED：新增超时配置测试最初失败，确认缺少 `MAX_PACKAGE_SKILL_TIMEOUT_SECONDS`、`PACKAGE_SKILL_TIMEOUT_ENV` 与 `resolve_package_skill_timeout_seconds`。
+  - GREEN：目标超时配置测试 1 passed。
+  - 目标 Skill 包安全与 P0 测试：6 passed。
+  - 后端全量：123 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 空白检查：`git diff --check` 通过，仅输出 Windows CRLF 换行转换 warning。
+- 下一步：
+  - 如果后续需要单个 Skill 跑更长时间，可设置环境变量 `AEGISQA_PACKAGE_SKILL_TIMEOUT_SECONDS=120` 或更高，当前上限为 600。
+  - 后续更专业的方案应把“任务总超时、单条样本超时、单个节点超时、重试策略”拆成 Task 级运行参数，不再只靠插件子进程保护阈值。
 
 ### 2026-06-02 清理本地上传 Skill 包并创建桌面示例插件
 

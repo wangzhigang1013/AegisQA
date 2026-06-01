@@ -8,6 +8,23 @@ from zipfile import ZipFile
 from fastapi.testclient import TestClient
 
 from aegisqa.api.app import create_app
+from aegisqa.skills.packages import (
+    DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS,
+    MAX_PACKAGE_SKILL_TIMEOUT_SECONDS,
+    PACKAGE_SKILL_TIMEOUT_ENV,
+    resolve_package_skill_timeout_seconds,
+)
+
+
+def test_package_skill_timeout_can_be_configured_by_environment(monkeypatch) -> None:
+    monkeypatch.setenv(PACKAGE_SKILL_TIMEOUT_ENV, "120")
+    assert resolve_package_skill_timeout_seconds() == 120
+
+    monkeypatch.setenv(PACKAGE_SKILL_TIMEOUT_ENV, str(MAX_PACKAGE_SKILL_TIMEOUT_SECONDS + 100))
+    assert resolve_package_skill_timeout_seconds() == MAX_PACKAGE_SKILL_TIMEOUT_SECONDS
+
+    monkeypatch.setenv(PACKAGE_SKILL_TIMEOUT_ENV, "not-a-number")
+    assert resolve_package_skill_timeout_seconds() == DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS
 
 
 def test_skill_package_records_contract_and_approval_metadata(tmp_path) -> None:
