@@ -6,6 +6,26 @@
 
 ## 最近改动
 
+### 2026-06-01 数据集上传 500 根因定位与提示优化
+
+- 改动摘要：定位用户上传数据集时看到“请求失败：500（HTTP_ERROR）”的根因。日志显示 5173 前端开发服务器的 Vite 代理访问 `127.0.0.1:8000` 失败：`connect ECONNREFUSED 127.0.0.1:8000`，不是 DatasetService 解析失败。已重新启动 FastAPI 后端到 `http://127.0.0.1:8000`，并通过 `http://127.0.0.1:5173/api/datasets/upload` 直接验证 JSONL 上传返回 200。前端 API client 增加空 500 识别：当 `/api` 代理返回没有结构化响应的 500 时，提示“后端服务不可用，请确认 FastAPI 已启动在 http://127.0.0.1:8000。”，避免用户只看到泛化 HTTP_ERROR。
+- 变更文件：
+  - `frontend/src/api/client.ts`
+  - `frontend/src/test/apiClient.test.ts`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/apiClient.test.ts`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest tests\test_p0_hardening.py -q -k dataset_upload`
+  - `Invoke-WebRequest -UseBasicParsing -Method Post http://127.0.0.1:5173/api/datasets/upload`
+- 测试结果：
+  - RED：新增 API client 测试最初失败，确认 Vite 代理空 500 仍显示“请求失败：500”。
+  - GREEN：`apiClient.test.ts` 2 passed，后端不可用提示已能返回 `BACKEND_UNAVAILABLE`。
+  - 前端 typecheck：通过。
+  - 后端上传异常测试：通过；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 本地前端代理上传验证：通过，返回 `ui_upload_repro:v1`。
+- 下一步：如继续优化启动体验，可在开发脚本中增加一键启动前后端并做健康检查，避免只启动 Vite 忘记启动 FastAPI。
+
 ### 2026-06-01 Workflow 与 Skill 交互闭环优化
 
 - 改动摘要：按最新计划修复 Workflow 发布无反馈、字段映射概念混乱、数据集映射说明缺失、Workflow 列表无删除、Skill Palette 信息过载、顶部控件语义不清、Skill 合约测试解释不足和后端根路径 Not Found 等问题。Workflow 设计器现在优先按草稿发布，发布前执行本地校验和后端校验；成功后展示版本号、“去创建任务”和“返回 Workflow 市场”，失败后展示顶部错误提示并聚焦 Console 的错误建议。Inspector 改为“输入绑定 / 输出写入 / 运行参数”，输入输出字段由 Skill schema 生成，JSON 映射降级为高级模式。选择“映射预览数据集 / 试运行数据集”后，会展示字段预览、输入绑定候选和试运行样本来源；未选择数据集时试运行禁用但允许发布结构。Workflow 市场补齐草稿复制/删除、已发布复制/归档和状态筛选。Skill Palette 改为搜索 + 推荐前 5 个，未启用 Skill 不能直接添加。Skill 市场合约测试展示测试输入、配置、输出、耗时、错误码和修复建议。Playwright 默认改用 5174 前端端口，避免和手动启动的 5173 开发服务抢代理配置。
