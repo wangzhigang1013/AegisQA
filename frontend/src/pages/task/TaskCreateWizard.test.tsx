@@ -329,6 +329,26 @@ describe('TaskCreateWizard', () => {
     );
   });
 
+  it('任务级表达式参数覆盖可从 Dataset field_paths 选择路径', async () => {
+    const onPreflight = vi.fn();
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} skills={demoSkills} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={onPreflight} onSubmit={vi.fn()} />);
+
+    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
+    await chooseSelectOption('覆盖 Step', '生成回答 / answer');
+    await chooseSelectOption('参数名', 'model / string');
+    await chooseSelectOption('覆盖值类型', '表达式路径');
+    await chooseSelectOption('表达式路径', 'row.question');
+    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
+
+    expect(onPreflight).toHaveBeenCalledWith(
+      expect.objectContaining<Partial<TaskCreateFormValues>>({
+        skill_overrides: { answer: { model: { type: 'expression', path: 'row.question' } } },
+      }),
+    );
+  });
+
   it('Preflight 后修改任务级 Skill 参数覆盖会要求重新运行预检', async () => {
     render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={overridePreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={vi.fn()} />);
 

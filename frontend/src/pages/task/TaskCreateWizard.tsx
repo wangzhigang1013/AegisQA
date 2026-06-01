@@ -93,6 +93,7 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
   const skillById = useMemo(() => indexSkillsById(skills), [skills]);
   const overrideTargets = useMemo(() => skillStepOptions(selectedWorkflow, skillById), [selectedWorkflow, skillById]);
   const selectedDatasetVersion = datasetVersions.find((item) => item.version.version_id === watchedDataset)?.version;
+  const expressionPathOptions = useMemo(() => fieldPathOptionsForDataset(selectedDatasetVersion), [selectedDatasetVersion]);
   const currentExecutionTemplate = watchedTemplate ?? form.getFieldValue('execution_template_id');
   const currentEvaluationGoal = watchedEvaluationGoal ?? form.getFieldValue('evaluation_goal');
   const currentPassRate = watchedPassRate ?? form.getFieldValue('pass_rate_threshold');
@@ -331,7 +332,7 @@ function TaskCreateWizardContent({ open, loading, preflightLoading, preflightRes
                           const valueType = (getFieldValue(['skill_override_rows', field.name, 'value_type']) || 'string') as SkillOverrideValueType;
                           return (
                             <Form.Item name={[field.name, 'value']} label={overrideValueLabel(valueType)} rules={[{ required: true, message: '请填写覆盖值' }]}>
-                              {overrideValueControl(valueType)}
+                              {overrideValueControl(valueType, expressionPathOptions)}
                             </Form.Item>
                           );
                         }}
@@ -543,6 +544,13 @@ function schemaTypeLabel(schema: SkillConfigSchemaField): string {
   return firstSchemaType(schema.type) || 'any';
 }
 
+function fieldPathOptionsForDataset(datasetVersion: DatasetSummary['versions'][number] | undefined): { value: string; label: string }[] {
+  const paths = datasetVersion?.field_paths?.length
+    ? datasetVersion.field_paths
+    : Object.keys(datasetVersion?.field_schema ?? {}).map((field) => `row.${field}`);
+  return Array.from(new Set(paths.filter(Boolean))).map((path) => ({ value: path, label: path }));
+}
+
 function skillOverridesFromRows(rows: unknown): SkillOverrideConfig {
   if (!Array.isArray(rows)) return {};
   return rows.reduce<SkillOverrideConfig>((acc, row) => {
@@ -625,7 +633,7 @@ function overrideValueLabel(valueType: SkillOverrideValueType): string {
   return '覆盖值';
 }
 
-function overrideValueControl(valueType: SkillOverrideValueType) {
+function overrideValueControl(valueType: SkillOverrideValueType, expressionPathOptions: { value: string; label: string }[]) {
   if (valueType === 'number') {
     return <InputNumber className="full-width-control" placeholder="覆盖值" />;
   }
@@ -644,6 +652,17 @@ function overrideValueControl(valueType: SkillOverrideValueType) {
     return <Input.TextArea autoSize={{ minRows: 1, maxRows: 3 }} placeholder='{"temperature": 0.2}' />;
   }
   if (valueType === 'expression') {
+    if (expressionPathOptions.length) {
+      return (
+        <Select
+          aria-label="表达式路径"
+          showSearch
+          optionFilterProp="label"
+          options={expressionPathOptions}
+          placeholder="row.temperature"
+        />
+      );
+    }
     return <Input placeholder="row.temperature" />;
   }
   if (valueType === 'secret') {

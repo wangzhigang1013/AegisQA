@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-新一轮“Skill 参数门禁、Workflow Console 修复建议与任务级参数覆盖”继续深化。本阶段聚焦全流程稳定性与可解释性：React Flow 图发布、线性兼容发布入口和 Task 创建前预检不仅要提前发现 Skill 输入映射与 `config_schema` 参数问题，还要把后端结构化错误码转成前端可操作的中文修复建议，并让任务创建向导按 Skill `config_schema` 选择本次任务的参数覆盖，避免用户只能手写 `skill_overrides` 或在 API 层猜参数名。
+新一轮“Skill 参数门禁、Workflow Console 修复建议与任务级参数覆盖”继续深化。本阶段聚焦全流程稳定性与可解释性：React Flow 图发布、线性兼容发布入口和 Task 创建前预检不仅要提前发现 Skill 输入映射与 `config_schema` 参数问题，还要把后端结构化错误码转成前端可操作的中文修复建议，并让任务创建向导按 Skill `config_schema` 与 Dataset 字段路径选择本次任务的参数覆盖，避免用户只能手写 `skill_overrides`、参数名或 `row.xxx` 表达式路径。
 
 ## 当前已完成
 
@@ -39,6 +39,7 @@
 - Task Preflight 已增加关键参数签名新鲜度校验：`execution_template_id`、`evaluation_goal`、`quality_gate`、`sample_repeat_times`、`cost_budget` 变化都会让创建按钮重新进入“需重跑 Preflight”状态，避免模板或质量门槛被修改后沿用旧预检结果。
 - 任务创建向导已新增任务级 Skill 参数覆盖表格，支持选择 Skill Step、参数名、值类型和值；覆盖值会进入 Preflight、任务创建请求、任务快照和参数治理，且覆盖值变化会让旧 Preflight 过期。
 - 任务创建向导在传入 Skill 列表后会按所选 Step 反查 Skill `config_schema`，参数名从下拉选择，值类型自动推断为字符串、数字、布尔或 JSON，并优先填入 schema 默认值或 Skill 示例配置，减少手写参数名和类型的出错率。
+- 任务创建向导的表达式路径覆盖已接入 Dataset Version 字段路径候选，会优先展示 `field_paths`，没有时从 `field_schema` 生成 `row.<field>`，减少参数覆盖引用错误字段。
 - Task 创建 API 已增加服务端 Preflight 过期校验：传入旧 `preflight_result` 时会按 Dataset、Workflow、执行模板、评测目的、质量门槛、repeat、成本预算和 Skill 覆盖逐项比对，不一致时返回 `TASK_PREFLIGHT_STALE`。
 - Task 创建 API 已改为服务端重算 Preflight 作为事实源：客户端提交的 `preflight_result` 即使伪造为 passed，也不能绕过真实字段映射、Skill 审批、Golden 覆盖、质量门槛和预算检查。
 - Task Preflight 已支持持久化证据：每次 `POST /tasks/preflight` 会保存 `preflight_id`，任务创建可引用该 ID，后续报告和审计能追踪用户创建前实际看过哪次预检。
@@ -154,11 +155,12 @@
 - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 发布失败"`：先 RED 后 GREEN，最终 1 passed、45 skipped，确认 Workflow Console 对 `CONFIG_REQUIRED_MISSING`、`CONFIG_VALUE_INVALID`、`CONFIG_EXPRESSION_PATH_MISSING` 和 `CONFIG_SECRET_REF_EMPTY` 给出具体中文修复建议。
 - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx -t "任务级 Skill 参数覆盖|Preflight 后修改任务级"`：先 RED 后 GREEN，最终 2 passed、8 skipped，确认任务级 Skill 参数覆盖会进入 Preflight 和创建请求，且覆盖值变化会让旧 Preflight 过期。
 - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx -t "config_schema"`：先 RED 后 GREEN，确认任务级参数覆盖会按所选 Step 的 Skill `config_schema` 提供参数下拉并推断数字类型。
-- `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`：11 passed，确认任务创建向导既有必选校验、模板填充、阻断风险确认、执行参数、新增 Skill 覆盖入口和 schema-driven 参数选择兼容。
+- `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx -t "表达式参数覆盖"`：先 RED 后 GREEN，确认表达式参数覆盖可从 Dataset 字段路径候选中选择 `row.question` 并提交为 `{ type: "expression", path: "row.question" }`。
+- `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`：12 passed，确认任务创建向导既有必选校验、模板填充、阻断风险确认、执行参数、新增 Skill 覆盖入口、schema-driven 参数选择和表达式路径候选兼容。
 - `cd frontend && npm test -- src/test/App.test.tsx -t "任务级 Skill 参数覆盖"`：1 passed、46 skipped，确认执行中心真实创建任务请求会提交 `skill_overrides` 和带覆盖值的 `preflight_result`。
 - `python -m pytest -q`：112 个后端测试通过；仍有 Windows `.pytest_cache` 创建警告，不影响结果。
 - `cd frontend && npm run typecheck`：通过。
-- `cd frontend && npm test`：9 个测试文件、93 passed。
+- `cd frontend && npm test`：9 个测试文件、94 passed。
 - `cd frontend && npm run build`：通过。
 - `cd frontend && npm run e2e`：9 passed，任务主链路、CI Gate、Annotation Queue 和 Workflow 画布 E2E 均通过。
 - `git diff --check`：仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
@@ -4136,3 +4138,31 @@
   - Playwright E2E：9 passed，覆盖任务主链路、CI Gate、Annotation Queue 和 Workflow 画布。
   - 空白检查：`git diff --check` 仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - 下一步：提交本批次改动；随后继续评估任务创建向导是否需要支持表达式路径候选、Secret 引用候选和 JSON schema 嵌套参数编辑。
+
+### 2026-06-01 任务级表达式路径候选
+
+- 改动摘要：继续优化评测数据流转中的参数覆盖体验。任务创建向导在选择 Dataset Version 后，会为“表达式路径”类型的覆盖值提供字段路径候选；优先读取 Dataset Version 的 `field_paths`，如果没有则从 `field_schema` 自动生成 `row.<field>`。这样用户在把某个 Skill 参数临时改成运行期表达式时，可以直接选择 `row.question`、`row.reference` 等路径，减少手写路径导致的执行期失败。
+- 变更文件：
+  - `frontend/src/pages/task/TaskCreateWizard.tsx`
+  - `frontend/src/pages/task/TaskCreateWizard.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx -t "表达式参数覆盖"`
+  - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `python -m pytest -q`
+- 测试结果：
+  - RED：表达式参数覆盖定向测试最初失败，确认“表达式路径”仍是普通输入框，没有 Dataset 字段路径候选。
+  - GREEN：表达式参数覆盖定向测试最终 1 passed、11 skipped，确认可选择 `row.question` 并提交表达式结构。
+  - TaskCreateWizard 全量：12 passed。
+  - 前端 typecheck：通过。
+  - 前端全量：9 个测试文件、94 passed。
+  - 前端构建：通过，Vite 生产包生成完成。
+  - 后端全量：`python -m pytest -q` 通过，112 个测试通过；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - Playwright E2E：9 passed，覆盖任务主链路、CI Gate、Annotation Queue 和 Workflow 画布。
+  - 空白检查：`git diff --check` 仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
+- 下一步：提交本批次改动；随后继续评估 Secret 引用候选和 JSON schema 嵌套参数编辑。
