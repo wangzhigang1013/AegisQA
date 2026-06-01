@@ -2,9 +2,42 @@
 
 ## 当前阶段
 
-新一轮“Workflow 与 Skill 交互闭环”继续深化。本阶段聚焦用户在 Workflow 画布里最容易混淆的 7 个问题：发布必须有明确反馈，Skill 输入/输出/配置参数必须按 schema 区分，数据集字段如何进入 Workflow 必须可见，Workflow 资产要能删除和复制，Skill Palette 需要搜索化，试运行数据集和加载已有流程的语义要讲清楚，Skill 合约测试要展示它到底测试了什么。同时补齐 FastAPI 根路径启动提示，避免打开 `http://127.0.0.1:8000` 时只看到 `{"detail":"Not Found"}`。
+Skill 插件上传试用准备阶段。本阶段先清理本地 AegisQA store 中历史上传产生的杂乱插件包，再在桌面创建一组干净的可上传示例 Skill，用于验证“上传插件包 -> 运行合约测试 -> 审批启用 -> Workflow 搜索使用”的完整流程。后续继续围绕 Workflow 与 Skill 的交互闭环深化。
 
 ## 最近改动
+
+### 2026-06-02 清理本地上传 Skill 包并创建桌面示例插件
+
+- 改动摘要：按用户要求清理 AegisQA 本地 store 中历史上传产生的杂乱 Skill 插件包，只清空 `data/aegisqa_store/skill_packages` 与 `data/aegisqa_store/uploaded_skill_packages`，不触碰系统级 `C:\Users\17343\.codex\skills`，也不删除数据集、任务、Workflow、报告等其他业务数据。在桌面新增 `C:\Users\17343\Desktop\skills`，创建 4 个可直接上传到 AegisQA Skill 市场的示例插件包：顺序抽样 50 条、固定随机种子抽样 50 条、单条样本质量探针、回答与参考答案规则比较。同时补充中文 README 和抽样 50 条 Workflow 试用指南，说明批处理抽样 Skill 与逐条执行 Skill 的使用差异。
+- 变更文件/目录：
+  - `data/aegisqa_store/skill_packages`：已清空历史上传插件记录。
+  - `data/aegisqa_store/uploaded_skill_packages`：已清空历史插件解包目录。
+  - `C:\Users\17343\Desktop\skills\sample_50_first_n`
+  - `C:\Users\17343\Desktop\skills\sample_50_seeded_random`
+  - `C:\Users\17343\Desktop\skills\row_quality_probe`
+  - `C:\Users\17343\Desktop\skills\answer_compare_rule`
+  - `C:\Users\17343\Desktop\skills\sample_50_first_n.zip`
+  - `C:\Users\17343\Desktop\skills\sample_50_seeded_random.zip`
+  - `C:\Users\17343\Desktop\skills\row_quality_probe.zip`
+  - `C:\Users\17343\Desktop\skills\answer_compare_rule.zip`
+  - `C:\Users\17343\Desktop\skills\README.md`
+  - `C:\Users\17343\Desktop\skills\workflow_50_sample_guide.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - PowerShell 统计并清理 `data\aegisqa_store\skill_packages`、`data\aegisqa_store\uploaded_skill_packages`。
+  - `Compress-Archive` 打包 4 个示例插件目录为 zip。
+  - 使用 `fastapi.testclient.TestClient(create_app(store_root=临时目录))` 离线调用 `/skills/packages/upload` 与 `/skills/{skill_id}/contract-test`。
+- 测试结果：
+  - 清理前：`skill_packages` 165 条，`uploaded_skill_packages` 165 个目录。
+  - 清理后：两个目录均为 0。
+  - `answer_compare_rule.zip` 上传成功，`demo.answer_compare_rule@0.1.0` 合约测试通过。
+  - `row_quality_probe.zip` 上传成功，`demo.row_quality_probe@0.1.0` 合约测试通过。
+  - `sample_50_first_n.zip` 上传成功，`demo.sample_50_first_n@0.1.0` 合约测试通过。
+  - `sample_50_seeded_random.zip` 上传成功，`demo.sample_50_seeded_random@0.1.0` 合约测试通过。
+- 下一步：
+  - 如果当前 FastAPI 服务已经启动，需要重启后端，页面上的 Skill 市场才会重新加载已清空的插件包目录。
+  - 用户可在 Skill 市场上传桌面 `skills` 目录中的 zip，按 README 完成合约测试和审批启用。
+  - 正式任务抽样 50 条建议优先使用任务创建参数；批处理抽样 Skill 主要用于验证 Source 物化或未来批节点能力。
 
 ### 2026-06-02 Workflow 字段候选与校验就近反馈优化
 
