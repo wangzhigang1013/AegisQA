@@ -8,7 +8,7 @@ from typing import Iterable
 import yaml
 
 from aegisqa.skills.base import BaseSkill, SkillManifest
-from aegisqa.skills.examples import APIPullSkill, ASREvalSkill, CSVLoaderSkill, DBQuerySkill, JSONLLoaderSkill, LLMCallSkill, LLMJudgeSkill, OnlineSampleSkill
+from aegisqa.skills.examples import APIPullSkill, ASREvalSkill, CSVLoaderSkill, DBQuerySkill, JSONLLoaderSkill, LLMCallSkill, LLMJudgeSkill, ModelChatSkill, OnlineSampleSkill
 
 
 class SkillRegistry:
@@ -25,7 +25,7 @@ class SkillRegistry:
     @classmethod
     def with_builtin_skills(cls) -> "SkillRegistry":
         registry = cls()
-        for skill in [CSVLoaderSkill(), JSONLLoaderSkill(), DBQuerySkill(), APIPullSkill(), OnlineSampleSkill(), LLMCallSkill(), LLMJudgeSkill(), ASREvalSkill()]:
+        for skill in [CSVLoaderSkill(), JSONLLoaderSkill(), DBQuerySkill(), APIPullSkill(), OnlineSampleSkill(), ModelChatSkill(), LLMCallSkill(), LLMJudgeSkill(), ASREvalSkill()]:
             registry.register(skill)
         return registry
 

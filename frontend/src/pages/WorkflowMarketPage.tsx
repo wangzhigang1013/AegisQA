@@ -1,6 +1,6 @@
 import { ApartmentOutlined, CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined, StopOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Empty, Input, Popconfirm, Row, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, Empty, Input, Modal, Popconfirm, Row, Select, Space, Table, Tag, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -26,6 +26,8 @@ export function WorkflowMarketPage() {
   const [workflowQuery, setWorkflowQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [notice, setNotice] = useState<string | null>(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [newWorkflowName, setNewWorkflowName] = useState('');
   const draftsStatus = statusFilter === 'deleted' ? 'deleted' : undefined;
   const draftsQuery = useQuery({ queryKey: ['workflow-drafts', draftsStatus ?? 'active'], queryFn: () => api.workflowDrafts(draftsStatus), refetchOnMount: 'always' });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
@@ -67,8 +69,13 @@ export function WorkflowMarketPage() {
   }, [statusFilter, workflowDrafts, workflowQuery, workflowVersions]);
 
   const createDraftMutation = useMutation({
-    mutationFn: () => api.createWorkflowDraft({ name: '未命名 Workflow', graph: { ...demoWorkflowGraph, name: '未命名 Workflow' } }),
+    mutationFn: (name: string) => {
+      const finalName = name.trim() || '未命名 Workflow';
+      return api.createWorkflowDraft({ name: finalName, graph: { ...demoWorkflowGraph, name: finalName } });
+    },
     onSuccess: async (draft) => {
+      setIsCreateModalOpen(false);
+      setNewWorkflowName('');
       queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
       await queryClient.invalidateQueries({ queryKey: ['workflow-drafts'] });
       navigate(`/workflows/designer/${draft.draft_id}`);
@@ -111,14 +118,17 @@ export function WorkflowMarketPage() {
     navigate(`/workflows/designer/${draft.draft_id}`);
   }
 
+  function linkedDraftForWorkflow(workflow: WorkflowVersion) {
+    return workflowDrafts.find((draft) => draft.published_version_id === workflow.version_id && draft.status !== 'deleted');
+  }
+
   function openPublished(workflow: WorkflowVersion) {
-    if (workflow.graph) {
-      api.createWorkflowDraft({ name: `${workflow.name} 编辑草稿`, graph: workflow.graph as WorkflowGraph }).then((draft) => {
-        queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
-        void queryClient.invalidateQueries({ queryKey: ['workflow-drafts'] });
-        navigate(`/workflows/designer/${draft.draft_id}`);
-      });
+    const linkedDraft = linkedDraftForWorkflow(workflow);
+    if (!linkedDraft) {
+      setNotice('未找到该发布版本关联的原始草稿，不能直接编辑。请使用“复制为草稿”创建可编辑副本。');
+      return;
     }
+    openDraft(linkedDraft);
   }
 
   return (
@@ -127,10 +137,31 @@ export function WorkflowMarketPage() {
         eyebrow="流程资产"
         title="Workflow 资产市场"
         description="先选择或创建 Workflow，再进入画布编辑。已发布版本可直接用于创建任务。"
-        primaryAction={<Button type="primary" icon={<PlusOutlined />} loading={createDraftMutation.isPending} onClick={() => createDraftMutation.mutate()}>新建 Workflow</Button>}
+        primaryAction={<Button type="primary" icon={<PlusOutlined />} loading={createDraftMutation.isPending} onClick={() => setIsCreateModalOpen(true)}>新建 Workflow</Button>}
       />
 
       {notice ? <Alert type="success" showIcon closable message={notice} onClose={() => setNotice(null)} /> : null}
+
+      <Modal
+        title="新建 Workflow"
+        open={isCreateModalOpen}
+        okText="确认创建"
+        cancelText="取消"
+        confirmLoading={createDraftMutation.isPending}
+        onOk={() => createDraftMutation.mutate(newWorkflowName)}
+        onCancel={() => setIsCreateModalOpen(false)}
+      >
+        <Space direction="vertical" className="drawer-stack">
+          <Typography.Text type="secondary">填写后会同步写入草稿名称和 graph.name，进入画布后仍可继续修改。</Typography.Text>
+          <Input
+            aria-label="新建 Workflow 名称"
+            placeholder="例如：AP ASR 评测流程"
+            value={newWorkflowName}
+            onChange={(event) => setNewWorkflowName(event.target.value)}
+            onPressEnter={() => createDraftMutation.mutate(newWorkflowName)}
+          />
+        </Space>
+      </Modal>
 
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={16}>
@@ -171,7 +202,7 @@ export function WorkflowMarketPage() {
                     <Space>
                       {record.draft ? (
                         <>
-                          <Button icon={<EditOutlined />} disabled={record.status === 'deleted'} onClick={() => openDraft(record.draft!)}>进入画布</Button>
+                          <Button icon={<EditOutlined />} disabled={record.status === 'deleted'} onClick={() => openDraft(record.draft!)}>编辑</Button>
                           <Button icon={<CopyOutlined />} loading={copyDraftMutation.isPending} onClick={() => copyDraftMutation.mutate(record.draft!)}>复制草稿</Button>
                           <Popconfirm
                             title="确认删除 Workflow 草稿？"
@@ -186,7 +217,7 @@ export function WorkflowMarketPage() {
                       ) : null}
                       {record.workflow ? (
                         <>
-                          <Button icon={<EditOutlined />} disabled={!record.workflow.graph} onClick={() => openPublished(record.workflow!)}>复制并编辑</Button>
+                          <Button icon={<EditOutlined />} disabled={!linkedDraftForWorkflow(record.workflow)} onClick={() => openPublished(record.workflow!)}>编辑</Button>
                           <Button icon={<CopyOutlined />} loading={copyPublishedMutation.isPending} onClick={() => copyPublishedMutation.mutate(record.workflow!)}>复制为草稿</Button>
                           <Button danger icon={<StopOutlined />} disabled={record.status === 'archived'} loading={archiveWorkflowMutation.isPending} onClick={() => archiveWorkflowMutation.mutate(record.workflow!.version_id)}>归档</Button>
                         </>

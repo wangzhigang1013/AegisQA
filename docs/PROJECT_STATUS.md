@@ -2,9 +2,211 @@
 
 ## 当前阶段
 
-GitHub 发布准备阶段。本阶段按用户要求补充详细项目介绍文件，并准备把当前代码推送到 `wangzhigang1013/AegisQA.git`。README 已扩展为完整项目说明，覆盖项目定位、技术栈、目录结构、核心概念、执行模型、Skill 插件包、启动方式、API、验证命令和生产化演进建议。
+任务结果导出与统一模型网关优化阶段。本阶段补齐两项关键产品深度能力：执行中心任务详情可直接导出每条样本的运行结果 CSV/JSONL，解决“跑完的数据无法拿走”的问题；平台新增统一模型网关与 `model.chat@0.1.0` 内置 Skill，避免每个业务 Skill 重复实现模型 API 调用、鉴权、超时和响应解析。
 
 ## 最近改动
+
+### 2026-06-03 任务结果导出与统一模型网关
+
+- 改动摘要：新增任务级样本结果导出接口 `GET /tasks/{task_id}/results/export`，支持 `csv/json/jsonl`，默认导出每条 item 的 `row.*`、`context.*`、`metrics.*` 和 `node.<节点>.*` 标准输出；传 `include_steps=true` 时再展开 `step.<节点>.input/output/metrics/error`，用于排查链路。执行中心任务详情新增“导出结果 CSV”和“导出结果 JSONL”按钮，下载文件名按任务名生成。新增 `aegisqa.models.gateway` 统一模型网关，默认 `mock` 离线可跑，生产可通过 `AEGISQA_MODEL_PROVIDER=openai_compatible`、`AEGISQA_MODEL_BASE_URL`、`AEGISQA_MODEL_API_KEY`、`AEGISQA_MODEL_DEFAULT_MODEL` 接入兼容 Chat Completions 的模型服务。新增内置 Skill `model.chat@0.1.0`，并让兼容旧流程的 `llm.call@0.1.0` 也走统一模型网关。治理页新增“模型接入”状态卡，说明业务 Skill 可以复用模型调用节点，不需要重复写模型调用流程。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/__init__.py`
+  - `aegisqa/api/routes/models.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/models/__init__.py`
+  - `aegisqa/models/gateway.py`
+  - `aegisqa/skills/examples.py`
+  - `aegisqa/skills/registry.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/pages/task/TaskOperationsDrawer.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `frontend/src/types.ts`
+  - `tests/test_model_gateway.py`
+  - `tests/test_task_center_api.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py::test_task_result_export_includes_each_item_row_context_metrics_and_step_outputs tests\test_model_gateway.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+- 测试结果：
+  - 后端目标测试：3 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端 App 单文件：55 passed。
+  - 后端全量：通过；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+  - 前端全量：9 个测试文件、105 passed。
+  - 前端生产构建：`vite build` 通过。
+- 下一步：
+  - 可以继续把结果导出入口同步到报告中心的任务报告详情，让用户既能导出报告，也能导出样本明细。
+  - 如果后续要做真实模型配置页面，应只管理连接别名和测试状态，密钥仍建议走后端环境变量或 Secret 管理，不在浏览器表单里保存明文。
+  - 长任务下可进一步增加结果导出分页/流式下载，避免超大 CSV 一次性进入内存。
+
+### 2026-06-03 Workflow 直接编辑、Trace Tree 折叠与执行进度实时刷新
+
+- 改动摘要：按用户反馈修复三项体验问题。Workflow 资产市场中已发布版本的“编辑”按钮不再调用 `createWorkflowDraft`，而是查找 `published_version_id` 对应的原始草稿并直接进入画布；找不到原始草稿时不再伪装为编辑，只提示用户使用“复制为草稿”。Trace Tree 独立页面表格的 `defaultExpandAllRows` 改为 `false`，调用树默认关闭。执行中心调用任务执行接口时带上 `background=true`，后端立即返回 running；runner 新增 `progress_callback`，在开始执行、每条样本完成、最终完成时保存 Run 并回刷 Task；前端仅在存在 running 任务时每秒刷新任务列表，并同步任务详情抽屉里的进度。
+- 变更文件：
+  - `aegisqa/engine/runner.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/pages/TraceTreePage.tsx`
+  - `frontend/src/pages/WorkflowMarketPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `tests/test_platform_core.py`
+  - `tests/test_task_center_api.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 市场编辑已发布|Trace Tree 独立|任务列表执行"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest tests/test_task_center_api.py tests/test_platform_core.py -q -k "background_execute or lifecycle_report or progress_after_each_item"`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `git diff --check`
+- 测试结果：
+  - 前端目标测试：3 passed。
+  - 前端类型检查：`tsc -b` 通过。
+  - 后端目标测试：3 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 后端全量：通过；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端全量：9 个测试文件、103 passed。
+  - 前端生产构建：`vite build` 通过。
+  - 空白检查：通过，仅有 Windows CRLF 换行提示。
+- 下一步：
+  - 如果用户希望“已发布版本编辑”完全不显示草稿概念，下一步可以在后端给 WorkflowVersion 增加 `source_draft_id` 字段并让前端直接以 Workflow 资产 ID 跳转，进一步隐藏草稿实现细节。
+
+### 2026-06-02 执行中心创建任务瘦身与字段映射提示修复
+
+- 改动摘要：按用户反馈修复执行中心创建任务仍被 `question/reference` 阻断且表单过重的问题。`TaskCreateWizard` 已改为最小创建模型，只保留任务名称、Dataset Version、Workflow Version、Preflight 和 blocked 风险确认；删除执行参数模板、评测目的、质量门槛、并发/repeat/重试/成本预算、任务级 Skill 参数覆盖等创建阶段高级项。执行中心提交 Preflight 和创建任务时不再夹带 `execution_template_id`、`quality_gate`、`evaluation_goal`、`sample_repeat_times`、`skill_overrides` 等旧字段。Workflow 下拉现在展示该发布版本实际读取的 `row.xxx` 字段，并按版本倒序展示；如果当前数据集缺少这些字段，会直接提示“可能选了旧 Workflow 版本或需要回画布重新发布”，而不是让用户误以为系统默认需要 `question/reference`。
+- 变更文件：
+  - `frontend/src/pages/task/TaskCreateWizard.tsx`
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/pages/task/TaskCreateWizard.test.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/pages/task/TaskCreateWizard.test.tsx`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+- 测试结果：
+  - TaskCreateWizard 单测：9 passed。
+  - 执行中心目标集成测试：3 passed。
+  - 前端类型检查：`tsc -b` 通过。
+  - 前端全量测试：9 个测试文件、102 passed。
+- 下一步：
+  - 建议用户在执行中心重新打开“创建任务”，选择刚发布的 Workflow 新版本；如果仍提示缺字段，先看 Workflow 下拉显示的 `需要 row.xxx`，这说明选择的发布版本本身还读取这些字段，需要回画布改绑定并重新发布。
+  - 后续若需要恢复质量门禁/执行模板，应放到“高级设置”折叠区或单独的执行策略页面，不再作为默认创建任务路径。
+
+### 2026-06-02 Workflow 市场编辑按钮语义修正
+
+- 改动摘要：按用户反馈修正 Workflow 资产市场的操作按钮语义。草稿行原“进入画布”改为“编辑”；已发布 Workflow 行原“复制并编辑”改为“编辑”，点击后基于已发布版本打开一个可编辑草稿并进入画布；“复制为草稿”保留为只复制资产、不立即进入画布的动作。这样页面上不再出现“复制并编辑”和“复制为草稿”两个近似重复按钮，用户可以直接理解为“编辑已有内容”。
+- 变更文件：
+  - `frontend/src/pages/WorkflowMarketPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 市场"`
+  - `cd frontend && npm run typecheck`
+  - `git diff --check`
+- 测试结果：
+  - Workflow 市场目标测试：3 passed。
+  - 前端类型检查：`tsc -b` 通过。
+  - 空白检查：通过，仅有 Windows CRLF 换行提示。
+- 下一步：
+  - 如果需要进一步减少误解，可以在“编辑”按钮 hover 说明里补充：“已发布版本不可原地改写，将打开一个编辑草稿”。
+
+### 2026-06-02 Workflow 创建命名、发布保存与任务字段映射修复
+
+- 改动摘要：按用户反馈修复 Workflow 创建和发布闭环。Workflow 市场“新建 Workflow”现在会先打开命名弹窗，用户填写的名称会同时写入草稿 `name` 和 `graph.name`；后端草稿创建、更新、发布也会强制同步这两个名称字段，避免刷新、发布或创建任务时退回“未命名/默认 Workflow”。Workflow 画布发布按钮改为“校验并发布”，点击后会自动执行本地校验和后端校验，只有无阻断错误才会先保存当前画布快照再发布草稿；这样用户刚改的流程名称、输入绑定和字段路径会进入发布版本，不再用旧草稿创建任务。试运行按钮移动到底部“校验、试运行与输出结果”区域，试运行完成后自动切到 JSON 输出结果，减少上下滚动。新增任务创建回归，确认已更新为 `row.ap_code` 的发布版本不会继续要求旧的 `question/reference` 字段。
+- 变更文件：
+  - `aegisqa/api/routes/workflows.py`
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/pages/WorkflowMarketPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/WorkflowDesignerPage.test.tsx`
+  - `tests/test_api_interaction_contract.py`
+  - `tests/test_task_center_api.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_api_interaction_contract.py tests\test_task_center_api.py -q -k "draft_keeps_display_name or latest_draft_mapping"`
+  - `cd frontend && npm test -- src/test/WorkflowDesignerPage.test.tsx -t "发布前自动校验"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 市场"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 发布失败"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 发布成功"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+- 测试结果：
+  - 后端目标回归：2 passed。
+  - 前端发布目标回归：1 passed。
+  - Workflow 市场目标回归：3 passed。
+  - Workflow 发布失败/成功回归：均通过。
+  - 后端全量：全部 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+  - 前端全量：9 个测试文件、107 passed。
+  - 前端生产构建：`vite build` 通过。
+- 下一步：
+  - 如果用户已经用旧版本发布过 Workflow，需要重新打开画布、确认输入绑定后点击“校验并发布”，再在执行中心选择新发布的 Workflow 版本创建任务；旧发布版本本身不会被静默改写。
+  - 后续可继续优化任务创建向导，在 Preflight 报缺字段时直接提示“可能选择了旧 Workflow 版本”，并提供跳转到对应 Workflow 画布的修复入口。
+
+### 2026-06-02 AP ASR 查询插件内置 CSV 与相对路径修正
+
+- 改动摘要：根据用户反馈，修正 `ap_asr_lookup` 插件不能依赖本机桌面绝对路径的问题。现在 `ap_cache_full.csv` 已复制到插件目录 `data/ap_cache_full.csv`，`handler.py` 默认以自身所在插件包目录为根解析 `data/ap_cache_full.csv`；如果用户后续传入相对 `csv_path`，也会按插件包根目录解析。重新生成的 `ap_asr_lookup.zip` 已包含 CSV、handler 和 manifest，可拷贝到其他机器后直接上传使用。
+- 变更文件/目录：
+  - `C:\Users\17343\Desktop\skills\ap_asr_lookup\handler.py`
+  - `C:\Users\17343\Desktop\skills\ap_asr_lookup\skill.yaml`
+  - `C:\Users\17343\Desktop\skills\ap_asr_lookup\data\ap_cache_full.csv`
+  - `C:\Users\17343\Desktop\skills\ap_asr_lookup.zip`
+  - `C:\Users\17343\Desktop\skills\README.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - 直接导入 `C:\Users\17343\Desktop\skills\ap_asr_lookup\handler.py`，不传 `csv_path`，用 `AP2049693544326713367` 查询包内 CSV。
+  - 使用 `yaml.safe_load` 检查 `skill.yaml` 中 `csv_path.default` 与 `example_config.csv_path` 均为 `data/ap_cache_full.csv`。
+  - `Compress-Archive -Path C:\Users\17343\Desktop\skills\ap_asr_lookup\* -DestinationPath C:\Users\17343\Desktop\skills\ap_asr_lookup.zip -Force`
+  - 使用 `ZipFile` 确认 zip 内容包含 `data/ap_cache_full.csv`、`handler.py`、`skill.yaml`。
+  - 使用 `fastapi.testclient.TestClient(create_app(store_root=临时目录))` 上传新版 `ap_asr_lookup.zip` 并调用 `/skills/demo.ap_asr_lookup@0.1.0/contract-test`。
+  - 通过上传后的子进程插件执行 `AP2051994009856999483`，不传 `csv_path`，验证可从包内 CSV 返回最长 ASR。
+- 测试结果：
+  - 默认相对路径查询命中：`found=True`，`text_length=2953`，`truncated=False`，`asr_status=ok`，`cache_task_id=PATC2050180180550447129`。
+  - manifest 默认配置已改为 `data/ap_cache_full.csv`。
+  - zip 内容：`data/ap_cache_full.csv` 3766741 字节、`handler.py` 3508 字节、`skill.yaml` 2147 字节。
+  - 临时上传状态：`pending_review`；合约测试：`ok=True`，`contract_found=True`，`contract_text_length=2953`。
+  - 最长 ASR 子进程测试：`AP2051994009856999483` 返回 17869 字，`truncated=False`，耗时约 103.39ms。
+- 下一步：
+  - 用户可上传新版 `C:\Users\17343\Desktop\skills\ap_asr_lookup.zip`，这版不再依赖 `C:\Users\17343\Desktop\ap_cache_full.csv` 绝对路径。
+  - 在 Workflow 中继续将 `row.ap_code` 绑定到该 Skill 的 `ap_code` 输入，下游引用 `节点ID.text` 获取 ASR 文本。
+
+### 2026-06-02 AP ASR 查询插件创建
+
+- 改动摘要：按用户要求在桌面 `C:\Users\17343\Desktop\skills` 下创建 `ap_asr_lookup` 插件 Skill。该 Skill 输入 `ap_code`，通过读取 `C:\Users\17343\Desktop\ap_cache_full.csv` 查询匹配行，把 ASR 文本输出到 `text` 字段，并附带 `found`、`text_length`、`truncated`、`cache_task_id`、`asr_status` 等排查字段。考虑到 AegisQA 插件子进程 stdout 有 64KB 安全上限，默认 `max_text_chars=18000`，当前 CSV 最长 ASR 为 17869 字，不会被默认截断。
+- 变更文件/目录：
+  - `C:\Users\17343\Desktop\skills\ap_asr_lookup\skill.yaml`
+  - `C:\Users\17343\Desktop\skills\ap_asr_lookup\handler.py`
+  - `C:\Users\17343\Desktop\skills\ap_asr_lookup.zip`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - 直接导入 `C:\Users\17343\Desktop\skills\ap_asr_lookup\handler.py`，用 `AP2049693544326713367` 查询 CSV。
+  - 直接导入 handler，用不存在的 `AP_NOT_EXISTS` 验证未命中返回结构。
+  - 使用 `yaml.safe_load` 读取 `skill.yaml`，确认 `skill_id`、输入必填字段、输出必填字段和默认 CSV 路径。
+  - `Compress-Archive -Path C:\Users\17343\Desktop\skills\ap_asr_lookup\* -DestinationPath C:\Users\17343\Desktop\skills\ap_asr_lookup.zip -Force`
+  - 使用 `fastapi.testclient.TestClient(create_app(store_root=临时目录))` 上传 `ap_asr_lookup.zip` 并调用 `/skills/demo.ap_asr_lookup@0.1.0/contract-test`。
+  - 通过上传后的子进程插件执行 CSV 中最长 ASR 对应 `AP2051994009856999483`，验证返回长度和截断状态。
+- 测试结果：
+  - 示例 AP 查询命中：`found=True`，`text_length=2953`，`truncated=False`，`asr_status=ok`，`cache_task_id=PATC2050180180550447129`。
+  - 不存在 AP 查询返回稳定空结果：`found=False`，`text=""`，`text_length=0`。
+  - zip 内容已确认仅包含 `handler.py` 与 `skill.yaml`，不包含 `__pycache__`。
+  - 临时上传状态：`pending_review`；合约测试：`ok=True`。
+  - 最长 ASR 测试：`AP2051994009856999483` 原文 17869 字，返回 17869 字，`truncated=False`，子进程执行耗时约 100-109ms。
+- 下一步：
+  - 用户可在 AegisQA Skill 市场上传 `C:\Users\17343\Desktop\skills\ap_asr_lookup.zip`，运行合约测试并审批启用。
+  - 在 Workflow 中将数据集字段 `row.ap_code` 绑定到该 Skill 的 `ap_code` 输入，下游节点可引用 `节点ID.text` 获取 ASR 文本。
 
 ### 2026-06-02 README 详细介绍与 GitHub 推送准备
 
@@ -4494,3 +4696,98 @@ GitHub 发布准备阶段。本阶段按用户要求补充详细项目介绍文�
   - Playwright E2E：9 passed，覆盖任务主链路、CI Gate、Annotation Queue 和 Workflow 画布。
   - 空白检查：`git diff --check` 仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - 下一步：提交本批次改动并收尾；后续如继续深化，可优先评估 Secret 引用候选和 JSON schema 嵌套参数编辑。
+
+### 2026-06-03 Agent Skill 安全模式适配
+
+- 改动摘要：按用户选择先实现 A 方案，让 Codex/Agent 生态里的 `SKILL.md` 风格 Skill 可以作为 AegisQA Workflow 组件使用。新增 Agent Skill 安全运行时：扫描配置根目录下的 `SKILL.md`，导入后生成 AegisQA `SkillManifest`，状态为 `pending_review`；合约测试会读取 `SKILL.md` 和 `references/`，通过统一模型网关生成示例输出，不执行 `scripts/`、本机命令、网络请求或任意用户代码。合约测试通过并审批后，Agent Skill 可被 Workflow 引用，节点输出固定写入 `节点ID.answer` / `节点ID.text`，下游可直接消费。
+- 产品交互：Skill 市场新增“导入 Agent Skill”入口，弹窗展示扫描结果、来源目录、候选 skill_id、安全模式说明和导入按钮；Skill 表格来源列扩展为 `builtin / package / agent`；Agent Skill 详情展示运行模式、来源目录、`SKILL.md` 路径、合约状态和安全模式步骤。
+- 后端能力：
+  - `GET /agent-skills/discover`
+  - `GET /agent-skills`
+  - `POST /agent-skills/import`
+  - 应用启动时从持久化记录重新注册 Agent Skill，避免重启丢失。
+  - `/skills/{skill_id}/contract-test`、`approve/disable/deprecate` 同步 Agent Skill 生命周期状态。
+- 变更文件：
+  - `aegisqa/skills/agent_skills.py`
+  - `aegisqa/api/routes/agent_skills.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/__init__.py`
+  - `aegisqa/api/routes/skills.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/types.ts`
+  - `frontend/src/pages/SkillsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `tests/test_agent_skill_runtime.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_agent_skill_runtime.py -q`
+  - `python -m pytest tests\test_agent_skill_runtime.py tests\test_skill_package_security.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Skill 市场支持扫描并导入本机 Agent Skill"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `git diff --check`
+- 测试结果：
+  - RED：后端目标测试最初失败，确认 `/agent-skills/discover` 和 `/agent-skills/import` 不存在；前端目标测试最初失败，确认 Skill 市场没有“导入 Agent Skill”入口。
+  - GREEN：后端 Agent Skill 目标测试 2 passed，覆盖发现、导入、合约测试、审批、重启恢复、Workflow 节点执行。
+  - 回归：Agent Skill + 插件安全测试 8 passed。
+  - 后端全量：`python -m pytest -q` 通过；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端 typecheck：通过。
+  - 前端全量：9 个测试文件、106 passed。
+  - 前端构建：通过，Vite 生产包生成完成。
+  - 空白检查：`git diff --check` 仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
+- 下一步：如继续深化，可做 B 方案的受控工具模式：为 Agent Skill 增加 `tool_enabled` 权限级别、命令白名单、网络/文件访问审批、执行沙箱和更细粒度审计；当前版本先保持安全模式，适合把说明型 Agent Skill 快速纳入 Workflow 组件体系。
+
+### 2026-06-03 Agent Skill zip 包上传运行时升级
+
+- 改动摘要：按用户澄清后的真实需求，把“本机目录扫描导入 Agent Skill”的主产品入口调整为“上传 Agent Skill zip 包”。后端 `POST /skills/packages/upload` 现在支持三种包形态：
+  - 新脚本型 Agent Skill：`SKILL.md + skill.yaml/json + scripts/run.py`，通过 `runtime.mode=script` 和 `runtime.entrypoint` 声明脚本入口，不调用模型。
+  - 新说明型 Agent Skill：`SKILL.md + skill.yaml/json + references/`，通过 `runtime.mode=instruction_model` 读取说明和资料后走统一模型网关。
+  - 旧版插件：`skill.yaml/json + handler.py`，未声明 `runtime` 时继续按 `handler.py:run` 兼容执行。
+- 产品交互：Skill 市场移除“导入 Agent Skill”本机扫描按钮，主按钮改为“上传 Agent Skill 包”；上传弹窗解释 zip 包结构、`runtime.mode=script`、`runtime.mode=instruction_model`、纯参数 Skill 必须声明 schema 的原因；Skill 详情展示包运行方式、脚本入口和 `SKILL.md` 路径；合约测试失败建议会按脚本型/说明型分别提示检查 `runtime.entrypoint` 或 `SKILL.md/references` 与模型网关。
+- 后端能力：
+  - `SubprocessPackageSkill` 从固定 `handler.py` 升级为可执行 `scripts/run.py:run` 等任意包内入口。
+  - 新增 `InstructionPackageSkill`，读取上传包里的 `SKILL.md` 和 `references/`，通过统一模型网关输出 `answer/text`。
+  - 支持 zip 外层多一层目录。
+  - 纯脚本包缺 `skill.yaml/json` 会返回 `SKILL_PACKAGE_MANIFEST_MISSING`，避免平台无法生成 Workflow 输入、输出和参数 UI。
+  - 应用重启后按 `skill_packages` 记录恢复脚本型和说明型上传 Skill。
+- 文档：新增 `docs/AGENT_SKILL_PACKAGE_GUIDE.md`，详细说明 Agent Skill zip 包结构、脚本型/说明型运行模式、多 Python 文件引用、Workflow 中如何使用、合约测试含义、安全限制和生产化建议；README 的 Skill 插件包章节已同步新版格式。
+- 变更文件：
+  - `aegisqa/skills/packages.py`
+  - `aegisqa/api/app.py`
+  - `tests/test_agent_skill_package_upload.py`
+  - `frontend/src/pages/SkillsPage.tsx`
+  - `frontend/src/types.ts`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `frontend/e2e/task-flow.spec.ts`
+  - `README.md`
+  - `docs/AGENT_SKILL_PACKAGE_GUIDE.md`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_agent_skill_package_upload.py -q`
+  - `python -m pytest tests\test_skill_package_security.py tests\test_p0_hardening.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm test -- --run src/test/App.test.tsx -t "Skill"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e -- e2e/task-flow.spec.ts`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - RED：新增后端测试最初 4 failed，确认上传接口仍强制 `handler.py`，不识别 `runtime.mode`，缺 manifest 的脚本包错误文案也不符合新需求。
+  - GREEN：`tests\test_agent_skill_package_upload.py` 最终 4 passed，覆盖脚本型 Agent Skill 上传、合约测试、审批、重启恢复、Workflow 节点执行、说明型 Skill 无 handler 上传，以及纯脚本缺 manifest 拒绝。
+  - 回归：`tests\test_skill_package_security.py tests\test_p0_hardening.py` 9 passed，确认旧 `handler.py` 插件、超时、输出大小限制、日志截断和路径脱敏没有回归。
+  - 后端全量：`python -m pytest -q` 通过；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端 Skill 定向：8 passed、48 skipped，覆盖上传 Agent Skill 包入口、隐藏本机扫描入口、合约测试结构化展示和脚本型修复建议。
+  - 前端 typecheck：通过。
+  - 前端全量：9 个测试文件、106 passed。
+  - 前端构建：通过，Vite 生产包生成完成。
+  - Playwright 主链路：`e2e/task-flow.spec.ts` 1 passed，覆盖上传数据、上传并审批 Skill、发布 Workflow、创建并执行任务、查看报告、纠错 Badcase 和 Trace Flow。
+  - Playwright 全量：本轮两次超过 240 秒/420 秒未返回有效输出，被命令超时截断；未记为通过。已清理 E2E 临时 8010/5174 服务，保留用户手动启动的 8000/5173 服务。
+- 下一步：
+  - 如果继续深化 Agent Skill 包能力，优先做 multipart/对象存储上传、包大小限制、解压大小限制、依赖锁文件、容器沙箱、网络白名单、文件访问权限和资源配额。
+  - 前端可继续增加 Skill 包上传前的本地 manifest 预览，提前展示 `input_schema/output_schema/config_schema/runtime`，减少用户上传后才发现 schema 错误。

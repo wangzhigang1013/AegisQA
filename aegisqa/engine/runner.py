@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -169,19 +169,26 @@ class WorkflowRunner:
         self._save_run(run)
         return run
 
-    def execute_run(self, run_id: str) -> RunRecord:
+    def execute_run(self, run_id: str, progress_callback: Callable[[RunRecord], None] | None = None) -> RunRecord:
         run = self.get_run(run_id)
         if run.canceled:
             run.status = "canceled"
             self._save_run(run)
+            if progress_callback:
+                progress_callback(run)
             return run
         if run.paused:
             run.status = "paused"
             self._save_run(run)
+            if progress_callback:
+                progress_callback(run)
             return run
 
         run.status = "running"
         run.started_at = run.started_at or _now()
+        self._save_run(run)
+        if progress_callback:
+            progress_callback(run)
         limiter = InMemoryRateLimiter(qps_by_skill={key: float(value) for key, value in run.snapshot.get("runtime", {}).get("rate_limits", {}).items()})
 
         rows_by_id = self._rows_by_id(run.dataset_id, run.dataset_version)
@@ -190,6 +197,9 @@ class WorkflowRunner:
                 continue
             row = rows_by_id[item.row_id]
             self._execute_item(run, item, row, limiter)
+            self._save_run(run)
+            if progress_callback:
+                progress_callback(run)
 
         if all(item.status == "succeeded" for item in run.items):
             run.status = "completed"
@@ -199,6 +209,8 @@ class WorkflowRunner:
             run.status = "failed"
         run.finished_at = _now()
         self._save_run(run)
+        if progress_callback:
+            progress_callback(run)
         return run
 
     def retry_failed_items(self, run_id: str) -> RunRecord:

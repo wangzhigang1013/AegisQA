@@ -249,7 +249,10 @@ export type SkillPackageRecord = {
   status: string;
   manifest: SkillManifest;
   package_dir?: string;
-  handler_path?: string;
+  handler_path?: string | null;
+  skill_md_path?: string | null;
+  runtime_mode?: string;
+  entrypoint?: string | null;
   last_contract_ok: boolean;
   last_contract_result?: Record<string, unknown> | null;
   last_contract_at?: string | null;
@@ -258,6 +261,51 @@ export type SkillPackageRecord = {
   approval_note?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type AgentSkillDiscoveryItem = {
+  name: string;
+  description: string;
+  source_dir: string;
+  skill_md_path: string;
+  source_root: string;
+  skill_id_candidate: string;
+  runtime_mode: string;
+  already_imported: boolean;
+};
+
+export type AgentSkillDiscoveryResult = {
+  count: number;
+  items: AgentSkillDiscoveryItem[];
+};
+
+export type AgentSkillRecord = {
+  agent_skill_id: string;
+  source_dir: string;
+  skill_md_path: string;
+  runtime_mode: string;
+  status: string;
+  manifest: SkillManifest;
+  last_contract_ok: boolean;
+  last_contract_result?: Record<string, unknown> | null;
+  last_contract_at?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  approval_note?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ModelGatewayStatus = {
+  provider: string;
+  ready: boolean;
+  mode: string;
+  default_model: string;
+  base_url_configured: boolean;
+  api_key_configured: boolean;
+  timeout_seconds: number;
+  skill_ref: string;
+  message: string;
 };
 
 export type TaskRecord = {

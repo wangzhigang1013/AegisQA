@@ -1,5 +1,7 @@
 import type {
   AnnotationTask,
+  AgentSkillDiscoveryResult,
+  AgentSkillRecord,
   AnnotationQueuePageResult,
   AuditEvent,
   AnnotationCandidate,
@@ -44,6 +46,7 @@ import type {
   SkillContractResult,
   SkillManifest,
   SkillPackageRecord,
+  ModelGatewayStatus,
   StoredJudgeAudit,
   TaskRecord,
   TaskReport,
@@ -335,6 +338,14 @@ export const api = {
     }),
   skills: () => request<SkillManifest[]>('/skills'),
   skillPackages: () => request<SkillPackageRecord[]>('/skills/packages'),
+  agentSkills: () => request<AgentSkillRecord[]>('/agent-skills'),
+  discoverAgentSkills: () => request<AgentSkillDiscoveryResult>('/agent-skills/discover'),
+  importAgentSkill: (body: { source_dir: string; skill_id?: string; name?: string }) =>
+    request<AgentSkillRecord>('/agent-skills/import', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  modelGatewayStatus: () => request<ModelGatewayStatus>('/model-gateway/status'),
   uploadSkillPackage: (body: { filename: string; content_base64: string }) =>
     request<SkillPackageRecord>('/skills/packages/upload', {
       method: 'POST',
@@ -518,7 +529,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  executeTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/execute`, { method: 'POST' }),
+  executeTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/execute?background=true`, { method: 'POST' }),
   createTaskAttempt: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/attempts`, { method: 'POST' }),
   pauseTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/pause`, { method: 'POST' }),
   resumeTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/resume`, { method: 'POST' }),
@@ -535,6 +546,11 @@ export const api = {
     const query = new URLSearchParams({ file_format, role });
     if (approvalRequestId) query.set('approval_request_id', approvalRequestId);
     return request<Record<string, unknown>>(`/tasks/${taskId}/report/export?${query.toString()}`);
+  },
+  exportTaskResults: (taskId: string, file_format: 'json' | 'jsonl' | 'csv', includeSteps = false) => {
+    const query = new URLSearchParams({ file_format });
+    if (includeSteps) query.set('include_steps', 'true');
+    return request<Record<string, unknown>>(`/tasks/${taskId}/results/export?${query.toString()}`);
   },
   reportExportRequests: (filters: { task_id?: string; status?: string } = {}) => {
     const query = new URLSearchParams();

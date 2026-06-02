@@ -78,6 +78,59 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText('测试草稿')).toBeInTheDocument();
     expect(await screen.findByText('RAG 回归评测')).toBeInTheDocument();
     expect(screen.getByText(/模板/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /复制并编辑/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /编辑/ }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /复制为草稿/ })).toBeInTheDocument();
+  });
+
+  it('Workflow 市场新建时会使用用户填写的名称创建草稿', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const requests: { url: string; method?: string; body?: string }[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push({ url, method: init?.method, body: String(init?.body ?? '') });
+      if (url.endsWith('/workflow-drafts') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        return jsonResponse({ draft_id: 'draft-named', status: 'draft', name: body.name, graph: body.graph, created_at: '', updated_at: '' });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/workflows');
+
+    fireEvent.click(await screen.findByRole('button', { name: /新建 Workflow/ }));
+    fireEvent.change(await screen.findByLabelText('新建 Workflow 名称'), { target: { value: 'AP ASR 评测流程' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+
+    await waitFor(() => {
+      const createRequest = requests.find((request) => request.url.endsWith('/workflow-drafts') && request.method === 'POST');
+      expect(createRequest).toBeTruthy();
+      const body = JSON.parse(createRequest?.body ?? '{}');
+      expect(body.name).toBe('AP ASR 评测流程');
+      expect(body.graph.name).toBe('AP ASR 评测流程');
+    });
+  });
+
+  it('Workflow 市场编辑已发布版本时打开原发布草稿，不再复制创建新草稿', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const requests: { url: string; method?: string; body?: string }[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push({ url, method: init?.method, body: String(init?.body ?? '') });
+      if (url.endsWith('/workflow-drafts')) {
+        return jsonResponse([{ draft_id: 'draft-test', status: 'published', published_version_id: 'wf-demo:v1', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' }]);
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/workflows');
+
+    const editButtons = await screen.findAllByRole('button', { name: /编辑/ });
+    fireEvent.click(editButtons[editButtons.length - 1]);
+
+    expect(await screen.findByText('Workflow 设计器')).toBeInTheDocument();
+    expect(await screen.findByText('当前草稿：draft-test')).toBeInTheDocument();
+    expect(requests.some((request) => request.url.endsWith('/workflow-drafts') && request.method === 'POST')).toBe(false);
   });
 
   it('Workflow 市场支持删除草稿、复制草稿和按状态筛选', async () => {
@@ -126,7 +179,7 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByPlaceholderText('搜索 Skill 名称、描述、标签或 schema')).toBeInTheDocument();
     expect(screen.getByText('点对多')).toBeInTheDocument();
     expect(screen.getByText('多对一')).toBeInTheDocument();
-    expect(screen.getByText('校验与试运行 Console')).toBeInTheDocument();
+    expect(screen.getByText('校验、试运行与输出结果')).toBeInTheDocument();
   });
 
   it('Workflow Skill Palette 通过语义搜索添加 Skill，并阻止未启用 Skill', async () => {
@@ -426,9 +479,10 @@ describe('AegisQA 前端工作台', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /创建任务/ }));
 
-      expect(await screen.findByText('创建任务')).toBeInTheDocument();
-      expect(screen.getByText('评测目的')).toBeInTheDocument();
-      expect(screen.getByText('质量门槛')).toBeInTheDocument();
+      expect(await screen.findByRole('dialog', { name: '创建任务' })).toBeInTheDocument();
+      expect(screen.queryByText('评测目的')).not.toBeInTheDocument();
+      expect(screen.queryByText('质量门槛')).not.toBeInTheDocument();
+      expect(screen.queryByText('执行参数模板')).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: /运行 Preflight/ })).toBeDisabled();
       expect(screen.getByRole('button', { name: '确认创建任务' })).toBeDisabled();
 
@@ -436,7 +490,7 @@ describe('AegisQA 前端工作台', () => {
       fireEvent.mouseDown(screen.getAllByLabelText('Dataset Version')[0]);
       fireEvent.click(await screen.findByText('问答回归集 v1 / 100 条'));
       fireEvent.mouseDown(screen.getAllByLabelText('Workflow Version')[0]);
-      fireEvent.click(await screen.findByText('RAG 回归评测 v1'));
+      fireEvent.click(await screen.findByText('RAG 回归评测 v1 / 需要 row.question, row.reference'));
       expect(screen.getByRole('button', { name: /运行 Preflight/ })).not.toBeDisabled();
 
       fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
@@ -507,49 +561,32 @@ describe('AegisQA 前端工作台', () => {
     });
   });
 
-  it('执行中心选择执行模板后创建任务会提交模板 ID', async () => {
+  it('执行中心任务详情支持导出每条样本执行结果', async () => {
     await renderWorkbench('/runs');
 
-    fireEvent.click(await screen.findByRole('button', { name: /创建任务/ }));
-    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '模板化上线门禁' } });
-    fireEvent.mouseDown(findComboboxByLabel('执行参数模板'));
-    fireEvent.click(await screen.findByText('上线门禁稳健模板 / 内置'));
-    fireEvent.mouseDown(screen.getAllByLabelText('Dataset Version')[0]);
-    fireEvent.click(await screen.findByText('问答回归集 v1 / 100 条'));
-    fireEvent.mouseDown(screen.getAllByLabelText('Workflow Version')[0]);
-    fireEvent.click(await screen.findByText('RAG 回归评测 v1'));
+    fireEvent.click(await screen.findByRole('button', { name: /详情/ }));
+    expect(await screen.findByText(/任务详情：RAG 任务/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
-    expect((await screen.findAllByText(/Preflight 通过/)).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
-    expect(await screen.findByText(/任务已创建/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /导出结果 CSV/ }));
+    expect(await screen.findByText(/结果导出成功：RAG_任务_results.csv 已开始下载/)).toBeInTheDocument();
+    expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/results/export?file_format=csv'), expect.anything());
 
-    const createTaskCall = vi
-      .mocked(globalThis.fetch)
-      .mock.calls.find(([input, init]) => String(input).endsWith('/tasks') && init?.method === 'POST');
-    const body = JSON.parse(String(createTaskCall?.[1]?.body ?? '{}'));
-    expect(body.execution_template_id).toBe('release_gate_safe');
-    expect(body.preflight_id).toBe('preflight-demo');
-    expect(body.preflight_result.execution_template_id).toBe('release_gate_safe');
+    await waitFor(() => expect(screen.getByRole('button', { name: /导出结果 JSONL/ })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: /导出结果 JSONL/ }));
+    expect(await screen.findByText(/结果导出成功：RAG_任务_results.jsonl 已开始下载/)).toBeInTheDocument();
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/results/export?file_format=jsonl'), expect.anything());
   });
 
-  it('执行中心创建任务会提交任务级 Skill 参数覆盖', async () => {
+  it('执行中心创建任务只提交 Dataset、Workflow 和 Preflight，不再夹带执行模板或质量门禁', async () => {
     await renderWorkbench('/runs');
 
     fireEvent.click(await screen.findByRole('button', { name: /创建任务/ }));
-    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '覆盖参数上线任务' } });
+    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '最小创建任务' } });
     fireEvent.mouseDown(screen.getAllByLabelText('Dataset Version')[0]);
     fireEvent.click(await screen.findByText('问答回归集 v1 / 100 条'));
     fireEvent.mouseDown(screen.getAllByLabelText('Workflow Version')[0]);
-    fireEvent.click(await screen.findByText('RAG 回归评测 v1'));
-    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
-    fireEvent.mouseDown(findComboboxByLabel('覆盖 Step'));
-    const stepOptions = await screen.findAllByText('生成回答 / answer');
-    fireEvent.click(stepOptions[stepOptions.length - 1]);
-    fireEvent.mouseDown(findComboboxByLabel('参数名'));
-    const parameterOptions = await screen.findAllByText('model / string');
-    fireEvent.click(parameterOptions[parameterOptions.length - 1]);
-    fireEvent.change(screen.getByPlaceholderText('覆盖值'), { target: { value: 'task-model' } });
+    fireEvent.click(await screen.findByText('RAG 回归评测 v1 / 需要 row.question, row.reference'));
 
     fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
     expect((await screen.findAllByText(/Preflight 通过/)).length).toBeGreaterThan(0);
@@ -560,8 +597,19 @@ describe('AegisQA 前端工作台', () => {
       .mocked(globalThis.fetch)
       .mock.calls.find(([input, init]) => String(input).endsWith('/tasks') && init?.method === 'POST');
     const body = JSON.parse(String(createTaskCall?.[1]?.body ?? '{}'));
-    expect(body.skill_overrides).toEqual({ answer: { model: 'task-model' } });
-    expect(body.preflight_result.skill_overrides).toEqual({ answer: { model: 'task-model' } });
+    expect(body.name).toBe('最小创建任务');
+    expect(body.dataset_id).toBe('dataset-demo');
+    expect(body.dataset_version).toBe(1);
+    expect(body.workflow_version_id).toBe('wf-demo:v1');
+    expect(body.preflight_id).toBe('preflight-demo');
+    expect(body).not.toHaveProperty('execution_template_id');
+    expect(body).not.toHaveProperty('quality_gate');
+    expect(body).not.toHaveProperty('evaluation_goal');
+    expect(body).not.toHaveProperty('sample_repeat_times');
+    expect(body).not.toHaveProperty('skill_overrides');
+    expect(body.preflight_result).not.toHaveProperty('execution_template_id');
+    expect(body.preflight_result).not.toHaveProperty('quality_gate');
+    expect(body.preflight_result).not.toHaveProperty('skill_overrides');
   });
 
   it('Trace Flow 页面展示样本数据、参数来源和队列消息形状', async () => {
@@ -620,6 +668,12 @@ describe('AegisQA 前端工作台', () => {
 
     expect(await screen.findByText('Trace Tree')).toBeInTheDocument();
     expect(screen.getByText('run-demo')).toBeInTheDocument();
+    expect(screen.queryByText('llm.call@0.1.0')).not.toBeInTheDocument();
+
+    const expandButton = document.querySelector<HTMLButtonElement>('.ant-table-row-expand-icon');
+    expect(expandButton).toBeTruthy();
+    fireEvent.click(expandButton!);
+
     expect(screen.getAllByText('answer').length).toBeGreaterThan(0);
     expect(screen.getByText('llm.call@0.1.0')).toBeInTheDocument();
   });
@@ -663,11 +717,37 @@ describe('AegisQA 前端工作台', () => {
   });
 
   it('任务列表执行按钮会刷新任务状态', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const taskPages = [
+      { ...demoTask, status: 'queued', completed_items: 0 },
+      { ...demoTask, status: 'running', completed_items: 20 },
+    ];
+    const requests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push(url);
+      const parsed = new URL(url, 'http://localhost');
+      if (parsed.pathname.endsWith('/tasks/task-demo/execute')) {
+        return jsonResponse({ ...demoTask, status: 'running', completed_items: 0 });
+      }
+      if (parsed.pathname.endsWith('/tasks') && init?.method !== 'POST') {
+        const task = taskPages.shift() ?? { ...demoTask, status: 'running', completed_items: 20 };
+        return jsonResponse({
+          items: [task],
+          pagination: { page: 1, page_size: 8, total_items: 1, total_pages: 1 },
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
     await renderWorkbench('/runs');
 
     fireEvent.click(await screen.findByRole('button', { name: /执行/ }));
 
-    expect(await screen.findByText(/任务状态已更新/)).toBeInTheDocument();
+    expect(await screen.findByText(/任务状态已更新：running/)).toBeInTheDocument();
+    expect(requests.some((request) => request.includes('/tasks/task-demo/execute?background=true'))).toBe(true);
+
+    expect(await screen.findByText('20 / 100')).toBeInTheDocument();
   });
 
   it('任务详情展示 Run Attempts 和执行参数', async () => {
@@ -786,13 +866,14 @@ describe('AegisQA 前端工作台', () => {
     });
     await renderWorkbench('/skills');
 
-    fireEvent.click(screen.getByRole('button', { name: /上传 Skill 插件包/ }));
-    expect(await screen.findByText('上传 Skill 插件包')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /上传 Agent Skill 包/ }));
+    expect(await screen.findByRole('dialog', { name: /上传 Agent Skill 包/ })).toBeInTheDocument();
+    expect(screen.getByText(/SKILL.md、skill.yaml/)).toBeInTheDocument();
 
     fireEvent.click((await screen.findAllByRole('button', { name: /查看详情/ }))[0]);
     fireEvent.click(screen.getByRole('button', { name: /运行合约测试/ }));
 
-    expect(await screen.findByText(/合约测试通过/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/合约测试通过/)).length).toBeGreaterThan(0);
     expect(screen.getByText('合约测试做什么')).toBeInTheDocument();
     expect(screen.getByText(/使用 Skill manifest 里的 example_input 和 example_config/)).toBeInTheDocument();
     expect(screen.getByText('测试输入')).toBeInTheDocument();
@@ -819,15 +900,16 @@ describe('AegisQA 前端工作台', () => {
     await renderWorkbench('/skills');
 
     fireEvent.click(await screen.findByRole('button', { name: /查看详情/ }));
-    expect(await screen.findByText('插件启用步骤')).toBeInTheDocument();
-    expect(screen.getByText('第 2 步：运行合约测试')).toBeInTheDocument();
+    expect(await screen.findByText('Agent Skill 包启用步骤')).toBeInTheDocument();
+    expect(screen.getByText(/第 2 步：运行合约测试/)).toBeInTheDocument();
+    expect(screen.getByText('包运行方式')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /运行合约测试/ }));
 
     expect((await screen.findAllByText(/合约测试失败/)).length).toBeGreaterThan(0);
     expect(screen.getByText('错误码')).toBeInTheDocument();
     expect(screen.getByText('TYPE_MISMATCH')).toBeInTheDocument();
     expect(screen.getByText(/检查 skill.yaml\/skill.json/)).toBeInTheDocument();
-    expect(screen.getByText(/检查 handler.py 的 run\(inputs, config\)/)).toBeInTheDocument();
+    expect(screen.getByText(/检查 runtime.entrypoint/)).toBeInTheDocument();
   });
 
   it('Skill 市场展示插件包审批状态、合约测试状态和审批信息', async () => {
@@ -848,6 +930,29 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('待审批')).toBeInTheDocument();
     expect(screen.getByText('合约未通过')).toBeInTheDocument();
     expect(screen.getByText('未审批')).toBeInTheDocument();
+  });
+
+  it('Skill 市场只提供上传 Agent Skill zip 包，不再扫描本机目录', async () => {
+    const requests: { url: string; method?: string; body?: string }[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push({ url, method: init?.method, body: String(init?.body ?? '') });
+      if (url.endsWith('/skills')) {
+        return jsonResponse([pendingPackageSkill]);
+      }
+      if (url.endsWith('/skills/packages')) {
+        return jsonResponse([pendingSkillPackage]);
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/skills');
+
+    expect(await screen.findByRole('button', { name: /上传 Agent Skill 包/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /导入 Agent Skill/ })).not.toBeInTheDocument();
+    expect(requests.some((request) => request.url.endsWith('/agent-skills/discover'))).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: /上传 Agent Skill 包/ }));
+    expect(await screen.findByText(/脚本型示例：SKILL.md \+ skill.yaml \+ scripts\/run.py/)).toBeInTheDocument();
   });
 
   it('治理页审批抽屉展示 manifest、schema 和未通过合约测试禁用原因', async () => {
@@ -875,6 +980,15 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('输入 Schema')).toBeInTheDocument();
     expect(screen.getByText('未通过合约测试不能启用')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /审批启用/ })).toBeDisabled();
+  });
+
+  it('治理页展示统一模型网关状态，避免每个 Skill 重复实现模型调用', async () => {
+    await renderWorkbench('/governance');
+
+    expect(await screen.findByText('模型接入')).toBeInTheDocument();
+    expect(screen.getByText('统一模型网关')).toBeInTheDocument();
+    expect(screen.getByText('model.chat@0.1.0')).toBeInTheDocument();
+    expect(screen.getByText(/业务 Skill 可以直接复用模型调用节点/)).toBeInTheDocument();
   });
 
   it('Experiment 页面展示实验快照、baseline 对比和创建入口', async () => {

@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { TaskCreateWizard, type TaskCreateFormValues } from './TaskCreateWizard';
-import { demoSkills } from '../../data/demo';
 import type { DatasetSummary, WorkflowVersion } from '../../types';
 
 const datasets: DatasetSummary[] = [
@@ -21,8 +20,33 @@ const datasets: DatasetSummary[] = [
         version_id: 'dataset-demo:v1',
         row_count: 100,
         field_schema: { question: 'string', reference: 'string' },
+        field_paths: ['row.question', 'row.reference'],
         preview: [],
         golden: true,
+      },
+    ],
+  },
+];
+
+const apCodeDatasets: DatasetSummary[] = [
+  {
+    dataset_id: 'dataset-ap',
+    name: '审批码数据集',
+    latest_version: 1,
+    latest_version_id: 'dataset-ap:v1',
+    row_count: 50,
+    golden: false,
+    versions: [
+      {
+        dataset_id: 'dataset-ap',
+        name: '审批码数据集',
+        version: 1,
+        version_id: 'dataset-ap:v1',
+        row_count: 50,
+        field_schema: { ap_code: 'string', user_name: 'string' },
+        field_paths: ['row.ap_code', 'row.user_name'],
+        preview: [],
+        golden: false,
       },
     ],
   },
@@ -39,7 +63,7 @@ const workflows: WorkflowVersion[] = [
       name: 'RAG 回归评测',
       nodes: [
         { node_id: 'source', node_type: 'source', label: '数据源' },
-        { node_id: 'answer', node_type: 'skill', label: '生成回答', skill_ref: 'llm.call@0.1.0' },
+        { node_id: 'answer', node_type: 'skill', label: '生成回答', skill_ref: 'llm.call@0.1.0', input_mapping: { prompt: 'row.question' } },
       ],
       edges: [{ source: 'source', target: 'answer' }],
     },
@@ -56,17 +80,38 @@ const workflows: WorkflowVersion[] = [
   },
 ];
 
+const apCodeWorkflow: WorkflowVersion = {
+  workflow_id: 'wf-ap',
+  name: '审批码抽样流程',
+  version: 3,
+  version_id: 'wf-ap:v3',
+  status: 'published',
+  graph: {
+    name: '审批码抽样流程',
+    nodes: [
+      { node_id: 'source', node_type: 'source', label: '数据源' },
+      { node_id: 'extract', node_type: 'skill', label: '抽样审批码', skill_ref: 'ap.extract@0.1.0', input_mapping: { text: 'row.ap_code' } },
+    ],
+    edges: [{ source: 'source', target: 'extract' }],
+  },
+  steps: [
+    {
+      step_id: 'extract',
+      skill_ref: 'ap.extract@0.1.0',
+      input_mapping: { text: 'row.ap_code' },
+      output_mapping: { result: 'context.result' },
+      config: {},
+      cacheable: true,
+    },
+  ],
+};
+
 const passedPreflight = {
   status: 'passed',
   summary: '预检通过，可以创建并执行任务。',
   dataset_id: 'dataset-demo',
   dataset_version: 1,
   workflow_version_id: 'wf-demo:v1',
-  execution_template_id: undefined,
-  evaluation_goal: 'release_gate',
-  quality_gate: { pass_rate: 0.9, max_badcase_count: 0 },
-  sample_repeat_times: 1,
-  cost_budget: undefined,
   checks: [],
 };
 
@@ -76,11 +121,6 @@ const blockedPreflight = {
   dataset_id: 'dataset-demo',
   dataset_version: 1,
   workflow_version_id: 'wf-demo:v1',
-  execution_template_id: undefined,
-  evaluation_goal: 'release_gate',
-  quality_gate: { pass_rate: 0.9, max_badcase_count: 0 },
-  sample_repeat_times: 1,
-  cost_budget: undefined,
   checks: [
     {
       check_id: 'field_mapping',
@@ -91,47 +131,6 @@ const blockedPreflight = {
       recommendation: '请修正字段映射。',
     },
   ],
-};
-
-const executionTemplates = [
-  {
-    template_id: 'tasktpl-strict',
-    name: '高严谨回归模板',
-    description: '用于上线前高严谨回归。',
-    evaluation_goal: 'regression',
-    quality_gate: { pass_rate: 0.96, max_badcase_count: 1 },
-    execution_config: {
-      chunk_size: 50,
-      concurrency: 2,
-      sample_repeat_times: 3,
-      retry: { max_retries: 2, backoff_seconds: 4 },
-      cost_budget: 30,
-    },
-    tags: ['regression', 'strict'],
-    source: 'custom',
-    created_at: '2026-05-31T00:00:00Z',
-    updated_at: '2026-05-31T00:00:00Z',
-  },
-];
-
-const strictTemplatePreflight = {
-  ...passedPreflight,
-  execution_template_id: 'tasktpl-strict',
-  evaluation_goal: 'regression',
-  quality_gate: { pass_rate: 0.96, max_badcase_count: 1 },
-  sample_repeat_times: 3,
-  cost_budget: 30,
-};
-
-const customParamPreflight = {
-  ...passedPreflight,
-  sample_repeat_times: 2,
-  cost_budget: 12.5,
-};
-
-const overridePreflight = {
-  ...passedPreflight,
-  skill_overrides: { answer: { model: 'task-model' } },
 };
 
 describe('TaskCreateWizard', () => {
@@ -150,6 +149,18 @@ describe('TaskCreateWizard', () => {
     }
   });
 
+  it('创建任务只保留最小必要字段，不展示执行模板、质量门槛和任务级覆盖', async () => {
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={vi.fn()} />);
+
+    expect(screen.getByText('创建任务')).toBeInTheDocument();
+    expect(screen.queryByText('执行参数模板')).not.toBeInTheDocument();
+    expect(screen.queryByText('质量门槛')).not.toBeInTheDocument();
+    expect(screen.queryByText('任务级 Skill 参数覆盖')).not.toBeInTheDocument();
+    expect(screen.queryByText('评测目的')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /运行 Preflight/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '确认创建任务' })).toBeDisabled();
+  });
+
   it('必须选择 Dataset、Workflow 并完成可继续的 Preflight 后才能创建', async () => {
     const onSubmit = vi.fn();
     render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
@@ -160,8 +171,49 @@ describe('TaskCreateWizard', () => {
     await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
     expect(createButton).toBeDisabled();
 
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1 / 需要 row.question');
     expect(createButton).toBeDisabled();
+  });
+
+  it('运行 Preflight 只提交任务名、Dataset Version 和 Workflow Version', async () => {
+    const onPreflight = vi.fn();
+    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={onPreflight} onSubmit={vi.fn()} />);
+
+    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1 / 需要 row.question');
+    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
+
+    await waitFor(() => expect(onPreflight).toHaveBeenCalledWith(
+      expect.objectContaining<Partial<TaskCreateFormValues>>({
+        dataset_version_id: 'dataset-demo:v1',
+        workflow_version_id: 'wf-demo:v1',
+      }),
+    ));
+    expect(onPreflight.mock.calls[0][0]).not.toHaveProperty('execution_template_id');
+    expect(onPreflight.mock.calls[0][0]).not.toHaveProperty('quality_gate');
+    expect(onPreflight.mock.calls[0][0]).not.toHaveProperty('sample_repeat_times');
+    expect(onPreflight.mock.calls[0][0]).not.toHaveProperty('skill_overrides');
+  });
+
+  it('Workflow 需要的数据字段会直接展示，数据集不匹配时提示用户选择正确版本或重新发布', async () => {
+    render(<TaskCreateWizard open datasets={apCodeDatasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={vi.fn()} />);
+
+    await chooseSelectOption('Dataset Version', '审批码数据集 v1 / 50 条');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1 / 需要 row.question');
+
+    expect(screen.getByText('Dataset 与 Workflow 字段不匹配')).toBeInTheDocument();
+    expect(screen.getByText(/当前 Workflow 版本读取 row.question/)).toBeInTheDocument();
+    expect(screen.getByText(/如果你没有使用这些字段，请回 Workflow 画布确认输入绑定并重新发布/)).toBeInTheDocument();
+  });
+
+  it('Workflow 列表按版本倒序展示，避免误选旧版本字段映射', async () => {
+    render(<TaskCreateWizard open datasets={apCodeDatasets} workflows={[workflows[0], apCodeWorkflow]} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={vi.fn()} />);
+
+    fireEvent.mouseDown(getSelectInput('Workflow Version'));
+    const apWorkflow = await screen.findByText('审批码抽样流程 v3 / 需要 row.ap_code');
+    const oldWorkflow = await screen.findByText('RAG 回归评测 v1 / 需要 row.question');
+
+    expect(apWorkflow.compareDocumentPosition(oldWorkflow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('Preflight 阻断时默认不能创建，必须显式确认风险', async () => {
@@ -182,7 +234,7 @@ describe('TaskCreateWizard', () => {
 
     fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '强制任务' } });
     await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1 / 需要 row.question');
 
     const createButton = screen.getByRole('button', { name: '确认创建任务' });
     expect(createButton).toBeDisabled();
@@ -202,7 +254,7 @@ describe('TaskCreateWizard', () => {
 
     fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '重跑 Preflight 任务' } });
     await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1 / 需要 row.question');
     fireEvent.click(screen.getByLabelText('我已确认 Preflight 阻断风险，仍要创建任务'));
 
     rerender(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={passedPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
@@ -212,216 +264,31 @@ describe('TaskCreateWizard', () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ allow_blocked_preflight: false }));
   });
 
-  it('选择执行参数模板后会填充质量门槛和执行参数', async () => {
-    const onSubmit = vi.fn();
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} executionTemplates={executionTemplates} loading={false} preflightLoading={false} preflightResult={strictTemplatePreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
-
-    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '模板任务' } });
-    await chooseSelectOption('执行参数模板', '高严谨回归模板');
-    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
-    fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
-
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining<Partial<TaskCreateFormValues>>({
-        execution_template_id: 'tasktpl-strict',
-        evaluation_goal: 'regression',
-        pass_rate_threshold: 0.96,
-        max_badcase_count: 1,
-        chunk_size: 50,
-        concurrency: 2,
-        sample_repeat_times: 3,
-        max_retries: 2,
-        retry_backoff_seconds: 4,
-        cost_budget: 30,
-      }),
-    );
-  });
-
-  it('Preflight 后修改关键参数会要求重新运行预检', async () => {
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={passedPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={vi.fn()} />);
+  it('Preflight 后修改 Dataset 或 Workflow 会要求重新运行预检', async () => {
+    render(<TaskCreateWizard open datasets={datasets} workflows={[workflows[0], apCodeWorkflow]} loading={false} preflightLoading={false} preflightResult={passedPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={vi.fn()} />);
 
     await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
+    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1 / 需要 row.question');
     expect(screen.getByRole('button', { name: '确认创建任务' })).not.toBeDisabled();
 
-    fireEvent.change(screen.getByPlaceholderText('例如：20.00'), { target: { value: '12.5' } });
+    await chooseSelectOption('Workflow Version', '审批码抽样流程 v3 / 需要 row.ap_code');
 
     expect(screen.getByRole('button', { name: '确认创建任务' })).toBeDisabled();
     expect(screen.getByText('Preflight 结果已过期')).toBeInTheDocument();
-  });
-
-  it('运行 Preflight 会提交完整默认执行参数', async () => {
-    const onPreflight = vi.fn();
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={onPreflight} onSubmit={vi.fn()} />);
-
-    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
-    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
-
-    await waitFor(() => expect(onPreflight).toHaveBeenCalledWith(
-      expect.objectContaining<Partial<TaskCreateFormValues>>({
-        evaluation_goal: 'release_gate',
-        pass_rate_threshold: 0.9,
-        max_badcase_count: 0,
-        sample_repeat_times: 1,
-        max_retries: 1,
-        retry_backoff_seconds: 0,
-      }),
-    ));
-  });
-
-  it('任务级 Skill 参数覆盖会进入 Preflight 和创建请求', async () => {
-    const onPreflight = vi.fn();
-    const onSubmit = vi.fn();
-    const { unmount } = render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={onPreflight} onSubmit={onSubmit} />);
-
-    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
-    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
-    await chooseSelectOption('覆盖 Step', '生成回答 / answer');
-    fireEvent.change(screen.getByPlaceholderText('例如：model'), { target: { value: 'model' } });
-    fireEvent.change(screen.getByPlaceholderText('覆盖值'), { target: { value: 'task-model' } });
-    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
-
-    await waitFor(() => expect(onPreflight).toHaveBeenCalledWith(
-      expect.objectContaining<Partial<TaskCreateFormValues>>({
-        skill_overrides: { answer: { model: 'task-model' } },
-      }),
-    ));
-
-    unmount();
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={overridePreflight} onCancel={vi.fn()} onPreflight={onPreflight} onSubmit={onSubmit} />);
-    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '覆盖参数任务' } });
-    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
-    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
-    await chooseSelectOption('覆盖 Step', '生成回答 / answer');
-    fireEvent.change(screen.getByPlaceholderText('例如：model'), { target: { value: 'model' } });
-    fireEvent.change(screen.getByPlaceholderText('覆盖值'), { target: { value: 'task-model' } });
-    fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
-
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining<Partial<TaskCreateFormValues>>({
-        skill_overrides: { answer: { model: 'task-model' } },
-      }),
-    );
-  });
-
-  it('任务级 Skill 参数覆盖按所选 Step 的 config_schema 选择参数并推断值类型', async () => {
-    const onPreflight = vi.fn();
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} skills={demoSkills} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={onPreflight} onSubmit={vi.fn()} />);
-
-    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
-    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
-    await chooseSelectOption('覆盖 Step', '生成回答 / answer');
-    await chooseSelectOption('参数名', 'temperature / number');
-    fireEvent.change(screen.getByLabelText('覆盖值'), { target: { value: '0.35' } });
-    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
-
-    await waitFor(() => expect(onPreflight).toHaveBeenCalledWith(
-      expect.objectContaining<Partial<TaskCreateFormValues>>({
-        skill_overrides: { answer: { temperature: 0.35 } },
-      }),
-    ));
-  });
-
-  it('任务级表达式参数覆盖可从 Dataset field_paths 选择路径', async () => {
-    const onPreflight = vi.fn();
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} skills={demoSkills} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={onPreflight} onSubmit={vi.fn()} />);
-
-    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
-    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
-    await chooseSelectOption('覆盖 Step', '生成回答 / answer');
-    await chooseSelectOption('参数名', 'model / string');
-    await chooseSelectOption('覆盖值类型', '表达式路径');
-    await chooseSelectOption('表达式路径', 'row.question');
-    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
-
-    await waitFor(() => expect(onPreflight).toHaveBeenCalledWith(
-      expect.objectContaining<Partial<TaskCreateFormValues>>({
-        skill_overrides: { answer: { model: { type: 'expression', path: 'row.question' } } },
-      }),
-    ));
-  });
-
-  it('非法 JSON 覆盖值会在运行 Preflight 前被表单校验拦截', async () => {
-    const onPreflight = vi.fn();
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} skills={demoSkills} loading={false} preflightLoading={false} onCancel={vi.fn()} onPreflight={onPreflight} onSubmit={vi.fn()} />);
-
-    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
-    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
-    await chooseSelectOption('覆盖 Step', '生成回答 / answer');
-    await chooseSelectOption('参数名', 'model / string');
-    await chooseSelectOption('覆盖值类型', 'JSON');
-    fireEvent.change(screen.getByPlaceholderText('{"temperature": 0.2}'), { target: { value: '{bad json' } });
-    fireEvent.click(screen.getByRole('button', { name: /运行 Preflight/ }));
-
-    expect(await screen.findByText('请填写合法 JSON。')).toBeInTheDocument();
-    expect(onPreflight).not.toHaveBeenCalled();
-  });
-
-  it('Preflight 后修改任务级 Skill 参数覆盖会要求重新运行预检', async () => {
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={overridePreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={vi.fn()} />);
-
-    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
-    fireEvent.click(screen.getByRole('button', { name: '添加任务级参数覆盖' }));
-    await chooseSelectOption('覆盖 Step', '生成回答 / answer');
-    fireEvent.change(screen.getByPlaceholderText('例如：model'), { target: { value: 'model' } });
-    fireEvent.change(screen.getByPlaceholderText('覆盖值'), { target: { value: 'task-model' } });
-    expect(screen.getByRole('button', { name: '确认创建任务' })).not.toBeDisabled();
-
-    fireEvent.change(screen.getByPlaceholderText('覆盖值'), { target: { value: 'changed-model' } });
-
-    expect(screen.getByRole('button', { name: '确认创建任务' })).toBeDisabled();
-    expect(screen.getByText('Preflight 结果已过期')).toBeInTheDocument();
-  });
-
-  it('提交任务参数时包含并发、重试、repeat 和成本预算', async () => {
-    const onSubmit = vi.fn();
-    render(<TaskCreateWizard open datasets={datasets} workflows={workflows} loading={false} preflightLoading={false} preflightResult={customParamPreflight} onCancel={vi.fn()} onPreflight={vi.fn()} onSubmit={onSubmit} />);
-
-    fireEvent.change(screen.getByPlaceholderText('例如：RAG 回归评测 2026-05-31'), { target: { value: '严谨化任务' } });
-    await chooseSelectOption('Dataset Version', '问答回归集 v1 / 100 条');
-    await chooseSelectOption('Workflow Version', 'RAG 回归评测 v1');
-    fireEvent.change(screen.getByPlaceholderText('100'), { target: { value: '50' } });
-    fireEvent.change(screen.getByPlaceholderText('1'), { target: { value: '3' } });
-    fireEvent.change(screen.getByPlaceholderText('repeat=1'), { target: { value: '2' } });
-    fireEvent.change(screen.getByPlaceholderText('max=1'), { target: { value: '4' } });
-    fireEvent.change(screen.getByPlaceholderText('seconds=0'), { target: { value: '5' } });
-    fireEvent.change(screen.getByPlaceholderText('例如：20.00'), { target: { value: '12.5' } });
-
-    fireEvent.click(screen.getByRole('button', { name: '确认创建任务' }));
-
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining<TaskCreateFormValues>({
-        name: '严谨化任务',
-        dataset_version_id: 'dataset-demo:v1',
-        workflow_version_id: 'wf-demo:v1',
-        chunk_size: 50,
-        concurrency: 3,
-        sample_repeat_times: 2,
-        max_retries: 4,
-        retry_backoff_seconds: 5,
-        cost_budget: 12.5,
-      }),
-    );
   });
 });
 
 async function chooseSelectOption(label: string, optionText: string) {
+  const selectInput = getSelectInput(label);
+  fireEvent.mouseDown(selectInput);
+  const candidates = await screen.findAllByText(optionText);
+  fireEvent.click(candidates[candidates.length - 1]);
+}
+
+function getSelectInput(label: string) {
   const selectInput = screen.getAllByLabelText(label).find((element) => element.getAttribute('role') === 'combobox');
   if (!selectInput) {
     throw new Error(`找不到下拉输入框：${label}`);
   }
-  fireEvent.mouseDown(selectInput);
-  const candidates = await screen.findAllByText(optionText);
-  fireEvent.click(candidates[candidates.length - 1]);
+  return selectInput;
 }

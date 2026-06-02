@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -63,6 +64,8 @@ from aegisqa.workflows.validation import config_issue_from_exception, validate_w
 
 
 REPORT_EXPORT_FORMATS = {"json", "csv", "html"}
+TASK_RESULT_EXPORT_FORMATS = {"json", "jsonl", "csv"}
+TASK_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="aegisqa-task")
 
 
 def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -374,9 +377,38 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         return _get_record(ctx.store, "tasks", task_id)
 
     @app.post("/tasks/{task_id}/execute")
-    def execute_task(task_id: str) -> dict[str, Any]:
+    def execute_task(task_id: str, background: bool = Query(default=False)) -> dict[str, Any]:
         task = _get_record(ctx.store, "tasks", task_id)
         _ensure_task_action_allowed(task, "execute")
+        if background:
+            run = ctx.runner.get_run(task["run_id"])
+            run.status = "running"
+            run.started_at = run.started_at or _now()
+            # 后台执行必须先持久化 running 状态，否则前端轮询只能看到 queued 到 completed 的跳变。
+            ctx.runner._save_run(run)
+            task = _refresh_task_from_run(ctx.store, task, run)
+
+            def refresh_progress(current_run: RunRecord) -> None:
+                latest_task = _get_record(ctx.store, "tasks", task_id)
+                _refresh_task_from_run(ctx.store, latest_task, current_run)
+
+            def execute_in_background() -> None:
+                try:
+                    ctx.runner.execute_run(task["run_id"], progress_callback=refresh_progress)
+                except Exception as exc:  # noqa: BLE001 - 后台任务不能把异常丢到线程外导致前端永远停在 running。
+                    failed_run = ctx.runner.get_run(task["run_id"])
+                    failed_run.status = "failed"
+                    failed_run.finished_at = _now()
+                    ctx.runner._save_run(failed_run)
+                    latest_task = _get_record(ctx.store, "tasks", task_id)
+                    refreshed = _refresh_task_from_run(ctx.store, latest_task, failed_run)
+                    refreshed["last_error"] = str(exc)
+                    _save_record(ctx.store, "tasks", "task_id", refreshed)
+                    ctx.audit_service.record(actor="api", action="task.execute.failed", target=task_id, detail={"error": str(exc)})
+
+            TASK_EXECUTOR.submit(execute_in_background)
+            ctx.audit_service.record(actor="api", action="task.execute.start", target=task_id, detail={"run_id": run.run_id, "background": True})
+            return task
         run = ctx.runner.execute_run(task["run_id"])
         return _refresh_task_from_run(ctx.store, task, run)
 
@@ -512,6 +544,47 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             "run_id": task.get("run_id"),
             "file_format": file_format,
             "approval_request_id": approval_request.get("request_id") if approval_request else None,
+            "content": content,
+        }
+
+    @app.get("/tasks/{task_id}/results/export")
+    def export_task_results(task_id: str, file_format: str = "csv", include_steps: bool = Query(default=False)) -> dict[str, Any]:
+        """导出任务的样本级执行结果。
+
+        报告导出面向复盘指标，结果导出面向用户拿到“每条数据跑完后生成了什么”。因此这里
+        不复用报告 CSV，而是按 item 扁平化 row/context/metrics 和节点输出，方便 Excel、
+        BI 或后续人工处理继续消费。
+        """
+
+        _ensure_task_result_export_format(file_format)
+        task = _get_record(ctx.store, "tasks", task_id)
+        run = ctx.runner.get_run(task["run_id"])
+        rows = _build_task_result_export_rows(run, include_steps=include_steps)
+        if file_format == "json":
+            content: Any = rows
+        elif file_format == "jsonl":
+            content = "\n".join(json_dumps(row) for row in rows)
+        elif file_format == "csv":
+            content = _build_task_result_export_csv(rows)
+        else:
+            raise HTTPException(status_code=400, detail={"message": "file_format 仅支持 json/jsonl/csv"})
+        ctx.audit_service.record(
+            actor="api",
+            action="task.results.export",
+            target=task_id,
+            detail={
+                "run_id": task.get("run_id"),
+                "file_format": file_format,
+                "include_steps": include_steps,
+                "row_count": len(rows),
+            },
+        )
+        return {
+            "task_id": task_id,
+            "run_id": task.get("run_id"),
+            "file_format": file_format,
+            "include_steps": include_steps,
+            "row_count": len(rows),
             "content": content,
         }
 
@@ -1029,6 +1102,97 @@ def _paginate_records(records: list[dict[str, Any]], *, page: int, page_size: in
             "total_pages": ceil(total_items / safe_page_size) if total_items else 0,
         },
     }
+
+
+def _ensure_task_result_export_format(file_format: str) -> None:
+    if file_format not in TASK_RESULT_EXPORT_FORMATS:
+        raise HTTPException(status_code=400, detail={"message": "file_format 仅支持 json/jsonl/csv"})
+
+
+def _build_task_result_export_rows(run: RunRecord, *, include_steps: bool) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in run.items:
+        context_snapshot = item.context_snapshot or {}
+        row: dict[str, Any] = {
+            "run_id": run.run_id,
+            "item_id": item.item_id,
+            "row_id": item.row_id,
+            "row_index": item.row_index,
+            "repeat_index": item.repeat_index,
+            "status": item.status,
+            "retry_count": item.retry_count,
+            "started_at": item.started_at or "",
+            "finished_at": item.finished_at or "",
+        }
+        _flatten_value("row", context_snapshot.get("row", {}), row)
+        _flatten_value("context", context_snapshot.get("context", {}), row)
+        _flatten_value("metrics", item.metrics or context_snapshot.get("metrics", {}), row)
+        _flatten_value("error", item.error or {}, row)
+        for step in item.steps:
+            # `node.<step_id>.*` 是给业务用户看的标准节点输出命名空间；
+            # `step.<step_id>.*` 是排查执行细节时才展开的 Trace 级信息。
+            _flatten_value(f"node.{step.step_id}", step.output_snapshot, row)
+            if include_steps:
+                row[f"step.{step.step_id}.status"] = step.status
+                row[f"step.{step.step_id}.skill_ref"] = step.skill_ref
+                row[f"step.{step.step_id}.latency_ms"] = step.latency_ms
+                row[f"step.{step.step_id}.cache_hit"] = step.cache_hit
+                _flatten_value(f"step.{step.step_id}.input", step.input_snapshot, row)
+                _flatten_value(f"step.{step.step_id}.output", step.output_snapshot, row)
+                _flatten_value(f"step.{step.step_id}.metrics", step.metrics, row)
+                _flatten_value(f"step.{step.step_id}.error", step.error or {}, row)
+        rows.append(row)
+    return rows
+
+
+def _build_task_result_export_csv(rows: list[dict[str, Any]]) -> str:
+    columns = _task_result_export_columns(rows)
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=columns, lineterminator="\n")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({column: _csv_scalar(row.get(column)) for column in columns})
+    return output.getvalue().strip()
+
+
+def _task_result_export_columns(rows: list[dict[str, Any]]) -> list[str]:
+    base_columns = [
+        "run_id",
+        "item_id",
+        "row_id",
+        "row_index",
+        "repeat_index",
+        "status",
+        "retry_count",
+        "started_at",
+        "finished_at",
+    ]
+    seen = set(base_columns)
+    dynamic_columns = sorted({key for row in rows for key in row if key not in seen})
+    return base_columns + dynamic_columns
+
+
+def _flatten_value(prefix: str, value: Any, target: dict[str, Any]) -> None:
+    if value in (None, ""):
+        return
+    if isinstance(value, dict):
+        for key in sorted(value):
+            child_prefix = f"{prefix}.{key}" if prefix else str(key)
+            _flatten_value(child_prefix, value[key], target)
+        return
+    target[prefix] = value
+
+
+def _csv_scalar(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return json_dumps(value)
 
 
 def _build_task_report_export_csv(payload: dict[str, Any]) -> str:

@@ -181,41 +181,91 @@ Skill 只处理当前这一条样本
 
 不推荐把普通 Skill 写成自己循环 100 条数据。除非它是专门的批处理 Source / Sampling Skill，否则平台将无法知道内部哪一条样本失败、哪一条耗时过长。
 
-## Skill 插件包格式
+## Agent Skill 包格式
 
-插件包是一个 zip 文件，根目录必须包含：
+Skill 市场现在以“上传 Agent Skill zip 包”为主入口。平台不再要求从本机 `.codex/skills`
+或 `.agents/skills` 扫描目录；你可以把自己已经写好的 Agent Skill 打成 zip 上传。
 
-```text
-skill.yaml 或 skill.yml 或 skill.json
-handler.py
-```
-
-可以包含多个 Python 文件，例如：
+推荐结构：
 
 ```text
-my_skill/
-├── skill.yaml
-├── handler.py
-├── scorer.py
-├── utils.py
-└── libs/
-    ├── __init__.py
-    └── parser.py
+my_agent_skill.zip
+├── SKILL.md                 # 必须：Agent Skill 的说明、触发场景和使用约束
+├── skill.yaml               # 强烈建议：平台机器可读合约
+├── scripts/
+│   └── run.py               # 脚本型 Skill 的执行入口
+├── references/
+│   └── rules.md             # 说明型 Skill 的补充资料
+└── assets/                  # 可选资源
 ```
 
-入口仍然是 `handler.py`，必须暴露：
+当前支持两种运行模式：
+
+- `runtime.mode=script`：不调用模型，只执行 `runtime.entrypoint` 指向的 Python 函数，适合关键词检查、规则打分、字段转换、纯参数计算。
+- `runtime.mode=instruction_model`：读取 `SKILL.md` 和 `references/`，通过统一模型网关生成结果，适合提示词型 Agent Skill。
+
+脚本型 Skill 必须在 `skill.yaml` 或 `skill.json` 中声明 `input_schema`、`output_schema`、
+`config_schema` 和 `runtime.entrypoint`。示例：
+
+```yaml
+skill_id: agent.keyword_check@0.1.0
+name: 关键词检查
+version: 0.1.0
+description: 不调用模型的参数化关键词检查。
+runtime:
+  mode: script
+  entrypoint: scripts/run.py:run
+input_schema:
+  type: object
+  required: [text]
+  properties:
+    text:
+      type: string
+config_schema:
+  type: object
+  required: [keywords]
+  properties:
+    keywords:
+      type: array
+      items:
+        type: string
+output_schema:
+  type: object
+  required: [hit, matched_keywords]
+  properties:
+    hit:
+      type: boolean
+    matched_keywords:
+      type: array
+      items:
+        type: string
+example_input:
+  text: 这段回答存在幻觉
+example_config:
+  keywords: [幻觉]
+```
+
+脚本入口必须暴露 `run(inputs, config)`：
 
 ```python
 def run(inputs, config):
+    text = inputs["text"]
+    keywords = config["keywords"]
+    matched = [item for item in keywords if item in text]
     return {
-        "output": {},
-        "metrics": {},
+        "output": {"hit": bool(matched), "matched_keywords": matched},
+        "metrics": {"matched_count": len(matched)},
         "artifacts": {},
-        "logs": [],
+        "logs": ["script mode"],
     }
 ```
 
-插件不会直接 import 到 FastAPI 主进程中执行，而是通过短生命周期 Python 子进程运行。这样可以降低插件异常污染主服务的风险。
+旧版 `skill.yaml|skill.json + handler.py` 插件仍然兼容；如果没有声明 `runtime`，平台会把
+`handler.py:run` 当作脚本入口。
+
+插件不会直接 import 到 FastAPI 主进程中执行，而是通过短生命周期 Python 子进程运行。
+说明型 Skill 则通过统一模型网关执行，不会运行脚本。更详细的打包、上传、审批和
+Workflow 引用方式见 [docs/AGENT_SKILL_PACKAGE_GUIDE.md](docs/AGENT_SKILL_PACKAGE_GUIDE.md)。
 
 当前插件执行保护：
 

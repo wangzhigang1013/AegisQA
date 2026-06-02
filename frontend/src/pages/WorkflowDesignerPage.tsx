@@ -127,7 +127,7 @@ function WorkflowDesignerContent() {
     if (routeDraftQuery.data) {
       loadedRouteDraftId.current = routeDraftId;
       if (isWorkflowGraph(routeDraftQuery.data.graph)) {
-        loadGraph(routeDraftQuery.data.graph, routeDraftQuery.data.draft_id, routeDraftQuery.data.updated_at);
+        loadGraph({ ...routeDraftQuery.data.graph, name: routeDraftQuery.data.name }, routeDraftQuery.data.draft_id, routeDraftQuery.data.updated_at);
         return;
       }
       setConsoleText('草稿加载失败：后端返回的 Workflow Graph 结构不完整，请从 Workflow 市场重新打开或复制草稿。');
@@ -239,6 +239,7 @@ function WorkflowDesignerContent() {
     onSuccess: (run) => {
       setConsoleResult(run as unknown as Record<string, unknown>);
       setConsoleText(`试运行完成：${run.run_id}，队列消息只携带 item_id。`);
+      setConsoleTab('json');
     },
     onError: (error) => setConsoleText(error instanceof Error ? `试运行失败：${error.message}` : '试运行失败'),
   });
@@ -349,10 +350,10 @@ function WorkflowDesignerContent() {
     const [kind, id] = String(value).split(':', 2);
     if (kind === 'draft') {
       const draft = workflowDrafts.find((item) => item.draft_id === id);
-      if (draft) loadGraph(draft.graph, draft.draft_id, draft.updated_at);
+      if (draft) loadGraph({ ...draft.graph, name: draft.name }, draft.draft_id, draft.updated_at);
     } else if (kind === 'workflow') {
       const workflow = workflowVersions.find((item) => item.version_id === id);
-      if (workflow?.graph) loadGraph(workflow.graph as WorkflowGraph, null);
+      if (workflow?.graph) loadGraph({ ...(workflow.graph as WorkflowGraph), name: workflow.name }, null);
     } else if (kind === 'template') {
       loadGraph({ ...demoWorkflowGraph, name: `${id}_template` }, null);
     }
@@ -391,7 +392,11 @@ function WorkflowDesignerContent() {
   }
 
   async function publishCurrentWorkflow() {
-    const currentGraph = buildWorkflowGraph(workflowNameRef.current, nodesRef.current, edgesRef.current);
+    const currentName = workflowNameRef.current.trim() || '未命名 Workflow';
+    const currentGraph = buildWorkflowGraph(currentName, nodesRef.current, edgesRef.current);
+    if (currentName !== workflowNameRef.current) {
+      changeWorkflowName(currentName, false);
+    }
     const localIssues = validateWorkflowGraphDraft(currentGraph);
     if (localIssues.length) {
       const localValidation = graphValidationFromDraftIssues(currentGraph, localIssues);
@@ -407,13 +412,15 @@ function WorkflowDesignerContent() {
       throw new Error('发布前校验失败，请查看错误与建议。');
     }
 
-    if (draftId) {
-      return api.publishWorkflowDraft(draftId);
-    }
-    const draft = await api.createWorkflowDraft({ name: workflowNameRef.current, graph: currentGraph });
+    // 发布必须使用用户当前看到的画布快照。先保存当前名称、字段映射和参数，再发布草稿，
+    // 避免后端发布旧草稿导致名称回退或任务 Preflight 仍按旧字段检查。
+    const draft = draftId
+      ? await api.updateWorkflowDraft(draftId, { name: currentName, graph: currentGraph })
+      : await api.createWorkflowDraft({ name: currentName, graph: currentGraph });
     setDraftId(draft.draft_id);
     setLastSavedAt(draft.updated_at);
     queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
+    setIsDirty(false);
     return api.publishWorkflowDraft(draft.draft_id);
   }
 
@@ -518,11 +525,7 @@ function WorkflowDesignerContent() {
         primaryAction={
           <Space wrap>
             <Button icon={<SaveOutlined />} onClick={() => saveDraftMutation.mutate()} loading={saveDraftMutation.isPending}>保存草稿</Button>
-            <Button icon={<CheckCircleOutlined />} onClick={() => validateMutation.mutate()} loading={validateMutation.isPending}>校验</Button>
-            <Tooltip title={!selectedDataset ? '请选择映射预览数据集' : ''}>
-              <Button icon={<PlayCircleOutlined />} disabled={!selectedDataset} onClick={() => dryRunMutation.mutate()} loading={dryRunMutation.isPending}>试运行</Button>
-            </Tooltip>
-            <Button type="primary" icon={<DeploymentUnitOutlined />} onClick={() => publishMutation.mutate()} loading={publishMutation.isPending}>发布</Button>
+            <Button type="primary" icon={<DeploymentUnitOutlined />} onClick={() => publishMutation.mutate()} loading={publishMutation.isPending}>校验并发布</Button>
             <Button onClick={() => navigate('/workflows')}>返回市场</Button>
           </Space>
         }
@@ -606,7 +609,7 @@ function WorkflowDesignerContent() {
           </Col>
           <Col xs={12} lg={4}>
             <Typography.Text type="secondary">流程名称</Typography.Text>
-            <Input value={workflowName} onChange={(event) => changeWorkflowName(event.target.value)} />
+            <Input aria-label="流程名称" value={workflowName} onChange={(event) => changeWorkflowName(event.target.value)} />
           </Col>
         </Row>
         {selectedDataset ? (
@@ -988,7 +991,18 @@ function WorkflowDesignerContent() {
         ) : null}
       </Drawer>
 
-      <Card className="flat-card" title="校验与试运行 Console">
+      <Card
+        className="flat-card"
+        title="校验、试运行与输出结果"
+        extra={
+          <Space wrap>
+            <Button icon={<CheckCircleOutlined />} onClick={() => validateMutation.mutate()} loading={validateMutation.isPending}>校验当前画布</Button>
+            <Tooltip title={!selectedDataset ? '请选择映射预览数据集' : '试运行完成后会直接切到 JSON 结果'}>
+              <Button icon={<PlayCircleOutlined />} disabled={!selectedDataset} onClick={() => dryRunMutation.mutate()} loading={dryRunMutation.isPending}>试运行并查看结果</Button>
+            </Tooltip>
+          </Space>
+        }
+      >
         <Tabs
           activeKey={consoleTab}
           onChange={setConsoleTab}

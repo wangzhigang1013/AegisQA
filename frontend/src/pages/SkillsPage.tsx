@@ -78,8 +78,12 @@ export function SkillsPage() {
       <PageHeader
         eyebrow="能力市场"
         title="Skill 市场"
-        description="上传、审批和管理可被 Workflow 引用的 Skill。插件包默认待审批，合约测试通过后才能进入流程。"
-        primaryAction={<Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>上传 Skill 插件包</Button>}
+        description="上传、审批和管理可被 Workflow 引用的 Agent Skill 包。脚本型 Skill 直接跑参数逻辑，说明型 Skill 通过模型网关执行。"
+        primaryAction={(
+          <Space wrap>
+            <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>上传 Agent Skill 包</Button>
+          </Space>
+        )}
       />
 
       {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
@@ -136,20 +140,27 @@ export function SkillsPage() {
             {
               title: '审批人',
               render: (_, record) => {
-                const packageRecord = packageBySkillId[record.skill_id];
-                return packageRecord ? (packageRecord.approved_by ?? '未审批') : '-';
+                const lifecycleRecord = packageBySkillId[record.skill_id];
+                return lifecycleRecord ? (lifecycleRecord.approved_by ?? '未审批') : '-';
               },
             },
             {
               title: '审批时间',
               render: (_, record) => {
-                const packageRecord = packageBySkillId[record.skill_id];
-                return packageRecord ? (packageRecord.approved_at ?? '-') : '-';
+                const lifecycleRecord = packageBySkillId[record.skill_id];
+                return lifecycleRecord ? (lifecycleRecord.approved_at ?? '-') : '-';
               },
             },
             { title: '标签', dataIndex: 'tags', render: (tags: string[]) => <Space wrap>{tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}</Space> },
             { title: '权限', dataIndex: 'permissions', render: (items: string[]) => <Space wrap>{items.map((item) => <Tag color="blue" key={item}>{item}</Tag>)}</Space> },
-            { title: '插件包', render: (_, record) => (packageBySkillId[record.skill_id] ? <Tag color="purple">package</Tag> : <Tag>builtin</Tag>) },
+            {
+              title: '来源',
+              render: (_, record) => {
+                const packageRecord = packageBySkillId[record.skill_id];
+                if (packageRecord) return <Tag color="purple">{formatPackageRuntime(packageRecord.runtime_mode)}</Tag>;
+                return <Tag>builtin</Tag>;
+              },
+            },
             {
               title: '操作',
               render: (_, record) => (
@@ -175,18 +186,26 @@ export function SkillsPage() {
             <Typography.Paragraph>{activeSkill.description}</Typography.Paragraph>
             <Card size="small" title="合约测试做什么">
               <Typography.Paragraph>
-                使用 Skill manifest 里的 example_input 和 example_config 执行一次 Skill，验证输入 schema、输出 schema、handler 返回结构和基础运行是否正常。
+                使用 Skill manifest 里的 example_input 和 example_config 执行一次 Skill，验证输入 schema、输出 schema、运行入口和返回结构是否正常。
+                脚本型会调用 runtime.entrypoint，说明型会读取 SKILL.md 和 references 后走统一模型网关。
               </Typography.Paragraph>
             </Card>
             {packageBySkillId[activeSkill.skill_id] ? (
               <>
-                <Card size="small" title="插件启用步骤">
+                <Card size="small" title="Agent Skill 包启用步骤">
                   <Space direction="vertical">
-                    <Typography.Text>第 1 步：上传插件包</Typography.Text>
-                    <Typography.Text>第 2 步：运行合约测试</Typography.Text>
+                    <Typography.Text>第 1 步：上传 zip 包，包内包含 SKILL.md，脚本型还需要 skill.yaml/skill.json 声明 schema 和 runtime.entrypoint。</Typography.Text>
+                    <Typography.Text>第 2 步：运行合约测试，确认 example_input、example_config 和输出 schema 能对齐。</Typography.Text>
                     <Typography.Text>第 3 步：治理页审批启用</Typography.Text>
                     <Typography.Text>第 4 步：Workflow 画布中搜索并添加</Typography.Text>
                   </Space>
+                </Card>
+                <Card size="small" title="包运行方式">
+                  <Descriptions size="small" column={1}>
+                    <Descriptions.Item label="运行模式">{formatPackageRuntime(packageBySkillId[activeSkill.skill_id].runtime_mode)}</Descriptions.Item>
+                    <Descriptions.Item label="脚本入口">{packageBySkillId[activeSkill.skill_id].entrypoint ?? '-'}</Descriptions.Item>
+                    <Descriptions.Item label="SKILL.md">{packageBySkillId[activeSkill.skill_id].skill_md_path ?? '-'}</Descriptions.Item>
+                  </Descriptions>
                 </Card>
                 <Card size="small" title="插件审批状态">
                   <Space wrap>
@@ -203,7 +222,7 @@ export function SkillsPage() {
             <Card size="small" title="输出 Schema"><pre>{JSON.stringify(activeSkill.output_schema, null, 2)}</pre></Card>
             <Card size="small" title="配置 Schema"><pre>{JSON.stringify(activeSkill.config_schema, null, 2)}</pre></Card>
             {contractResultText ? <Alert type={contractResultText.includes('通过') ? 'success' : 'error'} showIcon message={contractResultText} /> : null}
-            {contractResult ? <ContractResultCard result={contractResult} activeSkill={activeSkill} /> : null}
+            {contractResult ? <ContractResultCard result={contractResult} activeSkill={activeSkill} packageRecord={packageBySkillId[activeSkill.skill_id]} /> : null}
             <Tooltip title="会用示例输入和示例配置真实执行一次 Skill，并检查输入输出 schema。">
               <Button icon={<CheckCircleOutlined />} type="primary" loading={contractMutation.isPending} onClick={() => contractMutation.mutate(activeSkill.skill_id)}>
                 运行合约测试
@@ -214,7 +233,7 @@ export function SkillsPage() {
       </Drawer>
 
       <Modal
-        title="上传 Skill 插件包向导"
+        title="上传 Agent Skill 包"
         open={uploadOpen}
         forceRender
         onCancel={() => setUploadOpen(false)}
@@ -224,6 +243,13 @@ export function SkillsPage() {
         ]}
       >
         <Form form={form} layout="vertical" onFinish={(values) => uploadMutation.mutate(values)}>
+          <Alert
+            type="info"
+            showIcon
+            message="zip 包格式"
+            description="推荐包含 SKILL.md、skill.yaml 或 skill.json、scripts、references、assets。纯参数或脚本型 Skill 必须在 skill.yaml/skill.json 中声明 input_schema、output_schema、config_schema 和 runtime.mode=script；说明型 Skill 使用 runtime.mode=instruction_model。旧的 handler.py 插件仍兼容。"
+            style={{ marginBottom: 16 }}
+          />
           <Form.Item name="filename" label="文件名">
             <Input placeholder="echo_skill.zip" />
           </Form.Item>
@@ -239,8 +265,8 @@ export function SkillsPage() {
             maxCount={1}
           >
             <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-            <p className="ant-upload-text">选择 zip 插件包</p>
-            <p className="ant-upload-hint">包内必须包含 skill.yaml 或 skill.json，以及 handler.py。</p>
+            <p className="ant-upload-text">选择 Agent Skill zip 包</p>
+            <p className="ant-upload-hint">脚本型示例：SKILL.md + skill.yaml + scripts/run.py；说明型示例：SKILL.md + skill.yaml + references/。</p>
           </Upload.Dragger>
         </Form>
       </Modal>
@@ -279,8 +305,17 @@ function formatSkillStatus(status: string): string {
   }[status] ?? status;
 }
 
-function ContractResultCard({ result, activeSkill }: { result: SkillContractResult; activeSkill: SkillManifest }) {
+function formatPackageRuntime(runtimeMode?: string): string {
+  return {
+    script: '脚本型',
+    instruction_model: '说明型',
+    safe_model: '说明型',
+  }[runtimeMode ?? ''] ?? (runtimeMode || 'package');
+}
+
+function ContractResultCard({ result, activeSkill, packageRecord }: { result: SkillContractResult; activeSkill: SkillManifest; packageRecord?: SkillPackageRecord }) {
   const errorCode = typeof (result as unknown as Record<string, unknown>).code === 'string' ? String((result as unknown as Record<string, unknown>).code) : result.error;
+  const suggestion = contractSuggestion(packageRecord);
   return (
     <Card size="small" title="合约测试结果">
       <Space direction="vertical" className="drawer-stack">
@@ -297,10 +332,20 @@ function ContractResultCard({ result, activeSkill }: { result: SkillContractResu
             type="warning"
             showIcon
             message="修复建议"
-            description="检查 skill.yaml/skill.json 中的 schema 是否和 handler 输出一致；检查 handler.py 的 run(inputs, config) 是否返回 output、metrics、logs；如果超时，请减少初始化成本或外部调用。"
+            description={suggestion}
           />
         ) : null}
       </Space>
     </Card>
   );
+}
+
+function contractSuggestion(packageRecord?: SkillPackageRecord): string {
+  if (packageRecord?.runtime_mode === 'script') {
+    return '检查 skill.yaml/skill.json 中的 schema 是否和脚本输出一致；检查 runtime.entrypoint 指向的函数是否暴露 run(inputs, config)，并返回 output、metrics、logs；如果超时，请减少初始化成本或外部调用。';
+  }
+  if (packageRecord?.runtime_mode === 'instruction_model' || packageRecord?.runtime_mode === 'safe_model') {
+    return '检查 SKILL.md 和 references 是否能清楚描述任务；检查 output_schema 是否与说明型输出字段 answer/text 对齐；如果模型网关失败，请检查模型接入配置。';
+  }
+  return '检查 skill.yaml/skill.json 中的 schema 是否和运行结果一致；旧插件请检查 handler.py 的 run(inputs, config)，新脚本型 Skill 请检查 runtime.entrypoint。';
 }

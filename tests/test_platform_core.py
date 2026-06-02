@@ -165,6 +165,48 @@ def test_workflow_runner_executes_chunked_items_and_generates_report(tmp_path: P
     assert "cache_hit" in completed.items[0].steps[0].model_dump()
 
 
+def test_workflow_runner_reports_progress_after_each_item(tmp_path: Path) -> None:
+    store = JsonStore(tmp_path / "store")
+    dataset_service = DatasetService(store)
+    registry = SkillRegistry.with_builtin_skills()
+    data_path = tmp_path / "progress.jsonl"
+    _write_jsonl(
+        data_path,
+        [
+            {"question": "Q1", "reference": "A1", "expected_label": "pass"},
+            {"question": "Q2", "reference": "A2", "expected_label": "pass"},
+            {"question": "Q3", "reference": "A3", "expected_label": "pass"},
+        ],
+    )
+    dataset = dataset_service.upload_dataset("progress", data_path, golden=True, label_field="expected_label")
+    workflow = WorkflowDraft(
+        name="progress_workflow",
+        steps=[
+            WorkflowStep(
+                step_id="answer",
+                skill_ref="llm.call@0.1.0",
+                input_mapping={"prompt": "row.question"},
+                output_mapping={},
+                config={"model": "demo-model"},
+            )
+        ],
+    ).publish()
+    runner = WorkflowRunner(store, dataset_service, registry)
+    run = runner.create_run(RunRequest(workflow=workflow, dataset_id=dataset.dataset_id, dataset_version=dataset.version))
+    progress: list[tuple[str, int]] = []
+
+    runner.execute_run(
+        run.run_id,
+        progress_callback=lambda current_run: progress.append(
+            (current_run.status, len([item for item in current_run.items if item.status in {"succeeded", "failed"}]))
+        ),
+    )
+
+    assert progress[0] == ("running", 0)
+    assert progress[-1] == ("completed", 3)
+    assert [completed for _, completed in progress if completed] == [1, 2, 3, 3]
+
+
 def test_workflow_runner_exposes_outputs_by_step_id_without_output_mapping(tmp_path: Path) -> None:
     store = JsonStore(tmp_path / "store")
     dataset_service = DatasetService(store)

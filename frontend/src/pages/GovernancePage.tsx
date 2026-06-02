@@ -1,6 +1,6 @@
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Input, Modal, Space, Table, Tag, Timeline, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Descriptions, Input, Modal, Space, Table, Tag, Timeline, Tooltip, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 
 import { api } from '../api/client';
@@ -23,6 +23,7 @@ export function GovernancePage() {
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
   const packagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
   const auditEventsQuery = useQuery({ queryKey: ['audit-events'], queryFn: () => api.auditEvents() });
+  const modelGatewayQuery = useQuery({ queryKey: ['model-gateway-status'], queryFn: api.modelGatewayStatus });
   const packageBySkillId = useMemo(() => indexPackagesBySkillId(packagesQuery.data ?? []), [packagesQuery.data]);
   const filteredSkills = useMemo(() => {
     const query = skillQuery.trim().toLowerCase();
@@ -60,6 +61,30 @@ export function GovernancePage() {
           </Typography.Text>
           <Typography.Text type="secondary">
             当前页面只保留治理动作：权限矩阵、Skill 生命周期和审计日志。
+          </Typography.Text>
+        </Space>
+      </Card>
+
+      <Card className="flat-card" title="模型接入" loading={modelGatewayQuery.isLoading}>
+        <Space direction="vertical" className="full-width-control" size={12}>
+          <Alert
+            type={modelGatewayQuery.data?.ready ? 'success' : 'warning'}
+            showIcon
+            message="统一模型网关"
+            description="业务 Skill 可以直接复用模型调用节点，不需要在每个 Skill 里重复实现模型 API、鉴权、超时和返回解析。"
+          />
+          <Descriptions bordered size="small" column={2}>
+            <Descriptions.Item label="推荐 Skill">{modelGatewayQuery.data?.skill_ref ? <Typography.Text code>{modelGatewayQuery.data.skill_ref}</Typography.Text> : '-'}</Descriptions.Item>
+            <Descriptions.Item label="Provider">{modelGatewayQuery.data?.provider ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="默认模型">{modelGatewayQuery.data?.default_model ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="模式">{formatModelGatewayMode(modelGatewayQuery.data?.mode)}</Descriptions.Item>
+            <Descriptions.Item label="Base URL">{modelGatewayQuery.data?.base_url_configured ? '已配置' : '未配置'}</Descriptions.Item>
+            <Descriptions.Item label="API Key">{modelGatewayQuery.data?.api_key_configured ? '已配置' : '未配置或本地模型无需 Key'}</Descriptions.Item>
+            <Descriptions.Item label="超时">{modelGatewayQuery.data ? `${modelGatewayQuery.data.timeout_seconds} 秒` : '-'}</Descriptions.Item>
+            <Descriptions.Item label="状态"><Tag color={modelGatewayQuery.data?.ready ? 'green' : 'gold'}>{modelGatewayQuery.data?.ready ? '可用' : '未配置真实模型'}</Tag></Descriptions.Item>
+          </Descriptions>
+          <Typography.Text type="secondary">
+            真实模型接入请在后端设置 <Typography.Text code>AEGISQA_MODEL_PROVIDER=openai_compatible</Typography.Text>、<Typography.Text code>AEGISQA_MODEL_BASE_URL</Typography.Text>、<Typography.Text code>AEGISQA_MODEL_API_KEY</Typography.Text> 和 <Typography.Text code>AEGISQA_MODEL_DEFAULT_MODEL</Typography.Text>。
           </Typography.Text>
         </Space>
       </Card>
@@ -162,4 +187,11 @@ function formatSkillStatus(status: string): string {
     disabled: '已禁用',
     deprecated: '已废弃',
   }[status] ?? status;
+}
+
+function formatModelGatewayMode(mode?: string): string {
+  return {
+    offline_mock: '离线 Mock',
+    openai_compatible: 'OpenAI-compatible',
+  }[mode ?? ''] ?? (mode || '-');
 }

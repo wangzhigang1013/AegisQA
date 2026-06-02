@@ -1,9 +1,10 @@
-import { PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { DownloadOutlined, PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Alert, Button, Card, Descriptions, Drawer, Space, Table, Tabs, Tag, Timeline, Tooltip, Typography } from 'antd';
 import type { ReactNode } from 'react';
+import { useState } from 'react';
 
-import { api } from '../../api/client';
+import { api, formatApiError } from '../../api/client';
 import type { TaskPreflightResult, TaskRecord } from '../../types';
 import { TaskSnapshotPanel, formatExecutionConfig } from './TaskSnapshotPanel';
 
@@ -20,6 +21,7 @@ export function TaskOperationsDrawer({
   onClose: () => void;
   onAction: (task: TaskRecord, action: TaskAction) => void;
 }) {
+  const [notice, setNotice] = useState<string | null>(null);
   const traceQuery = useQuery({
     queryKey: ['task-trace-tree', task?.task_id],
     queryFn: () => api.taskTraceTree(task?.task_id ?? '', { page: 1, pageSize: 5 }),
@@ -35,6 +37,20 @@ export function TaskOperationsDrawer({
     queryFn: () => api.taskTraceFlow(task?.task_id ?? ''),
     enabled: Boolean(task?.task_id),
   });
+  const exportResultsMutation = useMutation({
+    mutationFn: async (format: 'csv' | 'jsonl') => {
+      if (!task) {
+        throw new Error('请先选择任务，再导出结果。');
+      }
+      const exported = await api.exportTaskResults(task.task_id, format);
+      return { exported, task };
+    },
+    onSuccess: ({ exported, task: exportedTask }) => {
+      const filename = downloadTaskResultsExport(exported, exportedTask);
+      setNotice(`结果导出成功：${filename} 已开始下载。`);
+    },
+    onError: (error) => setNotice(`结果导出失败：${formatApiError(error)}`),
+  });
 
   return (
     <Drawer title={task ? `任务详情：${task.name}` : '任务详情'} width={820} open={Boolean(task)} onClose={onClose}>
@@ -49,7 +65,10 @@ export function TaskOperationsDrawer({
             <TaskActionButton task={task} action="attempt" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="新建 Attempt" />
             <Button href={`/tasks/${task.task_id}/trace`}>查看 Trace Flow</Button>
             <Button href={`/tasks/${task.task_id}/trace-tree`}>查看 Trace Tree</Button>
+            <Button icon={<DownloadOutlined />} loading={exportResultsMutation.isPending} onClick={() => exportResultsMutation.mutate('csv')}>导出结果 CSV</Button>
+            <Button icon={<DownloadOutlined />} loading={exportResultsMutation.isPending} onClick={() => exportResultsMutation.mutate('jsonl')}>导出结果 JSONL</Button>
           </Space>
+          {notice ? <Alert showIcon type={notice.includes('失败') ? 'error' : 'success'} message={notice} closable onClose={() => setNotice(null)} /> : null}
 
           <Tabs
             items={[
@@ -204,6 +223,41 @@ function preflightColor(status: TaskPreflightResult['status']) {
   if (status === 'blocked') return 'red';
   return 'default';
 }
+
+function downloadTaskResultsExport(exported: Record<string, unknown>, task: TaskRecord) {
+  const format = typeof exported.file_format === 'string' ? exported.file_format : 'csv';
+  const content = normalizeTaskResultsExportContent(exported.content ?? exported, format);
+  const filename = `${safeTaskResultFileName(task.name || task.task_id)}_results.${format}`;
+  const blob = new Blob([content], { type: taskResultExportMimeTypes[format] ?? 'text/plain;charset=utf-8' });
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = href;
+  link.download = filename;
+  // 下载必须通过临时 a 标签触发，完成后立即清理，避免 Drawer 多次打开后残留 DOM。
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+  return filename;
+}
+
+function normalizeTaskResultsExportContent(content: unknown, format: string) {
+  if (typeof content === 'string') {
+    return content;
+  }
+  return JSON.stringify(content, null, format === 'json' ? 2 : 0);
+}
+
+function safeTaskResultFileName(name: string) {
+  const normalized = name.trim().replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '');
+  return normalized || 'task-results';
+}
+
+const taskResultExportMimeTypes: Record<string, string> = {
+  csv: 'text/csv;charset=utf-8',
+  jsonl: 'application/x-ndjson;charset=utf-8',
+  json: 'application/json;charset=utf-8',
+};
 
 export function TaskActionButton({
   task,

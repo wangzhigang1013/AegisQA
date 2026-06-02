@@ -68,7 +68,7 @@ export function TraceTreePage() {
                 onChange: setTracePage,
               }}
               expandable={{
-                defaultExpandAllRows: true,
+                defaultExpandAllRows: false,
                 expandedRowRender: (item) => <StepTable steps={(item.step_nodes as Record<string, unknown>[]) ?? []} />,
               }}
               columns={[

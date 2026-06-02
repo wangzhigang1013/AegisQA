@@ -14,7 +14,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from aegisqa.core.errors import AegisQAError
+from aegisqa.models.gateway import ModelGateway
 from aegisqa.skills.base import BaseSkill, SkillManifest, SkillResult
 
 
@@ -23,6 +26,20 @@ DEFAULT_PACKAGE_SKILL_TIMEOUT_SECONDS = 60
 MAX_PACKAGE_SKILL_TIMEOUT_SECONDS = 600
 MAX_PACKAGE_SKILL_OUTPUT_BYTES = 64 * 1024
 MAX_PACKAGE_SKILL_STREAM_CHARS = 4000
+DEFAULT_REFERENCE_CHAR_LIMIT = 6000
+MAX_REFERENCE_CHAR_LIMIT = 30000
+
+
+class PackageRuntimeSpec:
+    """插件包运行时声明。
+
+    运行时信息不写入 `SkillManifest`，因为 manifest 负责“组件合约”，runtime 负责
+    “平台如何执行”。这两者分开以后，Workflow 仍只关心输入、输出和配置 schema。
+    """
+
+    def __init__(self, mode: str, entrypoint: str | None = None) -> None:
+        self.mode = mode
+        self.entrypoint = entrypoint
 
 
 def resolve_package_skill_timeout_seconds(timeout_seconds: int | str | None = None) -> int:
@@ -45,19 +62,23 @@ def resolve_package_skill_timeout_seconds(timeout_seconds: int | str | None = No
 
 
 class SubprocessPackageSkill(BaseSkill):
-    """通过受控子进程执行插件包 `handler.py` 的 Skill。"""
+    """通过受控子进程执行插件包脚本入口的 Skill。"""
 
     def __init__(
         self,
         manifest: SkillManifest,
         handler_path: Path,
         *,
+        package_root: Path | None = None,
+        function_name: str = "run",
         timeout_seconds: int | None = None,
     ) -> None:
         self.manifest = manifest
-        # 子进程会把 cwd 切到插件目录；这里必须提前转成绝对路径，
-        # 避免相对路径在子进程中被再次拼接导致 handler.py 找不到。
+        # 子进程会把 cwd 切到插件根目录；这里必须提前转成绝对路径，
+        # 避免相对路径在子进程中被再次拼接导致入口脚本找不到。
         self.handler_path = handler_path.resolve()
+        self.package_root = (package_root or self.handler_path.parent).resolve()
+        self.function_name = function_name
         # 这里是单次 Skill 调用的保护阈值，不是整个任务的总时长限制。
         # 真实任务可以循环执行很多条样本，但每条样本仍需要可控的最大运行时间。
         self.timeout_seconds = resolve_package_skill_timeout_seconds(timeout_seconds)
@@ -72,11 +93,12 @@ class SubprocessPackageSkill(BaseSkill):
                     "-c",
                     _RUNNER_CODE,
                     str(self.handler_path),
+                    self.function_name,
                 ],
                 input=payload,
                 text=True,
                 capture_output=True,
-                cwd=str(self.handler_path.parent),
+                cwd=str(self.package_root),
                 timeout=self.timeout_seconds,
                 check=False,
             )
@@ -87,8 +109,8 @@ class SubprocessPackageSkill(BaseSkill):
                 details={"timeout_seconds": self.timeout_seconds},
             ) from exc
         if completed.returncode != 0:
-            stderr, stderr_truncated = _prepare_stream(completed.stderr, self.handler_path.parent)
-            stdout, stdout_truncated = _prepare_stream(completed.stdout, self.handler_path.parent)
+            stderr, stderr_truncated = _prepare_stream(completed.stderr, self.package_root)
+            stdout, stdout_truncated = _prepare_stream(completed.stdout, self.package_root)
             message = stderr or stdout or f"插件进程退出码：{completed.returncode}"
             raise AegisQAError(
                 "SKILL_PACKAGE_RUNTIME_ERROR",
@@ -104,7 +126,7 @@ class SubprocessPackageSkill(BaseSkill):
             )
         output_size = len((completed.stdout or "").encode("utf-8"))
         if output_size > MAX_PACKAGE_SKILL_OUTPUT_BYTES:
-            stdout, stdout_truncated = _prepare_stream(completed.stdout, self.handler_path.parent)
+            stdout, stdout_truncated = _prepare_stream(completed.stdout, self.package_root)
             raise AegisQAError(
                 "SKILL_PACKAGE_OUTPUT_TOO_LARGE",
                 "插件 stdout 超过安全限制，请减少 output、metrics、artifacts 或 logs 的体积。",
@@ -118,7 +140,7 @@ class SubprocessPackageSkill(BaseSkill):
         try:
             data = json.loads(completed.stdout or "{}")
         except json.JSONDecodeError as exc:
-            stdout, stdout_truncated = _prepare_stream(completed.stdout, self.handler_path.parent)
+            stdout, stdout_truncated = _prepare_stream(completed.stdout, self.package_root)
             raise AegisQAError(
                 "SKILL_PACKAGE_OUTPUT_ERROR",
                 "插件必须向 stdout 输出合法 JSON。",
@@ -130,6 +152,143 @@ class SubprocessPackageSkill(BaseSkill):
             artifacts=data.get("artifacts", {}),
             logs=data.get("logs", []),
         )
+
+
+class InstructionPackageSkill(BaseSkill):
+    """把上传包里的 `SKILL.md` 说明转换成可在 Workflow 中调用的 Skill。"""
+
+    def __init__(self, manifest: SkillManifest, package_root: Path, *, runtime_mode: str = "instruction_model") -> None:
+        self.manifest = manifest
+        self.package_root = package_root.resolve()
+        self.runtime_mode = runtime_mode
+        super().__init__()
+
+    def run(self, inputs: dict[str, Any], config: dict[str, Any] | None = None) -> SkillResult:
+        config = config or {}
+        max_reference_chars = _bounded_int(config.get("max_reference_chars"), DEFAULT_REFERENCE_CHAR_LIMIT, MAX_REFERENCE_CHAR_LIMIT)
+        skill_md = _read_skill_md(self.package_root)
+        references = _read_reference_bundle(self.package_root, max_chars=max_reference_chars)
+        response = ModelGateway.from_env().generate(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "你正在以 AegisQA 执行一个上传的 Agent Skill。"
+                        "只能根据 SKILL.md、references 和输入数据生成结果；"
+                        "如果 Skill 包没有脚本入口，不要假设可以运行本地命令。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"## SKILL.md\n{skill_md}\n\n"
+                        f"## references\n{references or '无'}\n\n"
+                        f"## inputs\n{yaml.safe_dump(inputs, allow_unicode=True, sort_keys=False)}\n\n"
+                        f"## config\n{yaml.safe_dump(config, allow_unicode=True, sort_keys=False)}"
+                    ),
+                },
+            ],
+            model=config.get("model"),
+            temperature=config.get("temperature"),
+            max_tokens=config.get("max_tokens"),
+        )
+        return SkillResult(
+            output={
+                "answer": response.text,
+                "text": response.text,
+                "skill_id": self.manifest.skill_id,
+                "runtime_mode": self.runtime_mode,
+            },
+            metrics={
+                "latency_ms": response.latency_ms,
+                "model_total_tokens": response.usage.get("total_tokens", 0),
+            },
+            artifacts={"model": response.model, "provider": response.provider, "usage": response.usage},
+            logs=["Agent Skill 说明型运行时：已读取 SKILL.md/references，并通过统一模型网关生成输出。"],
+        )
+
+
+def resolve_package_entrypoint(package_root: Path, entrypoint: str | None) -> tuple[Path, str, str]:
+    """解析并校验 `scripts/run.py:run` 形式的入口声明。"""
+
+    if not entrypoint:
+        entrypoint = "handler.py:run"
+    path_part, function_name = entrypoint.rsplit(":", 1) if ":" in entrypoint else (entrypoint, "run")
+    if not path_part.strip() or not function_name.strip():
+        raise AegisQAError(
+            "SKILL_PACKAGE_ENTRYPOINT_INVALID",
+            "runtime.entrypoint 必须形如 scripts/run.py:run。",
+            details={"entrypoint": entrypoint},
+        )
+    package_root = package_root.resolve()
+    entrypoint_path = (package_root / path_part).resolve()
+    if package_root not in entrypoint_path.parents and entrypoint_path != package_root:
+        raise AegisQAError(
+            "SKILL_PACKAGE_INVALID_PATH",
+            "runtime.entrypoint 不能指向插件包目录之外的文件。",
+            details={"entrypoint": entrypoint},
+        )
+    if not entrypoint_path.exists() or not entrypoint_path.is_file():
+        raise AegisQAError(
+            "SKILL_PACKAGE_ENTRYPOINT_MISSING",
+            "插件包脚本入口不存在。",
+            details={"entrypoint": entrypoint, "resolved_path": str(entrypoint_path)},
+        )
+    return entrypoint_path, function_name, f"{Path(path_part).as_posix()}:{function_name}"
+
+
+def build_instruction_manifest_from_skill_md(package_root: Path) -> SkillManifest:
+    """为只有 `SKILL.md` 的说明型 Skill 生成默认机器合约。"""
+
+    skill_md_path = package_root / "SKILL.md"
+    if not skill_md_path.exists():
+        raise AegisQAError("SKILL_PACKAGE_SKILL_MD_MISSING", "说明型 Agent Skill 包缺少 SKILL.md。")
+    metadata, body = _parse_skill_markdown(skill_md_path.read_text(encoding="utf-8"))
+    name = str(metadata.get("name") or package_root.name)
+    description = str(metadata.get("description") or _first_paragraph(body) or f"Agent Skill：{name}")
+    return SkillManifest(
+        skill_id=str(metadata.get("skill_id") or f"agent.{_slugify(name)}@0.1.0"),
+        name=name,
+        version=str(metadata.get("version") or "0.1.0"),
+        description=description,
+        author=str(metadata.get("author") or "Agent Skill"),
+        tags=["agent-skill", "instruction-model", *_metadata_string_list(metadata.get("tags"))],
+        scenarios=_metadata_string_list(metadata.get("scenarios")) or ["agent-workflow"],
+        input_schema={
+            "type": "object",
+            "required": ["task"],
+            "properties": {
+                "task": {"type": "string", "description": "交给 Agent Skill 处理的任务文本。"},
+                "row": {"type": "object", "description": "可选：完整数据集行。"},
+                "context": {"type": "object", "description": "可选：上游节点输出。"},
+            },
+        },
+        output_schema={
+            "type": "object",
+            "required": ["answer", "text"],
+            "properties": {
+                "answer": {"type": "string"},
+                "text": {"type": "string"},
+                "skill_id": {"type": "string"},
+                "runtime_mode": {"type": "string"},
+            },
+        },
+        config_schema={
+            "type": "object",
+            "properties": {
+                "model": {"type": "string"},
+                "temperature": {"type": "number"},
+                "max_tokens": {"type": "integer"},
+                "max_reference_chars": {"type": "integer", "default": DEFAULT_REFERENCE_CHAR_LIMIT},
+            },
+        },
+        cacheable=False,
+        permissions=["model:call", "filesystem:skill_package_read"],
+        enabled=False,
+        status="pending_review",
+        example_input={"task": f"请用一句话说明 {name} 的用途。"},
+        example_config={},
+    )
 
 
 def _prepare_stream(value: str, package_root: Path, limit: int = MAX_PACKAGE_SKILL_STREAM_CHARS) -> tuple[str, bool]:
@@ -154,8 +313,69 @@ def _sanitize_local_paths(value: str, package_root: Path) -> str:
     for item in sorted(path_variants, key=len, reverse=True):
         if item:
             text = text.replace(item, "<skill_package>")
-    text = re.sub(r'File ".*?handler\.py"', 'File "<skill_package>/handler.py"', text)
+    text = re.sub(r'File ".*?\.py"', 'File "<skill_package>/script.py"', text)
     return re.sub(r"[a-zA-Z]:[\\/][^\s\"']+", "<local_path>", text)
+
+
+def _read_skill_md(package_root: Path) -> str:
+    return (package_root / "SKILL.md").read_text(encoding="utf-8")
+
+
+def _read_reference_bundle(package_root: Path, *, max_chars: int) -> str:
+    references_dir = package_root / "references"
+    if not references_dir.exists():
+        return ""
+    chunks: list[str] = []
+    remaining = max_chars
+    for path in sorted(references_dir.rglob("*")):
+        if remaining <= 0:
+            break
+        if not path.is_file() or path.suffix.lower() not in {".md", ".txt", ".json", ".yaml", ".yml"}:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")[:remaining]
+        remaining -= len(text)
+        chunks.append(f"### {path.relative_to(package_root).as_posix()}\n{text}")
+    return "\n\n".join(chunks)
+
+
+def _parse_skill_markdown(text: str) -> tuple[dict[str, Any], str]:
+    if not text.startswith("---"):
+        return {}, text
+    match = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", text, flags=re.DOTALL)
+    if not match:
+        return {}, text
+    metadata = yaml.safe_load(match.group(1)) or {}
+    return metadata if isinstance(metadata, dict) else {}, match.group(2)
+
+
+def _first_paragraph(text: str) -> str:
+    for block in re.split(r"\n\s*\n", text.strip()):
+        cleaned = "\n".join(line.strip() for line in block.splitlines() if line.strip() and not line.strip().startswith("#"))
+        if cleaned:
+            return cleaned[:200]
+    return ""
+
+
+def _metadata_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (str, int, float)):
+        return [str(value)]
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, (str, int, float))]
+
+
+def _slugify(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_.-]+", "-", value.strip().lower()).strip("-") or "uploaded-skill"
+
+
+def _bounded_int(value: Any, default: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(0, min(parsed, maximum))
 
 
 _RUNNER_CODE = r"""
@@ -164,13 +384,14 @@ import json
 import sys
 
 handler_path = sys.argv[1]
+function_name = sys.argv[2]
 payload = json.loads(sys.stdin.read() or "{}")
 spec = importlib.util.spec_from_file_location("aegisqa_uploaded_skill_handler", handler_path)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-if not hasattr(module, "run"):
-    raise RuntimeError("handler.py 必须暴露 run(inputs, config)")
-result = module.run(payload.get("inputs", {}), payload.get("config", {}))
+if not hasattr(module, function_name):
+    raise RuntimeError(f"脚本入口必须暴露 {function_name}(inputs, config)")
+result = getattr(module, function_name)(payload.get("inputs", {}), payload.get("config", {}))
 if result is None:
     result = {}
 if "output" not in result:

@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { demoDataset, demoSkills, installDefaultWorkbenchMocks, jsonResponse, renderWorkbench, findComboboxByLabel } from './workbenchTestHarness';
+import { demoDataset, demoSkills, demoWorkflowGraph, installDefaultWorkbenchMocks, jsonResponse, renderWorkbench, findComboboxByLabel } from './workbenchTestHarness';
 
 describe('Workflow 设计器深度交互', () => {
   installDefaultWorkbenchMocks();
@@ -91,7 +91,7 @@ describe('Workflow 设计器深度交互', () => {
 
     await renderWorkbench('/workflows/designer/draft-test');
 
-    fireEvent.click(await screen.findByRole('button', { name: /校验/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /校验当前画布/ }));
 
     expect(await screen.findByText('当前校验问题')).toBeInTheDocument();
     expect(screen.getAllByText(/输入绑定引用了非上游节点输出/).length).toBeGreaterThan(0);
@@ -126,5 +126,39 @@ describe('Workflow 设计器深度交互', () => {
     expect(screen.queryByText('row.field_59')).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('搜索字段路径、类型或示例值'), { target: { value: 'field_59' } });
     expect(await screen.findByText('row.field_59')).toBeInTheDocument();
+  });
+
+  it('发布前自动校验并保存当前名称和字段映射，再发布草稿', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/workflow-graphs/validate')) {
+        return jsonResponse({ ok: true, errors: [], warnings: [], execution_levels: [['answer']], graph_tips: [], node_count: 3, edge_count: 2 });
+      }
+      if (url.endsWith('/workflow-drafts/draft-test/publish')) {
+        return jsonResponse({ workflow_id: 'wf-custom', version_id: 'wf-custom:v1', version: 1, name: 'AP ASR 评测流程', status: 'published', graph: demoWorkflowGraph, steps: [] });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse({});
+    });
+
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    fireEvent.change(await screen.findByLabelText('流程名称'), { target: { value: 'AP ASR 评测流程' } });
+    fireEvent.change(screen.getByLabelText('字段路径 prompt'), { target: { value: 'row.ap_code' } });
+    fireEvent.click(screen.getByRole('button', { name: /校验并发布/ }));
+
+    await waitFor(() => {
+      const saveCall = vi
+        .mocked(globalThis.fetch)
+        .mock.calls.find(([input, init]) => String(input).endsWith('/workflow-drafts/draft-test') && init?.method === 'PUT');
+      expect(saveCall).toBeTruthy();
+      const body = JSON.parse(String(saveCall?.[1]?.body ?? '{}'));
+      expect(body.name).toBe('AP ASR 评测流程');
+      expect(body.graph.name).toBe('AP ASR 评测流程');
+      const answerNode = body.graph.nodes.find((node: { node_id: string }) => node.node_id === 'answer');
+      expect(answerNode.input_mapping.prompt).toBe('row.ap_code');
+    });
+
+    expect((await screen.findAllByText('发布成功：wf-custom:v1')).length).toBeGreaterThan(0);
   });
 });

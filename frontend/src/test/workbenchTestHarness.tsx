@@ -835,7 +835,10 @@ export const pendingSkillPackage = {
   status: 'pending_review',
   manifest: pendingPackageSkill,
   package_dir: 'hidden',
-  handler_path: 'hidden',
+  handler_path: null,
+  skill_md_path: 'hidden/SKILL.md',
+  runtime_mode: 'script',
+  entrypoint: 'scripts/run.py:run',
   last_contract_ok: false,
   last_contract_result: { ok: false, message: '尚未运行' },
   last_contract_at: null,
@@ -895,8 +898,29 @@ export function installDefaultWorkbenchMocks() {
       if (url.endsWith('/skills/packages')) {
         return jsonResponse([pendingSkillPackage]);
       }
+      if (url.endsWith('/model-gateway/status')) {
+        return jsonResponse({
+          provider: 'mock',
+          ready: true,
+          mode: 'offline_mock',
+          default_model: 'mock-eval-model',
+          base_url_configured: false,
+          api_key_configured: false,
+          timeout_seconds: 60,
+          skill_ref: 'model.chat@0.1.0',
+          message: '业务 Skill 不需要重复实现模型调用，可在 Workflow 中复用统一模型调用节点。',
+        });
+      }
       if (url.endsWith('/skills/packages/upload')) {
-        return jsonResponse({ package_id: 'pkg-demo', status: 'pending_review', manifest: { ...demoSkills[0], skill_id: 'plugin.echo@0.1.0', status: 'pending_review', enabled: false } });
+        return jsonResponse({
+          package_id: 'pkg-demo',
+          status: 'pending_review',
+          runtime_mode: 'script',
+          entrypoint: 'scripts/run.py:run',
+          skill_md_path: 'hidden/SKILL.md',
+          handler_path: null,
+          manifest: { ...demoSkills[0], skill_id: 'plugin.echo@0.1.0', status: 'pending_review', enabled: false },
+        });
       }
       if (url.endsWith('/workflow-templates')) {
         return jsonResponse([{ template_id: 'rag_regression', name: 'RAG 回归评测', description: 'LLMCall + Judge', scenario: 'rag' }]);
@@ -909,7 +933,7 @@ export function installDefaultWorkbenchMocks() {
         if (init?.method === 'DELETE') {
           return jsonResponse({ draft_id: 'draft-test', status: 'deleted', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '2026-06-01T00:00:00Z' });
         }
-        return jsonResponse({ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' });
+        return jsonResponse({ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, published_version_id: 'wf-demo:v1', created_at: '', updated_at: '' });
       }
       if (url.endsWith('/workflow-drafts/draft-test/publish')) {
         return jsonResponse(demoWorkflowVersion);
@@ -918,7 +942,7 @@ export function installDefaultWorkbenchMocks() {
         if (init?.method === 'POST') {
           return jsonResponse({ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' });
         }
-        return jsonResponse([{ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, created_at: '', updated_at: '' }]);
+        return jsonResponse([{ draft_id: 'draft-test', status: 'draft', name: '测试草稿', graph: demoWorkflowGraph, published_version_id: 'wf-demo:v1', created_at: '', updated_at: '' }]);
       }
       if (url.endsWith('/workflows')) {
         return jsonResponse([demoWorkflowVersion]);
@@ -1431,6 +1455,12 @@ export function installDefaultWorkbenchMocks() {
       }
       if (url.includes('/tasks/task-demo/report/export?file_format=json')) {
         return jsonResponse({ task_id: 'task-demo', file_format: 'json', content: { preflight_evidence: { preflight_id: 'preflight-demo' } } });
+      }
+      if (url.includes('/tasks/task-demo/results/export?file_format=csv')) {
+        return jsonResponse({ task_id: 'task-demo', file_format: 'csv', row_count: 1, content: 'item_id,row.question,context.answer\nitem-demo,什么是 Trace?,模型回答' });
+      }
+      if (url.includes('/tasks/task-demo/results/export?file_format=jsonl')) {
+        return jsonResponse({ task_id: 'task-demo', file_format: 'jsonl', row_count: 1, content: '{"item_id":"item-demo","row.question":"什么是 Trace?"}' });
       }
       if (url.includes('/audit-events?action=task.report.export') && url.includes('target=task-demo')) {
         return jsonResponse(demoReportExportAuditEvents);

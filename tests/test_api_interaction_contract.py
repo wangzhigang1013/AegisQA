@@ -112,6 +112,26 @@ def test_workflow_draft_skill_contract_and_run_controls(tmp_path: Path) -> None:
     assert canceled["status"] == "canceled"
 
 
+def test_workflow_draft_keeps_display_name_and_graph_name_in_sync(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    graph = _graph_payload()
+    graph["name"] = "默认 Workflow"
+    draft = client.post("/workflow-drafts", json={"name": "用户填写的 Workflow 名称", "graph": graph}).json()
+
+    assert draft["name"] == "用户填写的 Workflow 名称"
+    assert draft["graph"]["name"] == "用户填写的 Workflow 名称"
+
+    updated = client.put(f"/workflow-drafts/{draft['draft_id']}", json={"name": "发布前改名"}).json()
+    assert updated["name"] == "发布前改名"
+    assert updated["graph"]["name"] == "发布前改名"
+
+    published = client.post(f"/workflow-drafts/{draft['draft_id']}/publish").json()
+    assert published["name"] == "发布前改名"
+    assert published["graph"]["name"] == "发布前改名"
+
+
 def test_badcase_judge_and_export_actions(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)
@@ -152,4 +172,3 @@ def test_badcase_judge_and_export_actions(tmp_path: Path) -> None:
     ).json()
     assert client.get("/judge-profiles").json()[0]["profile_id"] == profile["profile_id"]
     assert client.get("/judge-audits").json()[0]["audit_id"] == audit["audit_id"]
-

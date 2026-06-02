@@ -24,12 +24,14 @@ test('上传数据、审批 Skill、发布 Workflow、执行任务并沉淀 Badc
 
   await page.goto('/workflows');
   await page.getByRole('button', { name: /新建 Workflow/ }).click();
+  await page.getByLabel('新建 Workflow 名称').fill(workflowName);
+  await page.getByRole('button', { name: '确认创建' }).click();
   await expect(page.getByText('Skill Palette')).toBeVisible();
 
   const workflow = await publishPluginWorkflow(request, workflowName, skillId);
   await page.goto('/workflows');
   await page.getByPlaceholder('搜索 Workflow 名称').fill(workflowName);
-  await expect(page.getByText(workflowName)).toBeVisible();
+  await expect(page.locator('tr').filter({ hasText: workflowName }).filter({ hasText: '已发布' })).toBeVisible();
 
   await createAndExecuteTask(page, datasetName, workflowName, taskName);
   await verifyTaskSearch(page, taskName);
@@ -51,7 +53,7 @@ async function uploadDataset(page: Page, datasetPath: string, datasetName: strin
 
 async function uploadAndApproveSkill(page: Page, skillPackagePath: string, skillId: string) {
   await page.goto('/skills');
-  await page.getByRole('button', { name: /上传 Skill 插件包/ }).click();
+  await page.getByRole('button', { name: /上传 Agent Skill 包/ }).click();
   await page.locator('.ant-modal input[type="file"]').setInputFiles(skillPackagePath);
   await page.getByRole('button', { name: '提交上传' }).click();
   await expect(page.getByText(new RegExp(`插件包已上传：${escapeRegExp(skillId)}`))).toBeVisible();
@@ -122,13 +124,13 @@ async function createAndExecuteTask(page: Page, datasetName: string, workflowNam
   await expect(page.getByText(new RegExp(`任务已创建：${escapeRegExp(taskName)}`))).toBeVisible();
 
   await page.getByRole('dialog').getByRole('button', { name: '执行' }).click();
-  await expect(page.getByText(/任务状态已更新：completed/)).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('completed')).toBeVisible();
   await expect(page.getByRole('tab', { name: '概览' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Trace' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Attempts' })).toBeVisible();
   await page.getByRole('tab', { name: '参数' }).click();
   await expect(page.getByText('任务冻结参数')).toBeVisible();
-  await expect(page.getByText(/cost_budget|concurrency/)).toBeVisible();
+  await expect(page.getByText('创建前 Preflight 证据')).toBeVisible();
 }
 
 async function verifyReportAndCorrectBadcase(page: Page, taskName: string) {

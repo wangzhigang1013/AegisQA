@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from aegisqa.models.gateway import ModelGateway
 from aegisqa.skills.base import BaseSkill, SkillManifest, SkillResult
 
 
@@ -211,10 +212,86 @@ class LLMCallSkill(BaseSkill):
     )
 
     def run(self, inputs: dict[str, Any], config: dict[str, Any] | None = None) -> SkillResult:
+        config = config or {}
         prompt = inputs["prompt"]
-        answer = f"模型回答：{prompt}。这是 AegisQA 的可复现示例输出。"
-        tokens = max(1, math.ceil(len(answer) / 2))
-        return SkillResult(output={"answer": answer, "tokens": tokens, "latency_ms": 1.0}, metrics={"tokens": tokens})
+        response = ModelGateway.from_env().generate(
+            prompt=prompt,
+            model=config.get("model"),
+            temperature=config.get("temperature"),
+        )
+        tokens = int(response.usage.get("total_tokens") or max(1, math.ceil(len(response.text) / 2)))
+        return SkillResult(
+            output={"answer": response.text, "tokens": tokens, "latency_ms": response.latency_ms},
+            metrics={"tokens": tokens, "model_provider": response.provider},
+            logs=["通过 AegisQA 统一模型网关完成模型调用。"],
+        )
+
+
+class ModelChatSkill(BaseSkill):
+    manifest = SkillManifest(
+        skill_id="model.chat@0.1.0",
+        name="统一模型调用",
+        version="0.1.0",
+        description="平台内置模型调用节点。业务 Skill 可消费该节点输出，不需要重复实现模型 API 调用流程。",
+        tags=["model", "llm", "gateway"],
+        scenarios=["generation", "judge", "workflow"],
+        cacheable=True,
+        config_schema={
+            "type": "object",
+            "properties": {
+                "model": {"type": "string"},
+                "temperature": {"type": "number"},
+                "max_tokens": {"type": "integer"},
+                "response_format": {"type": "object"},
+            },
+        },
+        input_schema={
+            "type": "object",
+            "required": ["prompt"],
+            "properties": {
+                "prompt": {"type": "string"},
+                "messages": {"type": "array"},
+                "variables": {"type": "object"},
+            },
+        },
+        output_schema={
+            "type": "object",
+            "required": ["text", "model", "provider", "usage"],
+            "properties": {
+                "text": {"type": "string"},
+                "model": {"type": "string"},
+                "provider": {"type": "string"},
+                "usage": {"type": "object"},
+                "latency_ms": {"type": "number"},
+            },
+        },
+        permissions=["network:optional"],
+        example_input={"prompt": "用一句话介绍 AegisQA。"},
+        example_config={"model": "mock-eval-model", "temperature": 0},
+    )
+
+    def run(self, inputs: dict[str, Any], config: dict[str, Any] | None = None) -> SkillResult:
+        config = config or {}
+        response = ModelGateway.from_env().generate(
+            prompt=inputs.get("prompt"),
+            messages=inputs.get("messages"),
+            model=config.get("model"),
+            temperature=config.get("temperature"),
+            max_tokens=config.get("max_tokens"),
+            response_format=config.get("response_format") if isinstance(config.get("response_format"), dict) else None,
+        )
+        output = {
+            "text": response.text,
+            "model": response.model,
+            "provider": response.provider,
+            "usage": response.usage,
+            "latency_ms": response.latency_ms,
+        }
+        total_tokens = response.usage.get("total_tokens")
+        metrics = {"model_latency_ms": response.latency_ms}
+        if isinstance(total_tokens, (int, float)):
+            metrics["tokens"] = total_tokens
+        return SkillResult(output=output, metrics=metrics, logs=["通过 AegisQA 统一模型网关完成模型调用。"])
 
 
 class LLMJudgeSkill(BaseSkill):

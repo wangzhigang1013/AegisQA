@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import time
 import zipfile
 from pathlib import Path
 
@@ -192,6 +193,79 @@ def test_task_lifecycle_report_and_trace_tree(tmp_path: Path) -> None:
     assert trace_tree["items"][0]["children"][0]["skill_ref"] == "llm.call@0.1.0"
 
 
+def test_task_result_export_includes_each_item_row_context_metrics_and_step_outputs(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "result_export_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "result_export_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "结果导出任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+        },
+    ).json()
+    client.post(f"/tasks/{task['task_id']}/execute")
+
+    csv_export = client.get(f"/tasks/{task['task_id']}/results/export", params={"file_format": "csv"}).json()
+    assert csv_export["file_format"] == "csv"
+    assert csv_export["row_count"] == 2
+    assert "row.question" in csv_export["content"]
+    assert "context.answer" in csv_export["content"]
+    assert "metrics.tokens" in csv_export["content"]
+    assert "step.answer.output.answer" not in csv_export["content"]
+
+    csv_with_steps = client.get(f"/tasks/{task['task_id']}/results/export", params={"file_format": "csv", "include_steps": True}).json()
+    assert "step.answer.output.answer" in csv_with_steps["content"]
+    assert "step.judge.output.label" in csv_with_steps["content"]
+
+    jsonl_export = client.get(f"/tasks/{task['task_id']}/results/export", params={"file_format": "jsonl"}).json()
+    rows = [json.loads(line) for line in jsonl_export["content"].splitlines()]
+    assert len(rows) == 2
+    assert rows[0]["row.question"] == "什么是 AegisQA?"
+    assert rows[0]["context.answer"].startswith("模型回答：")
+    assert rows[0]["metrics.tokens"] > 0
+
+
+def test_task_background_execute_returns_running_and_updates_progress(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "background_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "background_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "后台执行任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+        },
+    ).json()
+
+    started = client.post(f"/tasks/{task['task_id']}/execute", params={"background": True}).json()
+
+    assert started["status"] == "running"
+    assert started["completed_items"] == 0
+
+    latest = started
+    for _ in range(50):
+        latest = client.get(f"/tasks/{task['task_id']}").json()
+        if latest["status"] == "completed":
+            break
+        time.sleep(0.05)
+
+    assert latest["status"] == "completed"
+    assert latest["completed_items"] == 2
+
+
 def test_tasks_support_server_side_pagination_and_status_filter(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)
@@ -254,6 +328,53 @@ def test_task_creation_blocks_failed_preflight_unless_explicitly_forced(tmp_path
     assert forced["status"] == "queued"
     assert forced["preflight_result"]["status"] == "blocked"
     assert forced["execution_config"]["allow_blocked_preflight"] is True
+
+
+def test_task_creation_uses_latest_draft_mapping_after_publish(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "ap_dataset.jsonl"
+    rows = [{"ap_code": "AP001"}, {"ap_code": "AP002"}]
+    with data_path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    dataset = client.post("/datasets/from-path", json={"name": "ap_dataset", "path": str(data_path)}).json()
+    draft = client.post("/workflow-drafts", json={"name": "旧默认字段草稿", "graph": _graph_payload()}).json()
+    updated_graph = {
+        "name": "AP ASR 评测流程",
+        "nodes": [
+            {
+                "node_id": "answer",
+                "node_type": "skill",
+                "label": "生成查询",
+                "skill_ref": "llm.call@0.1.0",
+                "input_mapping": {"prompt": "row.ap_code"},
+                "output_mapping": {"answer": "context.answer"},
+                "config": {"model": "demo-model", "temperature": 0},
+            },
+            {"node_id": "report", "node_type": "output", "label": "报告"},
+        ],
+        "edges": [{"source": "answer", "target": "report"}],
+    }
+    client.put(f"/workflow-drafts/{draft['draft_id']}", json={"name": "AP ASR 评测流程", "graph": updated_graph})
+    workflow = client.post(f"/workflow-drafts/{draft['draft_id']}/publish").json()
+
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "AP ASR 任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+        },
+    ).json()
+
+    assert task["status"] == "queued"
+    assert task["workflow_name"] == "AP ASR 评测流程"
+    assert task["preflight_result"]["status"] in {"passed", "warning"}
+    field_check = next(check for check in task["preflight_result"]["checks"] if check["check_id"] == "field_mapping")
+    assert field_check["status"] == "passed"
 
 
 def test_task_preflight_blocks_historical_workflow_missing_required_skill_mapping(tmp_path: Path) -> None:

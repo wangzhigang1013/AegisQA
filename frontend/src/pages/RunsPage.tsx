@@ -12,7 +12,7 @@ import {
   Table,
   Tag,
 } from 'antd';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
@@ -40,8 +40,6 @@ export function RunsPage() {
   });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
   const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets, refetchOnMount: 'always' });
-  const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills, refetchOnMount: 'always' });
-  const executionTemplatesQuery = useQuery({ queryKey: ['task-execution-templates'], queryFn: api.taskExecutionTemplates, refetchOnMount: 'always' });
 
   const datasetVersions = useMemo(
     () => datasetsQuery.data?.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))) ?? [],
@@ -49,6 +47,23 @@ export function RunsPage() {
   );
   const tasks = tasksQuery.data?.items ?? [];
   const taskPagination = tasksQuery.data?.pagination;
+  const hasActiveTask = tasks.some((task) => isLiveTaskStatus(task.status));
+
+  useEffect(() => {
+    if (!hasActiveTask) return undefined;
+    const timer = window.setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [hasActiveTask, queryClient]);
+
+  useEffect(() => {
+    if (!detailTask) return;
+    const freshTask = tasks.find((task) => task.task_id === detailTask.task_id);
+    if (freshTask) {
+      setDetailTask(freshTask);
+    }
+  }, [detailTask, tasks]);
 
   function resolveDatasetVersion(values: TaskCreateFormValues): DatasetVersion {
     const datasetVersion = datasetVersions.find((item) => item.version.version_id === values.dataset_version_id)?.version;
@@ -58,13 +73,6 @@ export function RunsPage() {
     return datasetVersion;
   }
 
-  function qualityGateFromValues(values: TaskCreateFormValues) {
-    return {
-      pass_rate: values.pass_rate_threshold,
-      max_badcase_count: values.max_badcase_count,
-    };
-  }
-
   const preflightMutation = useMutation({
     mutationFn: (values: TaskCreateFormValues) => {
       const datasetVersion = resolveDatasetVersion(values);
@@ -72,12 +80,6 @@ export function RunsPage() {
         dataset_id: datasetVersion.dataset_id,
         dataset_version: datasetVersion.version,
         workflow_version_id: values.workflow_version_id,
-        execution_template_id: values.execution_template_id,
-        evaluation_goal: values.evaluation_goal,
-        quality_gate: qualityGateFromValues(values),
-        cost_budget: values.cost_budget,
-        sample_repeat_times: values.sample_repeat_times,
-        skill_overrides: values.skill_overrides,
       });
     },
     onSuccess: (result) => {
@@ -95,18 +97,8 @@ export function RunsPage() {
         dataset_id: datasetVersion.dataset_id,
         dataset_version: datasetVersion.version,
         workflow_version_id: values.workflow_version_id,
-        execution_template_id: values.execution_template_id,
-        evaluation_goal: values.evaluation_goal,
-        quality_gate: qualityGateFromValues(values),
         preflight_id: preflightResult?.preflight_id,
         preflight_result: preflightResult,
-        chunk_size: values.chunk_size,
-        concurrency: values.concurrency,
-        sample_repeat_times: values.sample_repeat_times,
-        max_retries: values.max_retries,
-        retry_backoff_seconds: values.retry_backoff_seconds,
-        cost_budget: values.cost_budget,
-        skill_overrides: values.skill_overrides,
         allow_blocked_preflight: values.allow_blocked_preflight,
       });
     },
@@ -248,8 +240,6 @@ export function RunsPage() {
         preflightResult={preflightResult}
         datasets={datasetsQuery.data ?? []}
         workflows={workflowsQuery.data ?? []}
-        skills={skillsQuery.data ?? []}
-        executionTemplates={Array.isArray(executionTemplatesQuery.data) ? executionTemplatesQuery.data : []}
         onCancel={() => {
           setCreateOpen(false);
           setPreflightResult(null);
@@ -274,6 +264,10 @@ function statusColor(status: string): string {
   if (status === 'running') return 'blue';
   if (status === 'paused') return 'orange';
   return 'default';
+}
+
+function isLiveTaskStatus(status: string): boolean {
+  return status === 'running';
 }
 
 function formatTime(value: string): string {

@@ -42,11 +42,12 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/workflow-drafts")
     def create_workflow_draft(request: WorkflowDraftCreateRequest) -> dict[str, Any]:
+        graph = _graph_with_name(request.graph, request.name)
         draft = {
             "draft_id": f"draft-{uuid4().hex[:12]}",
             "name": request.name,
             "status": "draft",
-            "graph": request.graph.model_dump(mode="json"),
+            "graph": graph.model_dump(mode="json"),
             "created_at": _now(),
             "updated_at": _now(),
         }
@@ -61,10 +62,14 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.put("/workflow-drafts/{draft_id}")
     def update_workflow_draft(draft_id: str, request: WorkflowDraftUpdateRequest) -> dict[str, Any]:
         draft = _get_workflow_draft(ctx.store, draft_id)
-        if request.name is not None:
-            draft["name"] = request.name
+        graph = request.graph or WorkflowGraph(**draft["graph"])
+        next_name = request.name if request.name is not None else graph.name
+        draft["name"] = next_name
+        graph = _graph_with_name(graph, next_name)
         if request.graph is not None:
-            draft["graph"] = request.graph.model_dump(mode="json")
+            draft["graph"] = graph.model_dump(mode="json")
+        elif request.name is not None:
+            draft["graph"] = graph.model_dump(mode="json")
         draft["updated_at"] = _now()
         _save_workflow_draft(ctx.store, draft)
         ctx.audit_service.record(actor="api", action="workflow_draft.update", target=draft_id)
@@ -90,6 +95,7 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
         version = ctx.workflow_service.publish(ctx.graph_service.to_workflow_draft(graph))
         ctx.workflows[version.version_id] = version
         draft["status"] = "published"
+        draft["graph"] = graph.model_dump(mode="json")
         draft["published_version_id"] = version.version_id
         draft["updated_at"] = _now()
         _save_workflow_draft(ctx.store, draft)
@@ -166,3 +172,15 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
         archived = ctx.workflow_service.archive(version_id)
         ctx.audit_service.record(actor="api", action="workflow.archive", target=version_id)
         return archived
+
+
+def _graph_with_name(graph: WorkflowGraph, name: str) -> WorkflowGraph:
+    """让草稿展示名称和 graph.name 保持一致。
+
+    前端画布、Workflow 市场和发布版本分别读取不同字段；如果二者不同步，
+    用户填写的名称会在刷新、发布或创建任务时退回旧默认值。
+    """
+
+    synced = graph.model_copy(deep=True)
+    synced.name = name
+    return synced

@@ -15,6 +15,13 @@ from aegisqa.api.app import (
     _update_skill_package_status,
 )
 from aegisqa.api.routes.context import RouteContext
+from aegisqa.skills.agent_skills import (
+    agent_skill_ids_from_store,
+    find_agent_skill_record,
+    mark_agent_skill_approved,
+    update_agent_skill_contract_result,
+    update_agent_skill_status,
+)
 from aegisqa.skills.base import SkillManifest
 
 
@@ -35,7 +42,8 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             for record in _list_records(ctx.store, "skill_packages")
             if record.get("manifest", {}).get("skill_id")
         }
-        return [skill for skill in skills if skill.skill_id in package_skill_ids]
+        visible_skill_ids = package_skill_ids | agent_skill_ids_from_store(ctx.store)
+        return [skill for skill in skills if skill.skill_id in visible_skill_ids]
 
     @app.get("/skills/packages")
     def list_skill_packages() -> list[dict[str, Any]]:
@@ -59,12 +67,14 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             package["last_contract_at"] = _now()
             package["updated_at"] = _now()
             _save_record(ctx.store, "skill_packages", "package_id", package)
+        update_agent_skill_contract_result(ctx.store, skill_id, result)
         return {"skill_id": skill_id, **result}
 
     @app.post("/skills/{skill_id:path}/disable", response_model=SkillManifest)
     def disable_skill(skill_id: str, request: SkillGovernanceRequest) -> SkillManifest:
         manifest = ctx.registry.disable(skill_id, reason=request.reason)
         _update_skill_package_status(ctx.store, manifest)
+        update_agent_skill_status(ctx.store, manifest)
         ctx.audit_service.record(actor="api", action="skill.disable", target=skill_id, detail={"reason": request.reason})
         return manifest
 
@@ -73,9 +83,14 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
         package = _find_skill_package(ctx.store, skill_id)
         if package and not package.get("last_contract_ok"):
             raise ValueError("插件包必须先通过合约测试，才能审批启用。")
+        agent_skill = find_agent_skill_record(ctx.store, skill_id)
+        if agent_skill and not agent_skill.get("last_contract_ok"):
+            raise ValueError("Agent Skill 必须先通过合约测试，才能审批启用。")
         manifest = ctx.registry.approve(skill_id)
         _update_skill_package_status(ctx.store, manifest)
+        update_agent_skill_status(ctx.store, manifest)
         _mark_skill_package_approved(ctx.store, manifest.skill_id, request.reason if request else "")
+        mark_agent_skill_approved(ctx.store, manifest.skill_id, request.reason if request else "")
         ctx.audit_service.record(actor="api", action="skill.approve", target=skill_id)
         return manifest
 
@@ -83,5 +98,6 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
     def deprecate_skill(skill_id: str, request: SkillGovernanceRequest) -> SkillManifest:
         manifest = ctx.registry.deprecate(skill_id, reason=request.reason)
         _update_skill_package_status(ctx.store, manifest)
+        update_agent_skill_status(ctx.store, manifest)
         ctx.audit_service.record(actor="api", action="skill.deprecate", target=skill_id, detail={"reason": request.reason})
         return manifest

@@ -34,7 +34,13 @@ from aegisqa.judge.profiles import JudgeProfile, JudgeProfileService, StoredJudg
 from aegisqa.reports.aggregator import RunReport, aggregate_run_report
 from aegisqa.security.access import AccessControl
 from aegisqa.skills.base import SkillManifest
-from aegisqa.skills.packages import SubprocessPackageSkill
+from aegisqa.skills.agent_skills import load_agent_skills_from_store
+from aegisqa.skills.packages import (
+    InstructionPackageSkill,
+    SubprocessPackageSkill,
+    build_instruction_manifest_from_skill_md,
+    resolve_package_entrypoint,
+)
 from aegisqa.skills.registry import SkillRegistry
 from aegisqa.storage.json_store import JsonStore
 from aegisqa.storage.sqlite_store import SQLiteStore
@@ -344,6 +350,7 @@ def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend
     store = _create_store(store_root, storage_backend=storage_backend)
     registry = SkillRegistry.with_builtin_skills()
     _load_skill_packages(store, registry)
+    load_agent_skills_from_store(store, registry)
     dataset_service = DatasetService(store)
     runner = WorkflowRunner(store, dataset_service, registry)
     badcases = BadcaseService(store)
@@ -415,9 +422,11 @@ def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend
         }
 
     from aegisqa.api.routes import (
+        register_agent_skill_routes,
         register_dataset_routes,
         register_governance_routes,
         register_judge_routes,
+        register_model_routes,
         register_productization_routes,
         register_report_routes,
         register_skill_routes,
@@ -442,6 +451,8 @@ def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend
     )
     # 先注册更具体的 Run Report/Trace 路由，再注册 /runs/{run_id}，避免路径匹配被泛化路由截获。
     register_governance_routes(app, route_context)
+    register_model_routes(app, route_context)
+    register_agent_skill_routes(app, route_context)
     register_skill_routes(app, route_context)
     register_dataset_routes(app, route_context)
     register_workflow_routes(app, route_context)
@@ -525,25 +536,62 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
     except zipfile.BadZipFile as exc:
         raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包必须是合法 zip 文件。") from exc
 
+    package_dir = _detect_package_content_root(package_dir)
     manifest_path = _first_existing(package_dir, ["skill.yaml", "skill.yml", "skill.json"])
+    skill_md_path = package_dir / "SKILL.md"
     handler_path = package_dir / "handler.py"
     if not manifest_path:
-        raise AegisQAError("SKILL_PACKAGE_MANIFEST_MISSING", "插件包缺少 skill.yaml 或 skill.json。")
-    if not handler_path.exists():
-        raise AegisQAError("SKILL_PACKAGE_HANDLER_MISSING", "插件包缺少 handler.py。")
-
-    manifest_payload = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-    manifest = SkillManifest(**manifest_payload)
+        if handler_path.exists() or (package_dir / "scripts").exists():
+            raise AegisQAError(
+                "SKILL_PACKAGE_MANIFEST_MISSING",
+                "纯参数或脚本型 Agent Skill 必须提供 skill.yaml 或 skill.json，用来声明输入、输出、配置和 runtime.entrypoint。",
+            )
+        if not skill_md_path.exists():
+            raise AegisQAError("SKILL_PACKAGE_MANIFEST_MISSING", "插件包缺少 skill.yaml、skill.json 或 SKILL.md。")
+        manifest = build_instruction_manifest_from_skill_md(package_dir)
+        runtime_payload: dict[str, Any] = {"mode": "instruction_model"}
+    else:
+        manifest_payload = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(manifest_payload, dict):
+            raise AegisQAError("SKILL_PACKAGE_MANIFEST_INVALID", "skill.yaml 或 skill.json 必须是对象。")
+        # runtime 是平台执行声明，不属于 Workflow 组件合约；从 manifest 中剥离后再交给 SkillManifest。
+        runtime_payload = manifest_payload.pop("runtime", {}) or {}
+        if not isinstance(runtime_payload, dict):
+            raise AegisQAError("SKILL_PACKAGE_RUNTIME_INVALID", "runtime 必须是对象。")
+        manifest = SkillManifest(**manifest_payload)
     manifest.enabled = False
     manifest.status = "pending_review"
-    registry.register(SubprocessPackageSkill(manifest, handler_path))
+    runtime_mode = _resolve_skill_package_runtime_mode(runtime_payload, package_dir)
+    entrypoint: str | None = None
+    handler_record_path: str | None = None
+    if runtime_mode == "script":
+        entrypoint_path, function_name, entrypoint = resolve_package_entrypoint(
+            package_dir,
+            str(runtime_payload.get("entrypoint") or "handler.py:run"),
+        )
+        if handler_path.exists() and entrypoint_path == handler_path.resolve():
+            handler_record_path = str(handler_path.resolve())
+        registry.register(SubprocessPackageSkill(manifest, entrypoint_path, package_root=package_dir, function_name=function_name))
+    elif runtime_mode == "instruction_model":
+        if not skill_md_path.exists():
+            raise AegisQAError("SKILL_PACKAGE_SKILL_MD_MISSING", "说明型 Agent Skill 包缺少 SKILL.md。")
+        registry.register(InstructionPackageSkill(manifest, package_dir, runtime_mode=runtime_mode))
+    else:
+        raise AegisQAError(
+            "SKILL_PACKAGE_RUNTIME_UNSUPPORTED",
+            f"不支持的 Skill 包运行模式：{runtime_mode}",
+            details={"supported": ["script", "instruction_model"]},
+        )
     record = {
         "package_id": package_id,
         "filename": request.filename,
         "status": manifest.status,
         "manifest": manifest.model_dump(mode="json"),
         "package_dir": str(package_dir),
-        "handler_path": str(handler_path),
+        "handler_path": handler_record_path,
+        "skill_md_path": str(skill_md_path.resolve()) if skill_md_path.exists() else None,
+        "runtime_mode": runtime_mode,
+        "entrypoint": entrypoint,
         "last_contract_ok": False,
         "last_contract_result": None,
         "last_contract_at": None,
@@ -559,11 +607,19 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
 
 def _load_skill_packages(store: JsonStore, registry: SkillRegistry) -> None:
     for record in _list_records(store, "skill_packages"):
-        handler_path = Path(record.get("handler_path", ""))
-        if not handler_path.exists():
+        package_dir = Path(record.get("package_dir", ""))
+        if not package_dir.exists():
             continue
         manifest = SkillManifest(**record["manifest"])
-        registry.register(SubprocessPackageSkill(manifest, handler_path))
+        runtime_mode = str(record.get("runtime_mode") or ("script" if record.get("handler_path") else "instruction_model"))
+        if runtime_mode == "script":
+            try:
+                entrypoint_path, function_name, _ = resolve_package_entrypoint(package_dir, record.get("entrypoint") or "handler.py:run")
+            except AegisQAError:
+                continue
+            registry.register(SubprocessPackageSkill(manifest, entrypoint_path, package_root=package_dir, function_name=function_name))
+        elif runtime_mode == "instruction_model" and (package_dir / "SKILL.md").exists():
+            registry.register(InstructionPackageSkill(manifest, package_dir, runtime_mode=runtime_mode))
 
 
 def _find_skill_package(store: JsonStore, skill_id: str) -> dict[str, Any] | None:
@@ -622,6 +678,39 @@ def _first_existing(root: Path, names: list[str]) -> Path | None:
         if candidate.exists():
             return candidate
     return None
+
+
+def _detect_package_content_root(extraction_root: Path) -> Path:
+    """兼容 zip 包外层多包了一层目录的常见情况。"""
+
+    if any((extraction_root / name).exists() for name in ["SKILL.md", "skill.yaml", "skill.yml", "skill.json", "handler.py", "scripts"]):
+        return extraction_root
+    children = list(extraction_root.iterdir())
+    directories = [item for item in children if item.is_dir()]
+    files = [item for item in children if item.is_file()]
+    if len(directories) == 1 and not files:
+        return directories[0]
+    return extraction_root
+
+
+def _resolve_skill_package_runtime_mode(runtime_payload: dict[str, Any], package_dir: Path) -> str:
+    """根据 manifest.runtime 和包内容推断 Skill 包执行模式。"""
+
+    raw_mode = str(runtime_payload.get("mode") or "").strip().lower()
+    aliases = {
+        "python": "script",
+        "subprocess": "script",
+        "safe_model": "instruction_model",
+        "model": "instruction_model",
+        "instructions": "instruction_model",
+    }
+    if raw_mode:
+        return aliases.get(raw_mode, raw_mode)
+    if (package_dir / "handler.py").exists():
+        return "script"
+    if (package_dir / "SKILL.md").exists():
+        return "instruction_model"
+    return "script"
 
 
 def _build_task_record(
