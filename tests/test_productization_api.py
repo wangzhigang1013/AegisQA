@@ -108,6 +108,7 @@ def test_experiment_snapshot_and_trace_tree_are_created_from_run(tmp_path: Path)
     trace_tree = client.get(f"/runs/{run['run_id']}/trace-tree").json()
     assert trace_tree["run_id"] == run["run_id"]
     assert trace_tree["items"][0]["children"][0]["skill_ref"] == "llm.call@0.1.0"
+    assert trace_tree["items"][0]["children"][0]["state"] == "SUCCEEDED"
     assert "latency_ms" in trace_tree["items"][0]["children"][0]
 
 

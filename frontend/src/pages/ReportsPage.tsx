@@ -316,7 +316,11 @@ export function ReportsPage() {
   const badcases = reportQuery.data?.badcases ?? [];
   const stepDistribution = reportQuery.data?.step_distribution ?? [];
   const qualityDecision = reportQuery.data?.quality_decision;
+  const qualityChecks = reportQuery.data?.quality_checks ?? [];
+  const gateEvaluation = reportQuery.data?.gate_evaluation;
   const budgetStatus = reportQuery.data?.budget_status;
+  const costStatus = reportQuery.data?.cost_status;
+  const unavailableReasons = reportQuery.data?.unavailable_reasons ?? [];
   const diagnostics = reportQuery.data?.diagnostics;
   const scoreAnalytics = scoreAnalyticsQuery.data;
   const exportHistory: AuditEvent[] = exportHistoryQuery.data ?? [];
@@ -502,6 +506,41 @@ export function ReportsPage() {
             </Card>
           ) : null}
 
+          {unavailableReasons.length ? (
+            <Card className="flat-card" title="真实性状态">
+              <Space direction="vertical" className="full-width-control">
+                {unavailableReasons.map((reason) => (
+                  <Alert key={reason} type="info" showIcon message={reason} />
+                ))}
+              </Space>
+            </Card>
+          ) : null}
+
+          {qualityChecks.length ? (
+            <Card className="flat-card" title="质量门禁">
+              <Space direction="vertical" className="full-width-control">
+                <Space wrap>
+                  <Tag color={gateEvaluation?.decision === 'failed' ? 'red' : gateEvaluation?.decision === 'skipped' ? 'default' : 'green'}>{gateEvaluation?.decision ?? 'unknown'}</Tag>
+                  {gateEvaluation?.summary ? <Typography.Text>{String(gateEvaluation.summary)}</Typography.Text> : null}
+                </Space>
+                <Table
+                  size="small"
+                  rowKey={(record) => String(record.check_id)}
+                  pagination={false}
+                  dataSource={qualityChecks}
+                  columns={[
+                    { title: '规则', dataIndex: 'title', render: (value, record) => String(value || record.check_id) },
+                    { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'failed' ? 'red' : value === 'passed' ? 'green' : 'default'}>{String(value)}</Tag> },
+                    { title: '指标', dataIndex: 'metric', render: (value) => String(value ?? '-') },
+                    { title: '实际值', dataIndex: 'actual', render: (value) => String(value ?? '-') },
+                    { title: '阈值', render: (_, record) => `${String(record.operator ?? '')} ${String(record.threshold ?? '-')}`.trim() },
+                    { title: '证据', dataIndex: 'evidence', render: (value) => <JsonInline value={value} /> },
+                  ]}
+                />
+              </Space>
+            </Card>
+          ) : null}
+
           <ReportSummary task={task} summary={reportQuery.data?.task_summary} versionSnapshot={reportQuery.data?.version_snapshot} preflightEvidence={reportQuery.data?.preflight_evidence} />
 
           <Card className="flat-card" title="报告导出历史">
@@ -628,7 +667,24 @@ export function ReportsPage() {
             </Col>
             <Col xs={24} xl={10}>
               <Card className="flat-card" title="成本预算">
-                {budgetStatus ? (
+                {costStatus?.source === 'unavailable' ? (
+                  <Alert type="info" showIcon message={costStatus.message} />
+                ) : costStatus?.source === 'llm_gateway' ? (
+                  <Space direction="vertical" className="full-width-control">
+                    <Alert type="success" showIcon message={costStatus.message} />
+                    <Space wrap>
+                      <Tag color="green">LLM Gateway</Tag>
+                      <Tag>Total tokens {costStatus.token_usage?.total_tokens ?? 0}</Tag>
+                      <Tag>Prompt calls {costStatus.prompt_call_count ?? 0}</Tag>
+                      {costStatus.providers?.map((provider) => <Tag key={provider}>{provider}</Tag>)}
+                    </Space>
+                    {budgetStatus ? (
+                      <Typography.Text type="secondary">
+                        预算 {budgetStatus.cost_budget ?? '未设置'} / 已用 {budgetStatus.cost_used.toFixed(4)} / 剩余 {budgetStatus.budget_remaining == null ? '未设置' : budgetStatus.budget_remaining.toFixed(4)}
+                      </Typography.Text>
+                    ) : null}
+                  </Space>
+                ) : budgetStatus ? (
                   <Space direction="vertical" className="full-width-control">
                     <Space wrap>
                       <Tag color={budgetStatus.status === 'exceeded' ? 'red' : budgetStatus.status === 'warning' ? 'orange' : 'green'}>{budgetStatus.status}</Tag>
@@ -916,6 +972,10 @@ function formatAuditTime(value: string) {
   return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
 }
 
+function JsonInline({ value }: { value: unknown }) {
+  return <Typography.Text className="json-inline-preview">{JSON.stringify(value ?? {})}</Typography.Text>;
+}
+
 async function ensureBadcaseId(badcase: Record<string, unknown>, task: TaskRecord | null | undefined): Promise<string> {
   if (badcase.badcase_id) {
     return String(badcase.badcase_id);
@@ -929,13 +989,25 @@ async function ensureBadcaseId(badcase: Record<string, unknown>, task: TaskRecor
     run_id: task.run_id,
     item_id: String(badcase.item_id),
     reason: String(badcase.reason ?? 'judge_fail'),
-    payload: asRecord(badcase.payload) ?? badcase,
+    payload: buildBadcaseCreatePayload(badcase),
   });
   return created.badcase_id;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function buildBadcaseCreatePayload(badcase: Record<string, unknown>): Record<string, unknown> {
+  const payload = { ...(asRecord(badcase.payload) ?? badcase) };
+  payload.source = payload.source ?? badcase.source ?? 'step';
+  payload.source_id = payload.source_id ?? badcase.source_id ?? badcase.step_id ?? badcase.item_id;
+  payload.evidence = payload.evidence ?? badcase.evidence ?? {
+    reason: String(badcase.reason ?? 'judge_fail'),
+    status: badcase.status,
+    item_id: badcase.item_id,
+  };
+  return payload;
 }
 
 function causeLabel(value: string) {

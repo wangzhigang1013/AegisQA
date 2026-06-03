@@ -4,6 +4,7 @@ import { beforeEach, expect, vi } from 'vitest';
 
 import { AppShell } from '../App';
 import { demoSkills, demoWorkflowGraph } from '../data/demo';
+import type { FeatureKey } from '../features';
 
 export { demoSkills, demoWorkflowGraph };
 
@@ -175,7 +176,7 @@ export const demoTraceFlow = {
   task: demoTask,
   dataset: { dataset_id: 'dataset-demo', name: '问答回归集', version: 1, version_id: 'dataset-demo:v1' },
   workflow: { workflow_id: 'wf-demo', name: 'RAG 回归评测', version_id: 'wf-demo:v1', snapshot_hash: 'abcdef1234567890' },
-  attempt: { run_id: 'run-demo', status: 'completed', current_attempt: 1, started_at: null, finished_at: null },
+  attempt: { run_id: 'run-demo', status: 'completed', state: 'SUCCEEDED', current_attempt: 1, started_at: null, finished_at: null },
   queue_message_shape: ['item_id'],
   data_edges: [{ source: 'dataset.row', target: 'answer.input' }],
   pagination: { page: 1, page_size: 8, total_items: 1, total_pages: 1 },
@@ -186,6 +187,7 @@ export const demoTraceFlow = {
       row_index: 0,
       repeat_index: 0,
       status: 'succeeded',
+      state: 'SUCCEEDED',
       row: { question: '什么是 Trace?', reference: 'AegisQA' },
       context: { answer: '模型回答' },
       metrics: { tokens: 12 },
@@ -194,11 +196,25 @@ export const demoTraceFlow = {
         {
           step_id: 'answer',
           skill_ref: 'llm.call@0.1.0',
+          skill_version: '0.1.0',
           status: 'succeeded',
+          state: 'SUCCEEDED',
           input: { prompt: '什么是 Trace?' },
+          resolved_input: { prompt: '什么是 Trace?' },
           resolved_config: { model: 'trace-model' },
           parameter_trace: { model: { source: 'workflow_config', value_preview: 'trace-model', redacted: false } },
           output: { answer: '模型回答' },
+          raw_output: { answer: '模型回答', debug: 'raw provider payload' },
+          validated_output: { answer: '模型回答' },
+          schema_errors: [],
+          prompt_calls: [
+            {
+              prompt_name: 'judge',
+              model_alias: 'test.judge',
+              status: 'succeeded',
+              token_usage: { total_tokens: 18 },
+            },
+          ],
           metrics: { tokens: 12 },
           latency_ms: 1,
           cache_hit: false,
@@ -213,6 +229,7 @@ export const demoTraceFlow = {
 export const demoTraceTree = {
   run_id: 'run-demo',
   status: 'completed',
+  state: 'SUCCEEDED',
   workflow_version: 'wf-demo:v1',
   dataset_version: 'dataset-demo:v1',
   pagination: { page: 1, page_size: 8, total_items: 1, total_pages: 1 },
@@ -221,17 +238,25 @@ export const demoTraceTree = {
       item_id: 'item-demo',
       row_id: '1',
       status: 'succeeded',
+      state: 'SUCCEEDED',
       metrics: { judge_score: 0.9 },
       error: null,
       children: [
         {
           step_id: 'answer',
           skill_ref: 'llm.call@0.1.0',
+          skill_version: '0.1.0',
           status: 'succeeded',
+          state: 'SUCCEEDED',
           latency_ms: 12,
           cache_hit: false,
           input: { prompt: '什么是 Trace?' },
+          resolved_input: { prompt: '什么是 Trace?' },
           output: { answer: '模型回答' },
+          raw_output: { answer: '模型回答', debug: 'raw provider payload' },
+          validated_output: { answer: '模型回答' },
+          schema_errors: [],
+          prompt_calls: [{ prompt_name: 'judge', model_alias: 'test.judge', status: 'succeeded' }],
           metrics: { tokens: 12 },
           error: null,
         },
@@ -846,7 +871,14 @@ export const pendingSkillPackage = {
   updated_at: '2026-05-31T00:00:00Z',
 };
 
-export async function renderWorkbench(path: string) {
+type RenderWorkbenchOptions = {
+  features?: Partial<Record<FeatureKey, boolean>>;
+};
+
+export async function renderWorkbench(path: string, options: RenderWorkbenchOptions = {}) {
+  if (options.features) {
+    globalThis.__AEGISQA_FEATURE_OVERRIDES__ = options.features;
+  }
   await act(async () => {
     render(
       <MemoryRouter initialEntries={[path]}>
@@ -884,6 +916,7 @@ export function findComboboxByLabel(label: string) {
 export function installDefaultWorkbenchMocks() {
   beforeEach(() => {
     vi.restoreAllMocks();
+    delete globalThis.__AEGISQA_FEATURE_OVERRIDES__;
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:report-export') });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
@@ -937,6 +970,12 @@ export function installDefaultWorkbenchMocks() {
           });
         }
         return jsonResponse([demoTask]);
+      }
+      if (url.endsWith('/workers/local/status')) {
+        return jsonResponse({ status: 'ready', pending_runs: [] });
+      }
+      if (url.endsWith('/workers/local/run-once') && init?.method === 'POST') {
+        return jsonResponse({ status: 'idle', processed_items: 0 });
       }
       if (url.endsWith('/task-execution-templates')) {
         return jsonResponse(demoTaskExecutionTemplates);
@@ -1455,6 +1494,18 @@ export function installDefaultWorkbenchMocks() {
       }
       if (url.includes('/tasks/task-demo/trace-tree')) {
         return jsonResponse(demoTraceTree);
+      }
+      if (url.includes('/runs/run-demo/items/item-demo/steps/answer/replay')) {
+        return jsonResponse({ replay_id: 'replay-demo', status: 'succeeded', raw_output: { answer: 'replayed answer' }, persisted: false });
+      }
+      if (url.includes('/runs/run-demo/items/item-demo/steps/answer/repro-bundle')) {
+        return jsonResponse({
+          bundle_id: 'repro-demo',
+          run_id: 'run-demo',
+          artifact_uri: 'local://repro-bundles/run-demo/item-demo/answer/repro-demo.json',
+          artifact_metadata: { content_type: 'application/json', size: 512 },
+          step: { raw_output: { answer: '模型回答' } },
+        });
       }
       if (url.endsWith('/tasks/task-demo/parameter-governance')) {
         return jsonResponse(demoParameterGovernance);

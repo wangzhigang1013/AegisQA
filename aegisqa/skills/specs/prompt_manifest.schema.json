@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegisqa.local/schemas/prompt_manifest.schema.json",
+  "title": "AegisQA Prompt Manifest v1",
+  "type": "object",
+  "required": ["input_variables", "output_schema", "model_policy", "retry_policy"],
+  "properties": {
+    "name": { "type": "string" },
+    "input_variables": {
+      "type": "object",
+      "additionalProperties": { "type": "object" }
+    },
+    "output_schema": { "type": "object" },
+    "model_policy": {
+      "type": "object",
+      "properties": {
+        "allowed_aliases": { "type": "array", "items": { "type": "string" } },
+        "default_alias": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "retry_policy": {
+      "type": "object",
+      "properties": {
+        "max_retries": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

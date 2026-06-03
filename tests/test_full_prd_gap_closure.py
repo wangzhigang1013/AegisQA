@@ -106,8 +106,18 @@ def test_dag_executor_runs_parallel_levels_and_conditions() -> None:
 def test_prompt_candidate_pool_badcase_filters_and_html_report_export(tmp_path: Path) -> None:
     store = JsonStore(tmp_path / "store")
     badcases = BadcaseService(store)
-    first = badcases.create_badcase("run-1", "item-1", "judge_label=fail", {"question": "支付失败", "score": 0.2, "skill": "judge"})
-    second = badcases.create_badcase("run-1", "item-2", "TypeMismatchError", {"question": "类型错误", "score": 0.0, "skill": "answer"})
+    first = badcases.create_badcase(
+        "run-1",
+        "item-1",
+        "judge_label=fail",
+        {"question": "支付失败", "score": 0.2, "skill": "judge", "source": "step", "source_id": "judge", "evidence": {"score": 0.2}},
+    )
+    second = badcases.create_badcase(
+        "run-1",
+        "item-2",
+        "TypeMismatchError",
+        {"question": "类型错误", "score": 0.0, "skill": "answer", "source": "step", "source_id": "answer", "evidence": {"error": "TypeMismatchError"}},
+    )
     badcases.correct_badcase(first.badcase_id, human_label="incorrect", problem_type="payment", note="需要优化 Prompt", add_to_golden=True)
 
     filtered = badcases.filter_badcases(status="accepted_to_golden", problem_type="payment", query="支付", min_score=0.1, max_score=0.3)

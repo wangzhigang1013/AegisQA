@@ -45,6 +45,8 @@ from aegisqa.api.app import (
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
 from aegisqa.engine.runner import RunRecord, RunRequest
+from aegisqa.quality.gates import GateEvaluator
+from aegisqa.quality.models import GateContext, GateRule
 from aegisqa.reports.aggregator import RunReport, aggregate_run_report, compare_reports
 
 
@@ -476,16 +478,45 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             # Task 是产品入口，Run 是底层执行实例；这里用 Run Report 指标并补充 Task 聚合字段。
             metrics = _ci_gate_metrics_from_task(task, run) | metrics
             target = {"kind": "task", "id": request.task_id}
-        results = [_evaluate_gate(metrics, gate) for gate in gates]
-        blocking_failures = [item for item in results if item["status"] == "failed" and item["blocking"]]
+        gate_evaluation = GateEvaluator().evaluate(
+            GateContext(metrics=metrics, target=target),
+            [
+                GateRule(
+                    rule_id=gate.gate_id,
+                    metric=gate.metric,
+                    operator=gate.operator,
+                    threshold=gate.threshold,
+                    blocking=gate.blocking,
+                )
+                for gate in gates
+            ],
+        )
+        quality_checks = [check.model_dump(mode="json") for check in gate_evaluation.quality_checks]
+        results = [
+            {
+                "gate_id": check["check_id"],
+                "metric": check["metric"],
+                "operator": check["operator"],
+                "threshold": check["threshold"],
+                "actual": check["actual"],
+                "blocking": check["blocking"],
+                "status": check["status"],
+                "reason": check["reason"],
+                "message": check["message"],
+                "evidence": check["evidence"],
+            }
+            for check in quality_checks
+        ]
         evaluation = {
             "evaluation_id": f"gateeval-{uuid4().hex[:12]}",
             "config_id": request.config_id,
-            "status": "blocked" if blocking_failures else "passed",
-            "blocking_failures": len(blocking_failures),
+            "status": "blocked" if gate_evaluation.decision == "failed" else gate_evaluation.decision,
+            "blocking_failures": gate_evaluation.blocking_failures,
             "target": target,
             "metrics": metrics,
             "results": results,
+            "quality_checks": quality_checks,
+            "gate_evaluation": gate_evaluation.model_dump(mode="json"),
             "created_at": _now(),
         }
         _save_record(ctx.store, "ci_gate_evaluations", "evaluation_id", evaluation)

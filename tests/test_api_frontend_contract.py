@@ -152,7 +152,14 @@ def test_source_materialize_trace_badcase_filter_and_error_contract(tmp_path: Pa
             "run_id": executed["run_id"],
             "item_id": executed["items"][0]["item_id"],
             "reason": "judge_label=fail",
-            "payload": {"skill": "llm.judge@0.1.0", "score": 0.4, "question": "Q1"},
+            "payload": {
+                "skill": "llm.judge@0.1.0",
+                "score": 0.4,
+                "question": "Q1",
+                "source": "step",
+                "source_id": executed["items"][0]["steps"][0]["step_id"],
+                "evidence": {"score": 0.4},
+            },
         },
     ).json()
     badcases = client.get("/badcases", params={"status": "pending_review", "skill": "llm.judge@0.1.0", "min_score": 0.2}).json()

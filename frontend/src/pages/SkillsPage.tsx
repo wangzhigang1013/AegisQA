@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react';
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { demoSkills } from '../data/demo';
-import type { SkillContractResult, SkillManifest, SkillPackageRecord } from '../types';
+import type { PromptDebugResult, SkillContractResult, SkillManifest, SkillPackageRecord } from '../types';
 
 type UploadFormValues = {
   filename: string;
@@ -23,6 +23,7 @@ export function SkillsPage() {
   const [skillQuery, setSkillQuery] = useState('');
   const [contractResultText, setContractResultText] = useState<string | null>(null);
   const [contractResult, setContractResult] = useState<SkillContractResult | null>(null);
+  const [promptDebugResult, setPromptDebugResult] = useState<PromptDebugResult | null>(null);
   const [form] = Form.useForm<UploadFormValues>();
 
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
@@ -70,6 +71,22 @@ export function SkillsPage() {
     onError: (error) => {
       setContractResult(null);
       setContractResultText(`合约测试失败：${formatApiError(error)}`);
+    },
+  });
+
+  const promptDebugMutation = useMutation({
+    mutationFn: ({ skill, promptName }: { skill: SkillManifest; promptName: string }) =>
+      api.promptDebug(skill.skill_id, skill.version, promptName, {
+        variables: skill.example_input,
+        trigger_reason: 'skill_detail_debug',
+      }) as Promise<PromptDebugResult>,
+    onSuccess: (result) => {
+      setPromptDebugResult(result);
+      setNotice(`Prompt Debug 完成：${result.prompt_name}`);
+    },
+    onError: (error) => {
+      setPromptDebugResult(null);
+      setNotice(`Prompt Debug 失败：${formatApiError(error)}`);
     },
   });
 
@@ -158,6 +175,7 @@ export function SkillsPage() {
                   onClick={() => {
                     setContractResultText(null);
                     setContractResult(null);
+                    setPromptDebugResult(null);
                     setActiveSkill(record);
                   }}
                 >
@@ -202,6 +220,27 @@ export function SkillsPage() {
             <Card size="small" title="输入 Schema"><pre>{JSON.stringify(activeSkill.input_schema, null, 2)}</pre></Card>
             <Card size="small" title="输出 Schema"><pre>{JSON.stringify(activeSkill.output_schema, null, 2)}</pre></Card>
             <Card size="small" title="配置 Schema"><pre>{JSON.stringify(activeSkill.config_schema, null, 2)}</pre></Card>
+            {activeSkill.prompts?.length ? (
+              <Card size="small" title="Prompts">
+                <Space direction="vertical" className="full-width-control">
+                  {activeSkill.prompts.map((prompt) => (
+                    <Card size="small" key={prompt.name} title={prompt.name}>
+                      <Space direction="vertical" className="full-width-control">
+                        <Typography.Text>路径：{prompt.path}</Typography.Text>
+                        <Button
+                          size="small"
+                          loading={promptDebugMutation.isPending}
+                          onClick={() => promptDebugMutation.mutate({ skill: activeSkill, promptName: prompt.name })}
+                        >
+                          Debug {prompt.name}
+                        </Button>
+                      </Space>
+                    </Card>
+                  ))}
+                </Space>
+              </Card>
+            ) : null}
+            {promptDebugResult ? <PromptDebugCard result={promptDebugResult} /> : null}
             {contractResultText ? <Alert type={contractResultText.includes('通过') ? 'success' : 'error'} showIcon message={contractResultText} /> : null}
             {contractResult ? <ContractResultCard result={contractResult} activeSkill={activeSkill} /> : null}
             <Tooltip title="会用示例输入和示例配置真实执行一次 Skill，并检查输入输出 schema。">
@@ -277,6 +316,23 @@ function formatSkillStatus(status: string): string {
     disabled: '已禁用',
     deprecated: '已废弃',
   }[status] ?? status;
+}
+
+function PromptDebugCard({ result }: { result: PromptDebugResult }) {
+  const artifactUris = result.artifact_uris && typeof result.artifact_uris === 'object' ? result.artifact_uris : null;
+  return (
+    <Card size="small" title="Prompt Debug Result">
+      <Space direction="vertical" className="full-width-control">
+        <Typography.Text strong>{result.prompt_name}</Typography.Text>
+        <Card size="small" title="Rendered Prompt"><pre>{result.rendered_prompt}</pre></Card>
+        <Card size="small" title="Raw Response"><pre>{result.raw_response}</pre></Card>
+        <Card size="small" title="Parsed Output"><pre>{JSON.stringify(result.parsed_output ?? {}, null, 2)}</pre></Card>
+        <Card size="small" title="Schema Validation"><pre>{JSON.stringify(result.schema_validation ?? {}, null, 2)}</pre></Card>
+        <Card size="small" title="Token Usage"><pre>{JSON.stringify(result.token_usage ?? {}, null, 2)}</pre></Card>
+        {artifactUris ? <Card size="small" title="Artifact URIs"><pre>{JSON.stringify(artifactUris, null, 2)}</pre></Card> : null}
+      </Space>
+    </Card>
+  );
 }
 
 function ContractResultCard({ result, activeSkill }: { result: SkillContractResult; activeSkill: SkillManifest }) {

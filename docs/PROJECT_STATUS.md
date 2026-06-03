@@ -2,9 +2,319 @@
 
 ## 当前阶段
 
-GitHub 发布准备阶段。本阶段按用户要求补充详细项目介绍文件，并准备把当前代码推送到 `wangzhigang1013/AegisQA.git`。README 已扩展为完整项目说明，覆盖项目定位、技术栈、目录结构、核心概念、执行模型、Skill 插件包、启动方式、API、验证命令和生产化演进建议。
+项目进展盘点阶段。本阶段在已推送到 `wangzhigang1013/AegisQA.git` 的主分支基础上，补充当前实现程度说明，明确 AegisQA 已达到工程化 MVP 与本地可演示闭环，同时标注生产级执行、存储、插件安全、企业权限和部署工程仍是后续重点。
 
 ## 最近改动
+
+### 2026-06-03 Reality-First Rebuild 完成度审计与缺口补齐
+
+- 改动摘要：开始按 Phase 0-6 对 Reality-First Rebuild 计划做完成度审计，并补齐审计中确认的显式缺口。新增 `docs/audit/rebuild_completion_audit.md`，记录各 Phase 当前覆盖、证据和剩余风险。Governance 页面新增 Model Alias 管理区，支持读取 `/model-aliases`、新增 alias 并写入后端审计。`context.llm.call` 子进程 runtime 现在会强制 `max_calls_per_run` 与 `max_tokens_per_run`，避免 Skill 绕过 LLM Gateway 预算边界。Badcase 创建现在必须来自真实 `step|quality_check|gate_rule|annotation`，并携带 `source_id` 与 `evidence`。Step Replay 在 `mock_llm_calls=true` 且已有历史 prompt calls 时，会复用原 Step 的 prompt trace 并标记 `mocked=true`，不再只是回显参数。
+- E2E 回归修复：Badcase 来源约束上线后，报告页中“未持久化 Badcase -> 加入 Golden”会先创建正式 Badcase。该创建 payload 现在会自动补 `source=step`、`source_id` 和 evidence，避免前端旧 payload 被后端真实来源门禁拒绝。
+- 变更文件：
+  - `docs/audit/rebuild_completion_audit.md`
+  - `docs/PROJECT_STATUS.md`
+  - `aegisqa/skills/packages.py`
+  - `aegisqa/badcases/service.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/types.ts`
+  - `tests/test_llm_gateway_phase2.py`
+  - `tests/test_replay_debug_phase5.py`
+  - `tests/test_platform_core.py`
+  - `tests/test_api_interaction_contract.py`
+  - `tests/test_api_frontend_contract.py`
+  - `tests/test_full_prd_gap_closure.py`
+  - `tests/test_product_extensions.py`
+  - `frontend/src/test/App.test.tsx`
+- 验证命令：
+  - `python -m pytest tests/test_llm_gateway_phase2.py::test_v1_package_context_llm_call_enforces_call_and_token_limits -q`
+  - `python -m pytest tests/test_platform_core.py::test_badcase_requires_real_source_and_evidence tests/test_platform_core.py::test_badcase_correction_and_judge_audit_metrics -q`
+  - `python -m pytest tests/test_replay_debug_phase5.py::test_step_replay_can_mock_recorded_llm_calls -q`
+  - `python -m pytest tests/test_llm_gateway_phase2.py tests/test_replay_debug_phase5.py tests/test_platform_core.py::test_badcase_correction_and_judge_audit_metrics tests/test_platform_core.py::test_badcase_requires_real_source_and_evidence tests/test_api_interaction_contract.py::test_badcase_judge_and_export_actions tests/test_api_frontend_contract.py::test_source_materialize_trace_badcase_filter_and_error_contract tests/test_full_prd_gap_closure.py::test_prompt_candidate_pool_badcase_filters_and_html_report_export tests/test_product_extensions.py::test_badcase_bulk_cluster_and_report_export -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Model Alias|治理页面权限"`
+  - `cd frontend && npm test -- src/test/ReportsPage.test.tsx -t "未持久化 Badcase"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - LLM Runtime 限制定向：1 passed。
+  - Badcase 来源约束定向：2 passed。
+  - Replay mock LLM calls 定向：1 passed。
+  - 后端组合回归：14 passed。
+  - 前端 Governance 定向：2 passed、57 skipped。
+  - 报告页未持久化 Badcase 回归：1 passed、15 skipped。
+  - 后端全量：159 passed，仅有 Starlette/httpx 依赖弃用 warning。
+  - 前端 typecheck：通过。
+  - 前端全量：10 个测试文件、118 passed。
+  - E2E：9 passed。
+  - 空白检查：通过；仅有 Windows LF/CRLF 换行转换 warning。
+- 下一步：
+  - Reality-First Rebuild Phase 0-6 的本地 runtime 范围已闭环；后续工作可单独拆分为生产 provider、容器级 sandbox、生产数据库/object storage/worker 适配等硬化计划。
+
+### 2026-06-03 Reality-First Rebuild Phase 6 第二批落地
+
+- 改动摘要：继续补齐 Phase 6 运行时。FastAPI app 初始化 `LocalRunWorker`，`POST /runs` 和 `POST /tasks` 创建 Run 后会自动入本地 worker 队列；新增 `GET /workers/local/status` 和 `POST /workers/local/run-once`，worker 每次只拉取并执行一个 pending RunItem，Run 未完成时自动重新入队供前端轮询或本地循环处理。`WorkflowRunner` 新增 `execute_next_item()`，暂停或取消状态下不会启动新的 pending item，已执行完成的 item 保持 succeeded，未启动 item 保持 pending。Sandbox Lite 补充 provider secret 隔离，插件子进程不再继承 `*_API_KEY`、token、secret 类环境变量，仍保留工作目录隔离、timeout、stdout/stderr 截断和路径清洗。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/context.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/engine/runner.py`
+  - `aegisqa/skills/packages.py`
+  - `aegisqa/workers/local.py`
+  - `tests/test_runtime_infra_phase6.py`
+  - `tests/test_skill_package_security.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_runtime_infra_phase6.py -q`
+  - `python -m pytest tests\test_skill_package_security.py -q`
+  - `python -m pytest tests\test_runtime_infra_phase6.py tests\test_skill_package_security.py tests\test_skill_package_v1.py -q`
+  - `python -m pytest tests\test_task_center_api.py tests\test_api.py tests\test_api_interaction_contract.py tests\test_productization_api.py -q`
+- 测试结果：
+  - Phase 6 运行时目标测试：5 passed，覆盖 ArtifactStore、dev-only JsonStore、自动入队、单 item worker、暂停/取消不启动新 item。
+  - Skill package 安全测试：7 passed，覆盖 provider API key 不进入插件子进程。
+  - Phase 6/Skill package 组合回归：19 passed。
+  - Task/API/Productization 组合回归：30 passed。
+- 下一步：
+  - 继续补状态机命名与前端轮询呈现：将计划里的 PENDING/QUEUED/RUNNING/PAUSED/CANCEL_REQUESTED/CANCELLED/SUCCEEDED/FAILED/TIMEOUT 与现有 completed/canceled 兼容映射清晰化。
+  - 继续补 Prompt Debug 前端入口和 Sandbox Lite 更细的网络/资源限制文档。
+
+### 2026-06-03 Reality-First Rebuild Phase 6 首批落地
+
+- 改动摘要：新增运行时基础设施首批实现。`JsonStore` 明确标记为 dev-only，并声明生产替代方向为 PostgreSQL/MySQL 元数据仓储 + ArtifactStore。新增 `ArtifactStore` 接口与 `LocalArtifactStore`，支持本地 artifact URI、bytes/json 读写、metadata 描述和路径穿越拦截。新增 `LocalRunWorker`，以 run_id 队列方式消费 queued Run，并委托现有 `WorkflowRunner.execute_run()` 完成单机执行，为后续 API 入队和前端轮询保留清晰边界。
+- 变更文件：
+  - `aegisqa/storage/artifacts.py`
+  - `aegisqa/storage/json_store.py`
+  - `aegisqa/workers/local.py`
+  - `tests/test_runtime_infra_phase6.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_runtime_infra_phase6.py -q`
+  - `python -m pytest tests\test_runtime_infra_phase6.py tests\test_replay_debug_phase5.py tests\test_quality_gate_phase4.py tests\test_productization_api.py tests\test_task_center_api.py tests\test_platform_core.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `git diff --check`
+- 测试结果：
+  - Phase 6 目标测试：3 passed，覆盖 LocalArtifactStore、JsonStore dev-only 标记、LocalRunWorker 执行 queued Run。
+  - Phase 4-6 与核心平台组合回归：46 passed。
+  - 后端全量：150 passed。
+  - 前端 typecheck：通过。
+  - 前端全量：10 个测试文件、110 passed。
+  - 空白检查：通过；仅有 Windows CRLF 换行转换 warning。
+- 下一步：
+  - Phase 6 仍需继续接入 API 创建 Task/Run 后真实入队、Worker 拉取 pending item、暂停/取消状态机和 Sandbox Lite 资源限制。
+  - Phase 5 前端 Step 详情抽屉仍需接 Replay、Prompt Debug、Repro Bundle 操作。
+
+### 2026-06-03 Reality-First Rebuild Phase 5 首批落地
+
+- 改动摘要：新增最小可用的 Step Replay、Prompt Debug 和 Repro Bundle。`POST /runs/{run_id}/items/{item_id}/steps/{step_id}/replay` 会读取已持久化 Step 输入，支持 `override_input` 重新执行当前 registry 中的 Skill，并返回 raw/validated output、prompt_calls、metrics、latency，默认不写回原 Run。`POST /skills/{skill_id}/versions/{version}/prompts/{prompt_name}/debug` 复用 Skill 包 prompt assets、Governance Model Alias 和 test provider，返回 rendered_prompt、raw_response、parsed_output、schema_validation 和 token_usage。`GET /runs/{run_id}/items/{item_id}/steps/{step_id}/repro-bundle` 导出 workflow、skill manifest、prompt assets、context snapshot、resolved/raw/validated output、schema errors、prompt calls 和 error。前端 Trace Flow 的 Step 卡片已新增 Replay 和 Repro Bundle 操作，并在页面内展示返回结果。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/api/routes/skills.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/TraceFlowPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `tests/test_replay_debug_phase5.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Flow 页面展示|Trace Tree 独立页面"`
+  - `python -m pytest tests\test_replay_debug_phase5.py -q`
+  - `python -m pytest tests\test_replay_debug_phase5.py tests\test_llm_gateway_phase2.py tests\test_step_trace_phase3.py tests\test_trace_flow_api.py tests\test_productization_api.py -q`
+  - `python -m pytest tests\test_skill_package_v1.py tests\test_task_center_api.py -q`
+- 测试结果：
+  - Trace 前端定向测试：2 passed，52 skipped，覆盖 Step Replay 和 Repro Bundle 按钮调用与结果展示。
+  - Phase 5 目标测试：2 passed，覆盖 Step Replay、Repro Bundle 和 Prompt Debug。
+  - Phase 2/3/5 路由与 trace 回归：20 passed。
+  - Skill Package/Task Center 回归：21 passed。
+- 下一步：
+  - 前端 Task/Trace Step 详情抽屉仍需接 Replay、Prompt Debug、Repro Bundle 操作。
+  - 继续 Phase 6：ArtifactStore、单机 Worker、状态机和 Sandbox Lite 限制。
+
+### 2026-06-03 Reality-First Rebuild Phase 3 前端 + Phase 4 首批落地
+
+- 改动摘要：继续推进 Reality-First Rebuild。Phase 3 前端 Trace Tree/Trace Flow 已展示 Step `resolved_input`、`raw_output`、`validated_output`、`schema_errors`、`prompt_calls`、`skill_version`，旧 `input/output` 仍保留兼容。Phase 4 新增 `aegisqa/quality` 最小统一质量模型与 `GateEvaluator`，CI Gate 不再把缺失指标默认当成 0，而是返回 `skipped/metric_unavailable`；Preflight 额外输出统一 `quality_checks` 与 `gate_evaluation`，旧 `checks` 继续保留。标准规则目录已覆盖 Workflow Graph Valid、Skill Approved、Input Mapping Resolvable、Schema Compliance、Step/RunItem 错误率、Latency、LLM JSON/Schema Rate、Cost Budget、Golden Accuracy，Run/Task CI Gate 指标会从真实 Step Trace 和 Prompt Calls 派生可计算错误率。
+- 变更文件：
+  - `aegisqa/quality/__init__.py`
+  - `aegisqa/quality/models.py`
+  - `aegisqa/quality/rules.py`
+  - `aegisqa/quality/gates.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/productization.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `frontend/src/pages/TraceFlowPage.tsx`
+  - `frontend/src/pages/TraceTreePage.tsx`
+  - `frontend/src/types.ts`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `tests/test_quality_gate_phase4.py`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Flow 页面展示|Trace Tree 独立页面"`
+  - `python -m pytest tests\test_quality_gate_phase4.py -q`
+  - `python -m pytest tests\test_productization_api.py -q`
+  - `python -m pytest tests\test_task_center_api.py -q`
+  - `python -m pytest tests\test_quality_gate_phase4.py tests\test_productization_api.py tests\test_task_center_api.py tests\test_trace_flow_api.py tests\test_step_trace_phase3.py -q`
+- 测试结果：
+  - Trace 前端定向测试：2 passed，52 skipped。
+  - Phase 4 目标测试：5 passed，覆盖 GateEvaluator fail/skipped、CI Gate 缺指标 skipped、Preflight 统一质量结果字段、标准规则目录和真实 Step/Prompt 指标派生。
+  - Productization API 回归：10 passed。
+  - Task Center API 回归：14 passed。
+  - Phase 3/4 后端组合回归：33 passed。
+- 下一步：
+  - 继续 Phase 4 深度：把 Workflow Graph Valid、Skill Approved、Input Mapping Resolvable、Schema Compliance、Step/RunItem 错误率、Latency、LLM JSON/Schema Rate、Cost Budget、Golden Accuracy 等规则全部接入 `GateEvaluator`。
+  - 随后进入 Phase 5：Node Replay、Prompt Debug、Repro Bundle 和 Trace Step 详情抽屉。
+
+### 2026-06-03 Reality-First Rebuild Phase 3 首批落地
+
+- 改动摘要：继续推进 Phase 3 的真实 Step Trace 基础。`RunItemStep` 新增并持久化 `resolved_input`、`raw_output`、`validated_output`、`schema_errors`、`prompt_calls`、`skill_version`，同时保留旧 `input_snapshot/output_snapshot` 兼容历史 UI。runner 成功路径会写 resolved/raw/validated；Skill output_schema 校验失败时固定错误码 `OUTPUT_SCHEMA_INVALID`，保留 raw_output，validated_output 为空，并记录 schema_errors。`SkillResult` 新增 prompt_calls，v1 子进程会把 `context.llm.calls` 自动带回。Trace Flow API 同时返回旧 `input/output` 与新 `resolved_input/raw_output/validated_output/schema_errors/prompt_calls/skill_version` 字段。
+- 变更文件：
+  - `aegisqa/engine/runner.py`
+  - `aegisqa/reports/trace_flow.py`
+  - `aegisqa/skills/base.py`
+  - `aegisqa/skills/packages.py`
+  - `tests/test_step_trace_phase3.py`
+- 验证命令：
+  - `python -m pytest tests\test_step_trace_phase3.py -q`
+  - `python -m pytest tests\test_step_trace_phase3.py tests\test_platform_core.py tests\test_trace_flow_api.py tests\test_task_center_api.py tests\test_skill_parameter_resolution.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+- 测试结果：
+  - Phase 3 目标测试：2 passed，覆盖成功 Step 的 resolved/raw/validated/skill_version 持久化和 output_schema invalid 的 raw/validated/error 行为。
+  - runner/trace 相关回归：33 passed。
+  - 后端全量：通过；仍有 Starlette TestClient deprecation warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+  - 前端全量：10 个测试文件、110 passed。
+- 下一步：
+  - 继续 Phase 3 深度：前端 Trace Tree/Trace Flow Step 详情展示 resolved/raw/validated/prompt call summary；Hybrid Skill A 改为真实 `context.llm.call` 两段 prompt 流程。
+  - 然后进入 Phase 4：QualityCheckResult、GateRule/GateEvaluator，并统一 Preflight、Quality Gate、CI Gate 底层逻辑。
+
+### 2026-06-03 Reality-First Rebuild Phase 2 首批落地
+
+- 改动摘要：继续按顺序进入 Phase 2。新增 `aegisqa/llm/models.py`、`aegisqa/llm/providers.py`、`aegisqa/llm/gateway.py`，落地最小 LLM Gateway 服务层：PromptAsset、ModelAlias、TokenUsage、LLMCallRun/PromptCallTrace、deterministic TestLLMProvider、prompt 渲染、JSON 解析、output_schema 校验、token budget 校验和结构化错误码。新增 Governance 下的 `GET /model-aliases`、`POST /model-aliases`，写入审计事件 `model_alias.upsert`。Skill 包上传时保存 prompt template，`SubprocessPackageSkill` 支持把 prompt assets 与启用的 model aliases 传入 v1 子进程，v1 handler 可通过 `context.llm.call(prompt_name, variables, trigger_reason, model_alias=None)` 调用本地 test runtime；仍不注入任何真实 provider secret。
+- 变更文件：
+  - `aegisqa/llm/__init__.py`
+  - `aegisqa/llm/models.py`
+  - `aegisqa/llm/providers.py`
+  - `aegisqa/llm/gateway.py`
+  - `aegisqa/api/routes/governance.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/skills/packages.py`
+  - `tests/test_llm_gateway_phase2.py`
+- 验证命令：
+  - `python -m pytest tests\test_llm_gateway_phase2.py -q`
+  - `python -m pytest tests\test_llm_gateway_phase2.py tests\test_skill_package_v1.py tests\test_skill_package_security.py tests\test_api.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+- 测试结果：
+  - Phase 2 目标测试：4 passed，覆盖 Model Alias API 与审计、Prompt 变量缺失、权限拒绝、alias 拒绝、JSON parse error、output schema invalid、成功 LLMCallRun token usage，以及 v1 package `context.llm.call(...)` 子进程入口。
+  - 后端相关回归：20 passed。
+  - 后端全量：通过；仍有 Starlette TestClient deprecation warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+  - 前端全量：10 个测试文件、110 passed。
+- 下一步：
+  - 继续补 Phase 2 剩余深度：把 LLMCallRun/PromptCallTrace 持久化到 run/step trace，完善 max_calls_per_run 计数、prompt registry 查询接口和 Governance UI 下的 Model Alias 管理入口。
+  - 然后进入 Phase 3：Hybrid Skill A 与真实 Step Trace，把 resolved/raw/validated/schema_errors/prompt_calls 写入 RunItemStep。
+
+### 2026-06-03 Reality-First Rebuild Phase 1 首批落地
+
+- 改动摘要：按计划在 Phase 0 收口后进入 Skill Package Spec v1。新增 v1 Skill 包规范文档、manifest schema、prompt manifest schema；扩展 `SkillManifest`，旧 manifest 默认兼容为 `schema_version=0`、`type=code`、`category=legacy`；v1 包支持 `type=prompt|code|hybrid`、`category`、`runtime`、`prompts`、`llm_permissions`、`limits`。上传校验升级为解压前检查包大小、文件数、解压大小、路径穿越、绝对路径、symlink、可执行二进制，并把直接模型 SDK 调用记录为 warning。Prompt assets 会解析 `prompts/<name>/prompt.yaml` 与 `prompt.md`，保存 prompt hash、变量、输出 schema、模型策略和重试策略。`SubprocessPackageSkill` 兼容旧 `run(inputs, config)` 与 v1 `run(input_data, context)` 入口。新增 prompt/code/hybrid 三个示例包，均可通过真实上传、合约测试和审批流程。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/skills/base.py`
+  - `aegisqa/skills/packages.py`
+  - `aegisqa/skills/specs/skill_manifest.schema.json`
+  - `aegisqa/skills/specs/prompt_manifest.schema.json`
+  - `docs/specs/skill-package-v1.md`
+  - `examples/skill_packages/prompt_skill_v1`
+  - `examples/skill_packages/code_skill_v1`
+  - `examples/skill_packages/hybrid_skill_a_v1`
+  - `frontend/src/types.ts`
+  - `frontend/vitest.config.ts`
+  - `tests/test_skill_package_v1.py`
+- 验证命令：
+  - `python -m pytest tests\test_skill_package_v1.py -q`
+  - `python -m pytest tests\test_skill_package_security.py tests\test_p0_hardening.py tests\test_task_center_api.py tests\test_skill_package_v1.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+- 测试结果：
+  - Phase 1 目标测试：7 passed，覆盖 v1 manifest 默认兼容、v1 context 入口、prompt asset 必要文件校验、prompt hash 注册、安全内容拒绝、三个示例包上传/合约测试/审批。
+  - Skill 包安全/任务中心相关回归测试：30 passed。
+  - 后端全量：通过；仍有 Starlette TestClient deprecation warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+  - 前端全量：10 个测试文件、110 passed。由于当前慢测在全量并发下会超过 30 秒，本次把 Vitest 全局超时和懒加载测试显式超时调整为 60 秒，未改测试断言。
+- 下一步：
+  - 继续 Phase 2：Prompt Registry 持久化、LLM Gateway 服务层、Model Alias 最小接口、`context.llm.call(...)` 权限/变量/预算校验、LLM 调用 trace 和 test provider。
+  - Phase 1 当前不注入真实模型 API key；prompt 示例包用本地 test handler 验证包结构和入口，真实 provider 接入仍留到后续小计划。
+
+### 2026-06-03 Reality-First Rebuild Phase 0 首批落地
+
+- 改动摘要：按 Reality-First Rebuild 计划先执行 Phase 0，不物理删除历史高级模块，先完成“真实能力审计 + 主线降噪 + 假指标降级”的第一批实现。新增统一 feature flag，默认关闭 CI Gate、候选资产、修复任务、实验中心、人工审核和 Judge 审计；主导航只保留 Overview、Dataset、Skill、Workflow、Task、Trace、Report、Governance；被关闭模块直达路由显示 Experimental/Disabled 状态。Report 在没有真实 QualityCheckResult 与 LLM Gateway token usage 时显示 unavailable/skipped，不再把缺失数据包装成质量结论、成本或根因建议。
+- 变更文件：
+  - `.gitignore`
+  - `aegisqa/core/features.py`
+  - `aegisqa/api/routes/governance.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `docs/audit/feature_truth_audit.md`
+  - `frontend/e2e/productization.spec.ts`
+  - `frontend/src/features.ts`
+  - `frontend/src/features.test.ts`
+  - `frontend/src/data/demo.ts`
+  - `frontend/src/App.tsx`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/types.ts`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/RepairTasksPage.test.tsx`
+  - `frontend/src/test/ReportsPage.test.tsx`
+  - `frontend/src/test/lazyCharts.test.tsx`
+  - `frontend/src/test/lazyRoutes.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `tests/test_reality_first_phase0.py`
+- 验证命令：
+  - `python -m pytest tests\test_reality_first_phase0.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test -- src/features.test.ts src/test/App.test.tsx src/test/RepairTasksPage.test.tsx`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "主导航|Experimental|Workflow Skill Palette|Workflow Inspector|数据集"`
+  - `cd frontend && npm test -- src/test/ReportsPage.test.tsx -t "unavailable"`
+  - `cd frontend && npm test -- src/test/WorkflowDesignerPage.test.tsx src/pages/workflowDesigner/graphModel.test.ts`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run e2e -- workflow-designer.spec.ts productization.spec.ts`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Phase 0 后端目标测试：3 passed。
+  - 后端全量：通过；仍有 Starlette TestClient deprecation warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+  - 前端 Phase 0/Workflow focused 测试通过：App/Report/Workflow/feature flag/Repair Tasks 目标测试均通过。
+  - 前端全量 `npm test`：10 个测试文件、110 passed。高级模块测试已迁移为“默认 disabled + 显式 flag enabled 后仍可访问”的双态语义。
+  - 前端 E2E 全量：9 passed。CI Gate 与 Annotation Queue 在 E2E 中通过测试级 runtime flag 显式开启；Workflow 默认示例图补聚合节点后发布和试运行链路恢复通过。
+- 下一步：
+  - Phase 0 主体已收口，后续进入 Phase 1：Skill Package Spec v1、prompt manifest schema、包校验升级和 prompt/code/hybrid 示例包。
+  - Phase 2-6 尚未实现：Prompt Registry、LLM Gateway、Hybrid Skill A、真实 Step Trace、统一 GateEvaluator、Replay、ArtifactStore、Worker、Sandbox Lite 仍按原计划顺序推进。
+
+### 2026-06-03 当前进展与实现程度报告
+
+- 改动摘要：按用户要求读取当前项目内容，新增 `docs/CURRENT_PROGRESS.md`，从总体判断、代码规模、主流程、内部架构、验证资产、可演示链路、未完成项和结论几个维度总结 AegisQA 当前进展。报告区分“本地可演示工程化 MVP”和“企业级生产平台”两个口径，避免把生产化参考资产误写为已完整落地。
+- 变更文件：
+  - `docs/CURRENT_PROGRESS.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `rg --files`
+  - `rg -n "@app\.(get|post|put|delete|patch)|@router\.(get|post|put|delete|patch)" aegisqa\api`
+  - `rg -n "TODO|FIXME|NotImplemented|pass$|raise NotImplemented" aegisqa frontend\src tests docs`
+  - `git diff --check`
+- 测试结果：
+  - 已完成静态项目盘点：当前仓库包含 61 个后端 Python 文件、23 个后端测试文件、46 个前端 TS/TSX 文件、132 个 FastAPI 路由装饰器和 16 个 React 懒加载主页面。
+  - 代码 TODO/FIXME/NotImplemented 扫描未发现业务源码中的待实现标记，仅命中文档历史命令记录。
+  - `git diff --check` 通过，仅提示 Windows 工作区 LF/CRLF 换行转换 warning。
+  - 本次为文档生成，未重新运行后端/前端全量测试。
+- 下一步：
+  - 如需把进展报告作为发布材料，可继续压缩成 README 中的“当前状态”章节或整理成对外版本路线图。
 
 ### 2026-06-02 README 详细介绍与 GitHub 推送准备
 
@@ -4494,3 +4804,324 @@ GitHub 发布准备阶段。本阶段按用户要求补充详细项目介绍文�
   - Playwright E2E：9 passed，覆盖任务主链路、CI Gate、Annotation Queue 和 Workflow 画布。
   - 空白检查：`git diff --check` 仅提示 Windows CRLF 换行转换 warning，未发现空白错误。
 - 下一步：提交本批次改动并收尾；后续如继续深化，可优先评估 Secret 引用候选和 JSON schema 嵌套参数编辑。
+
+### 2026-06-03 Reality-first rebuild Phase 0-6 阶段落地
+
+- 改动摘要：按 rebuild 计划从主线降噪推进到 Runtime 可回放链路。新增后端/前端 feature flag，默认隐藏 CI Gate、候选资产、修复任务、实验中心、人工审核和 Judge 审计；Report 在缺少真实质量、成本、evidence 时显示 unavailable/skipped，不再生成假质量、假成本和假根因。新增 Skill Package v1 schema、Prompt manifest schema、Prompt Registry、LLM Gateway、Model Alias 接口、真实 Step Trace 字段、GateEvaluator、Step Replay、Prompt Debug、Repro Bundle、ArtifactStore 和本地 Worker。
+- 变更文件：
+  - `aegisqa/core/features.py`
+  - `aegisqa/llm/`
+  - `aegisqa/quality/`
+  - `aegisqa/skills/specs/`
+  - `aegisqa/storage/artifacts.py`
+  - `aegisqa/workers/local.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/skills.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/engine/runner.py`
+  - `aegisqa/skills/packages.py`
+  - `frontend/src/features.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/pages/SkillsPage.tsx`
+  - `frontend/src/pages/TraceFlowPage.tsx`
+  - `frontend/src/pages/TraceTreePage.tsx`
+  - `docs/audit/feature_truth_audit.md`
+  - `docs/specs/skill-package-v1.md`
+  - `examples/skill_packages/`
+- 阶段进展：
+  - Phase 0：完成 Feature Truth Audit、默认关闭高级模块、主导航降噪、Experimental/Disabled 页面提示、Report unavailable 状态。
+  - Phase 1：完成 Skill Package v1/prompt manifest schema、旧 manifest 兼容、包安全校验、Prompt/Code/Hybrid 示例包和合约测试路径。
+  - Phase 2：完成 Prompt Registry、LLM Gateway、test provider、Model Alias 最小 API、`context.llm.call()` 权限/变量/预算校验和 Prompt call trace。
+  - Phase 3：完成 Hybrid Skill A 示例和真实 Step Trace 持久化；Step 记录现在区分 `resolved_input`、`raw_output`、`validated_output`、`schema_errors`、`prompt_calls`、`skill_version`。
+  - Phase 4：完成 `QualityCheckResult`、`GateRule`、`GateEvaluationResult` 和统一 `GateEvaluator`；Preflight、Quality Gate、CI Gate 共用真实可计算规则，缺数据返回 skipped。
+  - Phase 5：完成 Step Replay、Prompt Debug、Repro Bundle 后端 API；Trace Flow 支持 Replay/Repro Bundle，Skill 详情支持 Prompt Debug 并展示 rendered/raw/parsed/schema/token。
+  - Phase 6：完成 JsonStore dev-only 标记、LocalArtifactStore、本地 Worker、API 入队和 `run-once` 调试接口；Run/RunItem/Step 增加规范化大写 `state` 字段，pause/cancel 后不再启动新的 RunItem；Subprocess sandbox 去除 provider API key/secret 环境变量并保留 cwd 隔离、timeout、stdout/stderr 限制。
+- 验证命令：
+  - `python -m pytest tests/test_runtime_infra_phase6.py tests/test_skill_package_security.py tests/test_skill_package_v1.py -q`
+  - `python -m pytest tests/test_task_center_api.py tests/test_api.py tests/test_api_interaction_contract.py tests/test_productization_api.py -q`
+  - `python -m pytest tests/test_runtime_infra_phase6.py tests/test_step_trace_phase3.py tests/test_trace_flow_api.py tests/test_platform_core.py -q`
+  - `python -m pytest tests/test_task_center_api.py tests/test_api.py tests/test_api_interaction_contract.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Prompt Debug"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Skill 合约测试|Prompt Debug|Skill 市场展示|Skill 详情"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 后端 Phase 6/包安全/Skill v1 定向：19 passed。
+  - 后端任务/API/产品化定向：30 passed。
+  - 后端 Runtime/Trace/平台核心定向：22 passed。
+  - 后端任务/API 合同回归：20 passed。
+  - 前端 Prompt Debug 定向：1 passed、54 skipped。
+  - 前端 Skills 相关定向：4 passed、51 skipped。
+  - 后端全量：`python -m pytest -q` 通过；仅有 Starlette/httpx 依赖弃用 warning。
+  - 前端 typecheck：通过。
+  - 前端全量：10 个测试文件、111 passed。
+  - Playwright E2E：9 passed，覆盖任务主链路、CI Gate、Annotation Queue 和 Workflow 画布。
+  - 空白检查：`git diff --check` 仅提示 Windows LF/CRLF 转换 warning，未发现空白错误。
+- 下一步：继续补齐 Sandbox Lite 文档化限制、Worker 执行链路的更完整 UI 状态和 ArtifactStore 生产替换说明。
+
+### 2026-06-03 Phase 6 Worker UI 与 Runtime 基础设施规格
+
+- 改动摘要：继续收口 Phase 6。执行中心新增 `Local Worker` 区块，展示本地 worker ready 状态、pending run 数量和队列 run_id，支持点击“执行一次”调用 `/workers/local/run-once` 推进一个 RunItem，并刷新任务列表与 worker 状态。新增 `docs/specs/runtime-infrastructure-v1.md`，明确 JsonStore dev-only、SQLite local persistent trial、生产数据库 + ArtifactStore 方向、Local Worker 行为、Run/RunItem/Step 状态机和 Sandbox Lite 当前保证/非保证边界。
+- 变更文件：
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/types.ts`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `docs/specs/runtime-infrastructure-v1.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Worker 队列"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Worker 队列|任务列表执行按钮|完成态任务"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest tests/test_runtime_infra_phase6.py tests/test_skill_package_security.py -q`
+  - `cd frontend && npm test`
+- 测试结果：
+  - RED：新增 Worker 队列测试最初失败，确认执行中心没有本地 Worker 状态区块和 run-once 操作入口。
+  - GREEN：Worker 队列定向测试 1 passed、55 skipped。
+  - 执行中心定向：5 passed、51 skipped。
+  - 回归：前端全量首次发现 Worker 按钮“执行一次”与任务行“执行”按钮在 `/执行/` 选择器下产生歧义；已改为“处理队列一次”，相关回归测试 3 passed、53 skipped。
+  - 前端 typecheck：通过。
+  - 后端 Runtime/Worker + Sandbox 定向：13 passed；仅有 Starlette/httpx 依赖弃用 warning。
+  - 前端全量：10 个测试文件、112 passed。
+- 下一步：运行本批次空白检查；随后继续评估是否需要在任务详情/Attempts 中展示 Run/RunItem/Step 规范化 `state`。
+
+### 2026-06-03 任务详情 Runtime State 可见性
+
+- 改动摘要：继续把 Phase 6 状态机从后端字段落到前端可见面。任务详情概览新增 `Runtime State`，优先展示后端规范化大写 `state`，旧任务没有该字段时回退到 `status.toUpperCase()`；Run Attempts 时间线新增 `state <STATE>`，保留旧 lowercase status 和 run_id，便于同时兼容历史 UI 与 rebuild runtime contract。
+- 变更文件：
+  - `frontend/src/pages/task/TaskSnapshotPanel.tsx`
+  - `frontend/src/pages/task/TaskOperationsDrawer.tsx`
+  - `frontend/src/types.ts`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Runtime State"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Runtime State|Run Attempts"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+- 测试结果：
+  - RED：Runtime State 目标测试最初失败，确认任务详情没有展示规范化 `state`。
+  - GREEN：Runtime State + Run Attempts 定向 2 passed、55 skipped。
+  - 前端 typecheck：通过。
+  - 前端全量：10 个测试文件、113 passed。
+- 下一步：运行空白检查；随后继续补 Step 级状态在 Trace Flow/Trace Tree 的可见性，尤其是 `SCHEMA_INVALID`、`TIMEOUT` 和旧 Run 降级显示。
+
+### 2026-06-03 Trace Step Runtime State 可见性
+
+- 改动摘要：继续补齐 Phase 6 状态机可见性。Trace Tree 后端 payload 现在返回 Run/RunItem/Step 的规范化 `state`，并补齐 Step 详情中的 `skill_version`、`resolved_input`、`resolved_config`、`parameter_trace`、`raw_output`、`validated_output`、`schema_errors`、`prompt_calls`，避免真实接口弱于前端 mock。Trace Flow 和 Trace Tree 前端展示 Run/Item/Step 的 `Runtime State`，旧 run 缺少 `state` 时回退到 `status.toUpperCase()`；Step timeline 明确显示 `state <STATE>`，便于识别 `SCHEMA_INVALID`、`TIMEOUT` 等运行时状态。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/reports/trace_flow.py`
+  - `frontend/src/pages/TraceFlowPage.tsx`
+  - `frontend/src/pages/TraceTreePage.tsx`
+  - `frontend/src/types.ts`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `tests/test_step_trace_phase3.py`
+  - `tests/test_productization_api.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests/test_step_trace_phase3.py tests/test_productization_api.py::test_experiment_snapshot_and_trace_tree_are_created_from_run -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Flow|Trace Tree"`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - RED：Step Trace/Trace Tree 定向测试最初失败，确认 Trace Flow/Trace Tree payload 缺少 Step `state` 字段。
+  - GREEN：后端 Trace 定向 3 passed；仅有 Starlette/httpx 依赖弃用 warning。
+  - 前端 Trace 定向：4 passed、53 skipped。
+  - 前端 typecheck：通过。
+- 下一步：运行空白检查；随后继续做一次全量 pytest/frontend 回归，确认 Phase 0-6 大批量改动在最新状态下仍然闭环。
+
+### 2026-06-03 最新全量回归与 Windows FileLock 稳定性
+
+- 改动摘要：全量回归时发现 `JsonStore.append_jsonl` 并发测试在 Windows 下偶发丢行，根因是锁文件刚释放/删除的短窗口里 `os.open(... O_EXCL ...)` 可能返回 `PermissionError`，线程直接退出后 JSONL 写入缺失。`FileLock.acquire()` 现在把 `PermissionError` 与 `FileExistsError` 一样视为锁竞争并按原超时策略重试，避免本地 Worker、Playwright 和多线程测试共享 JsonStore 时出现偶发写入丢失。
+- 变更文件：
+  - `aegisqa/storage/file_lock.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `1..5 | ForEach-Object { python -m pytest tests/test_json_store_locking.py -q; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - RED：后端全量首次失败在 `test_json_store_append_jsonl_preserves_concurrent_rows`，400 行期望实际只读到 380 行，并伴随 writer 线程 `PermissionError`。
+  - GREEN：JsonStore/FileLock 定向连续 5 次通过。
+  - 后端全量：通过；仅有 Starlette/httpx 依赖弃用 warning。
+  - 前端 typecheck：通过。
+  - 前端全量：10 个测试文件、113 passed。
+  - Playwright E2E：9 passed，覆盖任务主链路、CI Gate、Annotation Queue 和 Workflow 画布。
+- 下一步：继续梳理 Phase 0-6 是否还有真实 runtime 与 UI 信息不对齐的边角，例如 ArtifactStore 暴露入口、Worker 自动轮询和 Gate 失败证据在详情页的可操作性。
+
+### 2026-06-03 Repro Bundle 接入 ArtifactStore
+
+- 改动摘要：把 Phase 6 的 `ArtifactStore` 从纯接口/单测推进到真实 runtime API。`create_app()` 现在初始化 `LocalArtifactStore` 并挂到 `app.state` 与 `RouteContext`；`GET /runs/{run_id}/items/{item_id}/steps/{step_id}/repro-bundle` 在返回 bundle 的同时，将 workflow、skill manifest、prompt assets、resolved/raw/validated output、schema errors、prompt calls 和参数追踪写入 `LocalArtifactStore`，返回 `artifact_uri` 和 `artifact_metadata`。Trace Flow 的 Repro Bundle 结果卡会展示该 URI，方便后续下载、留档或迁移到对象存储。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/context.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `tests/test_replay_debug_phase5.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests/test_replay_debug_phase5.py::test_step_replay_and_repro_bundle_export_real_step_fields -q`
+  - `python -m pytest tests/test_runtime_infra_phase6.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Flow 页面展示"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest -q`
+- 测试结果：
+  - RED：Repro Bundle 定向测试最初失败，确认接口未返回 `artifact_uri`。
+  - GREEN：Repro Bundle 定向通过；Phase 6 runtime infra 6 passed。
+  - 前端 Trace Flow 定向：1 passed、56 skipped。
+  - 前端 typecheck：通过。
+  - 后端全量：通过；仅有 Starlette/httpx 依赖弃用 warning。
+- 下一步：继续补 Worker 状态自动刷新/轮询，或把 report export/rendered prompt/raw LLM response 等大对象逐步迁移到 ArtifactStore URI。
+
+### 2026-06-03 Local Worker 自动轮询
+
+- 改动摘要：执行中心 `Local Worker` 区块在 `pending_runs` 非空时显示 `auto refresh`，并每 1.5 秒刷新 worker status、重新拉取任务列表，避免用户手动点击刷新才能看到本地 Worker 推进后的状态变化；队列为空时停止轮询。手动“处理队列一次”保留，用于本地调试单步执行。
+- 变更文件：
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Worker 队列"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心"`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - Worker 队列定向：2 passed、56 skipped。
+  - 执行中心定向：6 passed、52 skipped。
+  - 前端 typecheck：通过。
+- 下一步：继续把 report export、rendered prompt、raw LLM response 等大对象逐步迁移到 ArtifactStore URI，或补 Gate failed 详情页中的 rule evidence 操作入口。
+
+### 2026-06-03 Report 使用真实 LLM Gateway Token Usage
+
+- 改动摘要：补齐 Phase 0/Phase 2 到 Report 的真实成本链路。v1 Prompt Skill 的本地 test provider trace 现在会记录 `provider`、`model`、`schema_validation`、`token_usage`、`duration_ms`；Prompt manifest 中的 `test_response` 会随 prompt asset 保存，确保合约测试和本地 test provider 可产生符合 output schema 的真实 trace。任务 Report 现在从持久化 `RunItemStep.prompt_calls` 聚合 token usage：有真实 `token_usage.total_tokens` 时 `cost_status.source=llm_gateway`，返回 token 汇总、prompt call 数、provider/model；没有真实 token usage 时继续显示 `Token/cost unavailable`。前端报告中心在成本预算卡展示 `LLM Gateway`、Total tokens 和 Prompt calls。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/skills/packages.py`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/types.ts`
+  - `frontend/src/test/ReportsPage.test.tsx`
+  - `tests/test_reality_first_phase0.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests/test_reality_first_phase0.py::test_task_report_marks_quality_and_cost_unavailable_without_real_sources tests/test_reality_first_phase0.py::test_task_report_uses_real_llm_token_usage_when_prompt_calls_exist -q`
+  - `python -m pytest tests/test_reality_first_phase0.py tests/test_skill_package_v1.py::test_phase1_example_packages_upload_contract_approve_and_run tests/test_replay_debug_phase5.py::test_prompt_debug_renders_and_validates_prompt_asset -q`
+  - `cd frontend && npm test -- src/test/ReportsPage.test.tsx -t "LLM Gateway trace|unavailable"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest -q`
+- 测试结果：
+  - RED：新增 Report token usage 测试最初失败，确认 Report 固定返回 `cost_status.source=unavailable`。
+  - GREEN：无真实 token usage 时 unavailable 路径保持通过；有 prompt call token usage 时 Report 返回 `llm_gateway` 并去掉 token unavailable reason。
+  - 后端定向：6 passed；后端全量通过，仅有 Starlette/httpx 依赖弃用 warning。
+  - 前端 Report 定向：2 passed、12 skipped。
+  - 前端 typecheck：通过。
+- 下一步：继续处理质量结果链路：报告层仍不自行生成质量结论，后续应把 Run 完成后的 GateEvaluator 结果持久化为 `QualityCheckResult`，再由 Report 展示真实 `quality_checks/gate_evaluation`。
+
+### 2026-06-03 Report 展示真实 Quality Gate 结果
+
+- 改动摘要：补齐 Phase 4 到 Report 的质量门禁展示链路。任务配置 `quality_gate.pass_rate` 或 `quality_gate.max_badcase_count` 后，Report 会复用 `_ci_gate_metrics_from_task()` 派生的真实 Run/Task 指标，并通过统一 `GateEvaluator` 生成 `QualityCheckResult` 与 `gate_evaluation`；返回中同时保留 Report 旧字段 `results`、`failed_blocking_rules`、`blocking`，方便前端展示失败规则证据。未配置质量门槛时继续返回空 `quality_checks` 和 `Quality checks are not configured.`，不凭报告层自行生成质量结论。前端报告中心新增“质量门禁”卡片，展示 decision、summary、规则状态、actual/threshold 和 evidence。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/types.ts`
+  - `frontend/src/test/ReportsPage.test.tsx`
+  - `tests/test_quality_gate_phase4.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests/test_quality_gate_phase4.py::test_task_report_exposes_quality_gate_evaluation_when_gate_is_configured tests/test_reality_first_phase0.py::test_task_report_marks_quality_and_cost_unavailable_without_real_sources -q`
+  - `python -m pytest tests/test_quality_gate_phase4.py tests/test_reality_first_phase0.py::test_task_report_marks_quality_and_cost_unavailable_without_real_sources -q`
+  - `cd frontend && npm test -- src/test/ReportsPage.test.tsx -t "质量门禁|LLM Gateway trace|unavailable"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest -q`
+- 测试结果：
+  - RED：Report quality gate 测试最初失败，确认 `quality_checks` 仍为空。
+  - GREEN：配置质量门槛后 Report 返回 `pass_rate_gate`、`badcase_count_gate` 和失败 evidence；未配置时 unavailable 路径保持通过。
+  - 后端 Phase 4 定向：7 passed；后端全量通过，仅有 Starlette/httpx 依赖弃用 warning。
+  - 前端 Report 定向：3 passed、12 skipped。
+  - 前端 typecheck：通过。
+- 下一步：继续推进 Run 完成后 GateEvaluationResult 的持久化，或把 report export、rendered prompt/raw LLM response 等大对象迁移到 ArtifactStore URI。
+
+### 2026-06-03 Report Export 接入 ArtifactStore
+
+- 改动摘要：继续补齐 Phase 6 ArtifactStore 承载对象。`GET /tasks/{task_id}/report/export` 现在在返回原有 `content` 的同时，将 JSON/CSV/HTML 导出内容写入 `LocalArtifactStore`，返回 `artifact_uri` 和 `artifact_metadata`；审计事件 `task.report.export` 也记录 `artifact_uri`。前端下载流程保持兼容，仍使用响应内联 content；后续可切换为按 artifact URI 下载或保留导出留档。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_center_api.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests/test_task_center_api.py::test_task_lifecycle_report_and_trace_tree -q`
+  - `python -m pytest tests/test_task_center_api.py -q -k "report or export"`
+  - `python -m pytest -q`
+- 测试结果：
+  - 任务报告导出链路：1 passed，验证 JSON artifact 可读回、CSV/HTML artifact bytes 与 content 一致、审计事件记录 artifact URI。
+  - 任务中心 report/export 相关：3 passed。
+  - 后端全量：通过；仅有 Starlette/httpx 依赖弃用 warning。
+- 下一步：继续迁移 rendered prompt/raw LLM response 到 ArtifactStore URI，或补 Step/Prompt Debug 的 artifact 下载入口。
+
+### 2026-06-03 Runtime Prompt Call 接入 ArtifactStore
+
+- 改动摘要：补齐 Phase 6 中 rendered prompts 和 raw LLM responses 的 ArtifactStore 承载。`WorkflowRunner` 现在支持可选 `artifact_store` 注入；`create_app()` 会把 `LocalArtifactStore` 注入 Runner。v1 Prompt Skill 执行产生 `prompt_calls` 后，Runner 会把 `rendered_prompt` 和 `raw_response` 分别写入 `LocalArtifactStore`，并在 prompt call trace 上追加 `artifact_uris.rendered_prompt/raw_response`。直接单元测试手动创建 Runner 时未传 artifact store，仍保持原行为。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/engine/runner.py`
+  - `tests/test_reality_first_phase0.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests/test_reality_first_phase0.py::test_task_report_marks_quality_and_cost_unavailable_without_real_sources tests/test_reality_first_phase0.py::test_task_report_uses_real_llm_token_usage_when_prompt_calls_exist -q`
+  - `python -m pytest tests/test_llm_gateway_phase2.py tests/test_replay_debug_phase5.py tests/test_runtime_infra_phase6.py tests/test_reality_first_phase0.py::test_task_report_uses_real_llm_token_usage_when_prompt_calls_exist -q`
+  - `python -m pytest tests/test_step_trace_phase3.py -q`
+  - `python -m pytest -q`
+- 测试结果：
+  - Prompt cost/report 测试验证 prompt call trace 的 rendered/raw artifact URI 可读回原文。
+  - Phase 2/5/6 定向：13 passed；Step Trace Phase 3：2 passed。
+  - 后端全量：通过；仅有 Starlette/httpx 依赖弃用 warning。
+- 下一步：继续补 Prompt Debug 返回 artifact URI，或进一步把 uploaded datasets/skill packages 的 artifact URI 暴露到 API payload。
+
+### 2026-06-03 Prompt Debug 接入 ArtifactStore
+
+- 改动摘要：`POST /skills/{skill_id}/versions/{version}/prompts/{prompt_name}/debug` 现在会把 rendered prompt、raw response 和完整 debug result 写入 `LocalArtifactStore`，返回 `artifact_uris` 与 `artifact_metadata`，审计事件 `prompt.debug` 也记录 artifact URI。前端 Skill 详情的 Prompt Debug 结果新增 `Artifact URIs` 卡片，用于查看调试资产留档位置。
+- 变更文件：
+  - `aegisqa/api/routes/skills.py`
+  - `frontend/src/pages/SkillsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `tests/test_replay_debug_phase5.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests/test_replay_debug_phase5.py::test_prompt_debug_renders_and_validates_prompt_asset tests/test_skill_package_security.py::test_skill_package_records_contract_and_approval_metadata -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Prompt Debug"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest -q`
+- 测试结果：
+  - 后端 Prompt Debug/Skill 审批定向：2 passed。
+  - 前端 Prompt Debug 定向：1 passed、57 skipped。
+  - 前端 typecheck：通过。
+  - 后端全量：通过；仅有 Starlette/httpx 依赖弃用 warning。
+- 下一步：继续暴露 uploaded datasets/skill packages 的 artifact URI，或开始做完整计划完成度审计，逐项确认还有哪些 explicit requirement 未被当前测试覆盖。
+
+### 2026-06-03 Dataset 与 Skill Package 上传接入 ArtifactStore
+
+- 改动摘要：继续补齐 Phase 6 中 uploaded datasets 和 skill packages 的 ArtifactStore 承载。`DatasetVersion` 新增 `artifact_uri` 和 `artifact_metadata`；`/datasets/from-path` 与 `/datasets/upload` 在解析并生成 row store 后，会把原始 CSV/JSONL 源文件写入 `LocalArtifactStore` 并回写 Dataset metadata。`/skills/packages/upload` 会把原始 zip 包写入 `LocalArtifactStore`，返回并持久化 `artifact_uri/artifact_metadata`。这些 URI 让后续迁移对象存储或导出回放包时不再依赖裸本地路径。
+- 变更文件：
+  - `aegisqa/datasets/service.py`
+  - `aegisqa/api/routes/datasets.py`
+  - `aegisqa/api/routes/skills.py`
+  - `tests/test_task_center_api.py`
+  - `tests/test_skill_package_security.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests/test_task_center_api.py::test_task_lifecycle_report_and_trace_tree tests/test_skill_package_security.py::test_skill_package_records_contract_and_approval_metadata -q`
+  - `python -m pytest tests/test_skill_package_v1.py tests/test_runtime_infra_phase6.py -q`
+  - `python -m pytest -q`
+- 测试结果：
+  - Dataset/Skill package artifact 定向：2 passed，验证源 JSONL 和上传 zip 可由 artifact URI 读回。
+  - Skill Package v1 + Runtime infra：13 passed。
+  - 后端全量：通过；仅有 Starlette/httpx 依赖弃用 warning。
+- 下一步：开始做完整计划完成度审计，按 Phase 0-6 的 explicit requirements 对当前实现和测试证据逐项确认，继续补遗漏。

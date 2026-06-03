@@ -40,6 +40,8 @@ class DatasetVersion(BaseModel):
     created_at: str = ""
     source_type: str = "unknown"
     source_ref: dict[str, Any] = Field(default_factory=dict)
+    artifact_uri: str | None = None
+    artifact_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class DatasetService:

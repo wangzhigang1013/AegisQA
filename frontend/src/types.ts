@@ -6,10 +6,17 @@ export type ApiError = {
 };
 
 export type SkillManifest = {
+  schema_version?: number;
   skill_id: string;
   name: string;
   version: string;
   description: string;
+  type?: 'prompt' | 'code' | 'hybrid';
+  category?: string;
+  runtime?: Record<string, unknown>;
+  prompts?: { name: string; path: string; [key: string]: unknown }[];
+  llm_permissions?: Record<string, unknown>;
+  limits?: Record<string, unknown>;
   tags: string[];
   scenarios: string[];
   input_schema: Record<string, unknown>;
@@ -150,14 +157,37 @@ export type WorkflowDraftRecord = {
 export type RunRecord = {
   run_id: string;
   status: string;
+  state?: string;
   total_items: number;
   queue_messages: { item_id: string }[];
   items: {
     item_id: string;
     row_id: string;
     status: string;
+    state?: string;
     steps: Record<string, unknown>[];
   }[];
+};
+
+export type LocalWorkerStatus = {
+  status: string;
+  pending_runs: string[];
+};
+
+export type LocalWorkerRunOnceResult = {
+  status: string;
+  run_id?: string;
+  run_status?: string;
+  processed_items: number;
+};
+
+export type ModelAlias = {
+  alias: string;
+  provider: string;
+  model: string;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type RunReport = {
@@ -191,6 +221,9 @@ export type BadcaseRecord = {
   status: string;
   reason: string;
   payload: Record<string, unknown>;
+  source?: string | null;
+  source_id?: string | null;
+  evidence?: unknown;
   human_label?: string | null;
   problem_type?: string | null;
   note?: string | null;
@@ -240,7 +273,29 @@ export type SkillContractResult = {
   output?: Record<string, unknown>;
   metrics?: Record<string, unknown>;
   error?: string;
+  code?: string;
   message?: string;
+  details?: Record<string, unknown>;
+};
+
+export type PromptAsset = {
+  name: string;
+  path: string;
+  prompt_hash: string;
+  input_variables: Record<string, unknown>;
+  output_schema: Record<string, unknown>;
+  model_policy: Record<string, unknown>;
+  retry_policy: Record<string, unknown>;
+};
+
+export type PromptDebugResult = {
+  prompt_name: string;
+  rendered_prompt: string;
+  raw_response: string;
+  parsed_output?: Record<string, unknown> | null;
+  schema_validation?: Record<string, unknown>;
+  token_usage?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type SkillPackageRecord = {
@@ -249,7 +304,9 @@ export type SkillPackageRecord = {
   status: string;
   manifest: SkillManifest;
   package_dir?: string;
-  handler_path?: string;
+  handler_path?: string | null;
+  prompt_assets?: PromptAsset[];
+  warnings?: { code: string; message: string; files?: string[]; [key: string]: unknown }[];
   last_contract_ok: boolean;
   last_contract_result?: Record<string, unknown> | null;
   last_contract_at?: string | null;
@@ -275,6 +332,7 @@ export type TaskRecord = {
   workflow_version_id: string;
   run_id: string;
   status: string;
+  state?: string;
   total_items: number;
   completed_items: number;
   failed_items: number;
@@ -301,6 +359,7 @@ export type TaskRecord = {
     attempt_index: number;
     run_id: string;
     status: string;
+    state?: string;
     total_items: number;
     completed_items: number;
     failed_items: number;
@@ -514,8 +573,29 @@ export type TaskReport = {
     segment_value?: string | null;
   }[];
   quality_decision?: QualityDecision;
+  quality_checks?: Record<string, unknown>[];
+  gate_evaluation?: {
+    decision: string;
+    blocking?: boolean;
+    summary: string | Record<string, number>;
+    results: Record<string, unknown>[];
+    failed_blocking_rules: Record<string, unknown>[];
+  };
   parameter_governance?: TaskParameterGovernance;
   budget_status?: BudgetStatus;
+  cost_status?: {
+    source: string;
+    message: string;
+    token_usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    };
+    prompt_call_count?: number;
+    providers?: string[];
+    models?: string[];
+  };
+  unavailable_reasons?: string[];
   diagnostics?: TaskDiagnostics;
   report: RunReport;
   badcases: Record<string, unknown>[];
@@ -1307,6 +1387,7 @@ export type CIGateEvaluationPageResult = {
 export type TraceTree = {
   run_id: string;
   status: string;
+  state?: string;
   workflow_version: string;
   dataset_version?: string;
   pagination?: {
@@ -1319,10 +1400,32 @@ export type TraceTree = {
     item_id: string;
     row_id: string;
     status: string;
+    state?: string;
     metrics: Record<string, unknown>;
     error?: Record<string, unknown> | null;
     children: Record<string, unknown>[];
   }[];
+};
+
+export type TraceStep = {
+  step_id: string;
+  skill_ref: string;
+  skill_version?: string | null;
+  status: string;
+  state?: string;
+  input: Record<string, unknown>;
+  resolved_input?: Record<string, unknown>;
+  resolved_config: Record<string, unknown>;
+  parameter_trace: Record<string, { source: string; value_preview: unknown; redacted: boolean; expression_path?: string; secret_ref?: string }>;
+  output: Record<string, unknown>;
+  raw_output?: Record<string, unknown>;
+  validated_output?: Record<string, unknown>;
+  schema_errors?: Record<string, unknown>[];
+  prompt_calls?: Record<string, unknown>[];
+  metrics: Record<string, unknown>;
+  latency_ms: number;
+  cache_hit: boolean;
+  error?: Record<string, unknown> | null;
 };
 
 export type TaskTraceFlow = {
@@ -1342,6 +1445,7 @@ export type TaskTraceFlow = {
   attempt: {
     run_id: string;
     status: string;
+    state?: string;
     current_attempt: number;
     started_at?: string | null;
     finished_at?: string | null;
@@ -1360,23 +1464,12 @@ export type TaskTraceFlow = {
     row_index: number;
     repeat_index: number;
     status: string;
+    state?: string;
     row: Record<string, unknown>;
     context: Record<string, unknown>;
     metrics: Record<string, unknown>;
     error?: Record<string, unknown> | null;
-    steps: {
-      step_id: string;
-      skill_ref: string;
-      status: string;
-      input: Record<string, unknown>;
-      resolved_config: Record<string, unknown>;
-      parameter_trace: Record<string, { source: string; value_preview: unknown; redacted: boolean; expression_path?: string; secret_ref?: string }>;
-      output: Record<string, unknown>;
-      metrics: Record<string, unknown>;
-      latency_ms: number;
-      cache_hit: boolean;
-      error?: Record<string, unknown> | null;
-    }[];
+    steps: TraceStep[];
     badcase: {
       is_badcase: boolean;
       reason?: string;

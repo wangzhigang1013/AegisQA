@@ -1,0 +1,21 @@
+{
+  "name": "judge",
+  "input_variables": {
+    "question": { "type": "string" },
+    "answer": { "type": "string" }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "result": { "type": "string" },
+      "confidence": { "type": "number" },
+      "evidence": { "type": "array", "items": { "type": "string" } }
+    },
+    "required": ["result", "confidence", "evidence"]
+  },
+  "model_policy": {
+    "allowed_aliases": ["test.judge"],
+    "default_alias": "test.judge"
+  },
+  "retry_policy": { "max_retries": 0 }
+}

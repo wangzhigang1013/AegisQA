@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import FastAPI
+from pydantic import BaseModel, Field
 
 from aegisqa.api.routes.context import RouteContext
+from aegisqa.core.errors import AegisQAError
+from aegisqa.core.features import resolve_feature_flags
+from aegisqa.llm.models import ModelAlias
 from aegisqa.reports.aggregator import aggregate_run_report
+
+
+class ModelAliasRequest(BaseModel):
+    alias: str
+    provider: str
+    model: str
+    enabled: bool = True
+    allowed_skill_ids: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 def register_governance_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -16,6 +30,31 @@ def register_governance_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "aegisqa"}
+
+    @app.get("/features")
+    def features() -> dict[str, Any]:
+        return {"features": resolve_feature_flags()}
+
+    @app.get("/model-aliases")
+    def list_model_aliases() -> list[dict[str, Any]]:
+        return sorted(ctx.store.list_json(["model_aliases"]), key=lambda item: item.get("alias", ""))
+
+    @app.post("/model-aliases")
+    def upsert_model_alias(request: ModelAliasRequest) -> dict[str, Any]:
+        if "/" in request.alias or "\\" in request.alias:
+            raise AegisQAError("MODEL_ALIAS_INVALID", "Model alias 不能包含路径分隔符。", details={"alias": request.alias})
+        alias = ModelAlias(**request.model_dump())
+        payload = alias.model_dump(mode="json")
+        payload["created_at"] = _alias_created_at(ctx, alias.alias)
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        ctx.store.write_json(["model_aliases", f"{alias.alias}.json"], payload)
+        ctx.audit_service.record(
+            actor="api",
+            action="model_alias.upsert",
+            target=alias.alias,
+            detail={"provider": alias.provider, "model": alias.model, "enabled": alias.enabled},
+        )
+        return payload
 
     @app.get("/dashboard/summary")
     def dashboard_summary() -> dict[str, Any]:
@@ -50,3 +89,10 @@ def register_governance_routes(app: FastAPI, ctx: RouteContext) -> None:
     def list_audit_events(actor: str | None = None, action: str | None = None, target: str | None = None) -> list[dict[str, Any]]:
         events = ctx.audit_service.list_events(actor=actor, action=action, target=target)
         return [event.model_dump(mode="json") for event in events]
+
+
+def _alias_created_at(ctx: RouteContext, alias: str) -> str:
+    existing = ctx.store.read_json(["model_aliases", f"{alias}.json"])
+    if existing and existing.get("created_at"):
+        return str(existing["created_at"])
+    return datetime.now(timezone.utc).isoformat()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timezone
+import hashlib
 import json
 from math import ceil
 import os
@@ -31,13 +32,17 @@ from aegisqa.datasets.service import DatasetService
 from aegisqa.engine.runner import RunRecord, RunRequest, WorkflowRunner
 from aegisqa.judge.audit import JudgeAuditResult, audit_judge_profile
 from aegisqa.judge.profiles import JudgeProfile, JudgeProfileService, StoredJudgeAudit
+from aegisqa.quality.gates import GateEvaluator
+from aegisqa.quality.models import GateContext, GateRule
 from aegisqa.reports.aggregator import RunReport, aggregate_run_report
 from aegisqa.security.access import AccessControl
 from aegisqa.skills.base import SkillManifest
-from aegisqa.skills.packages import SubprocessPackageSkill
+from aegisqa.skills.packages import MetadataOnlyPackageSkill, SubprocessPackageSkill
 from aegisqa.skills.registry import SkillRegistry
+from aegisqa.storage.artifacts import LocalArtifactStore
 from aegisqa.storage.json_store import JsonStore
 from aegisqa.storage.sqlite_store import SQLiteStore
+from aegisqa.workers.local import LocalRunWorker
 from aegisqa.workflows.graph import WorkflowGraph, WorkflowGraphService, WorkflowGraphValidationResult
 from aegisqa.workflows.models import WorkflowDraft, WorkflowVersion
 from aegisqa.workflows.service import WorkflowService
@@ -180,6 +185,20 @@ class SkillGovernanceRequest(BaseModel):
 class SkillPackageUploadRequest(BaseModel):
     filename: str
     content_base64: str
+
+
+MAX_SKILL_PACKAGE_BYTES = 5 * 1024 * 1024
+MAX_SKILL_PACKAGE_FILES = 200
+MAX_SKILL_PACKAGE_EXTRACTED_BYTES = 20 * 1024 * 1024
+EXECUTABLE_BINARY_EXTENSIONS = {".exe", ".dll", ".so", ".dylib", ".bin"}
+DIRECT_MODEL_SDK_PATTERNS = (
+    r"\bimport\s+openai\b",
+    r"\bfrom\s+openai\s+import\b",
+    r"\bimport\s+anthropic\b",
+    r"\bfrom\s+anthropic\s+import\b",
+    r"\bimport\s+google\.generativeai\b",
+    r"\bfrom\s+google\.generativeai\s+import\b",
+)
 
 
 class TaskCreateRequest(BaseModel):
@@ -344,8 +363,10 @@ def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend
     store = _create_store(store_root, storage_backend=storage_backend)
     registry = SkillRegistry.with_builtin_skills()
     _load_skill_packages(store, registry)
+    artifact_store = LocalArtifactStore(Path(store_root) / "artifacts")
     dataset_service = DatasetService(store)
-    runner = WorkflowRunner(store, dataset_service, registry)
+    runner = WorkflowRunner(store, dataset_service, registry, artifact_store=artifact_store)
+    worker = LocalRunWorker(runner)
     badcases = BadcaseService(store)
     workflow_service = WorkflowService(store, registry)
     graph_service = WorkflowGraphService(registry)
@@ -361,6 +382,8 @@ def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend
     app.state.registry = registry
     app.state.dataset_service = dataset_service
     app.state.runner = runner
+    app.state.worker = worker
+    app.state.artifact_store = artifact_store
     app.state.badcases = badcases
     app.state.workflow_service = workflow_service
     app.state.graph_service = graph_service
@@ -435,6 +458,8 @@ def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend
         workflow_service=workflow_service,
         graph_service=graph_service,
         runner=runner,
+        worker=worker,
+        artifact_store=artifact_store,
         badcases=badcases,
         judge_profiles=judge_profiles,
         access_control=access_control,
@@ -513,6 +538,12 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
         raw = base64.b64decode(request.content_base64)
     except Exception as exc:  # noqa: BLE001 - API 边界需要返回稳定错误。
         raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包内容不是合法 base64。") from exc
+    if len(raw) > MAX_SKILL_PACKAGE_BYTES:
+        raise AegisQAError(
+            "SKILL_PACKAGE_TOO_LARGE",
+            "插件包超过大小限制。",
+            details={"actual_bytes": len(raw), "max_bytes": MAX_SKILL_PACKAGE_BYTES},
+        )
     package_id = f"pkg-{uuid4().hex[:12]}"
     package_dir = store.path("uploaded_skill_packages", package_id, "package")
     package_dir.mkdir(parents=True, exist_ok=True)
@@ -521,7 +552,8 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
 
     try:
         with zipfile.ZipFile(zip_path) as archive:
-            _safe_extract_zip(archive, package_dir)
+            package_warnings = _validate_skill_package_archive(archive, package_dir)
+            archive.extractall(package_dir)
     except zipfile.BadZipFile as exc:
         raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包必须是合法 zip 文件。") from exc
 
@@ -529,21 +561,36 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
     handler_path = package_dir / "handler.py"
     if not manifest_path:
         raise AegisQAError("SKILL_PACKAGE_MANIFEST_MISSING", "插件包缺少 skill.yaml 或 skill.json。")
-    if not handler_path.exists():
-        raise AegisQAError("SKILL_PACKAGE_HANDLER_MISSING", "插件包缺少 handler.py。")
-
     manifest_payload = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
     manifest = SkillManifest(**manifest_payload)
+    prompt_assets = _load_prompt_assets(package_dir, manifest)
+    if not handler_path.exists() and manifest.type != "prompt":
+        raise AegisQAError("SKILL_PACKAGE_HANDLER_MISSING", "插件包缺少 handler.py。")
+
     manifest.enabled = False
     manifest.status = "pending_review"
-    registry.register(SubprocessPackageSkill(manifest, handler_path))
+    if handler_path.exists():
+        registry.register(
+            SubprocessPackageSkill(
+                manifest,
+                handler_path,
+                prompt_assets=prompt_assets,
+                model_aliases=_list_model_aliases_for_runtime(store),
+            )
+        )
+        handler_path_value = str(handler_path)
+    else:
+        registry.register(MetadataOnlyPackageSkill(manifest))
+        handler_path_value = None
     record = {
         "package_id": package_id,
         "filename": request.filename,
         "status": manifest.status,
         "manifest": manifest.model_dump(mode="json"),
         "package_dir": str(package_dir),
-        "handler_path": str(handler_path),
+        "handler_path": handler_path_value,
+        "prompt_assets": prompt_assets,
+        "warnings": package_warnings,
         "last_contract_ok": False,
         "last_contract_result": None,
         "last_contract_at": None,
@@ -559,11 +606,20 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
 
 def _load_skill_packages(store: JsonStore, registry: SkillRegistry) -> None:
     for record in _list_records(store, "skill_packages"):
-        handler_path = Path(record.get("handler_path", ""))
-        if not handler_path.exists():
-            continue
         manifest = SkillManifest(**record["manifest"])
-        registry.register(SubprocessPackageSkill(manifest, handler_path))
+        handler_path_value = record.get("handler_path")
+        handler_path = Path(handler_path_value) if handler_path_value else None
+        if handler_path and handler_path.exists():
+            registry.register(
+                SubprocessPackageSkill(
+                    manifest,
+                    handler_path,
+                    prompt_assets=record.get("prompt_assets", []),
+                    model_aliases=_list_model_aliases_for_runtime(store),
+                )
+            )
+        elif manifest.type == "prompt":
+            registry.register(MetadataOnlyPackageSkill(manifest))
 
 
 def _find_skill_package(store: JsonStore, skill_id: str) -> dict[str, Any] | None:
@@ -571,6 +627,10 @@ def _find_skill_package(store: JsonStore, skill_id: str) -> dict[str, Any] | Non
         if record.get("manifest", {}).get("skill_id") == skill_id:
             return record
     return None
+
+
+def _list_model_aliases_for_runtime(store: JsonStore) -> list[dict[str, Any]]:
+    return [record for record in _list_records(store, "model_aliases") if record.get("enabled", True)]
 
 
 def _update_skill_package_status(store: JsonStore, manifest: SkillManifest) -> None:
@@ -595,8 +655,25 @@ def _mark_skill_package_approved(store: JsonStore, skill_id: str, approval_note:
     _save_record(store, "skill_packages", "package_id", package)
 
 
-def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> None:
+def _validate_skill_package_archive(archive: zipfile.ZipFile, destination: Path) -> list[dict[str, Any]]:
     destination = destination.resolve()
+    members = archive.infolist()
+    if len(members) > MAX_SKILL_PACKAGE_FILES:
+        raise AegisQAError(
+            "SKILL_PACKAGE_TOO_MANY_FILES",
+            "插件包文件数量超过限制。",
+            details={"actual_files": len(members), "max_files": MAX_SKILL_PACKAGE_FILES},
+        )
+    extracted_bytes = sum(member.file_size for member in members)
+    if extracted_bytes > MAX_SKILL_PACKAGE_EXTRACTED_BYTES:
+        raise AegisQAError(
+            "SKILL_PACKAGE_EXTRACTED_TOO_LARGE",
+            "插件包解压后超过大小限制。",
+            details={"actual_extracted_bytes": extracted_bytes, "max_extracted_bytes": MAX_SKILL_PACKAGE_EXTRACTED_BYTES},
+        )
+    symlinks: list[str] = []
+    executable_binaries: list[str] = []
+    direct_model_sdk_calls: list[str] = []
     for member in archive.infolist():
         filename = member.filename.replace("\\", "/")
         parts = PurePosixPath(filename).parts
@@ -613,7 +690,101 @@ def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> None:
                 "插件包包含非法路径，禁止绝对路径或跨目录文件。",
                 details={"filename": member.filename},
             )
-    archive.extractall(destination)
+        if _zip_member_is_symlink(member):
+            symlinks.append(filename)
+        if not filename.endswith("/"):
+            suffix = Path(filename).suffix.lower()
+            if suffix in EXECUTABLE_BINARY_EXTENSIONS or archive.read(member)[:2] == b"MZ":
+                executable_binaries.append(filename)
+            if suffix in {".py", ".txt", ".md", ".yaml", ".yml", ".json"}:
+                try:
+                    text = archive.read(member).decode("utf-8")
+                except UnicodeDecodeError:
+                    text = ""
+                if text and any(re.search(pattern, text) for pattern in DIRECT_MODEL_SDK_PATTERNS):
+                    direct_model_sdk_calls.append(filename)
+    if symlinks or executable_binaries:
+        raise AegisQAError(
+            "SKILL_PACKAGE_UNSAFE_CONTENT",
+            "插件包包含不允许的 symlink 或可执行二进制。",
+            details={
+                "symlinks": symlinks,
+                "executable_binaries": executable_binaries,
+                "direct_model_sdk_calls": direct_model_sdk_calls,
+            },
+        )
+    warnings: list[dict[str, Any]] = []
+    if direct_model_sdk_calls:
+        warnings.append(
+            {
+                "code": "DIRECT_MODEL_SDK_CALL",
+                "message": "插件包疑似直接调用模型 SDK；生产运行必须改为平台 LLM Gateway。",
+                "files": direct_model_sdk_calls,
+            }
+        )
+    return warnings
+
+
+def _zip_member_is_symlink(member: zipfile.ZipInfo) -> bool:
+    return ((member.external_attr >> 16) & 0o170000) == 0o120000
+
+
+def _load_prompt_assets(package_dir: Path, manifest: SkillManifest) -> list[dict[str, Any]]:
+    prompt_assets: list[dict[str, Any]] = []
+    if manifest.schema_version < 1 and not manifest.prompts:
+        return prompt_assets
+    missing_files: list[str] = []
+    invalid_assets: list[dict[str, Any]] = []
+    for prompt_ref in manifest.prompts:
+        name = str(prompt_ref.get("name") or "")
+        path_value = str(prompt_ref.get("path") or f"prompts/{name}")
+        if not name:
+            invalid_assets.append({"name": name, "reason": "prompt name is required"})
+            continue
+        prompt_dir = (package_dir / path_value).resolve()
+        if package_dir.resolve() not in prompt_dir.parents and prompt_dir != package_dir.resolve():
+            invalid_assets.append({"name": name, "reason": "prompt path escapes package"})
+            continue
+        prompt_yaml = prompt_dir / "prompt.yaml"
+        prompt_md = prompt_dir / "prompt.md"
+        output_schema_path = prompt_dir / "output_schema.json"
+        if not prompt_yaml.exists():
+            missing_files.append(f"{path_value}/prompt.yaml")
+        if not prompt_md.exists():
+            missing_files.append(f"{path_value}/prompt.md")
+        if not prompt_yaml.exists() or not prompt_md.exists():
+            continue
+        payload = yaml.safe_load(prompt_yaml.read_text(encoding="utf-8")) or {}
+        for key in ["input_variables", "output_schema", "model_policy", "retry_policy"]:
+            if key not in payload:
+                invalid_assets.append({"name": name, "reason": f"{key} is required"})
+        output_schema = payload.get("output_schema")
+        if output_schema_path.exists():
+            output_schema = json.loads(output_schema_path.read_text(encoding="utf-8"))
+        prompt_text = prompt_md.read_text(encoding="utf-8")
+        prompt_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8") + b"\n" + prompt_text.encode("utf-8")
+        ).hexdigest()
+        prompt_assets.append(
+            {
+                "name": name,
+                "path": path_value,
+                "prompt_hash": prompt_hash,
+                "template": prompt_text,
+                "input_variables": payload.get("input_variables", {}),
+                "output_schema": output_schema or {},
+                "model_policy": payload.get("model_policy", {}),
+                "retry_policy": payload.get("retry_policy", {}),
+                "test_response": payload.get("test_response"),
+            }
+        )
+    if missing_files or invalid_assets:
+        raise AegisQAError(
+            "SKILL_PACKAGE_PROMPT_ASSET_INVALID",
+            "Prompt Skill 缺少必要 prompt 文件或 manifest 字段。",
+            details={"missing_files": missing_files, "invalid_assets": invalid_assets},
+        )
+    return prompt_assets
 
 
 def _first_existing(root: Path, names: list[str]) -> Path | None:
@@ -1386,6 +1557,8 @@ def _ci_gate_metrics_from_run(run: RunRecord) -> dict[str, float]:
             "p95_latency_ms": float(report.p95_latency_ms),
         }
     )
+    trace_metrics = _ci_gate_trace_metrics(run)
+    metrics.update(trace_metrics)
     return metrics
 
 
@@ -1399,6 +1572,39 @@ def _ci_gate_metrics_from_task(task: dict[str, Any], run: RunRecord) -> dict[str
     return metrics
 
 
+def _ci_gate_trace_metrics(run: RunRecord) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    total_items = len(run.items)
+    if total_items:
+        failed_items = sum(1 for item in run.items if item.status == "failed")
+        metrics["run_item_failure_rate"] = failed_items / total_items
+
+    steps = [step for item in run.items for step in item.steps]
+    if steps:
+        failed_steps = sum(1 for step in steps if step.status in {"failed", "schema_invalid", "timeout"} or step.error)
+        metrics["step_error_rate"] = failed_steps / len(steps)
+        output_schema_failures = sum(1 for step in steps if step.error and step.error.get("code") == "OUTPUT_SCHEMA_INVALID")
+        metrics["skill_output_schema_compliance"] = 1.0 - (output_schema_failures / len(steps))
+
+    prompt_calls = [call for step in steps for call in (step.prompt_calls or []) if isinstance(call, dict)]
+    if prompt_calls:
+        json_parse_failures = sum(1 for call in prompt_calls if call.get("error_code") == "JSON_PARSE_ERROR")
+        schema_failures = sum(1 for call in prompt_calls if call.get("error_code") == "OUTPUT_SCHEMA_INVALID" or _prompt_schema_invalid(call))
+        metrics["llm_json_parse_rate"] = 1.0 - (json_parse_failures / len(prompt_calls))
+        metrics["prompt_output_schema_rate"] = 1.0 - (schema_failures / len(prompt_calls))
+
+    return metrics
+
+
+def _prompt_schema_invalid(call: dict[str, Any]) -> bool:
+    schema_validation = call.get("schema_validation")
+    if isinstance(schema_validation, dict):
+        valid = schema_validation.get("valid")
+        if isinstance(valid, bool):
+            return not valid
+    return False
+
+
 def _build_trace_tree(run: RunRecord, *, page: int = 1, page_size: int = 50) -> dict[str, Any]:
     total_items = len(run.items)
     safe_page = max(page, 1)
@@ -1408,6 +1614,7 @@ def _build_trace_tree(run: RunRecord, *, page: int = 1, page_size: int = 50) -> 
     return {
         "run_id": run.run_id,
         "status": run.status,
+        "state": run.state,
         "workflow_version": run.workflow.version_id,
         "dataset_version": run.snapshot.get("dataset_version"),
         "pagination": {
@@ -1421,18 +1628,28 @@ def _build_trace_tree(run: RunRecord, *, page: int = 1, page_size: int = 50) -> 
                 "item_id": item.item_id,
                 "row_id": item.row_id,
                 "status": item.status,
+                "state": item.state,
                 "metrics": item.metrics,
                 "error": item.error,
                 "children": [
                     {
                         "step_id": step.step_id,
                         "skill_ref": step.skill_ref,
+                        "skill_version": step.skill_version,
                         "status": step.status,
+                        "state": step.state,
                         "latency_ms": step.latency_ms,
                         "cache_hit": step.cache_hit,
                         "rate_limit_wait_ms": step.rate_limit_wait_ms,
                         "input": step.input_snapshot,
+                        "resolved_input": step.resolved_input or step.input_snapshot,
+                        "resolved_config": step.config_snapshot,
+                        "parameter_trace": step.parameter_trace,
                         "output": step.output_snapshot,
+                        "raw_output": step.raw_output or step.output_snapshot,
+                        "validated_output": step.validated_output or step.output_snapshot,
+                        "schema_errors": step.schema_errors,
+                        "prompt_calls": step.prompt_calls,
                         "metrics": step.metrics,
                         "error": step.error,
                     }
@@ -1479,21 +1696,22 @@ def _evaluate_assertion(payload: dict[str, Any], assertion: AssertionRuleRequest
 
 
 def _evaluate_gate(metrics: dict[str, float], gate: CIGateRuleRequest) -> dict[str, Any]:
-    actual = float(metrics.get(gate.metric, 0))
-    passed = _compare(actual, gate.operator, gate.threshold)
+    result = GateEvaluator().evaluate(
+        GateContext(metrics=metrics),
+        [GateRule(rule_id=gate.gate_id, metric=gate.metric, operator=gate.operator, threshold=gate.threshold, blocking=gate.blocking)],
+    )
+    check = result.quality_checks[0]
     return {
         "gate_id": gate.gate_id,
         "metric": gate.metric,
         "operator": gate.operator,
         "threshold": gate.threshold,
-        "actual": actual,
+        "actual": check.actual,
         "blocking": gate.blocking,
-        "status": "passed" if passed else "failed",
-        "message": (
-            f"质量门禁通过：{gate.metric}={actual} {gate.operator} {gate.threshold}"
-            if passed
-            else f"质量门禁未通过：{gate.metric}={actual} 不满足 {gate.operator} {gate.threshold}"
-        ),
+        "status": check.status,
+        "reason": check.reason,
+        "message": check.message,
+        "evidence": check.evidence,
     }
 
 

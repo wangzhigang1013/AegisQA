@@ -48,9 +48,9 @@ class FileLock:
                     os.write(self._fd, f"pid={os.getpid()}\n".encode("utf-8"))
                     self._acquired = True
                     return self
-                except FileExistsError:
+                except (FileExistsError, PermissionError) as exc:
                     if monotonic() >= deadline:
-                        raise TimeoutError(f"等待文件锁超时：{self.lock_path}")
+                        raise TimeoutError(f"等待文件锁超时：{self.lock_path}") from exc
                     sleep(self.poll_interval_seconds)
         except BaseException:
             self._thread_lock.release()

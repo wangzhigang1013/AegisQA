@@ -33,6 +33,7 @@ def register_dataset_routes(app: FastAPI, ctx: RouteContext) -> None:
             label_field=request.label_field,
             answer_field=request.answer_field,
         )
+        _attach_dataset_source_artifact(ctx, dataset, path)
         return dataset.model_dump(mode="json")
 
     @app.post("/datasets/upload")
@@ -59,6 +60,7 @@ def register_dataset_routes(app: FastAPI, ctx: RouteContext) -> None:
             label_field=request.label_field,
             answer_field=request.answer_field,
         )
+        _attach_dataset_source_artifact(ctx, dataset, upload_path)
         return dataset.model_dump(mode="json")
 
     @app.post("/datasets/source-materialize")
@@ -93,3 +95,17 @@ def register_dataset_routes(app: FastAPI, ctx: RouteContext) -> None:
         dataset = ctx.dataset_service.correct_field_type(dataset_id, version, field_name, request.field_type)
         ctx.audit_service.record(actor="api", action="dataset.field_type.correct", target=f"{dataset_id}:v{version}:{field_name}", detail={"field_type": request.field_type})
         return dataset.model_dump(mode="json")
+
+
+def _attach_dataset_source_artifact(ctx: RouteContext, dataset: Any, source_path: Path) -> None:
+    key = "/".join(["datasets", _artifact_key_part(dataset.dataset_id), f"v{dataset.version}", f"source.{dataset.file_format}"])
+    content_type = "text/csv;charset=utf-8" if dataset.file_format == "csv" else "application/x-ndjson"
+    uri = ctx.artifact_store.put_bytes(key, source_path.read_bytes(), content_type=content_type)
+    dataset.artifact_uri = uri
+    dataset.artifact_metadata = ctx.artifact_store.describe(uri)
+    ctx.dataset_service._save_version(dataset)
+
+
+def _artifact_key_part(value: str) -> str:
+    safe = "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in value)
+    return safe or "unknown"

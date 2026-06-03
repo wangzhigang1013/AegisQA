@@ -12,7 +12,7 @@ import {
   Table,
   Tag,
 } from 'antd';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
@@ -42,6 +42,7 @@ export function RunsPage() {
   const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets, refetchOnMount: 'always' });
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills, refetchOnMount: 'always' });
   const executionTemplatesQuery = useQuery({ queryKey: ['task-execution-templates'], queryFn: api.taskExecutionTemplates, refetchOnMount: 'always' });
+  const workerStatusQuery = useQuery({ queryKey: ['workers', 'local', 'status'], queryFn: api.localWorkerStatus, refetchOnMount: 'always' });
 
   const datasetVersions = useMemo(
     () => datasetsQuery.data?.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))) ?? [],
@@ -49,6 +50,18 @@ export function RunsPage() {
   );
   const tasks = tasksQuery.data?.items ?? [];
   const taskPagination = tasksQuery.data?.pagination;
+  const pendingRuns = workerStatusQuery.data?.pending_runs ?? [];
+  const workerPollingActive = pendingRuns.length > 0;
+  const refetchWorkerStatus = workerStatusQuery.refetch;
+
+  useEffect(() => {
+    if (!workerPollingActive) return undefined;
+    const timer = window.setInterval(() => {
+      refetchWorkerStatus();
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [queryClient, refetchWorkerStatus, workerPollingActive]);
 
   function resolveDatasetVersion(values: TaskCreateFormValues): DatasetVersion {
     const datasetVersion = datasetVersions.find((item) => item.version.version_id === values.dataset_version_id)?.version;
@@ -137,6 +150,18 @@ export function RunsPage() {
     onError: (error) => setNotice(`操作失败：${formatApiError(error)}`),
   });
 
+  const workerRunOnceMutation = useMutation({
+    mutationFn: api.localWorkerRunOnce,
+    onSuccess: async (result) => {
+      setNotice(result.processed_items > 0 ? `Worker 已处理 ${result.processed_items} 个 RunItem：${result.run_id}` : 'Worker 队列为空。');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['workers', 'local', 'status'] }),
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+      ]);
+    },
+    onError: (error) => setNotice(`Worker 执行失败：${formatApiError(error)}`),
+  });
+
   function triggerTaskAction(task: TaskRecord, action: TaskAction) {
     taskActionMutation.mutate({ taskId: task.task_id, action });
   }
@@ -151,6 +176,28 @@ export function RunsPage() {
       />
 
       {notice ? <Alert type={notice.includes('失败') ? 'error' : 'info'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
+
+      <Card className="flat-card" title="Local Worker">
+        <Space wrap className="section-actions">
+          <Tag color={workerStatusQuery.data?.status === 'ready' ? 'green' : 'default'}>
+            {workerStatusQuery.data?.status ?? 'unknown'}
+          </Tag>
+          <span>pending_runs: {pendingRuns.length}</span>
+          {workerPollingActive ? <Tag color="processing">auto refresh</Tag> : null}
+          {pendingRuns.slice(0, 3).map((runId) => <Tag key={runId}>{runId}</Tag>)}
+          {pendingRuns.length > 3 ? <Tag>+{pendingRuns.length - 3}</Tag> : null}
+          <Button
+            icon={<PlayCircleOutlined />}
+            loading={workerRunOnceMutation.isPending}
+            onClick={() => workerRunOnceMutation.mutate()}
+          >
+            处理队列一次
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={() => workerStatusQuery.refetch()} loading={workerStatusQuery.isFetching}>
+            刷新
+          </Button>
+        </Space>
+      </Card>
 
       <Card className="flat-card" title="任务列表">
         <Space wrap className="section-actions">

@@ -9,7 +9,10 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from aegisqa.core.errors import AegisQAError
 from aegisqa.storage.json_store import JsonStore
+
+ALLOWED_BADCASE_SOURCES = {"step", "quality_check", "gate_rule", "annotation"}
 
 
 class BadcaseRecord(BaseModel):
@@ -19,6 +22,9 @@ class BadcaseRecord(BaseModel):
     status: str = "detected"
     reason: str
     payload: dict[str, Any] = Field(default_factory=dict)
+    source: str | None = None
+    source_id: str | None = None
+    evidence: Any = None
     human_label: str | None = None
     problem_type: str | None = None
     note: str | None = None
@@ -34,6 +40,7 @@ class BadcaseService:
         self.store = store
 
     def create_badcase(self, run_id: str, item_id: str, reason: str, payload: dict[str, Any]) -> BadcaseRecord:
+        source, source_id, evidence = _validated_source(payload)
         now = _now()
         record = BadcaseRecord(
             badcase_id=f"badcase-{uuid4().hex[:12]}",
@@ -42,6 +49,9 @@ class BadcaseService:
             status="pending_review",
             reason=reason,
             payload=payload,
+            source=source,
+            source_id=source_id,
+            evidence=evidence,
             created_at=now,
             updated_at=now,
         )
@@ -224,6 +234,19 @@ class BadcaseService:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _validated_source(payload: dict[str, Any]) -> tuple[str, str, Any]:
+    source = str(payload.get("source") or "").strip()
+    source_id = str(payload.get("source_id") or "").strip()
+    evidence = payload.get("evidence")
+    if source not in ALLOWED_BADCASE_SOURCES or not source_id or evidence in (None, "", [], {}):
+        raise AegisQAError(
+            "BADCASE_SOURCE_INVALID",
+            "Badcase 必须来自真实 step、quality_check、gate_rule 或 annotation，并携带 source_id 与 evidence。",
+            details={"source": source or None, "source_id": source_id or None, "allowed_sources": sorted(ALLOWED_BADCASE_SOURCES)},
+        )
+    return source, source_id, evidence
 
 
 def _text_vector(text: str) -> set[str]:

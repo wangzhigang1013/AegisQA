@@ -18,6 +18,9 @@ from aegisqa.storage.file_lock import FileLock
 class JsonStore:
     """面向 JSON/JSONL 的最小仓储封装。"""
 
+    dev_only = True
+    production_replacement = "PostgreSQL/MySQL metadata store + ArtifactStore"
+
     def __init__(self, root: Path | str) -> None:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)

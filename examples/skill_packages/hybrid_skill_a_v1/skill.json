@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "skill_id": "example.hybrid_judge_review@0.1.0",
+  "name": "Hybrid Judge Review Example",
+  "version": "0.1.0",
+  "description": "A v1 hybrid skill package that retrieves candidates, judges them, conditionally reviews, and aggregates output.",
+  "type": "hybrid",
+  "category": "judge",
+  "runtime": { "kind": "python", "entrypoint": "handler.py" },
+  "prompts": [
+    { "name": "judge", "path": "prompts/judge" },
+    { "name": "review", "path": "prompts/review" }
+  ],
+  "llm_permissions": {
+    "allowed_prompt_names": ["judge", "review"],
+    "allowed_model_aliases": ["test.judge"],
+    "max_calls_per_run": 2,
+    "max_tokens_per_run": 2000
+  },
+  "limits": { "timeout_seconds": 60 },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "question": { "type": "string" },
+      "answer": { "type": "string" }
+    },
+    "required": ["question", "answer"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "result": { "type": "string" },
+      "confidence": { "type": "number" },
+      "reviewed": { "type": "boolean" },
+      "evidence": { "type": "array", "items": { "type": "string" } }
+    },
+    "required": ["result", "confidence", "reviewed", "evidence"]
+  },
+  "config_schema": { "type": "object" },
+  "example_input": { "question": "Is the answer grounded?", "answer": "yes, based on the provided evidence" },
+  "example_config": {}
+}

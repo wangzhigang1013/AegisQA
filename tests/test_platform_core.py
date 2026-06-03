@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from aegisqa.badcases.service import BadcaseService
+from aegisqa.core.errors import AegisQAError
 from aegisqa.core.mapper import TypeMismatchError, resolve_input_mapping
 from aegisqa.core.security import redact_secrets
 from aegisqa.datasets.service import DatasetService
@@ -239,7 +240,7 @@ def test_badcase_correction_and_judge_audit_metrics(tmp_path: Path) -> None:
         run_id="run-1",
         item_id="item-1",
         reason="judge_label=fail",
-        payload={"question": "Q", "answer": "A"},
+        payload={"question": "Q", "answer": "A", "source": "step", "source_id": "step-1", "evidence": {"score": 0.1}},
     )
 
     corrected = service.correct_badcase(
@@ -269,6 +270,34 @@ def test_badcase_correction_and_judge_audit_metrics(tmp_path: Path) -> None:
     assert -1 <= audit.cohen_kappa <= 1
     assert audit.confusion_matrix["pass"]["pass"] == 1
     assert len(audit.misclassified_items) == 2
+
+
+def test_badcase_requires_real_source_and_evidence(tmp_path: Path) -> None:
+    service = BadcaseService(JsonStore(tmp_path / "store"))
+
+    with pytest.raises(AegisQAError) as missing:
+        service.create_badcase("run-1", "item-1", "missing evidence", {"question": "Q"})
+
+    assert missing.value.code == "BADCASE_SOURCE_INVALID"
+
+    with pytest.raises(AegisQAError) as invalid:
+        service.create_badcase(
+            "run-1",
+            "item-1",
+            "invalid source",
+            {"source": "report", "source_id": "report-1", "evidence": {"reason": "derived summary"}},
+        )
+
+    assert invalid.value.code == "BADCASE_SOURCE_INVALID"
+
+    created = service.create_badcase(
+        "run-1",
+        "item-1",
+        "gate failed",
+        {"source": "gate_rule", "source_id": "pass_rate_gate", "evidence": {"actual": 0.5, "threshold": 0.9}},
+    )
+
+    assert created.payload["source"] == "gate_rule"
 
 
 def test_secret_redaction_removes_sensitive_values_from_nested_payloads() -> None:

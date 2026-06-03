@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel
 
 from aegisqa.api.app import (
     CIGateRuleRequest,
@@ -55,6 +56,8 @@ from aegisqa.core.errors import AegisQAError
 from aegisqa.core.mapper import MappingPathError, TypeMismatchError
 from aegisqa.core.security import redact_secrets
 from aegisqa.engine.runner import RunRecord, RunRequest
+from aegisqa.quality.gates import GateEvaluator
+from aegisqa.quality.models import GateContext, GateEvaluationResult, GateRule, QualityCheckResult
 from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments, compare_reports
 from aegisqa.reports.diagnostics import build_task_diagnostics
 from aegisqa.reports.trace_flow import build_task_trace_flow
@@ -63,6 +66,12 @@ from aegisqa.workflows.validation import config_issue_from_exception, validate_w
 
 
 REPORT_EXPORT_FORMATS = {"json", "csv", "html"}
+
+
+class StepReplayRequest(BaseModel):
+    override_input: dict[str, Any] | None = None
+    disable_cache: bool = False
+    mock_llm_calls: bool = False
 
 
 def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -204,6 +213,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             preflight_result=preflight_result,
         )
         _save_record(ctx.store, "tasks", "task_id", task)
+        ctx.worker.enqueue_run(run.run_id)
         ctx.audit_service.record(
             actor="api",
             action="task.create",
@@ -495,6 +505,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             content = _build_task_report_export_html(payload)
         else:
             raise HTTPException(status_code=400, detail={"message": "file_format 仅支持 json/csv/html"})
+        artifact_uri, artifact_metadata = _persist_report_export_artifact(ctx, task_id, str(task.get("run_id") or "run"), file_format, content)
         ctx.audit_service.record(
             actor=role,
             action="task.report.export",
@@ -505,6 +516,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 "preflight_id": preflight.get("preflight_id"),
                 "role": role,
                 "approval_request_id": approval_request.get("request_id") if approval_request else None,
+                "artifact_uri": artifact_uri,
             },
         )
         return {
@@ -512,6 +524,8 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             "run_id": task.get("run_id"),
             "file_format": file_format,
             "approval_request_id": approval_request.get("request_id") if approval_request else None,
+            "artifact_uri": artifact_uri,
+            "artifact_metadata": artifact_metadata,
             "content": content,
         }
 
@@ -560,7 +574,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/runs", response_model=RunRecord)
     def create_run(request: RunCreateRequest) -> RunRecord:
-        return ctx.runner.create_run(
+        run = ctx.runner.create_run(
             RunRequest(
                 workflow=request.workflow,
                 dataset_id=request.dataset_id,
@@ -571,10 +585,23 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 rate_limits=request.rate_limits,
             )
         )
+        ctx.worker.enqueue_run(run.run_id)
+        return run
 
     @app.get("/runs", response_model=list[RunRecord])
     def list_runs() -> list[RunRecord]:
         return ctx.runner.list_runs()
+
+    @app.get("/workers/local/status")
+    def local_worker_status() -> dict[str, Any]:
+        return {"status": "ready", "pending_runs": ctx.worker.pending_runs()}
+
+    @app.post("/workers/local/run-once")
+    def local_worker_run_once() -> dict[str, Any]:
+        result = ctx.worker.run_once()
+        if result.get("run_id"):
+            ctx.audit_service.record(actor="worker", action="worker.local.run_once", target=str(result["run_id"]), detail={"processed_items": result.get("processed_items")})
+        return result
 
     @app.post("/runs/{run_id}/execute", response_model=RunRecord)
     def execute_run(run_id: str) -> RunRecord:
@@ -601,9 +628,126 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         ctx.audit_service.record(actor="api", action="run.resume", target=run_id)
         return ctx.runner.resume_run(run_id)
 
+    @app.post("/runs/{run_id}/items/{item_id}/steps/{step_id}/replay")
+    def replay_run_item_step(run_id: str, item_id: str, step_id: str, request: StepReplayRequest) -> dict[str, Any]:
+        run, item, step = _find_run_item_step(ctx, run_id, item_id, step_id)
+        resolved_input = deepcopy(request.override_input) if request.override_input is not None else deepcopy(step.resolved_input or step.input_snapshot)
+        if request.mock_llm_calls and step.prompt_calls:
+            prompt_calls = []
+            for prompt_call in deepcopy(step.prompt_calls):
+                if isinstance(prompt_call, dict):
+                    prompt_call["mocked"] = True
+                    prompt_call["mock_source_step_id"] = step.step_id
+                prompt_calls.append(prompt_call)
+            replay = {
+                "replay_id": f"replay-{uuid4().hex[:12]}",
+                "run_id": run.run_id,
+                "item_id": item.item_id,
+                "step_id": step.step_id,
+                "skill_ref": step.skill_ref,
+                "skill_version": step.skill_version,
+                "status": "succeeded" if step.status == "succeeded" else step.status,
+                "resolved_input": resolved_input,
+                "raw_output": deepcopy(step.raw_output or step.output_snapshot),
+                "validated_output": deepcopy(step.validated_output or step.output_snapshot),
+                "schema_errors": deepcopy(step.schema_errors),
+                "prompt_calls": prompt_calls,
+                "metrics": deepcopy(step.metrics),
+                "logs": [],
+                "latency_ms": 0,
+                "disable_cache": request.disable_cache,
+                "mock_llm_calls": request.mock_llm_calls,
+                "persisted": False,
+                "created_at": _now(),
+            }
+            ctx.audit_service.record(actor="api", action="step.replay", target=step_id, detail={"run_id": run_id, "item_id": item_id, "mock_llm_calls": True})
+            return replay
+        skill = ctx.registry.get(step.skill_ref)
+        result, latency_ms = skill.execute(resolved_input, deepcopy(step.config_snapshot))
+        replay = {
+            "replay_id": f"replay-{uuid4().hex[:12]}",
+            "run_id": run.run_id,
+            "item_id": item.item_id,
+            "step_id": step.step_id,
+            "skill_ref": step.skill_ref,
+            "skill_version": step.skill_version,
+            "status": "succeeded",
+            "resolved_input": resolved_input,
+            "raw_output": result.output,
+            "validated_output": result.output,
+            "schema_errors": [],
+            "prompt_calls": result.prompt_calls,
+            "metrics": result.metrics,
+            "logs": result.logs,
+            "latency_ms": latency_ms,
+            "disable_cache": request.disable_cache,
+            "mock_llm_calls": request.mock_llm_calls,
+            "persisted": False,
+            "created_at": _now(),
+        }
+        ctx.audit_service.record(actor="api", action="step.replay", target=step_id, detail={"run_id": run_id, "item_id": item_id})
+        return replay
+
+    @app.get("/runs/{run_id}/items/{item_id}/steps/{step_id}/repro-bundle")
+    def get_step_repro_bundle(run_id: str, item_id: str, step_id: str) -> dict[str, Any]:
+        run, item, step = _find_run_item_step(ctx, run_id, item_id, step_id)
+        try:
+            manifest = ctx.registry.get_manifest(step.skill_ref).model_dump(mode="json")
+        except KeyError:
+            manifest = {"skill_id": step.skill_ref, "status": "missing"}
+        bundle = {
+            "bundle_id": f"repro-{uuid4().hex[:12]}",
+            "run_id": run.run_id,
+            "item_id": item.item_id,
+            "step_id": step.step_id,
+            "workflow": run.workflow.model_dump(mode="json"),
+            "skill_manifest": manifest,
+            "prompt_assets": _step_prompt_assets(ctx, step.skill_ref),
+            "row": item.context_snapshot.get("row", {}),
+            "context_snapshot": item.context_snapshot,
+            "step": {
+                "skill_ref": step.skill_ref,
+                "skill_version": step.skill_version,
+                "resolved_input": step.resolved_input or step.input_snapshot,
+                "raw_output": step.raw_output or step.output_snapshot,
+                "validated_output": step.validated_output or step.output_snapshot,
+                "schema_errors": step.schema_errors,
+                "prompt_calls": step.prompt_calls,
+                "error": step.error,
+                "metrics": step.metrics,
+                "latency_ms": step.latency_ms,
+                "config_snapshot": step.config_snapshot,
+                "parameter_trace": step.parameter_trace,
+            },
+            "created_at": _now(),
+        }
+        artifact_key = "/".join(
+            [
+                "repro-bundles",
+                _artifact_key_part(run.run_id),
+                _artifact_key_part(item.item_id),
+                _artifact_key_part(step.step_id),
+                f"{bundle['bundle_id']}.json",
+            ]
+        )
+        artifact_uri = ctx.artifact_store.put_json(artifact_key, bundle)
+        artifact_metadata = ctx.artifact_store.describe(artifact_uri)
+        ctx.audit_service.record(
+            actor="api",
+            action="step.repro_bundle.created",
+            target=step_id,
+            detail={"run_id": run_id, "item_id": item_id, "artifact_uri": artifact_uri},
+        )
+        return {**bundle, "artifact_uri": artifact_uri, "artifact_metadata": artifact_metadata}
+
     @app.get("/runs/{run_id}", response_model=RunRecord)
     def get_run(run_id: str) -> RunRecord:
         return ctx.runner.get_run(run_id)
+
+
+def _artifact_key_part(value: str) -> str:
+    safe = "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in value)
+    return safe or "unknown"
 
 
 def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> dict[str, Any]:
@@ -647,6 +791,7 @@ def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> d
         _cost_budget_check(request.cost_budget),
     ]
     status = _preflight_status(checks)
+    quality_checks, gate_evaluation = _build_preflight_quality_evaluation(checks)
     return {
         "status": status,
         "summary": _preflight_summary(status, checks),
@@ -660,6 +805,8 @@ def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> d
         "cost_budget": request.cost_budget,
         "skill_overrides": request.skill_overrides,
         "checks": checks,
+        "quality_checks": quality_checks,
+        "gate_evaluation": gate_evaluation,
         "created_at": _now(),
     }
 
@@ -928,7 +1075,26 @@ def _record_report_export_denied(ctx: RouteContext, task_id: str, file_format: s
             "required_permission": "report:export",
             "approval_request_id": approval_request_id,
         },
+        )
+
+
+def _persist_report_export_artifact(ctx: RouteContext, task_id: str, run_id: str, file_format: str, content: Any) -> tuple[str, dict[str, Any]]:
+    export_id = f"export-{uuid4().hex[:12]}"
+    key = "/".join(
+        [
+            "reports",
+            _artifact_key_part(task_id),
+            _artifact_key_part(run_id),
+            f"{export_id}.{file_format}",
+        ]
     )
+    if file_format == "json":
+        artifact_uri = ctx.artifact_store.put_json(key, content)
+    else:
+        content_type = "text/csv;charset=utf-8" if file_format == "csv" else "text/html;charset=utf-8"
+        artifact_uri = ctx.artifact_store.put_bytes(key, str(content).encode("utf-8"), content_type=content_type)
+    metadata = ctx.artifact_store.describe(artifact_uri)
+    return artifact_uri, {**metadata, "export_id": export_id}
 
 
 def _ensure_report_export_format(file_format: str) -> None:
@@ -965,6 +1131,13 @@ def _build_task_report_payload(
     # 页面报告只需要当前页坏例明细；聚合指标仍来自完整 RunReport。
     # 导出报告会显式 include_all_badcases=True，确保离线报告不被分页截断。
     report_payload["badcases"] = page_badcases
+    quality_checks, gate_evaluation = _build_report_quality_evaluation(task, run)
+    cost_status = _build_report_cost_status(run)
+    unavailable_reasons = []
+    if not quality_checks:
+        unavailable_reasons.append("Quality checks are not configured.")
+    if cost_status["source"] == "unavailable":
+        unavailable_reasons.append("Token/cost unavailable until LLM Gateway token usage is enabled.")
     return {
         "task": task,
         "task_summary": _build_task_report_summary(task, run),
@@ -975,8 +1148,12 @@ def _build_task_report_payload(
         "segments": [segment.model_dump(mode="json") for segment in segments],
         "recommendations": [recommendation.model_dump(mode="json") for recommendation in build_report_recommendations(segments)],
         "quality_decision": _build_quality_decision(task, run, report, segments),
+        "quality_checks": quality_checks,
+        "gate_evaluation": gate_evaluation,
         "parameter_governance": parameter_governance,
         "budget_status": _build_budget_status(task, report),
+        "cost_status": cost_status,
+        "unavailable_reasons": unavailable_reasons,
         "diagnostics": diagnostics,
         "report": report_payload,
         "badcases": page_badcases,
@@ -987,6 +1164,98 @@ def _build_task_report_payload(
             "html": f"/tasks/{task['task_id']}/report/export?file_format=html",
         },
     }
+
+
+def _build_report_cost_status(run: Any) -> dict[str, Any]:
+    token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    call_count = 0
+    providers: set[str] = set()
+    models: set[str] = set()
+    for item in getattr(run, "items", []):
+        for step in getattr(item, "steps", []):
+            for call in getattr(step, "prompt_calls", []) or []:
+                usage = call.get("token_usage") if isinstance(call, dict) else None
+                if not isinstance(usage, dict):
+                    continue
+                total_tokens = usage.get("total_tokens")
+                if not isinstance(total_tokens, (int, float)) or isinstance(total_tokens, bool) or total_tokens <= 0:
+                    continue
+                call_count += 1
+                for key in token_usage:
+                    value = usage.get(key)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        token_usage[key] += int(value)
+                provider = call.get("provider")
+                model = call.get("model")
+                if provider:
+                    providers.add(str(provider))
+                if model:
+                    models.add(str(model))
+    if call_count == 0:
+        return {
+            "source": "unavailable",
+            "message": "Token/cost unavailable until LLM Gateway token usage is enabled.",
+        }
+    return {
+        "source": "llm_gateway",
+        "message": "Token usage is aggregated from persisted LLM Gateway prompt call traces.",
+        "token_usage": token_usage,
+        "prompt_call_count": call_count,
+        "providers": sorted(providers),
+        "models": sorted(models),
+    }
+
+
+def _build_report_quality_evaluation(task: dict[str, Any], run: RunRecord) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    quality_gate = task.get("quality_gate") if isinstance(task.get("quality_gate"), dict) else {}
+    rules: list[GateRule] = []
+    pass_rate = quality_gate.get("pass_rate", quality_gate.get("pass_rate_threshold"))
+    if isinstance(pass_rate, (int, float)) and not isinstance(pass_rate, bool):
+        rules.append(
+            GateRule(
+                rule_id="pass_rate_gate",
+                metric="pass_rate",
+                operator=">=",
+                threshold=float(pass_rate),
+                blocking=True,
+                title="Pass Rate Gate",
+            )
+        )
+    max_badcase_count = quality_gate.get("max_badcase_count")
+    if isinstance(max_badcase_count, (int, float)) and not isinstance(max_badcase_count, bool):
+        rules.append(
+            GateRule(
+                rule_id="badcase_count_gate",
+                metric="badcase_count",
+                operator="<=",
+                threshold=float(max_badcase_count),
+                blocking=True,
+                title="Badcase Count Gate",
+            )
+        )
+    if not rules:
+        quality_checks: list[dict[str, Any]] = []
+        return quality_checks, {
+            "decision": "skipped",
+            "status": "skipped",
+            "blocking": False,
+            "blocking_failures": 0,
+            "summary": {"passed": 0, "failed": 0, "warnings": 0, "skipped": 1},
+            "results": quality_checks,
+            "quality_checks": quality_checks,
+            "failed_blocking_rules": [],
+        }
+
+    evaluation = GateEvaluator().evaluate(
+        GateContext(metrics=_ci_gate_metrics_from_task(task, run), target={"kind": "task", "id": str(task.get("task_id"))}),
+        rules,
+    )
+    quality_checks = [check.model_dump(mode="json") for check in evaluation.quality_checks]
+    payload = evaluation.model_dump(mode="json")
+    payload["blocking"] = evaluation.blocking_failures > 0
+    payload["results"] = quality_checks
+    payload["failed_blocking_rules"] = [check for check in quality_checks if check.get("status") == "failed" and check.get("blocking")]
+    return quality_checks, payload
 
 
 def _paginate_badcases(
@@ -1391,8 +1660,8 @@ def _quality_gate_check(quality_gate: dict[str, Any]) -> dict[str, Any]:
     return _preflight_check(
         "quality_gate",
         "质量门槛",
-        "warning",
-        "当前任务没有设置明确通过率门槛。",
+        "skipped",
+        "当前任务没有设置明确通过率门槛，质量门槛预检已跳过。",
         {"quality_gate": quality_gate},
         "建议为正式任务设置 pass_rate 和 max_badcase_count，报告才能直接判断能否发布。",
     )
@@ -1434,6 +1703,81 @@ def _preflight_summary(status: str, checks: list[dict[str, Any]]) -> str:
     if status == "warning":
         return f"预检可继续，但有 {len(warnings)} 项建议优化。"
     return "预检通过，可以创建并执行任务。"
+
+
+def _build_preflight_quality_evaluation(checks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    quality_checks: list[QualityCheckResult] = []
+    for check in checks:
+        status = check.get("status")
+        if status == "blocked":
+            quality_status = "failed"
+            reason = "preflight_blocked"
+        elif status in {"warning", "skipped"}:
+            quality_status = "skipped"
+            reason = "preflight_warning" if status == "warning" else "rule_unconfigured"
+        else:
+            quality_status = "passed"
+            reason = None
+        quality_checks.append(
+            QualityCheckResult(
+                check_id=str(check.get("check_id", "")),
+                title=str(check.get("title", "")),
+                status=quality_status,
+                reason=reason,
+                message=str(check.get("message", "")),
+                evidence=check.get("details", {}) if isinstance(check.get("details"), dict) else {},
+                recommendation=str(check.get("recommendation", "")),
+            )
+        )
+
+    blocking_failures = sum(1 for check in quality_checks if check.status == "failed")
+    if blocking_failures:
+        decision = "failed"
+    elif quality_checks and all(check.status == "skipped" for check in quality_checks):
+        decision = "skipped"
+    else:
+        decision = "passed"
+    gate_evaluation = GateEvaluationResult(
+        decision=decision,
+        status=decision,
+        blocking_failures=blocking_failures,
+        quality_checks=quality_checks,
+        summary=_preflight_gate_summary(decision, quality_checks, blocking_failures),
+    )
+    return [check.model_dump(mode="json") for check in quality_checks], gate_evaluation.model_dump(mode="json")
+
+
+def _preflight_gate_summary(decision: str, checks: list[QualityCheckResult], blocking_failures: int) -> str:
+    if decision == "failed":
+        return f"{blocking_failures} 项预检规则阻断。"
+    if decision == "skipped":
+        return "预检规则缺少可计算配置或真实数据，已跳过。"
+    skipped = sum(1 for check in checks if check.status == "skipped")
+    return f"预检统一质量评估通过，{skipped} 项规则跳过。"
+
+
+def _find_run_item_step(ctx: RouteContext, run_id: str, item_id: str, step_id: str):
+    run = ctx.runner.get_run(run_id)
+    item = next((candidate for candidate in run.items if candidate.item_id == item_id), None)
+    if item is None:
+        raise AegisQAError("RUN_ITEM_NOT_FOUND", "Run Item 不存在。", status_code=404, details={"run_id": run_id, "item_id": item_id})
+    step = next((candidate for candidate in item.steps if candidate.step_id == step_id), None)
+    if step is None:
+        raise AegisQAError(
+            "RUN_ITEM_STEP_NOT_FOUND",
+            "Run Item Step 不存在。",
+            status_code=404,
+            details={"run_id": run_id, "item_id": item_id, "step_id": step_id},
+        )
+    return run, item, step
+
+
+def _step_prompt_assets(ctx: RouteContext, skill_ref: str) -> list[dict[str, Any]]:
+    for package in _list_records(ctx.store, "skill_packages"):
+        if package.get("manifest", {}).get("skill_id") == skill_ref:
+            assets = package.get("prompt_assets")
+            return assets if isinstance(assets, list) else []
+    return []
 
 
 def _create_repair_tasks_from_diagnostics(ctx: RouteContext, task: dict[str, Any], diagnostics: dict[str, Any]) -> dict[str, Any]:

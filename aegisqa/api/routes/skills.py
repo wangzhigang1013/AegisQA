@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI
+from pydantic import BaseModel, Field
 
 from aegisqa.api.app import (
     SkillGovernanceRequest,
@@ -15,7 +18,17 @@ from aegisqa.api.app import (
     _update_skill_package_status,
 )
 from aegisqa.api.routes.context import RouteContext
+from aegisqa.core.errors import AegisQAError
+from aegisqa.llm.gateway import LLMGateway
+from aegisqa.llm.models import ModelAlias, PromptAsset
+from aegisqa.llm.providers import TestLLMProvider
 from aegisqa.skills.base import SkillManifest
+
+
+class PromptDebugRequest(BaseModel):
+    variables: dict[str, Any] = Field(default_factory=dict)
+    trigger_reason: str = "prompt_debug"
+    model_alias: str | None = None
 
 
 def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -46,8 +59,59 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.post("/skills/packages/upload")
     def upload_skill_package(request: SkillPackageUploadRequest) -> dict[str, Any]:
         record = _install_skill_package(ctx.store, ctx.registry, request)
+        artifact_uri = ctx.artifact_store.put_bytes(
+            "/".join(["skill-packages", _artifact_key_part(record["package_id"]), request.filename]),
+            base64.b64decode(request.content_base64),
+            content_type="application/zip",
+        )
+        record["artifact_uri"] = artifact_uri
+        record["artifact_metadata"] = ctx.artifact_store.describe(artifact_uri)
+        _save_record(ctx.store, "skill_packages", "package_id", record)
         ctx.audit_service.record(actor="api", action="skill_package.upload", target=record["manifest"]["skill_id"])
         return record
+
+    @app.post("/skills/{skill_id}/versions/{version}/prompts/{prompt_name}/debug")
+    def debug_skill_prompt(skill_id: str, version: str, prompt_name: str, request: PromptDebugRequest) -> dict[str, Any]:
+        package = _find_skill_package(ctx.store, skill_id)
+        if not package:
+            raise AegisQAError("SKILL_PACKAGE_NOT_FOUND", "Skill 包不存在，无法调试 Prompt。", status_code=404, details={"skill_id": skill_id})
+        manifest = package.get("manifest", {})
+        if str(manifest.get("version")) != version:
+            raise AegisQAError(
+                "SKILL_VERSION_NOT_FOUND",
+                "Skill 版本不存在。",
+                status_code=404,
+                details={"skill_id": skill_id, "version": version, "available_version": manifest.get("version")},
+            )
+        prompt_assets = {
+            asset["name"]: PromptAsset.model_validate(asset)
+            for asset in package.get("prompt_assets", [])
+            if isinstance(asset, dict) and asset.get("name")
+        }
+        model_aliases = {
+            alias["alias"]: ModelAlias.model_validate(alias)
+            for alias in ctx.store.list_json(["model_aliases"])
+            if isinstance(alias, dict) and alias.get("enabled", True) and alias.get("alias")
+        }
+        gateway = LLMGateway(prompt_assets=prompt_assets, model_aliases=model_aliases, providers={"test": TestLLMProvider()})
+        call = gateway.call(
+            prompt_name,
+            request.variables,
+            trigger_reason=request.trigger_reason,
+            model_alias=request.model_alias,
+            permissions=manifest.get("llm_permissions", {}),
+        )
+        payload = call.model_dump(mode="json")
+        artifact_uris, artifact_metadata = _persist_prompt_debug_artifacts(ctx, skill_id, version, prompt_name, payload)
+        payload["artifact_uris"] = artifact_uris
+        payload["artifact_metadata"] = artifact_metadata
+        ctx.audit_service.record(
+            actor="api",
+            action="prompt.debug",
+            target=f"{skill_id}:{prompt_name}",
+            detail={"version": version, "artifact_uris": artifact_uris},
+        )
+        return payload
 
     @app.post("/skills/{skill_id:path}/contract-test")
     def run_skill_contract_test(skill_id: str) -> dict[str, Any]:
@@ -85,3 +149,42 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
         _update_skill_package_status(ctx.store, manifest)
         ctx.audit_service.record(actor="api", action="skill.deprecate", target=skill_id, detail={"reason": request.reason})
         return manifest
+
+
+def _persist_prompt_debug_artifacts(
+    ctx: RouteContext,
+    skill_id: str,
+    version: str,
+    prompt_name: str,
+    payload: dict[str, Any],
+) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
+    base_key = "/".join(
+        [
+            "prompt-debug",
+            _artifact_key_part(skill_id),
+            _artifact_key_part(version),
+            _artifact_key_part(prompt_name),
+            f"debug-{uuid4().hex[:12]}",
+        ]
+    )
+    artifact_uris: dict[str, str] = {}
+    artifact_metadata: dict[str, dict[str, Any]] = {}
+    rendered_prompt = payload.get("rendered_prompt")
+    if isinstance(rendered_prompt, str):
+        uri = ctx.artifact_store.put_bytes(f"{base_key}/rendered_prompt.txt", rendered_prompt.encode("utf-8"), content_type="text/plain;charset=utf-8")
+        artifact_uris["rendered_prompt"] = uri
+        artifact_metadata["rendered_prompt"] = ctx.artifact_store.describe(uri)
+    raw_response = payload.get("raw_response")
+    if isinstance(raw_response, str):
+        uri = ctx.artifact_store.put_bytes(f"{base_key}/raw_response.txt", raw_response.encode("utf-8"), content_type="text/plain;charset=utf-8")
+        artifact_uris["raw_response"] = uri
+        artifact_metadata["raw_response"] = ctx.artifact_store.describe(uri)
+    uri = ctx.artifact_store.put_json(f"{base_key}/debug_result.json", payload)
+    artifact_uris["debug_result"] = uri
+    artifact_metadata["debug_result"] = ctx.artifact_store.describe(uri)
+    return artifact_uris, artifact_metadata
+
+
+def _artifact_key_part(value: str) -> str:
+    safe = "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in value)
+    return safe or "unknown"

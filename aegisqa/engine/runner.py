@@ -39,8 +39,15 @@ class RunItemStep(BaseModel):
     step_id: str
     skill_ref: str
     status: str = "pending"
+    state: str = "PENDING"
     input_snapshot: dict[str, Any] = Field(default_factory=dict)
     output_snapshot: dict[str, Any] = Field(default_factory=dict)
+    resolved_input: dict[str, Any] = Field(default_factory=dict)
+    raw_output: dict[str, Any] = Field(default_factory=dict)
+    validated_output: dict[str, Any] = Field(default_factory=dict)
+    schema_errors: list[dict[str, Any]] = Field(default_factory=list)
+    prompt_calls: list[dict[str, Any]] = Field(default_factory=list)
+    skill_version: str | None = None
     config_snapshot: dict[str, Any] = Field(default_factory=dict)
     parameter_trace: dict[str, dict[str, Any]] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
@@ -66,6 +73,7 @@ class RunItem(BaseModel):
     row_hash: str
     repeat_index: int = 0
     status: str = "pending"
+    state: str = "PENDING"
     retry_count: int = 0
     steps: list[RunItemStep] = Field(default_factory=list)
     context_snapshot: dict[str, Any] = Field(default_factory=dict)
@@ -80,6 +88,7 @@ class RunRecord(BaseModel):
 
     run_id: str
     status: str
+    state: str = "PENDING"
     workflow: WorkflowVersion
     dataset_id: str
     dataset_version: int
@@ -110,10 +119,11 @@ class WorkflowRunner:
     - Step 轨迹记录输入、输出、耗时、限速、缓存和异常。
     """
 
-    def __init__(self, store: JsonStore, dataset_service: DatasetService, registry: SkillRegistry) -> None:
+    def __init__(self, store: JsonStore, dataset_service: DatasetService, registry: SkillRegistry, *, artifact_store: Any | None = None) -> None:
         self.store = store
         self.dataset_service = dataset_service
         self.registry = registry
+        self.artifact_store = artifact_store
         self._cache: dict[str, dict[str, Any]] = {}
 
     def create_run(self, request: RunRequest) -> RunRecord:
@@ -143,6 +153,7 @@ class WorkflowRunner:
         run = RunRecord(
             run_id=run_id,
             status="queued",
+            state="QUEUED",
             workflow=request.workflow,
             dataset_id=dataset.dataset_id,
             dataset_version=dataset.version,
@@ -166,6 +177,7 @@ class WorkflowRunner:
                 "task_config_snapshot": redact_secrets(request.task_config_snapshot),
             },
         )
+        _sync_runtime_states(run)
         self._save_run(run)
         return run
 
@@ -173,10 +185,12 @@ class WorkflowRunner:
         run = self.get_run(run_id)
         if run.canceled:
             run.status = "canceled"
+            _sync_runtime_states(run)
             self._save_run(run)
             return run
         if run.paused:
             run.status = "paused"
+            _sync_runtime_states(run)
             self._save_run(run)
             return run
 
@@ -198,8 +212,52 @@ class WorkflowRunner:
         else:
             run.status = "failed"
         run.finished_at = _now()
+        _sync_runtime_states(run)
         self._save_run(run)
         return run
+
+    def execute_next_item(self, run_id: str) -> tuple[RunRecord, int]:
+        """Execute one pending RunItem for local worker mode."""
+
+        run = self.get_run(run_id)
+        if run.canceled:
+            run.status = "canceled"
+            _sync_runtime_states(run)
+            self._save_run(run)
+            return run, 0
+        if run.paused:
+            run.status = "paused"
+            _sync_runtime_states(run)
+            self._save_run(run)
+            return run, 0
+
+        item = next((candidate for candidate in run.items if candidate.status == "pending"), None)
+        if item is None:
+            run.status = self._terminal_status(run)
+            run.finished_at = run.finished_at or _now()
+            _sync_runtime_states(run)
+            self._save_run(run)
+            return run, 0
+
+        run.status = "running"
+        run.started_at = run.started_at or _now()
+        limiter = InMemoryRateLimiter(qps_by_skill={key: float(value) for key, value in run.snapshot.get("runtime", {}).get("rate_limits", {}).items()})
+        row = self._rows_by_id(run.dataset_id, run.dataset_version)[item.row_id]
+        self._execute_item(run, item, row, limiter)
+
+        if run.canceled:
+            run.status = "canceled"
+            run.finished_at = _now()
+        elif run.paused:
+            run.status = "paused"
+        elif any(candidate.status == "pending" for candidate in run.items):
+            run.status = "running"
+        else:
+            run.status = self._terminal_status(run)
+            run.finished_at = _now()
+        _sync_runtime_states(run)
+        self._save_run(run)
+        return run, 1
 
     def retry_failed_items(self, run_id: str) -> RunRecord:
         """断点续跑失败样本，不覆盖已经成功的样本。"""
@@ -218,6 +276,7 @@ class WorkflowRunner:
         run = self.get_run(run_id)
         run.canceled = True
         run.status = "canceled"
+        _sync_runtime_states(run)
         self._save_run(run)
         return run
 
@@ -225,6 +284,7 @@ class WorkflowRunner:
         run = self.get_run(run_id)
         run.paused = True
         run.status = "paused"
+        _sync_runtime_states(run)
         self._save_run(run)
         return run
 
@@ -233,6 +293,7 @@ class WorkflowRunner:
         run.paused = False
         if run.status == "paused":
             run.status = "queued"
+        _sync_runtime_states(run)
         self._save_run(run)
         return self.execute_run(run_id)
 
@@ -262,6 +323,7 @@ class WorkflowRunner:
         run = RunRecord(
             run_id=run_id,
             status="queued",
+            state="QUEUED",
             workflow=workflow,
             dataset_id=dataset.dataset_id,
             dataset_version=dataset.version,
@@ -278,6 +340,7 @@ class WorkflowRunner:
                 "dry_run": True,
             },
         )
+        _sync_runtime_states(run)
         self._save_run(run)
         return self.execute_run(run.run_id)
 
@@ -285,15 +348,21 @@ class WorkflowRunner:
         payload = self.store.read_json(["runs", f"{run_id}.json"])
         if not payload:
             raise KeyError(f"Run 不存在：{run_id}")
-        return RunRecord(**payload)
+        run = RunRecord(**payload)
+        _sync_runtime_states(run)
+        return run
 
     def list_runs(self) -> list[RunRecord]:
         """列出 Run 快照，供执行中心和概览页展示最近状态。"""
 
-        return [RunRecord(**payload) for payload in self.store.list_json(["runs"])]
+        runs = [RunRecord(**payload) for payload in self.store.list_json(["runs"])]
+        for run in runs:
+            _sync_runtime_states(run)
+        return runs
 
     def _execute_item(self, run: RunRecord, item: RunItem, row: DatasetRow, limiter: InMemoryRateLimiter) -> None:
         item.status = "running"
+        item.state = "RUNNING"
         item.started_at = _now()
         context: dict[str, Any] = {
             "row": row.data,
@@ -316,10 +385,13 @@ class WorkflowRunner:
         for workflow_step in run.workflow.steps:
             skill = self.registry.get(workflow_step.skill_ref)
             step = RunItemStep(step_id=workflow_step.step_id, skill_ref=workflow_step.skill_ref, status="validating")
+            step.state = "PENDING"
+            step.skill_version = skill.manifest.version
             item.steps.append(step)
             try:
                 inputs = resolve_input_mapping(workflow_step.input_mapping, context, skill.manifest.input_schema)
-                step.input_snapshot = redact_secrets(inputs)
+                step.resolved_input = redact_secrets(inputs)
+                step.input_snapshot = step.resolved_input
                 step.input_hash = _stable_hash(inputs)
                 task_config_snapshot = run.snapshot.get("task_config_snapshot", {})
                 task_overrides = task_config_snapshot.get("skill_overrides", {}) if isinstance(task_config_snapshot, dict) else {}
@@ -335,6 +407,7 @@ class WorkflowRunner:
                 step.rate_limited_count = decision.rate_limited_count
                 step.rate_limit_wait_ms = decision.wait_ms
                 step.status = "rate_limited" if decision.rate_limited_count else "running"
+                step.state = "RUNNING"
 
                 cache_key = self._cache_key(workflow_step, skill.manifest.version, inputs, resolved_parameters.config)
                 step.cache_key = cache_key[:16]
@@ -346,33 +419,68 @@ class WorkflowRunner:
                     metrics = raw_output.get("metrics", {})
                     latency_ms = 0.0
                     logs = ["命中 Step 级 Evaluation Cache，跳过真实 Skill 调用。"]
+                    prompt_calls = []
                 else:
                     step.called_skill = True
                     result, latency_ms = skill.execute(inputs, resolved_parameters.config)
                     output = result.output
                     metrics = result.metrics
                     logs = result.logs
+                    prompt_calls = self._persist_prompt_call_artifacts(run, item, workflow_step.step_id, result.prompt_calls)
                     if workflow_step.cacheable:
                         self._cache[cache_key] = {"output": output, "metrics": metrics}
 
-                validate_json_schema(output, skill.manifest.output_schema)
+                validated_output = validate_json_schema(output, skill.manifest.output_schema)
+                output_payload = validated_output if isinstance(validated_output, dict) else output
                 # 标准输出命名空间固定为 `step_id.field`，下游映射可直接引用
                 # `answer.answer` 这类路径；output_mapping 仅保留为旧流程的别名写入能力。
-                context[workflow_step.step_id] = output
+                context[workflow_step.step_id] = output_payload
                 for output_field, target_path in workflow_step.output_mapping.items():
-                    if output_field in output:
-                        set_by_path(context, target_path, output[output_field])
-                context["steps"][workflow_step.step_id] = {"input": inputs, "output": output}
+                    if output_field in output_payload:
+                        set_by_path(context, target_path, output_payload[output_field])
+                context["steps"][workflow_step.step_id] = {"input": inputs, "output": output_payload}
                 context["metrics"].update(metrics)
                 step.status = "succeeded"
-                step.output_snapshot = redact_secrets(output)
-                step.output_hash = _stable_hash(output)
+                step.state = "SUCCEEDED"
+                step.raw_output = redact_secrets(output)
+                step.validated_output = redact_secrets(output_payload)
+                step.output_snapshot = step.validated_output
+                step.output_hash = _stable_hash(output_payload)
                 step.metrics = metrics
                 step.logs = logs
+                step.prompt_calls = prompt_calls
                 step.latency_ms = latency_ms
             except TypeMismatchError as exc:
                 step.status = "failed"
+                if getattr(exc, "code", None) == "OUTPUT_SCHEMA_INVALID":
+                    step.state = "SCHEMA_INVALID"
+                    raw_output = getattr(exc, "raw_output", {})
+                    step.called_skill = True
+                    step.raw_output = redact_secrets(raw_output if isinstance(raw_output, dict) else {"value": raw_output})
+                    step.output_snapshot = step.raw_output
+                    step.validated_output = {}
+                    step.schema_errors = [
+                        {
+                            "field_path": exc.field_path,
+                            "expected_type": exc.expected_type,
+                            "actual_type": exc.actual_type,
+                            "message": str(exc),
+                        }
+                    ]
+                    step.error = {
+                        "type": "TypeMismatchError",
+                        "code": "OUTPUT_SCHEMA_INVALID",
+                        "field_path": exc.field_path,
+                        "expected_type": exc.expected_type,
+                        "actual_type": exc.actual_type,
+                        "message": str(exc),
+                    }
+                    context["errors"].append(step.error)
+                    item.status = "failed"
+                    item.error = step.error
+                    break
                 step.called_skill = False
+                step.state = "FAILED"
                 step.error = {
                     "type": "TypeMismatchError",
                     "field_path": exc.field_path,
@@ -386,6 +494,7 @@ class WorkflowRunner:
                 break
             except (MappingPathError, Exception) as exc:  # noqa: BLE001 - Worker 边界需要捕获并落库。
                 step.status = "failed"
+                step.state = "FAILED"
                 step.error = {"type": type(exc).__name__, "message": str(exc)}
                 context["errors"].append(step.error)
                 item.status = "failed"
@@ -394,6 +503,7 @@ class WorkflowRunner:
 
         if item.status != "failed":
             item.status = "succeeded"
+        item.state = _item_state(item.status)
         item.context_snapshot = redact_secrets({key: value for key, value in context.items() if key != "secrets"})
         item.metrics = context["metrics"]
         item.finished_at = _now()
@@ -402,6 +512,18 @@ class WorkflowRunner:
         # Worker 按 item_id/row_id 单条读取是生产形态；本地 MVP 为了简化单进程执行，
         # 在 execute_run 中建立索引。数据集创建和队列投递阶段仍保持流式。
         return {row.row_id: row for row in self.dataset_service.iter_rows(dataset_id, dataset_version, chunk_size=1)}
+
+    @staticmethod
+    def _terminal_status(run: RunRecord) -> str:
+        if all(item.status == "succeeded" for item in run.items):
+            return "completed"
+        if any(item.status == "failed" for item in run.items):
+            return "failed"
+        if run.paused:
+            return "paused"
+        if run.canceled:
+            return "canceled"
+        return "queued"
 
     def _cache_key(self, step: Any, skill_version: str, inputs: dict[str, Any], config: dict[str, Any]) -> str:
         payload = {
@@ -416,7 +538,46 @@ class WorkflowRunner:
         return _stable_hash(payload)
 
     def _save_run(self, run: RunRecord) -> None:
+        _sync_runtime_states(run)
         self.store.write_json(["runs", f"{run.run_id}.json"], run.model_dump(mode="json"))
+
+    def _persist_prompt_call_artifacts(self, run: RunRecord, item: RunItem, step_id: str, prompt_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if self.artifact_store is None:
+            return prompt_calls
+        persisted: list[dict[str, Any]] = []
+        for index, call in enumerate(prompt_calls):
+            if not isinstance(call, dict):
+                persisted.append(call)
+                continue
+            enriched = dict(call)
+            artifact_uris = dict(enriched.get("artifact_uris") or {})
+            base_key = "/".join(
+                [
+                    "prompt-calls",
+                    _artifact_key_part(run.run_id),
+                    _artifact_key_part(item.item_id),
+                    _artifact_key_part(step_id),
+                    f"{index}-{uuid4().hex[:8]}",
+                ]
+            )
+            rendered_prompt = enriched.get("rendered_prompt")
+            if isinstance(rendered_prompt, str):
+                artifact_uris["rendered_prompt"] = self.artifact_store.put_bytes(
+                    f"{base_key}/rendered_prompt.txt",
+                    rendered_prompt.encode("utf-8"),
+                    content_type="text/plain;charset=utf-8",
+                )
+            raw_response = enriched.get("raw_response")
+            if isinstance(raw_response, str):
+                artifact_uris["raw_response"] = self.artifact_store.put_bytes(
+                    f"{base_key}/raw_response.txt",
+                    raw_response.encode("utf-8"),
+                    content_type="text/plain;charset=utf-8",
+                )
+            if artifact_uris:
+                enriched["artifact_uris"] = artifact_uris
+            persisted.append(enriched)
+        return persisted
 
 
 def _now() -> str:
@@ -426,3 +587,58 @@ def _now() -> str:
 def _stable_hash(payload: Any) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def _artifact_key_part(value: str) -> str:
+    safe = "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in value)
+    return safe or "unknown"
+
+
+def _sync_runtime_states(run: RunRecord) -> None:
+    run.state = _run_state(run.status)
+    for item in run.items:
+        item.state = _item_state(item.status)
+        for step in item.steps:
+            step.state = _step_state(step.status, step.error)
+
+
+def _run_state(status: str) -> str:
+    return {
+        "pending": "PENDING",
+        "queued": "QUEUED",
+        "running": "RUNNING",
+        "paused": "PAUSED",
+        "cancel_request": "CANCEL_REQUESTED",
+        "canceled": "CANCELLED",
+        "cancelled": "CANCELLED",
+        "completed": "SUCCEEDED",
+        "succeeded": "SUCCEEDED",
+        "failed": "FAILED",
+        "timeout": "TIMEOUT",
+    }.get(status, status.upper())
+
+
+def _item_state(status: str) -> str:
+    return {
+        "pending": "PENDING",
+        "running": "RUNNING",
+        "succeeded": "SUCCEEDED",
+        "failed": "FAILED",
+        "skipped": "SKIPPED",
+    }.get(status, status.upper())
+
+
+def _step_state(status: str, error: dict[str, Any] | None = None) -> str:
+    if error and error.get("code") == "OUTPUT_SCHEMA_INVALID":
+        return "SCHEMA_INVALID"
+    return {
+        "pending": "PENDING",
+        "validating": "PENDING",
+        "rate_limited": "RUNNING",
+        "running": "RUNNING",
+        "succeeded": "SUCCEEDED",
+        "failed": "FAILED",
+        "skipped": "SKIPPED",
+        "timeout": "TIMEOUT",
+        "schema_invalid": "SCHEMA_INVALID",
+    }.get(status, status.upper())

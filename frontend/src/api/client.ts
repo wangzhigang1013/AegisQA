@@ -22,6 +22,9 @@ import type {
   JudgeProfile,
   JudgeCrossValidationResult,
   JudgeAuditTrends,
+  LocalWorkerRunOnceResult,
+  LocalWorkerStatus,
+  ModelAlias,
   PromptSkillCandidate,
   PromptSkillCandidatePageResult,
   PromptSkillCandidateBulkArchiveResult,
@@ -524,6 +527,14 @@ export const api = {
   resumeTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/resume`, { method: 'POST' }),
   cancelTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/cancel`, { method: 'POST' }),
   retryFailedTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/retry-failed`, { method: 'POST' }),
+  localWorkerStatus: () => request<LocalWorkerStatus>('/workers/local/status'),
+  localWorkerRunOnce: () => request<LocalWorkerRunOnceResult>('/workers/local/run-once', { method: 'POST' }),
+  modelAliases: () => request<ModelAlias[]>('/model-aliases'),
+  upsertModelAlias: (body: { alias: string; provider: string; model: string; enabled?: boolean }) =>
+    request<ModelAlias>('/model-aliases', {
+      method: 'POST',
+      body: JSON.stringify({ ...body, enabled: body.enabled ?? true }),
+    }),
   taskReport: (taskId: string, pagination: { badcasePage?: number; badcasePageSize?: number } = {}) => {
     const query = new URLSearchParams();
     if (pagination.badcasePage) query.set('badcase_page', String(pagination.badcasePage));
@@ -584,6 +595,18 @@ export const api = {
   resumeRun: (runId: string) => request<RunRecord>(`/runs/${runId}/resume`, { method: 'POST' }),
   cancelRun: (runId: string) => request<RunRecord>(`/runs/${runId}/cancel`, { method: 'POST' }),
   retryFailedRun: (runId: string) => request<RunRecord>(`/runs/${runId}/retry-failed`, { method: 'POST' }),
+  promptDebug: (skillId: string, version: string, promptName: string, body: { variables?: Record<string, unknown>; trigger_reason?: string; model_alias?: string | null }) =>
+    request<Record<string, unknown>>(`/skills/${encodeURIComponent(skillId)}/versions/${encodeURIComponent(version)}/prompts/${encodeURIComponent(promptName)}/debug`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  replayStep: (runId: string, itemId: string, stepId: string, body: { override_input?: Record<string, unknown>; disable_cache?: boolean; mock_llm_calls?: boolean } = {}) =>
+    request<Record<string, unknown>>(`/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/steps/${encodeURIComponent(stepId)}/replay`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  stepReproBundle: (runId: string, itemId: string, stepId: string) =>
+    request<Record<string, unknown>>(`/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/steps/${encodeURIComponent(stepId)}/repro-bundle`),
   runTrace: (runId: string) => request<Record<string, unknown>>(`/runs/${runId}/trace`),
   traceTree: (runId: string, pagination: { page?: number; pageSize?: number } = {}) => {
     const query = new URLSearchParams();

@@ -1,6 +1,6 @@
 import { ApartmentOutlined, BranchesOutlined, DatabaseOutlined } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
-import { Alert, Card, Col, Descriptions, Empty, List, Row, Space, Tabs, Tag, Timeline, Typography } from 'antd';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { Alert, Button, Card, Col, Descriptions, Empty, List, Row, Space, Tabs, Tag, Timeline, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -10,6 +10,7 @@ import { PageHeader } from '../components/PageHeader';
 export function TraceFlowPage() {
   const { taskId } = useParams();
   const [tracePage, setTracePage] = useState(1);
+  const [stepActionResult, setStepActionResult] = useState<{ stepId: string; action: string; payload: Record<string, unknown> } | null>(null);
   const tracePageSize = 8;
   const traceQuery = useQuery({
     queryKey: ['task-trace-flow', taskId, tracePage, tracePageSize],
@@ -18,6 +19,14 @@ export function TraceFlowPage() {
   });
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const traceFlow = traceQuery.data;
+  const replayMutation = useMutation({
+    mutationFn: ({ runId, itemId, stepId }: { runId: string; itemId: string; stepId: string }) => api.replayStep(runId, itemId, stepId, { disable_cache: true, mock_llm_calls: true }),
+    onSuccess: (payload, variables) => setStepActionResult({ stepId: variables.stepId, action: 'Replay', payload }),
+  });
+  const reproBundleMutation = useMutation({
+    mutationFn: ({ runId, itemId, stepId }: { runId: string; itemId: string; stepId: string }) => api.stepReproBundle(runId, itemId, stepId),
+    onSuccess: (payload, variables) => setStepActionResult({ stepId: variables.stepId, action: 'Repro Bundle', payload }),
+  });
   const selectedItem = useMemo(() => {
     if (!traceFlow?.items.length) return null;
     return traceFlow.items.find((item) => item.item_id === selectedItemId) ?? traceFlow.items[0];
@@ -59,6 +68,7 @@ export function TraceFlowPage() {
                 <Descriptions size="small" column={1}>
                   <Descriptions.Item label="Run">{traceFlow.attempt.run_id}</Descriptions.Item>
                   <Descriptions.Item label="状态"><Tag>{traceFlow.attempt.status}</Tag></Descriptions.Item>
+                  <Descriptions.Item label="Runtime State"><Tag color="blue">{traceFlow.attempt.state ?? traceFlow.attempt.status.toUpperCase()}</Tag></Descriptions.Item>
                   <Descriptions.Item label="Attempt">{traceFlow.attempt.current_attempt}</Descriptions.Item>
                 </Descriptions>
               </Card>
@@ -85,7 +95,7 @@ export function TraceFlowPage() {
                   renderItem={(item) => (
                     <List.Item className={item.item_id === selectedItem?.item_id ? 'selected-list-row' : ''} onClick={() => setSelectedItemId(item.item_id)}>
                       <List.Item.Meta
-                        title={<Space><span>{item.item_id}</span><Tag color={item.badcase.is_badcase ? 'red' : 'green'}>{item.status}</Tag></Space>}
+                        title={<Space><span>{item.item_id}</span><Tag color={item.badcase.is_badcase ? 'red' : 'green'}>{item.status}</Tag><Tag color="blue">{item.state ?? item.status.toUpperCase()}</Tag></Space>}
                         description={`row=${item.row_id} / repeat=${item.repeat_index}`}
                       />
                     </List.Item>
@@ -99,11 +109,14 @@ export function TraceFlowPage() {
                   <Timeline
                     items={[
                       { dot: <DatabaseOutlined />, color: 'blue', children: `Dataset Row -> ${Object.keys(selectedItem.row).join(', ') || '空 row'}` },
-                      ...selectedItem.steps.map((step) => ({
-                        dot: <BranchesOutlined />,
-                        color: step.status === 'succeeded' ? 'green' : 'red',
-                        children: `${step.step_id} / ${step.skill_ref} / ${Math.round(step.latency_ms)}ms`,
-                      })),
+                      ...selectedItem.steps.map((step) => {
+                        const runtimeState = step.state ?? step.status.toUpperCase();
+                        return {
+                          dot: <BranchesOutlined />,
+                          color: step.status === 'succeeded' ? 'green' : 'red',
+                          children: `${step.step_id} / ${step.skill_ref} / ${Math.round(step.latency_ms)}ms / state ${runtimeState}`,
+                        };
+                      }),
                       { dot: <ApartmentOutlined />, color: selectedItem.badcase.is_badcase ? 'red' : 'green', children: selectedItem.badcase.is_badcase ? `Badcase：${selectedItem.badcase.reason}` : '未形成 Badcase' },
                     ]}
                   />
@@ -118,16 +131,49 @@ export function TraceFlowPage() {
                         children: (
                           <Space direction="vertical" className="full-width-control">
                             {selectedItem.steps.map((step) => (
-                              <Card size="small" key={step.step_id} title={`${step.step_id} / ${step.skill_ref}`}>
+                              <Card
+                                size="small"
+                                key={step.step_id}
+                                title={<Space><span>{step.step_id} / {step.skill_ref}</span><Tag>{step.status}</Tag><Tag color="blue">{step.state ?? step.status.toUpperCase()}</Tag></Space>}
+                              >
+                                <Descriptions size="small" column={1}>
+                                  <Descriptions.Item label="Runtime State">{step.state ?? step.status.toUpperCase()}</Descriptions.Item>
+                                </Descriptions>
+                                <Space className="toolbar-inline">
+                                  <Button
+                                    size="small"
+                                    onClick={() => replayMutation.mutate({ runId: traceFlow.attempt.run_id, itemId: selectedItem.item_id, stepId: step.step_id })}
+                                    loading={replayMutation.isPending}
+                                  >
+                                    Replay
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    onClick={() => reproBundleMutation.mutate({ runId: traceFlow.attempt.run_id, itemId: selectedItem.item_id, stepId: step.step_id })}
+                                    loading={reproBundleMutation.isPending}
+                                  >
+                                    Repro Bundle
+                                  </Button>
+                                </Space>
                                 <Tabs
                                   size="small"
                                   items={[
                                     { key: 'input', label: 'Input', children: <JsonBlock value={step.input} /> },
+                                    { key: 'resolved-input', label: 'Resolved Input', children: <JsonBlock value={step.resolved_input ?? step.input} /> },
                                     { key: 'params', label: '参数', children: <JsonBlock value={{ resolved_config: step.resolved_config, parameter_trace: step.parameter_trace }} /> },
                                     { key: 'output', label: 'Output', children: <JsonBlock value={step.output} /> },
+                                    { key: 'raw-output', label: 'Raw Output', children: <JsonBlock value={step.raw_output ?? step.output} /> },
+                                    { key: 'validated-output', label: 'Validated Output', children: <JsonBlock value={step.validated_output ?? step.output} /> },
+                                    { key: 'schema-errors', label: 'Schema Errors', children: <JsonBlock value={step.schema_errors ?? []} /> },
+                                    { key: 'llm-calls', label: 'LLM Calls', children: <JsonBlock value={step.prompt_calls ?? []} /> },
                                     { key: 'error', label: 'Error', children: <JsonBlock value={step.error ?? {}} /> },
                                   ]}
                                 />
+                                {stepActionResult?.stepId === step.step_id ? (
+                                  <Card size="small" title={stepActionResult.action}>
+                                    <JsonBlock value={stepActionResult.payload} />
+                                  </Card>
+                                ) : null}
                               </Card>
                             ))}
                           </Space>

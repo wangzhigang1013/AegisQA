@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -17,10 +17,17 @@ class SkillManifest(BaseModel):
     Manifest 是平台生成配置表单、做输入输出校验、固定版本快照的依据。
     """
 
+    schema_version: int = 0
     skill_id: str
     name: str
     version: str
     description: str
+    type: Literal["prompt", "code", "hybrid"] = "code"
+    category: str = "legacy"
+    runtime: dict[str, Any] = Field(default_factory=lambda: {"kind": "python", "entrypoint": "handler.py"})
+    prompts: list[dict[str, Any]] = Field(default_factory=list)
+    llm_permissions: dict[str, Any] = Field(default_factory=dict)
+    limits: dict[str, Any] = Field(default_factory=dict)
     author: str = "AegisQA"
     tags: list[str] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
@@ -44,6 +51,7 @@ class SkillResult(BaseModel):
     metrics: dict[str, Any] = Field(default_factory=dict)
     artifacts: dict[str, Any] = Field(default_factory=dict)
     logs: list[str] = Field(default_factory=list)
+    prompt_calls: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class BaseSkill(ABC):
@@ -71,7 +79,12 @@ class BaseSkill(ABC):
         started = perf_counter()
         result = self.run(inputs, config)
         latency_ms = (perf_counter() - started) * 1000
-        validate_json_schema(result.output, self.manifest.output_schema)
+        try:
+            validate_json_schema(result.output, self.manifest.output_schema)
+        except Exception as exc:
+            setattr(exc, "code", "OUTPUT_SCHEMA_INVALID")
+            setattr(exc, "raw_output", result.output)
+            raise
         return result, latency_ms
 
     def contract_test(self) -> dict[str, Any]:

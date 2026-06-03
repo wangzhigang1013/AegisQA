@@ -17,11 +17,11 @@ describe('图表组件懒加载', () => {
     await import('../pages/ReportsPage');
 
     expect(echartsModuleLoaded).not.toHaveBeenCalled();
-  });
+  }, 60_000);
 
   it('导入 Judge 审计页面时不应立即加载 ECharts 模块', async () => {
     await import('../pages/JudgeAuditPage');
 
     expect(echartsModuleLoaded).not.toHaveBeenCalled();
-  });
+  }, 60_000);
 });

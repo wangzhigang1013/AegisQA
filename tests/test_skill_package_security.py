@@ -45,12 +45,15 @@ def test_skill_market_can_hide_builtin_skills_for_clean_local_store(tmp_path) ->
 def test_skill_package_records_contract_and_approval_metadata(tmp_path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)
+    package_content = _plugin_zip()
 
     uploaded = client.post(
         "/skills/packages/upload",
-        json={"filename": "echo.zip", "content_base64": _plugin_zip()},
+        json={"filename": "echo.zip", "content_base64": package_content},
     ).json()
     assert uploaded["status"] == "pending_review"
+    assert uploaded["artifact_uri"].startswith("local://skill-packages/")
+    assert client.app.state.artifact_store.get_bytes(uploaded["artifact_uri"]) == base64.b64decode(package_content)
     assert uploaded["approved_by"] is None
     assert uploaded["approved_at"] is None
     assert uploaded["last_contract_at"] is None
@@ -136,6 +139,35 @@ def run(inputs, config):
     assert contract["code"] == "SKILL_PACKAGE_RUNTIME_ERROR"
     assert str(tmp_path) not in payload_text
     assert "C:/Users/17343/secret" not in payload_text
+
+
+def test_skill_package_subprocess_does_not_receive_provider_api_keys(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-from-parent")
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    handler = """
+import os
+
+def run(inputs, config):
+    return {
+        'output': {
+            'echo': str(bool(os.getenv('OPENAI_API_KEY'))),
+            'cwd_has_handler': str(os.path.exists(os.path.join(os.getcwd(), 'handler.py'))),
+        },
+        'metrics': {},
+    }
+"""
+    client.post(
+        "/skills/packages/upload",
+        json={"filename": "env.zip", "content_base64": _plugin_zip(skill_id="plugin.env@0.1.0", handler=handler)},
+    )
+
+    contract = client.post("/skills/plugin.env@0.1.0/contract-test").json()
+
+    assert contract["ok"] is True
+    assert contract["output"]["echo"] == "False"
+    assert contract["output"]["cwd_has_handler"] == "True"
 
 
 def _plugin_zip(skill_id: str = "plugin.echo@0.1.0", handler: str | None = None) -> str:

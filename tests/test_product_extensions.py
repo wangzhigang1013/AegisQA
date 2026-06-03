@@ -73,8 +73,18 @@ def test_skill_governance_templates_exports_rbac_and_audit(tmp_path: Path) -> No
 def test_badcase_bulk_cluster_and_report_export(tmp_path: Path) -> None:
     store = JsonStore(tmp_path / "store")
     service = BadcaseService(store)
-    first = service.create_badcase("run-1", "item-1", "judge_label=fail", {"question": "支付失败怎么办"})
-    second = service.create_badcase("run-1", "item-2", "judge_label=fail", {"question": "支付超时怎么办"})
+    first = service.create_badcase(
+        "run-1",
+        "item-1",
+        "judge_label=fail",
+        {"question": "支付失败怎么办", "source": "step", "source_id": "judge-1", "evidence": {"label": "fail"}},
+    )
+    second = service.create_badcase(
+        "run-1",
+        "item-2",
+        "judge_label=fail",
+        {"question": "支付超时怎么办", "source": "step", "source_id": "judge-2", "evidence": {"label": "fail"}},
+    )
 
     corrected = service.bulk_correct(
         [first.badcase_id, second.badcase_id],

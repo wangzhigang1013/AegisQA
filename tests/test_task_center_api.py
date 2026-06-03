@@ -119,6 +119,8 @@ def test_task_lifecycle_report_and_trace_tree(tmp_path: Path) -> None:
     _write_jsonl(data_path)
 
     dataset = client.post("/datasets/from-path", json={"name": "task_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    assert dataset["artifact_uri"].startswith("local://datasets/task_dataset/v1/source.jsonl")
+    assert client.app.state.artifact_store.get_bytes(dataset["artifact_uri"]) == data_path.read_bytes()
     workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
 
     task = client.post(
@@ -523,6 +525,10 @@ def test_task_preflight_is_persisted_and_task_references_preflight_id(tmp_path: 
     assert report["preflight_evidence"]["checks"][0]["check_id"] == "dataset_non_empty"
     json_export = client.get(f"/tasks/{task['task_id']}/report/export", params={"file_format": "json"}).json()
     assert json_export["content"]["preflight_evidence"]["preflight_id"] == preflight["preflight_id"]
+    assert json_export["artifact_uri"].startswith(f"local://reports/{task['task_id']}/")
+    assert json_export["artifact_metadata"]["content_type"] == "application/json"
+    stored_json_export = client.app.state.artifact_store.get_json(json_export["artifact_uri"])
+    assert stored_json_export["preflight_evidence"]["preflight_id"] == preflight["preflight_id"]
     denied_export = client.get(f"/tasks/{task['task_id']}/report/export", params={"file_format": "json", "role": "Viewer"})
     assert denied_export.status_code == 403
     assert denied_export.json()["code"] == "REPORT_EXPORT_FORBIDDEN"
@@ -532,6 +538,7 @@ def test_task_preflight_is_persisted_and_task_references_preflight_id(tmp_path: 
     assert "quality_decision,status" in csv_export["content"]
     assert "preflight_check,dataset_non_empty" in csv_export["content"]
     assert "segment," in csv_export["content"]
+    assert client.app.state.artifact_store.get_bytes(csv_export["artifact_uri"]).decode("utf-8") == csv_export["content"]
     html_export = client.get(f"/tasks/{task['task_id']}/report/export", params={"file_format": "html"}).json()
     assert preflight["preflight_id"] in html_export["content"]
     assert "<script>alert(1)</script>" not in html_export["content"]
@@ -540,10 +547,12 @@ def test_task_preflight_is_persisted_and_task_references_preflight_id(tmp_path: 
     assert "<h2>Preflight 检查</h2>" in html_export["content"]
     assert "<h2>分层分析</h2>" in html_export["content"]
     assert "<h2>Badcase 明细</h2>" in html_export["content"]
+    assert client.app.state.artifact_store.get_bytes(html_export["artifact_uri"]).decode("utf-8") == html_export["content"]
     export_events = client.get("/audit-events", params={"action": "task.report.export"}).json()
     assert export_events[-1]["target"] == task["task_id"]
     assert export_events[-1]["detail"]["file_format"] == "html"
     assert export_events[-1]["detail"]["preflight_id"] == preflight["preflight_id"]
+    assert export_events[-1]["detail"]["artifact_uri"] == html_export["artifact_uri"]
 
 
 def test_viewer_can_export_task_report_after_admin_approval(tmp_path: Path) -> None:

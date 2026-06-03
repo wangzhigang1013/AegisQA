@@ -118,7 +118,12 @@ def test_badcase_judge_and_export_actions(tmp_path: Path) -> None:
 
     badcase = client.post(
         "/badcases",
-        json={"run_id": "run-demo", "item_id": "item-demo", "reason": "judge_label=fail", "payload": {"question": "Q", "score": 0.2}},
+        json={
+            "run_id": "run-demo",
+            "item_id": "item-demo",
+            "reason": "judge_label=fail",
+            "payload": {"question": "Q", "score": 0.2, "source": "step", "source_id": "step-demo", "evidence": {"score": 0.2}},
+        },
     ).json()
     reopened = client.post(f"/badcases/{badcase['badcase_id']}/reopen").json()
     assert reopened["status"] == "reopened"

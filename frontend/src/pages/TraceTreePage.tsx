@@ -36,6 +36,7 @@ export function TraceTreePage() {
                 <Descriptions size="small" column={1}>
                   <Descriptions.Item label="Run ID">{traceTree.run_id}</Descriptions.Item>
                   <Descriptions.Item label="状态"><Tag>{traceTree.status}</Tag></Descriptions.Item>
+                  <Descriptions.Item label="Runtime State"><Tag color="blue">{traceTree.state ?? traceTree.status.toUpperCase()}</Tag></Descriptions.Item>
                 </Descriptions>
               </Card>
             </Col>
@@ -75,6 +76,7 @@ export function TraceTreePage() {
                 { title: 'Item', dataIndex: 'item_id' },
                 { title: 'Row', dataIndex: 'row_id' },
                 { title: '状态', dataIndex: 'status', render: (value) => <Tag>{value}</Tag> },
+                { title: 'Runtime State', dataIndex: 'state', render: (value, row) => <Tag color="blue">{String(value ?? String(row.status).toUpperCase())}</Tag> },
                 { title: 'Metrics', dataIndex: 'metrics', render: (value) => <JsonPreview value={value} /> },
               ]}
             />
@@ -91,13 +93,37 @@ function StepTable({ steps }: { steps: Record<string, unknown>[] }) {
   return (
     <Space direction="vertical" className="full-width-control">
       {steps.length ? steps.map((step) => (
-        <Card size="small" key={String(step.step_id)} title={<Space><Typography.Text strong>{String(step.step_id)}</Typography.Text><Tag>{String(step.status)}</Tag></Space>}>
+        <Card
+          size="small"
+          key={String(step.step_id)}
+          title={(
+            <Space>
+              <Typography.Text strong>{String(step.step_id)}</Typography.Text>
+              <Tag>{String(step.status)}</Tag>
+              <Tag color="blue">{String(step.state ?? String(step.status).toUpperCase())}</Tag>
+            </Space>
+          )}
+        >
           <Descriptions size="small" column={1}>
             <Descriptions.Item label="Skill">{String(step.skill_ref)}</Descriptions.Item>
+            <Descriptions.Item label="Runtime State">{String(step.state ?? String(step.status).toUpperCase())}</Descriptions.Item>
             <Descriptions.Item label="耗时">{Math.round(Number(step.latency_ms ?? 0))} ms</Descriptions.Item>
             <Descriptions.Item label="缓存">{step.cache_hit ? <Tag color="green">hit</Tag> : <Tag>miss</Tag>}</Descriptions.Item>
             <Descriptions.Item label="输入"><JsonPreview value={step.input} /></Descriptions.Item>
             <Descriptions.Item label="输出"><JsonPreview value={step.output} /></Descriptions.Item>
+            <Descriptions.Item label="Trace 详情">
+              <JsonPreview
+                value={{
+                  skill_version: step.skill_version,
+                  state: step.state,
+                  resolved_input: step.resolved_input ?? step.input,
+                  raw_output: step.raw_output ?? step.output,
+                  validated_output: step.validated_output ?? step.output,
+                  schema_errors: step.schema_errors ?? [],
+                  prompt_calls: step.prompt_calls ?? [],
+                }}
+              />
+            </Descriptions.Item>
           </Descriptions>
         </Card>
       )) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该 Item 暂无 Step 调用。" />}

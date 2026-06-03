@@ -12,6 +12,7 @@ export function TaskSnapshotPanel({ task }: { task: TaskRecord }) {
           <Descriptions.Item label="Run">{task.run_id}</Descriptions.Item>
           <Descriptions.Item label="当前 Attempt">{task.current_attempt ?? 1}</Descriptions.Item>
           <Descriptions.Item label="状态"><Tag>{task.status}</Tag></Descriptions.Item>
+          <Descriptions.Item label="Runtime State"><Tag>{task.state ?? task.status.toUpperCase()}</Tag></Descriptions.Item>
           <Descriptions.Item label="Badcase">{task.badcase_count}</Descriptions.Item>
           <Descriptions.Item label="执行参数">{formatExecutionConfig(task)}</Descriptions.Item>
         </Descriptions>

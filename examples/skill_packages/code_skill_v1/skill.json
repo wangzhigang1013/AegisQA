@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "skill_id": "example.code_echo@0.1.0",
+  "name": "Code Echo Example",
+  "version": "0.1.0",
+  "description": "A v1 code skill package using run(input_data, context).",
+  "type": "code",
+  "category": "transformer",
+  "runtime": { "kind": "python", "entrypoint": "handler.py" },
+  "prompts": [],
+  "llm_permissions": {
+    "allowed_prompt_names": [],
+    "allowed_model_aliases": [],
+    "max_calls_per_run": 0,
+    "max_tokens_per_run": 0
+  },
+  "limits": { "timeout_seconds": 60 },
+  "input_schema": {
+    "type": "object",
+    "properties": { "text": { "type": "string" } },
+    "required": ["text"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "echo": { "type": "string" },
+      "context_has_skill": { "type": "boolean" }
+    },
+    "required": ["echo", "context_has_skill"]
+  },
+  "config_schema": { "type": "object" },
+  "example_input": { "text": "hello" },
+  "example_config": {}
+}

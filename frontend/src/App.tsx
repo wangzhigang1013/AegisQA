@@ -12,10 +12,11 @@ import {
   ToolOutlined,
 } from '@ant-design/icons';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ConfigProvider, Layout, Menu, theme } from 'antd';
+import { Alert, ConfigProvider, Layout, Menu, theme } from 'antd';
 import type { MenuProps } from 'antd';
 import { lazy, Suspense, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { featureFlags, isFeatureEnabled, type FeatureKey } from './features';
 
 const OverviewPage = lazy(() => import('./pages/OverviewPage').then(({ OverviewPage }) => ({ default: OverviewPage })));
 const DatasetsPage = lazy(() => import('./pages/DatasetsPage').then(({ DatasetsPage }) => ({ default: DatasetsPage })));
@@ -46,26 +47,35 @@ function createAppQueryClient() {
   });
 }
 
-const navItems: MenuProps['items'] = [
+type MenuItem = NonNullable<MenuProps['items']>[number];
+
+const coreNavItems: MenuItem[] = [
   { key: '/', icon: <BarChartOutlined />, label: <NavLink to="/">概览</NavLink> },
   { key: '/datasets', icon: <DatabaseOutlined />, label: <NavLink to="/datasets">数据集</NavLink> },
   { key: '/skills', icon: <ExperimentOutlined />, label: <NavLink to="/skills">Skill 市场</NavLink> },
   { key: '/workflows', icon: <ApartmentOutlined />, label: <NavLink to="/workflows">Workflow 市场</NavLink> },
   { key: '/runs', icon: <PlayCircleOutlined />, label: <NavLink to="/runs">执行中心</NavLink> },
   { key: '/reports', icon: <BarChartOutlined />, label: <NavLink to="/reports">报告中心</NavLink> },
-  { key: '/repair-tasks', icon: <ToolOutlined />, label: <NavLink to="/repair-tasks">修复任务</NavLink> },
-  { key: '/experiments', icon: <ExperimentOutlined />, label: <NavLink to="/experiments">实验中心</NavLink> },
-  { key: '/ci-gates', icon: <ControlOutlined />, label: <NavLink to="/ci-gates">CI Gate</NavLink> },
-  { key: '/annotation-queue', icon: <FileSearchOutlined />, label: <NavLink to="/annotation-queue">人工审核</NavLink> },
-  { key: '/candidate-assets', icon: <FileSearchOutlined />, label: <NavLink to="/candidate-assets">候选资产</NavLink> },
-  { key: '/judge', icon: <AuditOutlined />, label: <NavLink to="/judge">Judge 审计</NavLink> },
   { key: '/governance', icon: <SafetyCertificateOutlined />, label: <NavLink to="/governance">治理与审计</NavLink> },
+];
+
+const experimentalNavItems: Array<MenuItem & { feature: FeatureKey }> = [
+  { feature: 'repair_tasks', key: '/repair-tasks', icon: <ToolOutlined />, label: <NavLink to="/repair-tasks">修复任务</NavLink> },
+  { feature: 'experiments', key: '/experiments', icon: <ExperimentOutlined />, label: <NavLink to="/experiments">实验中心</NavLink> },
+  { feature: 'ci_gate', key: '/ci-gates', icon: <ControlOutlined />, label: <NavLink to="/ci-gates">CI Gate</NavLink> },
+  { feature: 'annotation_queue', key: '/annotation-queue', icon: <FileSearchOutlined />, label: <NavLink to="/annotation-queue">人工审核</NavLink> },
+  { feature: 'candidate_assets', key: '/candidate-assets', icon: <FileSearchOutlined />, label: <NavLink to="/candidate-assets">候选资产</NavLink> },
+  { feature: 'judge_audit', key: '/judge', icon: <AuditOutlined />, label: <NavLink to="/judge">Judge 审计</NavLink> },
 ];
 
 export function AppShell() {
   const location = useLocation();
   const selectedKey = `/${location.pathname.split('/')[1]}`.replace(/\/$/, '') || '/';
   const [queryClient] = useState(createAppQueryClient);
+  const navItems: MenuProps['items'] = [
+    ...coreNavItems,
+    ...experimentalNavItems.filter((item) => isFeatureEnabled(item.feature)),
+  ];
 
   return (
     <ConfigProvider
@@ -109,12 +119,12 @@ export function AppShell() {
                   <Route path="/tasks/:taskId/trace" element={<TraceFlowPage />} />
                   <Route path="/tasks/:taskId/trace-tree" element={<TraceTreePage />} />
                   <Route path="/reports" element={<ReportsPage />} />
-                  <Route path="/repair-tasks" element={<RepairTasksPage />} />
-                  <Route path="/experiments" element={<ExperimentsPage />} />
-                  <Route path="/ci-gates" element={<CIGatesPage />} />
-                  <Route path="/annotation-queue" element={<AnnotationQueuePage />} />
-                  <Route path="/candidate-assets" element={<CandidateAssetsPage />} />
-                  <Route path="/judge" element={<JudgeAuditPage />} />
+                  <Route path="/repair-tasks" element={featureElement('repair_tasks', <RepairTasksPage />)} />
+                  <Route path="/experiments" element={featureElement('experiments', <ExperimentsPage />)} />
+                  <Route path="/ci-gates" element={featureElement('ci_gate', <CIGatesPage />)} />
+                  <Route path="/annotation-queue" element={featureElement('annotation_queue', <AnnotationQueuePage />)} />
+                  <Route path="/candidate-assets" element={featureElement('candidate_assets', <CandidateAssetsPage />)} />
+                  <Route path="/judge" element={featureElement('judge_audit', <JudgeAuditPage />)} />
                   <Route path="/governance" element={<GovernancePage />} />
                 </Routes>
               </Suspense>
@@ -123,5 +133,18 @@ export function AppShell() {
         </Layout>
       </QueryClientProvider>
     </ConfigProvider>
+  );
+}
+
+function featureElement(feature: FeatureKey, element: JSX.Element): JSX.Element {
+  if (isFeatureEnabled(feature)) {
+    return element;
+  }
+  const flag = featureFlags[feature];
+  return (
+    <section className="page-stack">
+      <Alert type="warning" showIcon message="Experimental feature disabled" description={flag.reason} />
+      <h1>{flag.label}</h1>
+    </section>
   );
 }

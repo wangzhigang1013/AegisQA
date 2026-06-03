@@ -14,7 +14,7 @@ describe('修复任务工作台', () => {
   installDefaultWorkbenchMocks();
 
   it('修复任务工作台支持查看证据、领取和完成', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     expect(screen.getByRole('link', { name: /修复任务/ })).toBeInTheDocument();
     expect(await screen.findByText('修复任务工作台')).toBeInTheDocument();
@@ -65,7 +65,7 @@ describe('修复任务工作台', () => {
       return jsonResponse([]);
     });
 
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     expect(await screen.findByText('修复任务 0')).toBeInTheDocument();
     expect(screen.queryByText('修复任务 8')).not.toBeInTheDocument();
@@ -84,7 +84,7 @@ describe('修复任务工作台', () => {
   });
 
   it('修复任务工作台支持发起人工审核和 CI Gate 复测动作', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     fireEvent.click(await screen.findByRole('button', { name: /发起人工审核/ }));
     expect((await screen.findAllByText(/已创建 2 个审核样本/)).length).toBeGreaterThan(0);
@@ -97,7 +97,7 @@ describe('修复任务工作台', () => {
   });
 
   it('修复任务工作台支持复跑并展示 Attempt 对比结果', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     fireEvent.click(await screen.findByRole('button', { name: /复跑对比/ }));
 
@@ -106,7 +106,7 @@ describe('修复任务工作台', () => {
   });
 
   it('修复任务工作台支持生成并展示上下文修复建议', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     fireEvent.click(await screen.findByRole('button', { name: /生成建议/ }));
 
@@ -116,7 +116,7 @@ describe('修复任务工作台', () => {
   });
 
   it('修复任务工作台支持把建议拆成可追踪子任务', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     fireEvent.click(await screen.findByRole('button', { name: /拆分子任务/ }));
 
@@ -129,7 +129,7 @@ describe('修复任务工作台', () => {
   });
 
   it('修复任务工作台支持查看修复树进度', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     fireEvent.click(await screen.findByRole('button', { name: /查看进度/ }));
 
@@ -141,7 +141,7 @@ describe('修复任务工作台', () => {
   });
 
   it('修复任务工作台支持指派负责人并在修复树提示逾期', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     await screen.findByText('[warning] 复盘低通过率分层');
     fireEvent.click(await screen.findByRole('button', { name: /指派修复任务/ }));
@@ -158,7 +158,7 @@ describe('修复任务工作台', () => {
   });
 
   it('修复任务工作台支持生成 Dataset 字段修复计划', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     fireEvent.click(await screen.findByRole('button', { name: /字段修复计划/ }));
 
@@ -169,7 +169,7 @@ describe('修复任务工作台', () => {
   });
 
   it('修复任务工作台支持生成 Workflow 参数 diff 和回滚建议', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     fireEvent.click(await screen.findByRole('button', { name: /参数 diff\/回滚/ }));
 
@@ -181,7 +181,7 @@ describe('修复任务工作台', () => {
   });
 
   it('修复任务工作台支持生成 Prompt 和 Skill 版本对比', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     fireEvent.click(await screen.findByRole('button', { name: /版本对比/ }));
 
@@ -193,7 +193,7 @@ describe('修复任务工作台', () => {
   });
 
   it('修复任务工作台支持把版本对比沉淀为候选配置', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     fireEvent.click(await screen.findByRole('button', { name: /版本对比/ }));
     expect(await screen.findByText(/已生成 1 个 Prompt\/Skill 版本对比候选/)).toBeInTheDocument();
@@ -204,7 +204,7 @@ describe('修复任务工作台', () => {
   });
 
   it('修复任务工作台支持从版本差异创建 Workflow 草稿', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     fireEvent.click(await screen.findByRole('button', { name: /版本对比/ }));
     expect(await screen.findByText(/已生成 1 个 Prompt\/Skill 版本对比候选/)).toBeInTheDocument();
@@ -215,7 +215,7 @@ describe('修复任务工作台', () => {
   });
 
   it('修复任务工作台沉淀候选后仍可继续生成 Workflow 草稿', async () => {
-    await renderWorkbench('/repair-tasks');
+    await renderRepairTasksWorkbench();
 
     fireEvent.click(await screen.findByRole('button', { name: /版本对比/ }));
     expect(await screen.findByText(/已生成 1 个 Prompt\/Skill 版本对比候选/)).toBeInTheDocument();
@@ -228,3 +228,7 @@ describe('修复任务工作台', () => {
   });
 
 });
+
+function renderRepairTasksWorkbench() {
+  return renderWorkbench('/repair-tasks', { features: { repair_tasks: true } });
+}

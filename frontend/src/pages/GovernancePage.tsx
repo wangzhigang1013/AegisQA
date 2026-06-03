@@ -1,4 +1,4 @@
-import { SafetyCertificateOutlined } from '@ant-design/icons';
+import { SafetyCertificateOutlined, SaveOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Input, Modal, Space, Table, Tag, Timeline, Tooltip, Typography } from 'antd';
 import { useMemo, useState } from 'react';
@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { SkillApprovalDrawer } from './skills/SkillApprovalDrawer';
-import type { SkillManifest, SkillPackageRecord } from '../types';
+import type { ModelAlias, SkillManifest, SkillPackageRecord } from '../types';
 
 const permissionRows = [
   { key: 'admin', role: 'admin', permissions: 'workflow:publish, run:control, skill:governance, audit:read' },
@@ -20,9 +20,12 @@ export function GovernancePage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [skillQuery, setSkillQuery] = useState('');
   const [approvalSkill, setApprovalSkill] = useState<SkillManifest | null>(null);
+  const [aliasForm, setAliasForm] = useState({ alias: '', provider: 'test', model: '' });
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
   const packagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
   const auditEventsQuery = useQuery({ queryKey: ['audit-events'], queryFn: () => api.auditEvents() });
+  const modelAliasesQuery = useQuery({ queryKey: ['model-aliases'], queryFn: api.modelAliases });
+  const modelAliases = Array.isArray(modelAliasesQuery.data) ? modelAliasesQuery.data : [];
   const packageBySkillId = useMemo(() => indexPackagesBySkillId(packagesQuery.data ?? []), [packagesQuery.data]);
   const filteredSkills = useMemo(() => {
     const query = skillQuery.trim().toLowerCase();
@@ -40,6 +43,17 @@ export function GovernancePage() {
       await queryClient.invalidateQueries({ queryKey: ['audit-events'] });
     },
     onError: (error) => setNotice(error instanceof Error ? `治理动作失败：${error.message}` : '治理动作失败'),
+  });
+
+  const aliasMutation = useMutation({
+    mutationFn: () => api.upsertModelAlias({ ...aliasForm, enabled: true }),
+    onSuccess: async (alias) => {
+      setNotice(`Model Alias 已保存：${alias.alias}`);
+      setAliasForm({ alias: '', provider: 'test', model: '' });
+      await queryClient.invalidateQueries({ queryKey: ['model-aliases'] });
+      await queryClient.invalidateQueries({ queryKey: ['audit-events'] });
+    },
+    onError: (error) => setNotice(error instanceof Error ? `Model Alias 保存失败：${error.message}` : 'Model Alias 保存失败'),
   });
 
   return (
@@ -61,6 +75,56 @@ export function GovernancePage() {
           <Typography.Text type="secondary">
             当前页面只保留治理动作：权限矩阵、Skill 生命周期和审计日志。
           </Typography.Text>
+        </Space>
+      </Card>
+
+      <Card className="flat-card" title="Model Alias 管理">
+        <Space direction="vertical" size={12} className="full-width-control">
+          <Space wrap>
+            <Input
+              aria-label="Model Alias"
+              placeholder="例如 test.review"
+              value={aliasForm.alias}
+              onChange={(event) => setAliasForm((current) => ({ ...current, alias: event.target.value }))}
+              style={{ width: 220 }}
+            />
+            <Input
+              aria-label="Provider"
+              placeholder="provider"
+              value={aliasForm.provider}
+              onChange={(event) => setAliasForm((current) => ({ ...current, provider: event.target.value }))}
+              style={{ width: 160 }}
+            />
+            <Input
+              aria-label="Model"
+              placeholder="model"
+              value={aliasForm.model}
+              onChange={(event) => setAliasForm((current) => ({ ...current, model: event.target.value }))}
+              style={{ width: 220 }}
+            />
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              loading={aliasMutation.isPending}
+              disabled={!aliasForm.alias.trim() || !aliasForm.provider.trim() || !aliasForm.model.trim()}
+              onClick={() => aliasMutation.mutate()}
+            >
+              保存 Alias
+            </Button>
+          </Space>
+          <Table
+            rowKey="alias"
+            pagination={false}
+            loading={modelAliasesQuery.isLoading}
+            dataSource={modelAliases}
+            columns={[
+              { title: 'Alias', dataIndex: 'alias', render: (value) => <Typography.Text code>{value}</Typography.Text> },
+              { title: 'Provider', dataIndex: 'provider' },
+              { title: 'Model', dataIndex: 'model' },
+              { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? 'enabled' : 'disabled'}</Tag> },
+              { title: '更新时间', dataIndex: 'updated_at', render: (value: ModelAlias['updated_at']) => value ?? '-' },
+            ]}
+          />
         </Space>
       </Card>
 

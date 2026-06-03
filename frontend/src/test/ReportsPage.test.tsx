@@ -44,6 +44,115 @@ describe('报告中心', () => {
     expect(screen.getByText('80')).toBeInTheDocument();
   });
 
+  it('报告中心在缺少真实质量和 LLM 成本来源时展示 unavailable 状态', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/tasks/task-demo/report') && !url.includes('/export')) {
+        return jsonResponse({
+          task: demoTask,
+          task_summary: { task_id: 'task-demo', task_name: 'RAG 任务', run_id: 'run-demo', status: 'completed', sample_count: 1 },
+          version_snapshot: { dataset: {}, workflow: {}, execution_config: {} },
+          report: { run_id: 'run-demo', pass_rate: 1, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [] },
+          badcases: [],
+          badcase_pagination: { page: 1, page_size: 12, total_items: 0, total_pages: 0 },
+          quality_checks: [],
+          gate_evaluation: { decision: 'skipped', blocking: false, summary: { passed: 0, failed: 0, warnings: 0, skipped: 1 }, results: [], failed_blocking_rules: [] },
+          cost_status: { source: 'unavailable', message: 'Token/cost unavailable until LLM Gateway token usage is enabled.' },
+          unavailable_reasons: [
+            'Quality checks are not configured.',
+            'Token/cost unavailable until LLM Gateway token usage is enabled.',
+          ],
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/reports');
+
+    expect(await screen.findByText('Quality checks are not configured.')).toBeInTheDocument();
+    expect(screen.getAllByText('Token/cost unavailable until LLM Gateway token usage is enabled.').length).toBeGreaterThan(0);
+  });
+
+  it('报告中心展示来自 LLM Gateway trace 的真实 token usage', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/tasks/task-demo/report') && !url.includes('/export')) {
+        return jsonResponse({
+          task: demoTask,
+          task_summary: { task_id: 'task-demo', task_name: 'RAG 任务', run_id: 'run-demo', status: 'completed', sample_count: 1 },
+          version_snapshot: { dataset: {}, workflow: {}, execution_config: {} },
+          report: { run_id: 'run-demo', pass_rate: 1, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [] },
+          badcases: [],
+          badcase_pagination: { page: 1, page_size: 12, total_items: 0, total_pages: 0 },
+          cost_status: {
+            source: 'llm_gateway',
+            message: 'Token usage is aggregated from persisted LLM Gateway prompt call traces.',
+            token_usage: { prompt_tokens: 8, completion_tokens: 4, total_tokens: 12 },
+            prompt_call_count: 1,
+            providers: ['test'],
+          },
+          unavailable_reasons: ['Quality checks are not configured.'],
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/reports');
+
+    expect(await screen.findByText('LLM Gateway')).toBeInTheDocument();
+    expect(screen.getByText('Total tokens 12')).toBeInTheDocument();
+    expect(screen.getByText('Prompt calls 1')).toBeInTheDocument();
+    expect(screen.queryByText('Token/cost unavailable until LLM Gateway token usage is enabled.')).not.toBeInTheDocument();
+  });
+
+  it('报告中心展示真实质量门禁规则和失败证据', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/tasks/task-demo/report') && !url.includes('/export')) {
+        const qualityChecks = [
+          {
+            check_id: 'pass_rate_gate',
+            title: 'Pass Rate Gate',
+            status: 'failed',
+            metric: 'pass_rate',
+            operator: '>=',
+            threshold: 0.8,
+            actual: 0.4,
+            blocking: true,
+            evidence: { metric: 'pass_rate', actual: 0.4, threshold: 0.8 },
+          },
+        ];
+        return jsonResponse({
+          task: demoTask,
+          task_summary: { task_id: 'task-demo', task_name: 'RAG 任务', run_id: 'run-demo', status: 'completed', sample_count: 1 },
+          version_snapshot: { dataset: {}, workflow: {}, execution_config: {} },
+          report: { run_id: 'run-demo', pass_rate: 0.4, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [] },
+          badcases: [],
+          badcase_pagination: { page: 1, page_size: 12, total_items: 0, total_pages: 0 },
+          quality_checks: qualityChecks,
+          gate_evaluation: {
+            decision: 'failed',
+            summary: '1 条阻断规则未通过。',
+            results: qualityChecks,
+            failed_blocking_rules: qualityChecks,
+          },
+          unavailable_reasons: [],
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/reports');
+
+    expect(await screen.findByText('质量门禁')).toBeInTheDocument();
+    expect(screen.getByText('Pass Rate Gate')).toBeInTheDocument();
+    expect(screen.getAllByText('failed').length).toBeGreaterThan(0);
+    expect(screen.getByText(/"actual":0.4/)).toBeInTheDocument();
+  });
+
   it('报告中心支持从诊断加入人工审核队列', async () => {
     await renderWorkbench('/reports');
 
@@ -142,6 +251,47 @@ describe('报告中心', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看参数治理' }));
     expect(await screen.findByText('Trace Flow')).toBeInTheDocument();
     expect(await screen.findByText('问答回归集')).toBeInTheDocument();
+  });
+
+  it('报告中心将未持久化 Badcase 转正式记录时携带真实来源证据', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const createdPayloads: Record<string, unknown>[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/tasks/task-demo/report') && !url.includes('/export')) {
+        const transientBadcase = {
+          item_id: 'item-transient',
+          reason: 'judge_label=fail',
+          status: 'open',
+          payload: { question: 'Q1' },
+        };
+        return jsonResponse({
+          task: { ...demoTask, status: 'completed', pass_rate: 0.5, badcase_count: 1 },
+          task_summary: { task_id: 'task-demo', task_name: 'RAG 任务', run_id: 'run-demo', status: 'completed', sample_count: 1 },
+          version_snapshot: { dataset: {}, workflow: {}, execution_config: {} },
+          report: { run_id: 'run-demo', pass_rate: 0.5, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [transientBadcase] },
+          badcases: [transientBadcase],
+          badcase_pagination: { page: 1, page_size: 5, total_items: 1, total_pages: 1 },
+          export_links: { html: '', csv: '', json: '' },
+        });
+      }
+      if (url.endsWith('/badcases') && init?.method === 'POST') {
+        createdPayloads.push(JSON.parse(String(init.body)));
+        return jsonResponse({ ...demoBadcase, badcase_id: 'badcase-created', source: 'step', source_id: 'item-transient' });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/reports?task_id=task-demo');
+    fireEvent.click(await screen.findByRole('button', { name: /^加入 Golden$/ }));
+
+    await waitFor(() => expect(createdPayloads).toHaveLength(1));
+    expect(createdPayloads[0].payload).toMatchObject({
+      source: 'step',
+      source_id: 'item-transient',
+      evidence: { reason: 'judge_label=fail' },
+    });
+    expect(await screen.findByText(/Badcase 已加入 Golden 候选/)).toBeInTheDocument();
   });
 
   it('报告中心 Badcase 明细使用服务端分页，导出不受页面分页影响', async () => {

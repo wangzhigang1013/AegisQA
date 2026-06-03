@@ -20,6 +20,8 @@ class RouteContext:
     workflow_service: Any
     graph_service: Any
     runner: Any
+    worker: Any
+    artifact_store: Any
     badcases: Any
     judge_profiles: Any
     access_control: Any

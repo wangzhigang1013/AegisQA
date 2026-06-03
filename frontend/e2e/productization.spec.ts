@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('CI Gate 可以创建配置并阻断低通过率任务', async ({ page, request }) => {
+  await enableExperimentalFeatures(page, { ci_gate: true });
   const stamp = Date.now();
   const datasetName = `e2e_ci_dataset_${stamp}`;
   const workflowName = `E2E CI Gate Workflow ${stamp}`;
@@ -27,6 +28,7 @@ test('CI Gate 可以创建配置并阻断低通过率任务', async ({ page, req
 });
 
 test('Annotation Queue 可以领取、审核并回流 Golden', async ({ page, request }) => {
+  await enableExperimentalFeatures(page, { annotation_queue: true });
   const stamp = Date.now();
   const datasetName = `e2e_annotation_dataset_${stamp}`;
   const workflowName = `E2E Annotation Workflow ${stamp}`;
@@ -165,4 +167,10 @@ function escapeRegExp(value: string) {
 
 function apiPath(pathname: string) {
   return `/api${pathname}`;
+}
+
+async function enableExperimentalFeatures(page: import('@playwright/test').Page, features: Record<string, boolean>) {
+  await page.addInitScript((enabledFeatures) => {
+    (window as unknown as { __AEGISQA_FEATURE_OVERRIDES__?: Record<string, boolean> }).__AEGISQA_FEATURE_OVERRIDES__ = enabledFeatures;
+  }, features);
 }

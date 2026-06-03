@@ -118,7 +118,7 @@ export function TaskOperationsDrawer({
                       <Timeline
                         items={task.attempts.map((attempt) => ({
                           color: attempt.run_id === task.run_id ? 'blue' : attempt.status === 'completed' ? 'green' : 'gray',
-                          children: `#${attempt.attempt_index} / ${attempt.status} / ${attempt.run_id} / 通过率 ${Math.round(Number(attempt.pass_rate ?? 0) * 100)}%`,
+                          children: `#${attempt.attempt_index} / ${attempt.status} / state ${attempt.state ?? attempt.status.toUpperCase()} / ${attempt.run_id} / 通过率 ${Math.round(Number(attempt.pass_rate ?? 0) * 100)}%`,
                         }))}
                       />
                     ) : (
