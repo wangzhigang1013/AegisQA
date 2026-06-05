@@ -71,7 +71,9 @@ def register_dataset_routes(app: FastAPI, ctx: RouteContext) -> None:
             )
         suffix = Path(request.filename).suffix or ".jsonl"
         upload_path = ctx.store.path("uploads", f"{request.name}{suffix}")
-        upload_path.write_text(request.content, encoding="utf-8")
+        # 用 bytes 写入避免 Windows 文本模式把用户上传的换行符改写成 CRLF，
+        # 这样 ArtifactStore 中的 source 文件可以精确追溯 API 上传内容。
+        upload_path.write_bytes(request.content.encode("utf-8"))
         dataset = ctx.dataset_service.upload_dataset(
             request.name,
             upload_path,

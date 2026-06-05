@@ -14,6 +14,7 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - Step Repro Bundle 已写入 ArtifactStore 的 `repro_bundles` 命名空间，并在 API 响应中返回 artifact metadata，导出产物不再只是瞬时 JSON。
 - Skill Package 上传原始 zip 已写入 ArtifactStore 的 `skill_packages` 命名空间，上传响应和包记录会返回 artifact metadata，后续可按 sha256 与 artifact_id 追溯原始包。
 - Task Report JSON/CSV/HTML 导出已写入 ArtifactStore 的 `reports` 命名空间，导出响应和审计事件会带 artifact metadata / artifact_id。
+- Dataset 上传原始文件和 Source materialize JSONL 已写入 ArtifactStore 的 `uploaded_datasets` 命名空间，并写回 `source_ref.artifact`。
 - 模型网关 provider HTTP/network 错误详情会统一脱敏，避免外部服务回显 Authorization 或 API key 时泄漏。
 - Skill Package 上传会记录可执行/二进制文件、直接模型 SDK 调用和疑似硬编码 API key 的结构化 warning。
 - Trace Flow、Trace Tree 和 Report 页面加载失败时显示结构化错误码和 `trace_id`，便于定位后端请求。
@@ -38,6 +39,22 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - 历史 `tmp-report-debug*` 与 `tmp-report-gate-debug/` 调试目录已加入忽略规则，避免污染 `git status`。
 
 ## 最近改动
+
+### 2026-06-05 Dataset ArtifactStore 接入
+
+- 改动摘要：继续补齐 ArtifactStore 主资产接入，把 Dataset 上传原始内容和 Source Skill 物化样本写成可追溯的 `uploaded_datasets` 产物。
+- 主要变更：
+  - `DatasetService` 支持注入 `ArtifactStore`，`create_app()` 将 `LocalArtifactStore` 传入 DatasetService。
+  - `upload_dataset()` 在 DatasetVersion 保存前把 CSV/JSONL 原始文件写入 ArtifactStore，并把 metadata 写入 `source_ref.artifact`。
+  - `materialize_source_rows()` 将 Source Skill 物化 rows 编码为 JSONL 写入 ArtifactStore，并同样写回 `source_ref.artifact`。
+  - `/datasets/upload` 临时文件改为 UTF-8 bytes 写入，避免 Windows 文本模式把用户上传的 LF 改写成 CRLF。
+  - 新增回归测试，验证 Dataset API 响应和持久化 metadata 均可从 `app.state.artifact_store` 读回原始内容。
+- 验证：
+  - 红灯验证：`python -m pytest tests/test_dataset_artifact_store.py::test_dataset_upload_persists_source_file_in_artifact_store -q` 初始失败，缺少 `source_ref.artifact`。
+  - `python -m pytest tests/test_dataset_artifact_store.py::test_dataset_upload_persists_source_file_in_artifact_store -q`：1 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - `python -m pytest tests/test_dataset_artifact_store.py tests/test_trustworthy_evaluation_enhancements.py::test_dataset_lineage_tracks_source_fields_and_downstream_tasks tests/test_access_control_hardening.py::test_dataset_governance_write_routes_require_permission_and_record_actor_role tests/test_artifact_store.py -q`：11 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - `python -m pytest tests/test_platform_core.py::test_dataset_upload_streams_rows_and_versions_csv_jsonl tests/test_full_prd_gap_closure.py::test_source_skills_execute_db_api_online_sampling_and_materialize_dataset -q`：2 passed。
+  - 本批只触碰 Dataset ArtifactStore 接入和定向测试，没有运行后端全量、前端测试或 E2E。
 
 ### 2026-06-05 Task Report ArtifactStore 接入
 
