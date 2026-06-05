@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { useSearchParams } from 'react-router-dom';
 
 import { runWorkbenchAction } from '../actions/actionRouter';
-import { api } from '../api/client';
+import { api, formatApiError } from '../api/client';
 import { LazyECharts } from '../components/LazyECharts';
 import { ActionToolbar, DataTableShell, PageSection } from '../components/LayoutPrimitives';
 import { MetricTile } from '../components/MetricTile';
@@ -551,6 +551,18 @@ export function ReportsPage() {
       />
 
       {notice ? <Alert type={notice.includes('失败') || notice.includes('请先') ? 'warning' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
+      {tasksQuery.isError ? (
+        <Alert type="error" showIcon message="报告任务列表加载失败" description={formatApiError(tasksQuery.error)} />
+      ) : null}
+      {selectedTaskQuery.isError ? (
+        <Alert type="error" showIcon message="报告任务详情加载失败" description={formatApiError(selectedTaskQuery.error)} />
+      ) : null}
+      {reportQuery.isError ? (
+        <Alert type="error" showIcon message="报告加载失败" description={formatApiError(reportQuery.error)} />
+      ) : null}
+      {scoreAnalyticsQuery.isError ? (
+        <Alert type="warning" showIcon message="Score Analytics 加载失败" description={formatApiError(scoreAnalyticsQuery.error)} />
+      ) : null}
       {!canExportReport ? (
         <Alert
           type={hasHtmlExportApproval || hasOfflinePackageApproval ? 'info' : 'warning'}

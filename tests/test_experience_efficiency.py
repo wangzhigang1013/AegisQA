@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from aegisqa.api.app import create_app
+from aegisqa.skills.base import BaseSkill, SkillManifest, SkillResult
 
 
 def _write_jsonl(path: Path) -> None:
@@ -162,6 +163,68 @@ def test_step_replay_prompt_debug_and_repro_bundle_are_callable(tmp_path: Path) 
     assert bundle["raw_output"]
     assert bundle["replay_endpoint"] == f"{base_path}/replay"
     assert bundle["prompt_debug_endpoint"] == f"{base_path}/prompt-debug"
+
+
+def test_step_debug_endpoints_reject_viewer_role(tmp_path: Path) -> None:
+    client, task = _seed_executed_task(tmp_path)
+    trace_flow = client.get(f"/tasks/{task['task_id']}/trace-flow").json()
+    item = trace_flow["items"][0]
+    step = item["steps"][0]
+    base_path = f"/runs/{task['run_id']}/items/{item['item_id']}/steps/{step['step_id']}"
+
+    denied_replay = client.post(f"{base_path}/replay", json={"role": "Viewer", "actor": "viewer"})
+    denied_prompt = client.post(f"{base_path}/prompt-debug", json={"role": "Viewer", "actor": "viewer"})
+    denied_bundle = client.get(f"{base_path}/repro-bundle?role=Viewer&actor=viewer")
+
+    for response in (denied_replay, denied_prompt, denied_bundle):
+        assert response.status_code == 403
+        assert response.json()["code"] == "FORBIDDEN"
+        assert response.json()["details"]["required_permission"] == "run:create"
+
+
+def test_step_live_replay_preserves_raw_output_when_output_schema_invalid(tmp_path: Path) -> None:
+    client, task = _seed_executed_task(tmp_path)
+    trace_flow = client.get(f"/tasks/{task['task_id']}/trace-flow").json()
+    item = trace_flow["items"][0]
+    answer_step = item["steps"][0]
+    base_path = f"/runs/{task['run_id']}/items/{item['item_id']}/steps/{answer_step['step_id']}"
+
+    class InvalidReplaySkill(BaseSkill):
+        manifest = SkillManifest(
+            skill_id=answer_step["skill_ref"],
+            name="Invalid Replay Skill",
+            version="test",
+            description="测试 replay output_schema invalid 时是否保留 raw output。",
+            input_schema={"type": "object", "required": ["prompt"], "properties": {"prompt": {"type": "string"}}},
+            output_schema={
+                "type": "object",
+                "required": ["answer", "tokens"],
+                "properties": {"answer": {"type": "string"}, "tokens": {"type": "integer"}},
+            },
+        )
+
+        def run(self, inputs: dict[str, object], config: dict[str, object] | None = None) -> SkillResult:
+            return SkillResult(output={"answer": f"raw:{inputs['prompt']}"}, metrics={"debug": 1})
+
+    client.app.state.registry.register(InvalidReplaySkill())
+
+    replay = client.post(
+        f"{base_path}/replay",
+        json={
+            "input_mode": "override",
+            "override_input": {"prompt": "override prompt"},
+            "mock_llm_calls": False,
+            "disable_cache": True,
+        },
+    ).json()
+
+    assert replay["input_mode"] == "override"
+    assert replay["resolved_input"] == {"prompt": "override prompt"}
+    assert replay["status"] == "failed"
+    assert replay["error_code"] == "OUTPUT_SCHEMA_INVALID"
+    assert replay["raw_output"] == {"answer": "raw:override prompt"}
+    assert replay["validated_output"] == {}
+    assert replay["schema_errors"]
 
 
 def test_task_report_promotes_findings_and_action_targets(tmp_path: Path) -> None:

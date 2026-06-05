@@ -8,6 +8,12 @@ export type FeatureFlagKey =
 
 export type FeatureFlags = Record<FeatureFlagKey, boolean>;
 
+export type FeatureFlagsResponse = {
+  flags?: Partial<FeatureFlags>;
+  defaults?: Partial<FeatureFlags>;
+  env_prefix?: string;
+};
+
 export const FEATURE_FLAG_DEFAULTS: FeatureFlags = {
   ci_gate: false,
   candidate_assets: false,
@@ -53,4 +59,13 @@ export function isFeatureEnabled(feature: FeatureFlagKey, flags: FeatureFlags = 
 
 export function allFeatureFlagsEnabled(): FeatureFlags {
   return Object.fromEntries(Object.keys(FEATURE_FLAG_DEFAULTS).map((feature) => [feature, true])) as FeatureFlags;
+}
+
+export function mergeFeatureFlags(base: FeatureFlags, remote?: Partial<FeatureFlags>): FeatureFlags {
+  const merged = { ...base };
+  for (const feature of Object.keys(FEATURE_FLAG_DEFAULTS) as FeatureFlagKey[]) {
+    // 前端 env 与后端 env 任一显式开启都允许试用；默认 false 不覆盖已开启的本地 E2E/开发配置。
+    merged[feature] = Boolean(base[feature] || remote?.[feature]);
+  }
+  return merged;
 }

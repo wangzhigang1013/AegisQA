@@ -6,6 +6,15 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 
 当前最新批次已经完成：
 
+- Feature flags 启动时会合并后端 `/features` 返回值，后端开启的高级模块可进入前端导航；默认关闭仍保持隐藏。
+- CI Gate 缺少真实指标时返回 `skipped`，不再把缺失 cost/error 等指标当作 0 生成假 passed。
+- Step Replay live 模式在 output schema invalid 时保留 raw output、清空 validated output，并返回 `OUTPUT_SCHEMA_INVALID`。
+- Step Replay、Prompt Debug、Repro Bundle 均有 Viewer 权限拒绝回归；Repro Bundle GET 已补权限门禁和审计。
+- 新增 `ArtifactStore` / `LocalArtifactStore`，提供本地产物写入、读取、元数据、大小限制和路径安全检查，并挂载到 `app.state.artifact_store`。
+- 模型网关 provider HTTP/network 错误详情会统一脱敏，避免外部服务回显 Authorization 或 API key 时泄漏。
+- Skill Package 上传会记录可执行/二进制文件、直接模型 SDK 调用和疑似硬编码 API key 的结构化 warning。
+- Trace Flow、Trace Tree 和 Report 页面加载失败时显示结构化错误码和 `trace_id`，便于定位后端请求。
+- production-like smoke 脚本在 `-StartCompose` 时先检查 Docker CLI/Compose 可用性；本机当前未安装或未暴露 `docker`，真实 MySQL/Redis/Celery smoke 未通过。
 - Overview 工作台使用真实 `/overview/workbench` 聚合数据，不再拉取完整 Run 列表，也不使用 demo 兜底。
 - Task 详情、Trace Step、Report 推荐动作统一围绕真实证据和下一步动作展示。
 - 后端动作对象已统一为 `id/action/label/enabled/disabled/target_url/target/payload/evidence` 兼容契约。
@@ -26,6 +35,32 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - 历史 `tmp-report-debug*` 与 `tmp-report-gate-debug/` 调试目录已加入忽略规则，避免污染 `git status`。
 
 ## 最近改动
+
+### 2026-06-05 Reality-First 优化计划第二批硬化
+
+- 改动摘要：继续执行当前优化计划，聚焦 Feature Flag 同步、Replay/Prompt Debug/Repro 权限与异常态、真实质量门禁 skipped、模型网关脱敏、ArtifactStore、安全包 warning、Worker 控制证明和前端诊断错误详情。
+- 主要变更：
+  - 前端启动后调用 `/features`，通过 `mergeFeatureFlags` 合并后端 flags 与本地 `VITE_ENABLE_*`，避免前后端开关状态不一致。
+  - CI Gate 评估缺失真实指标时返回 `skipped` 和明确 reason，不再把缺失指标按 0 处理；Productization、baseline guard 和 Repair Task 复测入口统一使用 gate status 归并函数。
+  - live Step Replay 增加 input/config/output schema 校验；output schema 失败时保留 `raw_output`、返回空 `validated_output` 和 `OUTPUT_SCHEMA_INVALID`。
+  - Repro Bundle GET 增加 `role/actor` 查询参数、`run:create` 权限门禁和审计记录；Viewer 会被 Replay、Prompt Debug、Repro Bundle 拒绝。
+  - 新增 `aegisqa/storage/artifacts.py`，实现 `ArtifactStore`、`LocalArtifactStore`、结构化错误、元数据、路径穿越/绝对路径/大小限制校验，并挂载到 `app.state.artifact_store`。
+  - 模型网关 HTTP/network 错误详情通过 `redact_secrets` 脱敏，避免 provider 错误 body 回显密钥。
+  - Skill Package zip 安全扫描新增 warning：可执行/二进制文件、直接模型 SDK 调用、疑似硬编码 API key；不阻断历史包上传，但审批证据可见。
+  - Worker 状态机新增运行中 cancel 回归，证明 cancel 后不启动后续 RunItem；pause/cancel 同级覆盖。
+  - Trace Flow、Trace Tree、Report 页面加载失败 Alert 增加 `formatApiError` description，展示错误码与 `trace_id`。
+  - `scripts/smoke_production_like.ps1` 增加 Docker CLI/Compose 前置检查和 `$composeStarted` 清理保护。
+- 验证：
+  - 红灯验证：`python -m pytest tests/test_productization_api.py::test_ci_gate_missing_metric_is_skipped_instead_of_fake_passed -q` 初始失败，缺失 `cost` 被判为 passed。
+  - 红灯验证：`python -m pytest tests/test_artifact_store.py -q` 初始失败，缺少 `aegisqa.storage.artifacts`。
+  - 红灯验证：`python -m pytest tests/test_model_gateway.py::test_model_gateway_http_error_redacts_provider_body_secrets -q` 初始失败，provider body 泄漏 `sk-*`。
+  - 红灯验证：`python -m pytest tests/test_experience_efficiency.py::test_step_debug_endpoints_reject_viewer_role -q` 初始失败，Repro Bundle 对 Viewer 返回 200。
+  - 红灯验证：`npm test -- App.test.tsx -t "Trace Flow 加载失败时展示后端错误码和 trace_id|报告加载失败时展示后端错误码和 trace_id"` 初始失败，页面未展示结构化错误详情。
+  - `python -m pytest tests/test_artifact_store.py tests/test_skill_package_security.py tests/test_model_gateway.py tests/test_model_usage_billing.py tests/test_experience_efficiency.py tests/test_platform_core.py::test_workflow_runner_honors_pause_requested_during_active_execution tests/test_platform_core.py::test_workflow_runner_honors_cancel_requested_during_active_execution tests/test_productization_api.py::test_assertion_dsl_and_ci_gate_return_actionable_results tests/test_productization_api.py::test_ci_gate_missing_metric_is_skipped_instead_of_fake_passed tests/test_productization_api.py::test_ci_gate_config_can_be_saved_and_evaluated_against_run_and_task tests/test_productization_api.py::test_ci_gate_evaluation_history_is_saved_and_filterable -q`：47 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - `cd frontend && npm run typecheck`：passed。
+  - `cd frontend && npm test -- App.test.tsx -t "默认隐藏高级模块导航|启动后合并后端 feature flags|Trace Flow 加载失败时展示后端错误码和 trace_id|报告加载失败时展示后端错误码和 trace_id|Trace Flow Step 抽屉"`：5 passed。
+  - `.\scripts\smoke_production_like.ps1 -StartCompose`：失败，稳定报错为 Docker CLI 不可用；本机未安装或未暴露 `docker`，因此未完成真实 MySQL/Redis/Celery 环境级 smoke。
+  - 本批没有运行后端全量、前端全量 Vitest 或 Playwright E2E；按当前计划只跑受影响面的定向验证。
 
 ### 2026-06-05 Feature Flag 主导航降噪
 

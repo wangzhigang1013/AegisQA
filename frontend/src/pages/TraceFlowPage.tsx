@@ -74,7 +74,7 @@ export function TraceFlowPage() {
         }
       />
 
-      {traceQuery.isError ? <Alert type="error" showIcon message="Trace Flow 加载失败" /> : null}
+      {traceQuery.isError ? <Alert type="error" showIcon message="Trace Flow 加载失败" description={formatApiError(traceQuery.error)} /> : null}
 
       {traceFlow ? (
         <>

@@ -55,6 +55,34 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/VITE_ENABLE_CI_GATE/)).toBeInTheDocument();
   });
 
+  it('启动后合并后端 feature flags，允许后端开启高级模块入口', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/features')) {
+        return jsonResponse({
+          flags: {
+            ci_gate: true,
+            candidate_assets: false,
+            repair_tasks: false,
+            experiments: false,
+            annotation_queue: false,
+            judge_audit: false,
+          },
+          defaults: {},
+          env_prefix: 'AEGISQA_ENABLE_',
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/ci-gates', { featureFlags: 'defaults' });
+
+    expect(await screen.findByRole('link', { name: /CI Gate/ })).toBeInTheDocument();
+    expect(await screen.findByText('CI Gate')).toBeInTheDocument();
+    expect(screen.queryByText('Experimental / Disabled')).not.toBeInTheDocument();
+  });
+
   it('概览页读取真实 Dashboard 和工作台聚合数据', async () => {
     await renderWorkbench('/');
 
@@ -803,6 +831,27 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/workflow_config/)).toBeInTheDocument();
   });
 
+  it('Trace Flow 加载失败时展示后端错误码和 trace_id', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/tasks/task-demo/trace-flow')) {
+        return errorResponse(503, {
+          code: 'TRACE_FLOW_UNAVAILABLE',
+          message: 'Trace Flow 暂不可用',
+          trace_id: 'trace_flow_test',
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/tasks/task-demo/trace');
+
+    expect(await screen.findByText('Trace Flow 加载失败')).toBeInTheDocument();
+    expect(await screen.findByText(/TRACE_FLOW_UNAVAILABLE/)).toBeInTheDocument();
+    expect(screen.getByText(/trace_id=trace_flow_test/)).toBeInTheDocument();
+  });
+
   it('Trace Flow Step 抽屉调用 Replay、Prompt Debug 和 Repro Bundle 接口', async () => {
     const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
     const requests: { url: string; method?: string; body?: string }[] = [];
@@ -907,6 +956,27 @@ describe('AegisQA 前端工作台', () => {
       expect(traceRequests.some((request) => request.includes('page=2') && request.includes('page_size=8'))).toBe(true);
     });
     expect(await screen.findByText('trace-item-8')).toBeInTheDocument();
+  });
+
+  it('报告加载失败时展示后端错误码和 trace_id', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/tasks/task-demo/report')) {
+        return errorResponse(503, {
+          code: 'REPORT_UNAVAILABLE',
+          message: '报告暂不可用',
+          trace_id: 'trace_report_test',
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/reports?task_id=task-demo');
+
+    expect(await screen.findByText('报告加载失败')).toBeInTheDocument();
+    expect(await screen.findByText(/REPORT_UNAVAILABLE/)).toBeInTheDocument();
+    expect(screen.getByText(/trace_id=trace_report_test/)).toBeInTheDocument();
   });
 
   it('Trace Tree 独立页面展示 Item 到 Skill Step 的调用树', async () => {

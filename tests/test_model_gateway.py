@@ -1,4 +1,6 @@
+from io import BytesIO
 import json
+from urllib.error import HTTPError
 
 from fastapi.testclient import TestClient
 
@@ -131,6 +133,38 @@ def test_model_gateway_test_accepts_temporary_api_key_without_persisting(tmp_pat
     assert captured["authorization"] == "Bearer sk-temp-abcdef123456"
     settings_text = (tmp_path / "store" / "settings" / "model_gateway.json").read_text(encoding="utf-8")
     assert "sk-temp-abcdef123456" not in settings_text
+
+
+def test_model_gateway_http_error_redacts_provider_body_secrets(tmp_path, monkeypatch) -> None:
+    leaked_secret = "sk-provider-error-secret-123456"
+
+    def fake_urlopen(request, timeout):  # noqa: ANN001 - 测试替身只需要模拟 provider 错误响应。
+        raise HTTPError(
+            request.full_url,
+            401,
+            "Unauthorized",
+            {},
+            BytesIO(f'{{"error":"Authorization Bearer {leaked_secret}"}}'.encode("utf-8")),
+        )
+
+    monkeypatch.setattr(gateway_module, "urlopen", fake_urlopen)
+    client = TestClient(create_app(store_root=tmp_path / "store"))
+    client.put(
+        "/model-gateway/config",
+        json={
+            "provider": "openai_compatible",
+            "base_url": "https://api.example.com/v1",
+            "default_model": "example-model",
+            "timeout_seconds": 10,
+        },
+    )
+
+    response = client.post("/model-gateway/test", json={"prompt": "触发 provider 错误", "api_key": leaked_secret})
+
+    assert response.status_code == 502
+    payload_text = response.text
+    assert leaked_secret not in payload_text
+    assert payload_text.count("***REDACTED***") >= 1
 
 
 def test_model_gateway_legacy_plaintext_config_is_migrated_to_unconfigured(tmp_path) -> None:

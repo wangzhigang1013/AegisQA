@@ -12,6 +12,7 @@ $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptRoot "..")
 $resolvedComposeFile = Join-Path $repoRoot $ComposeFile
+$composeStarted = $false
 
 function Invoke-AegisApi {
   param(
@@ -58,6 +59,16 @@ function Invoke-DockerCompose {
   }
 }
 
+function Assert-DockerComposeAvailable {
+  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    throw "Docker CLI 不可用，无法启动 MySQL/Redis/Celery production-like smoke。请安装并启动 Docker Desktop，或去掉 -StartCompose 后连接已运行的 API。"
+  }
+  & docker compose version *> $null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Docker Compose 不可用，无法启动 production-like smoke。请确认当前 Docker 版本支持 'docker compose'。"
+  }
+}
+
 function Wait-TaskCompleted {
   param([string]$TaskId)
 
@@ -81,8 +92,10 @@ if (-not (Test-Path $resolvedComposeFile)) {
 
 try {
   if ($StartCompose) {
+    Assert-DockerComposeAvailable
     Write-Output "启动 production-like 依赖：MySQL、Redis、API、Worker"
     Invoke-DockerCompose -Arguments @("up", "-d", "mysql", "redis", "api", "worker")
+    $composeStarted = $true
   } else {
     Write-Output "未传 -StartCompose，将复用已启动的 API：$ApiUrl"
   }
@@ -165,7 +178,7 @@ try {
   Write-Output "Executor job: $($submitted.execution_state.executor_job_id)"
   Write-Output "Report: /reports?task_id=$($task.task_id)"
 } finally {
-  if ($StartCompose -and -not $KeepCompose) {
+  if ($composeStarted -and -not $KeepCompose) {
     Write-Output "停止 production-like compose 服务"
     try {
       Invoke-DockerCompose -Arguments @("down")

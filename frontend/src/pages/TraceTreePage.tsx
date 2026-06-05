@@ -4,7 +4,7 @@ import { Alert, Button, Card, Col, Descriptions, Empty, Row, Space, Table, Tag, 
 import { useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
-import { api } from '../api/client';
+import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 
 export function TraceTreePage() {
@@ -34,7 +34,14 @@ export function TraceTreePage() {
         }
       />
 
-      {traceQuery.isError ? <Alert type="error" showIcon message="Trace Tree 加载失败，请确认任务已经执行并生成 Run。" /> : null}
+      {traceQuery.isError ? (
+        <Alert
+          type="error"
+          showIcon
+          message="Trace Tree 加载失败，请确认任务已经执行并生成 Run。"
+          description={formatApiError(traceQuery.error)}
+        />
+      ) : null}
 
       {traceTree ? (
         <>

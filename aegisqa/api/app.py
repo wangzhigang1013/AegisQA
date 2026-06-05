@@ -45,6 +45,7 @@ from aegisqa.skills.packages import (
     resolve_package_entrypoint,
 )
 from aegisqa.skills.registry import SkillRegistry
+from aegisqa.storage.artifacts import LocalArtifactStore
 from aegisqa.storage.json_store import JsonStore
 from aegisqa.storage.mysql_store import ConnectionFactory, MySQLStore
 from aegisqa.storage.repositories import RepositoryRegistry
@@ -59,6 +60,18 @@ MAX_SKILL_PACKAGE_FILES = 200
 MAX_SKILL_PACKAGE_FILE_BYTES = 1_000_000
 MAX_SKILL_PACKAGE_TOTAL_BYTES = 1_500_000
 SKILL_PACKAGE_DEPENDENCY_FILES = {"requirements.txt", "pyproject.toml"}
+SKILL_PACKAGE_EXECUTABLE_SUFFIXES = {".bat", ".bin", ".cmd", ".dll", ".dylib", ".exe", ".sh", ".so"}
+SKILL_PACKAGE_TEXT_SUFFIXES = {".json", ".md", ".py", ".txt", ".yaml", ".yml"}
+SKILL_PACKAGE_DIRECT_MODEL_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bimport\s+(openai|anthropic|cohere|boto3)\b",
+        r"\bfrom\s+(openai|anthropic|cohere|boto3)\s+import\b",
+        r"\bimport\s+google\.generativeai\b",
+        r"\b(OpenAI|Anthropic)\s*\(",
+    )
+]
+SKILL_PACKAGE_API_KEY_PATTERN = re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]{12,}")
 
 
 class DatasetFromPathRequest(BaseModel):
@@ -453,6 +466,7 @@ def create_app(
         store_root = os.getenv("AEGISQA_STORE_ROOT", str(store_root))
     resolved_storage_backend = (storage_backend or os.getenv("AEGISQA_STORAGE_BACKEND") or "json").lower()
     store = _create_store(store_root, storage_backend=resolved_storage_backend, mysql_connection_factory=mysql_connection_factory)
+    artifact_store = LocalArtifactStore(Path(store.root) / "artifacts")
     repositories = RepositoryRegistry(store)
     setattr(store, "repositories", repositories)
     # 模型网关配置允许通过前端保存，本地 store 中有记录时要在启动阶段恢复到运行期。
@@ -479,6 +493,7 @@ def create_app(
 
     app = FastAPI(title="AegisQA", version="0.1.0")
     app.state.store = store
+    app.state.artifact_store = artifact_store
     app.state.repositories = repositories
     app.state.storage_backend = resolved_storage_backend
     app.state.registry = registry
@@ -910,6 +925,7 @@ def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> dict[str, 
     file_count = 0
     total_size = 0
     max_file_size = 0
+    warnings: list[dict[str, Any]] = []
     for member in archive.infolist():
         filename = member.filename.replace("\\", "/")
         parts = PurePosixPath(filename).parts
@@ -946,6 +962,8 @@ def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> dict[str, 
                 "插件包解压后的总大小超过安全限制。",
                 details={"total_size_bytes": total_size, "max_total_size_bytes": MAX_SKILL_PACKAGE_TOTAL_BYTES},
             )
+        member_payload = archive.read(member)
+        warnings.extend(_skill_package_member_warnings(filename, member, member_payload))
         target = (destination / member.filename).resolve()
         if destination not in target.parents and target != destination:
             raise AegisQAError(
@@ -958,12 +976,65 @@ def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> dict[str, 
         "file_count": file_count,
         "total_size_bytes": total_size,
         "max_file_size_bytes": max_file_size,
+        "warnings": warnings,
         "limits": {
             "max_files": MAX_SKILL_PACKAGE_FILES,
             "max_file_size_bytes": MAX_SKILL_PACKAGE_FILE_BYTES,
             "max_total_size_bytes": MAX_SKILL_PACKAGE_TOTAL_BYTES,
         },
     }
+
+
+def _skill_package_member_warnings(filename: str, member: zipfile.ZipInfo, payload: bytes) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
+    suffix = Path(filename).suffix.lower()
+    executable_bits = (member.external_attr >> 16) & 0o111
+    if suffix in SKILL_PACKAGE_EXECUTABLE_SUFFIXES or executable_bits:
+        warnings.append(
+            {
+                "code": "SKILL_PACKAGE_EXECUTABLE_FILE_WARNING",
+                "message": "插件包包含可执行或二进制文件，审批时需要确认其必要性。",
+                "filename": filename,
+            }
+        )
+    elif b"\x00" in payload[:4096]:
+        warnings.append(
+            {
+                "code": "SKILL_PACKAGE_BINARY_FILE_WARNING",
+                "message": "插件包包含二进制内容，审批时需要确认来源和用途。",
+                "filename": filename,
+            }
+        )
+    text = _decode_skill_package_text(filename, payload)
+    if text is None:
+        return warnings
+    if any(pattern.search(text) for pattern in SKILL_PACKAGE_DIRECT_MODEL_PATTERNS):
+        warnings.append(
+            {
+                "code": "SKILL_PACKAGE_DIRECT_MODEL_SDK_WARNING",
+                "message": "插件包源码疑似直接调用模型 SDK，应改用平台模型网关和 model alias。",
+                "filename": filename,
+            }
+        )
+    if SKILL_PACKAGE_API_KEY_PATTERN.search(text):
+        warnings.append(
+            {
+                "code": "SKILL_PACKAGE_API_KEY_WARNING",
+                "message": "插件包疑似包含硬编码 API key，审批前必须移除或改用平台 secret_ref。",
+                "filename": filename,
+            }
+        )
+    return warnings
+
+
+def _decode_skill_package_text(filename: str, payload: bytes) -> str | None:
+    suffix = Path(filename).suffix.lower()
+    if suffix not in SKILL_PACKAGE_TEXT_SUFFIXES:
+        return None
+    try:
+        return payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def _reject_unsupported_skill_package_dependencies(package_dir: Path, runtime_payload: dict[str, Any]) -> None:
@@ -1921,7 +1992,20 @@ def _evaluate_assertion(payload: dict[str, Any], assertion: AssertionRuleRequest
 
 
 def _evaluate_gate(metrics: dict[str, float], gate: CIGateRuleRequest) -> dict[str, Any]:
-    actual = float(metrics.get(gate.metric, 0))
+    raw_actual = metrics.get(gate.metric)
+    if not isinstance(raw_actual, (int, float)) or isinstance(raw_actual, bool):
+        return {
+            "gate_id": gate.gate_id,
+            "metric": gate.metric,
+            "operator": gate.operator,
+            "threshold": gate.threshold,
+            "actual": None,
+            "blocking": gate.blocking,
+            "status": "skipped",
+            "message": f"质量门禁跳过：缺少真实指标 {gate.metric}。",
+            "reason": "metric_unavailable",
+        }
+    actual = float(raw_actual)
     passed = _compare(actual, gate.operator, gate.threshold)
     return {
         "gate_id": gate.gate_id,
@@ -1937,6 +2021,15 @@ def _evaluate_gate(metrics: dict[str, float], gate: CIGateRuleRequest) -> dict[s
             else f"质量门禁未通过：{gate.metric}={actual} 不满足 {gate.operator} {gate.threshold}"
         ),
     }
+
+
+def _gate_evaluation_status(results: list[dict[str, Any]]) -> str:
+    blocking_failures = [item for item in results if item["status"] == "failed" and item["blocking"]]
+    if blocking_failures:
+        return "blocked"
+    if results and all(item.get("status") == "skipped" for item in results):
+        return "skipped"
+    return "passed"
 
 
 def _needs_annotation(item: dict[str, Any], *, strategy: str) -> bool:

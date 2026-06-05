@@ -76,6 +76,7 @@ import type {
   WorkflowParameterPreview,
   WorkflowVersion,
 } from '../types';
+import type { FeatureFlagsResponse } from '../features';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api';
 
@@ -205,6 +206,7 @@ function parseContentDispositionFilename(value: string | null): string | undefin
 
 export const api = {
   health: () => request<{ status: string; service: string }>('/health'),
+  features: () => request<FeatureFlagsResponse>('/features'),
   dashboard: () => request<DashboardSummary>('/dashboard/summary'),
   workbench: () => request<OverviewWorkbench>('/overview/workbench'),
   redTeamScan: (body: { task_id?: string; run_id?: string }) =>

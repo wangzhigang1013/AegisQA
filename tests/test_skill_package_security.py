@@ -263,6 +263,34 @@ def run(inputs, config):
     assert "SKILL_PACKAGE_NETWORK_DENIED" in contract["details"]["stderr"]
 
 
+def test_skill_package_upload_records_security_warnings_for_executable_and_direct_model_calls(tmp_path) -> None:
+    client = TestClient(create_app(store_root=tmp_path / "store"))
+    handler = """
+import openai
+
+def run(inputs, config):
+    return {"output": {"echo": inputs["text"]}}
+"""
+
+    uploaded = client.post(
+        "/skills/packages/upload",
+        json={
+            "filename": "warnings.zip",
+            "content_base64": _plugin_zip(
+                skill_id="plugin.warnings@0.1.0",
+                handler=handler,
+                extra_files={"bin/tool.exe": "MZ\x00binary"},
+            ),
+        },
+    )
+
+    assert uploaded.status_code == 200
+    warnings = uploaded.json()["package_security"]["warnings"]
+    codes = {item["code"] for item in warnings}
+    assert "SKILL_PACKAGE_EXECUTABLE_FILE_WARNING" in codes
+    assert "SKILL_PACKAGE_DIRECT_MODEL_SDK_WARNING" in codes
+
+
 def _plugin_zip(
     skill_id: str = "plugin.echo@0.1.0",
     handler: str | None = None,

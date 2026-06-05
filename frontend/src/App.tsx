@@ -14,11 +14,12 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Alert, Button, ConfigProvider, Layout, Menu, theme, Typography } from 'antd';
 import type { MenuProps } from 'antd';
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 
-import { FEATURE_ENV_PREFIX, type FeatureFlagKey, type FeatureFlags, getFeatureFlags, isFeatureEnabled } from './features';
+import { api } from './api/client';
+import { FEATURE_ENV_PREFIX, type FeatureFlagKey, type FeatureFlags, getFeatureFlags, isFeatureEnabled, mergeFeatureFlags } from './features';
 
 const OverviewPage = lazy(() => import('./pages/OverviewPage').then(({ OverviewPage }) => ({ default: OverviewPage })));
 const DatasetsPage = lazy(() => import('./pages/DatasetsPage').then(({ DatasetsPage }) => ({ default: DatasetsPage })));
@@ -76,7 +77,22 @@ export function AppShell() {
   const location = useLocation();
   const selectedKey = `/${location.pathname.split('/')[1]}`.replace(/\/$/, '') || '/';
   const [queryClient] = useState(createAppQueryClient);
-  const featureFlags = getFeatureFlags();
+  const [featureFlags, setFeatureFlags] = useState(getFeatureFlags);
+  useEffect(() => {
+    let active = true;
+    api.features()
+      .then((payload) => {
+        if (active) {
+          setFeatureFlags((current) => mergeFeatureFlags(current, payload.flags));
+        }
+      })
+      .catch(() => {
+        // 后端 flags 只是部署期事实同步；失败时继续使用前端 env，避免开发环境空白。
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const navItems: MenuProps['items'] = navItemConfigs
     .filter((item) => !item.feature || isFeatureEnabled(item.feature, featureFlags))
     .map(({ feature: _feature, ...item }) => item);

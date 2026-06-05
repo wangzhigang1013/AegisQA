@@ -110,3 +110,82 @@ def test_real_model_usage_is_recorded_on_steps_and_report_budget(tmp_path: Path,
     assert report["budget_status"]["prompt_tokens"] == 17
     assert report["budget_status"]["completion_tokens"] == 5
     assert report["budget_status"]["message"].startswith("模型网关 usage 成本")
+
+
+def test_missing_provider_usage_is_reported_as_unavailable_cost_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeOpenAIResponseWithoutUsage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "id": "chatcmpl-no-usage",
+                    "model": "no-usage-model",
+                    "choices": [{"message": {"content": "没有 usage 的真实 provider 响应"}, "finish_reason": "stop"}],
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):  # noqa: ANN001 - 测试替身只需要模拟 provider 没返回 usage。
+        return FakeOpenAIResponseWithoutUsage()
+
+    monkeypatch.setattr(gateway_module, "urlopen", fake_urlopen)
+    client = TestClient(create_app(store_root=tmp_path / "store"))
+    client.put(
+        "/model-gateway/config",
+        json={
+            "provider": "openai_compatible",
+            "base_url": "https://api.example.com/v1",
+            "default_model": "no-usage-model",
+            "timeout_seconds": 20,
+        },
+    )
+    data_path = tmp_path / "no_usage_dataset.jsonl"
+    data_path.write_text(json.dumps({"question": "请介绍 AegisQA"}, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    dataset = client.post("/datasets/from-path", json={"name": "no_usage_dataset", "path": str(data_path)}).json()
+    workflow = client.post(
+        "/workflow-graphs/publish",
+        json={
+            "graph": {
+                "name": "模型 usage 缺失流程",
+                "nodes": [
+                    {
+                        "node_id": "chat",
+                        "node_type": "skill",
+                        "label": "模型调用",
+                        "skill_ref": "model.chat@0.1.0",
+                        "input_mapping": {"prompt": "row.question"},
+                        "output_mapping": {"text": "context.answer"},
+                        "config": {"model": "no-usage-model", "temperature": 0},
+                    },
+                    {"node_id": "report", "node_type": "output", "label": "报告"},
+                ],
+                "edges": [{"source": "chat", "target": "report"}],
+            }
+        },
+    ).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "usage 缺失任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "cost_budget": 0.01,
+        },
+    ).json()
+
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+    assert executed["status"] == "completed"
+
+    report = client.get(f"/tasks/{task['task_id']}/report").json()
+    assert report["report"]["metrics"]["cost_source"] == "provider_usage.missing"
+    assert report["report"]["metrics"]["cost"] == 0
+    assert report["budget_status"]["cost_source"] == "provider_usage.missing"
+    assert report["budget_status"]["cost_used"] == 0
+    assert report["budget_status"]["message"].startswith("模型网关未返回成本")

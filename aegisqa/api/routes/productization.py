@@ -33,6 +33,7 @@ from aegisqa.api.app import (
     _ci_gate_metrics_from_task,
     _evaluate_assertion,
     _evaluate_gate,
+    _gate_evaluation_status,
     _find_task_by_run_id,
     _get_record,
     _get_workflow_draft,
@@ -627,7 +628,7 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         evaluation = {
             "evaluation_id": f"gateeval-{uuid4().hex[:12]}",
             "config_id": request.config_id,
-            "status": "blocked" if blocking_failures else "passed",
+            "status": _gate_evaluation_status(results),
             "blocking_failures": len(blocking_failures),
             "target": target,
             "metrics": metrics,
@@ -2159,7 +2160,7 @@ def _record_ci_gate_evaluation(
     evaluation = {
         "evaluation_id": f"gateeval-{uuid4().hex[:12]}",
         "config_id": config.get("config_id"),
-        "status": "blocked" if blocking_failures else "passed",
+        "status": _gate_evaluation_status(results),
         "blocking_failures": len(blocking_failures),
         "target": target,
         "metrics": metrics,
@@ -2325,9 +2326,10 @@ def _build_baseline_rollback_guard(ctx: RouteContext, suggestion: dict[str, Any]
         for config in ci_gate_configs
     ]
     blocking_failures = sum(int(item.get("blocking_failures", 0)) for item in evaluations)
+    results = [result for evaluation in evaluations for result in evaluation.get("results", [])]
     # 回滚也可能把 baseline 带回一个不满足当前质量门禁的旧版本，必须把复测证据和回滚动作绑定。
     return {
-        "status": "blocked" if blocking_failures else "passed",
+        "status": _gate_evaluation_status(results),
         "ci_gate_evaluations": evaluations,
         "blocking_failures": blocking_failures,
     }
@@ -2356,8 +2358,9 @@ def _build_baseline_apply_guard(ctx: RouteContext, suggestion: dict[str, Any], *
         for config in ci_gate_configs
     ]
     blocking_failures = sum(int(item.get("blocking_failures", 0)) for item in evaluations)
+    results = [result for evaluation in evaluations for result in evaluation.get("results", [])]
     return {
-        "status": "blocked" if blocking_failures else "passed",
+        "status": _gate_evaluation_status(results),
         "ci_gate_evaluations": evaluations,
         "blocking_failures": blocking_failures,
     }

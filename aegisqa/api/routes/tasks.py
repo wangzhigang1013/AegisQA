@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from html import escape
 from math import ceil
+from time import perf_counter
 from typing import Any, Iterable, Iterator
 from uuid import uuid4
 
@@ -43,6 +44,7 @@ from aegisqa.api.app import (
     _ensure_task_can_create_attempt,
     _get_record,
     _evaluate_gate,
+    _gate_evaluation_status,
     _list_records,
     _needs_annotation,
     _now,
@@ -54,7 +56,7 @@ from aegisqa.api.app import (
 )
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
-from aegisqa.core.mapper import MappingPathError, TypeMismatchError, collect_mapping_row_fields, resolve_input_mapping, set_by_path
+from aegisqa.core.mapper import MappingPathError, TypeMismatchError, collect_mapping_row_fields, resolve_input_mapping, set_by_path, validate_json_schema
 from aegisqa.core.security import redact_secrets
 from aegisqa.engine.runner import RunRecord, RunRequest
 from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments, compare_reports
@@ -199,15 +201,44 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             return payload
         try:
             skill = ctx.registry.get(step.skill_ref)
-            result, latency_ms = skill.execute(resolved_input, resolved_config)
+            validate_json_schema(resolved_input, skill.manifest.input_schema)
+            validate_json_schema(resolved_config, skill.manifest.config_schema)
+            started = perf_counter()
+            result = skill.run(resolved_input, resolved_config)
+            latency_ms = (perf_counter() - started) * 1000
+            raw_output = redact_secrets(result.output)
+            try:
+                validated_output = validate_json_schema(deepcopy(result.output), skill.manifest.output_schema)
+            except Exception as exc:  # noqa: BLE001 - Replay 必须保留未通过 schema 的原始输出，便于复现。
+                payload.update(
+                    {
+                        "status": "failed",
+                        "error_code": "OUTPUT_SCHEMA_INVALID",
+                        "raw_output": raw_output,
+                        "validated_output": {},
+                        "schema_errors": [{"type": type(exc).__name__, "message": str(exc)}],
+                        "metrics": result.metrics,
+                        "logs": result.logs,
+                        "latency_ms": latency_ms,
+                    }
+                )
+                ctx.audit_service.record(
+                    actor=request.actor,
+                    role=request.role,
+                    action="step.replay.failed",
+                    target=f"{run_id}/{item_id}/{step_id}",
+                    detail={"error_code": "OUTPUT_SCHEMA_INVALID", "error": str(exc)},
+                )
+                return payload
             payload.update(
                 {
                     "status": "succeeded",
-                    "raw_output": result.output,
-                    "validated_output": result.output,
+                    "raw_output": raw_output,
+                    "validated_output": redact_secrets(validated_output),
                     "metrics": result.metrics,
                     "logs": result.logs,
                     "latency_ms": latency_ms,
+                    "schema_errors": [],
                 }
             )
             ctx.audit_service.record(actor=request.actor, role=request.role, action="step.replay", target=f"{run_id}/{item_id}/{step_id}", detail={"mock_llm_calls": False, "status": "succeeded"})
@@ -258,7 +289,22 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         return payload
 
     @app.get("/runs/{run_id}/items/{item_id}/steps/{step_id}/repro-bundle")
-    def get_run_item_step_repro_bundle(run_id: str, item_id: str, step_id: str) -> dict[str, Any]:
+    def get_run_item_step_repro_bundle(
+        run_id: str,
+        item_id: str,
+        step_id: str,
+        role: str = Query(default="Evaluator"),
+        actor: str = Query(default="api"),
+    ) -> dict[str, Any]:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=role,
+            permission="run:create",
+            action="step.repro_bundle",
+            target=f"{run_id}/{item_id}/{step_id}",
+            actor=actor,
+        )
         task, run, item, step = _locate_task_run_item_step(ctx, run_id, item_id, step_id)
         skill_manifest = ctx.registry.get_manifest(step.skill_ref).model_dump(mode="json")
         bundle = _step_debug_payload(task, run, item, step)
@@ -279,6 +325,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 "prompt_debug_endpoint": f"/runs/{run_id}/items/{item_id}/steps/{step_id}/prompt-debug",
             }
         )
+        ctx.audit_service.record(actor=actor, role=role, action="step.repro_bundle", target=f"{run_id}/{item_id}/{step_id}", detail={"step_status": step.status})
         return bundle
 
     @app.post("/runs", response_model=RunRecord)
@@ -1948,7 +1995,7 @@ def _repair_action_evaluate_ci_gate(ctx: RouteContext, repair_task: dict[str, An
     evaluation = {
         "evaluation_id": f"gateeval-{uuid4().hex[:12]}",
         "config_id": None,
-        "status": "blocked" if blocking_failures else "passed",
+        "status": _gate_evaluation_status(results),
         "blocking_failures": len(blocking_failures),
         "target": {"kind": "task", "id": task["task_id"]},
         "metrics": metrics,
