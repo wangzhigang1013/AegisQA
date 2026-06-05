@@ -13,6 +13,7 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - 新增 `ArtifactStore` / `LocalArtifactStore`，提供本地产物写入、读取、元数据、大小限制和路径安全检查，并挂载到 `app.state.artifact_store`。
 - Step Repro Bundle 已写入 ArtifactStore 的 `repro_bundles` 命名空间，并在 API 响应中返回 artifact metadata，导出产物不再只是瞬时 JSON。
 - Skill Package 上传原始 zip 已写入 ArtifactStore 的 `skill_packages` 命名空间，上传响应和包记录会返回 artifact metadata，后续可按 sha256 与 artifact_id 追溯原始包。
+- Task Report JSON/CSV/HTML 导出已写入 ArtifactStore 的 `reports` 命名空间，导出响应和审计事件会带 artifact metadata / artifact_id。
 - 模型网关 provider HTTP/network 错误详情会统一脱敏，避免外部服务回显 Authorization 或 API key 时泄漏。
 - Skill Package 上传会记录可执行/二进制文件、直接模型 SDK 调用和疑似硬编码 API key 的结构化 warning。
 - Trace Flow、Trace Tree 和 Report 页面加载失败时显示结构化错误码和 `trace_id`，便于定位后端请求。
@@ -37,6 +38,20 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - 历史 `tmp-report-debug*` 与 `tmp-report-gate-debug/` 调试目录已加入忽略规则，避免污染 `git status`。
 
 ## 最近改动
+
+### 2026-06-05 Task Report ArtifactStore 接入
+
+- 改动摘要：继续补齐 ArtifactStore 主资产接入，把 Task Report 导出从一次性响应提升为可追溯、可校验、可读回的报告产物。
+- 主要变更：
+  - `GET /tasks/{task_id}/report/export` 在生成 JSON/CSV/HTML 内容后写入 ArtifactStore 的 `reports` 命名空间。
+  - 导出响应新增 `artifact` 元数据，包含 `kind`、`artifact_id`、`size_bytes`、`sha256`、`content_type`、`storage_path`、业务 metadata 和 `created_at`。
+  - `task.report.export` 审计 detail 新增 `artifact_id`，支持从审计记录追溯到具体导出文件。
+  - 新增回归断言，验证 JSON 报告导出的 artifact metadata 可用于从 `app.state.artifact_store` 读回完整坏例明细。
+- 验证：
+  - 红灯验证：`python -m pytest tests/test_task_report_badcase_pagination.py::test_task_report_badcases_are_paginated_without_truncating_export -q` 初始失败，缺少 `exported["artifact"]`。
+  - `python -m pytest tests/test_task_report_badcase_pagination.py::test_task_report_badcases_are_paginated_without_truncating_export -q`：1 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - `python -m pytest tests/test_task_report_badcase_pagination.py tests/test_task_center_api.py::test_viewer_can_export_task_report_after_admin_approval tests/test_task_center_api.py::test_task_report_offline_package_contains_audit_bundle_and_uses_export_approval tests/test_task_center_api.py::test_report_export_request_lifecycle_reject_revoke_and_expire tests/test_artifact_store.py -q`：12 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - 本批只触碰 Task Report 导出 ArtifactStore 接入和定向测试，没有运行后端全量、前端测试或 E2E。
 
 ### 2026-06-05 Skill Package ArtifactStore 接入
 

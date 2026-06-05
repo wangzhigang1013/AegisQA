@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 import io
 import json
 from typing import Any
@@ -112,6 +113,14 @@ def register_task_report_routes(app: FastAPI, ctx: RouteContext) -> None:
             content = _build_task_report_export_html(payload)
         else:
             raise HTTPException(status_code=400, detail={"message": "file_format 仅支持 json/csv/html"})
+        artifact = _persist_task_report_export_artifact(
+            ctx,
+            task_id=task_id,
+            run_id=task.get("run_id"),
+            file_format=file_format,
+            content=content,
+            approval_request_id=approval_request.get("request_id") if approval_request else None,
+        )
         ctx.audit_service.record(
             actor=actor,
             role=role,
@@ -123,6 +132,7 @@ def register_task_report_routes(app: FastAPI, ctx: RouteContext) -> None:
                 "preflight_id": preflight.get("preflight_id"),
                 "role": role,
                 "approval_request_id": approval_request.get("request_id") if approval_request else None,
+                "artifact_id": artifact["artifact_id"],
             },
         )
         return {
@@ -130,6 +140,7 @@ def register_task_report_routes(app: FastAPI, ctx: RouteContext) -> None:
             "run_id": task.get("run_id"),
             "file_format": file_format,
             "approval_request_id": approval_request.get("request_id") if approval_request else None,
+            "artifact": artifact,
             "content": content,
         }
 
@@ -216,6 +227,45 @@ def register_task_report_routes(app: FastAPI, ctx: RouteContext) -> None:
                 "X-AegisQA-Streaming": "true",
             },
         )
+
+
+def _persist_task_report_export_artifact(
+    ctx: RouteContext,
+    *,
+    task_id: str,
+    run_id: str | None,
+    file_format: str,
+    content: Any,
+    approval_request_id: str | None,
+) -> dict[str, Any]:
+    artifact_id = f"tasks/{task_id}/reports/report.{file_format}"
+    artifact = ctx.artifact_store.put_bytes(
+        "reports",
+        artifact_id,
+        _encode_task_report_export_content(content, file_format),
+        content_type=_task_report_export_content_type(file_format),
+        metadata={
+            "task_id": task_id,
+            "run_id": run_id,
+            "file_format": file_format,
+            "approval_request_id": approval_request_id,
+        },
+    )
+    return asdict(artifact)
+
+
+def _encode_task_report_export_content(content: Any, file_format: str) -> bytes:
+    if file_format == "json":
+        return json.dumps(content, ensure_ascii=False, indent=2).encode("utf-8")
+    return str(content).encode("utf-8")
+
+
+def _task_report_export_content_type(file_format: str) -> str:
+    return {
+        "json": "application/json",
+        "csv": "text/csv; charset=utf-8",
+        "html": "text/html; charset=utf-8",
+    }.get(file_format, "application/octet-stream")
 
 
 def _build_task_report_offline_package(ctx: RouteContext, task_id: str, payload: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:

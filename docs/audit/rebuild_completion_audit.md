@@ -24,7 +24,7 @@ AegisQA 的 Reality-First Rebuild 已达到“工程化 MVP 已成型、发布�
 | Feature Flag 同步 | 前端启动后合并后端 `/features`，后端开启的高级模块可进入导航，同时本地显式开启不会被后端默认 false 覆盖 | 完成 |
 | Gate 真实性 | CI Gate 缺失真实指标返回 `skipped` 和 reason，不再把缺失指标按 0 生成假 passed | 完成 |
 | Step Debug/Repro | Replay schema invalid 保留 raw output；Replay、Prompt Debug、Repro Bundle 都有 Viewer 权限拒绝回归；Repro Bundle 写入 ArtifactStore 并返回 artifact metadata | 完成试用级闭环 |
-| ArtifactStore | 新增 `ArtifactStore` / `LocalArtifactStore`，本地支持产物写入、读取、元数据、路径安全和大小限制；Step Repro Bundle 已接入 `repro_bundles`，Skill Package 原始 zip 已接入 `skill_packages` | 完成最小接口和两个主产物接入 |
+| ArtifactStore | 新增 `ArtifactStore` / `LocalArtifactStore`，本地支持产物写入、读取、元数据、路径安全和大小限制；Step Repro Bundle 已接入 `repro_bundles`，Skill Package 原始 zip 已接入 `skill_packages`，Task Report 导出已接入 `reports` | 完成最小接口和三个主产物接入 |
 | Skill 包安全 | 上传包安全扫描记录可执行/二进制文件、直接模型 SDK 调用、疑似硬编码 API key warning | 完成第一版 |
 | 模型网关安全 | secret_ref/临时 api_key 不持久化，provider usage/cost 和缺失 usage 都有回归；HTTP/network 错误详情已脱敏 | 完成本地可验证部分 |
 | 本地 runtime smoke | `scripts/smoke_runtime.ps1` 已验证本地 JSON/SQLite 试用主链路，可自动避开非 AegisQA 8000 服务 | 完成 |
@@ -39,7 +39,7 @@ AegisQA 的 Reality-First Rebuild 已达到“工程化 MVP 已成型、发布�
 | Redis | 需要真实 Redis 限流/队列配置验证 | 有 rate limiter 和 compose；缺环境级证据 | 生产类 smoke 检查 runtime-status |
 | Celery | 需要 API 提交后台任务并由 worker 完成 | 有 executor/worker 入口；缺异步 smoke 结果 | production-like smoke 使用 `background=true` 执行并轮询 |
 | 真实模型 Provider | 需要真实 openai-compatible endpoint、secret_ref、usage/cost 验证 | 本地 mock/fake provider 已覆盖 secret 与 usage 规则，真实 LiveCall 未验 | 提供 BaseUrl/DefaultModel/Secret 后跑 provider smoke `-LiveCall` |
-| ArtifactStore 接入 | 需要 Dataset/Report 等主产物逐步写入 ArtifactStore | Repro Bundle 和 Skill Package 原始 zip 已接入，Dataset/Report 历史文件流尚未统一迁移 | 按资产类型逐步接入 ArtifactStore |
+| ArtifactStore 接入 | 需要 Dataset 等主产物逐步写入 ArtifactStore | Repro Bundle、Skill Package 原始 zip 和 Task Report 导出已接入，Dataset 历史文件流尚未统一迁移 | 按资产类型逐步接入 ArtifactStore |
 
 ## 阶段判定
 

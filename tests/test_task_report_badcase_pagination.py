@@ -78,3 +78,9 @@ def test_task_report_badcases_are_paginated_without_truncating_export(tmp_path: 
     exported = client.get(f"/tasks/{task['task_id']}/report/export", params={"file_format": "json"}).json()
     assert len(exported["content"]["badcases"]) == 12
     assert exported["content"]["badcase_pagination"]["total_items"] == 12
+    artifact = exported["artifact"]
+    assert artifact["kind"] == "reports"
+    assert artifact["artifact_id"] == f"tasks/{task['task_id']}/reports/report.json"
+    saved_report = json.loads(client.app.state.artifact_store.read_bytes(artifact["kind"], artifact["artifact_id"]).decode("utf-8"))
+    assert saved_report["task"]["task_id"] == task["task_id"]
+    assert len(saved_report["badcases"]) == 12
