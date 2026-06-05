@@ -9,15 +9,7 @@
 在提交 release candidate 前，必须从仓库根目录完成：
 
 ```powershell
-python -m pytest -q
-cd frontend
-npm run typecheck
-npm test
-npm run build
-npm run e2e
-cd ..
-.\scripts\smoke_runtime.ps1
-git diff --check
+.\scripts\verify_release_candidate.ps1 -Scope release
 ```
 
 通过标准：
@@ -27,6 +19,33 @@ git diff --check
 - Runtime smoke 输出 `Runtime smoke passed`。
 - `git diff --check` 无空白错误；Windows LF/CRLF 提示可记录为非阻断。
 - `git status --short --untracked-files=all` 中不包含 `.runtime-smoke/` 产物。
+
+## 分层验证策略
+
+不要在每个小改动后运行全量测试。按改动风险选择验证层级：
+
+```powershell
+# 文档、脚本和状态文件改动：只检查必需文件、忽略规则和空白问题。
+.\scripts\verify_release_candidate.ps1 -Scope docs
+
+# API 契约、工作台动作、前端类型改动：跑定向后端契约测试和 typecheck。
+.\scripts\verify_release_candidate.ps1 -Scope targeted
+
+# 发布候选提交前：集中跑后端全量、前端单测、构建、E2E、本地 runtime smoke。
+.\scripts\verify_release_candidate.ps1 -Scope release
+```
+
+涉及本地运行时主链路但不需要全量 E2E 时，可以在 targeted 基础上增加 runtime smoke：
+
+```powershell
+.\scripts\verify_release_candidate.ps1 -Scope targeted -IncludeRuntimeSmoke
+```
+
+生产类环境验证单独执行，不纳入默认 release 脚本，避免 Docker/MySQL/Redis/Celery 成为每次本地回归的耗时项：
+
+```powershell
+.\scripts\smoke_production_like.ps1 -StartCompose
+```
 
 ## 当前已知边界
 

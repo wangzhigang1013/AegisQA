@@ -1,0 +1,54 @@
+# AegisQA Rebuild Completion Audit
+
+## 审计时间
+
+2026-06-05
+
+## 总体判断
+
+AegisQA 的 Reality-First Rebuild 已达到“工程化 MVP 已成型、发布候选可试用”的阶段。主链路已经有真实数据闭环和回归验证；生产化仍未完成，原因是 MySQL/Redis/Celery/真实模型 Provider 缺少环境级 smoke 证据。
+
+因此当前完成结论应写为：
+
+> 已具备小团队试用和演示所需的真实评测主链路，生产部署前仍需完成外部基础设施与真实模型 Provider 的环境级验证。
+
+## 已完成证据
+
+| 领域 | 当前证据 | 结论 |
+| --- | --- | --- |
+| 主链路 | Dataset -> Skill -> Workflow -> Task -> Trace -> Report -> Badcase -> Gate -> Workbench 已有 API/UI/E2E 覆盖 | 完成试用级闭环 |
+| 体验工作台 | `/overview/workbench` 使用真实 store 聚合，不拉完整 Run 列表，不用 demo 兜底 | 完成 |
+| Action Contract | 后端动作结构统一为 `id/action/label/enabled/disabled/target_url/target/payload/evidence`，前端使用 `actionRouter` | 完成 |
+| 诊断链路 | API 返回 `X-AegisQA-Request-ID`，错误 payload `trace_id` 与请求头对齐 | 完成 |
+| 本地 runtime smoke | `scripts/smoke_runtime.ps1` 已验证本地 JSON/SQLite 试用主链路，可自动避开非 AegisQA 8000 服务 | 完成 |
+| 前端稳定性 | Vitest 限制 2 worker，避免重页面并发导致懒加载超时 | 完成 |
+| 发布文档 | `docs/RELEASE_READINESS.md` 与 `docs/PROJECT_STATUS.md` 明确发布候选口径 | 完成 |
+
+## 尚未完成证据
+
+| 领域 | 缺口 | 当前状态 | 下一步 |
+| --- | --- | --- | --- |
+| MySQL | 需要真实 MySQL 容器下跑主链路 | 有 adapter 和 compose，缺 smoke 结果 | 跑 `scripts/smoke_production_like.ps1 -StartCompose` |
+| Redis | 需要真实 Redis 限流/队列配置验证 | 有 rate limiter 和 compose，缺环境级证据 | 生产类 smoke 检查 runtime-status |
+| Celery | 需要 API 提交后台任务并由 worker 完成 | 有 executor/worker 入口，缺异步 smoke 结果 | production-like smoke 使用 `background=true` 执行并轮询 |
+| 真实模型 Provider | 需要 openai-compatible endpoint、secret_ref、usage/cost 验证 | mock provider 已可用，真实 provider 未验 | 增加 provider smoke，不回显密钥 |
+| Replay/Repro | 需要从失败 Step 到重放/导出的完整可用性证明 | Trace 已具备详情基础 | 补 E2E 和导出校验 |
+
+## 阶段判定
+
+| 阶段 | 判定 | 说明 |
+| --- | --- | --- |
+| Feature Truth Audit | 完成但需持续维护 | 本文件与 `feature_truth_audit.md` 作为事实口径 |
+| Skill/Prompt/Runtime | 试用级完成 | mock provider 与包审批可用，真实 provider 待验证 |
+| Quality/Gate | 试用级完成 | 可阻断，缺更多生产指标样例 |
+| Replay/Debug/Repro | 部分完成 | Trace 详情已增强，重放和 bundle 仍需产品化 |
+| Worker/Artifact/Sandbox | 部分完成 | 本地 worker 可用，Celery/MySQL/Redis 需环境验证 |
+| Release Candidate | 已形成 | 本地验证栈已通过，分支仍需按需推送 |
+
+## 下一轮完成标准
+
+1. 生产类 smoke 在 MySQL + Redis + Celery 下通过，并记录 Task/Run/Report 证据。
+2. 真实 provider smoke 能证明 secret_ref、token usage、cost source 和错误码。
+3. `scripts/verify_release_candidate.ps1 -Scope release` 一条命令可复现本地发布候选验证。
+4. `docs/PROJECT_STATUS.md` 每次改动后更新，且不再引用不存在的审计文件。
+5. 高级模块继续保持 feature flag/disabled 口径，未验证能力不进入主流程。

@@ -15,8 +15,34 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - 新增浏览器级体验 E2E，覆盖 Overview、Task 抽屉、Trace Step 详情、Report 推荐动作和 Badcase 批量修复入口。
 - 前端 Vitest 已限制为 2 个 worker，避免多个完整 AppShell 与 Ant Design 重页面并发渲染导致懒加载等待超时。
 - 旧的超长状态日志已归档到 `docs/status_archive/2026-06-05-project-status-archive.md`。
+- `docs/audit/feature_truth_audit.md` 与 `docs/audit/rebuild_completion_audit.md` 已恢复，状态文档不再引用不存在的审计文件。
+- 新增分层发布验证脚本，默认走 docs/targeted 轻量验证，只有发布候选前才跑 full release 回归。
+- 新增 production-like smoke 脚本骨架，显式 `-StartCompose` 时才启动 Docker 验证 MySQL、Redis、Celery 和 API/Worker。
+- `docker-compose.yml` 已补 MySQL/Redis healthcheck，并确保 API 容器安装 Celery 后再启用 Celery executor。
+- 历史 `tmp-report-debug*` 与 `tmp-report-gate-debug/` 调试目录已加入忽略规则，避免污染 `git status`。
 
 ## 最近改动
+
+### 2026-06-05 优化计划 P0/P6 落地
+
+- 改动摘要：落实当前优化计划的第一批低风险事项，重点是修正文档真实性、恢复审计材料、固化分层验证策略，并为生产类环境 smoke 提供可执行脚本。
+- 主要变更：
+  - 新增 `docs/audit/feature_truth_audit.md`，逐模块记录 UI、API、持久化、真实 runtime 数据、阻断效果、测试覆盖、mock/shell 状态、处理决策和 Required Fix。
+  - 新增 `docs/audit/rebuild_completion_audit.md`，把当前结论限定为“发布候选/小团队试用”，并列出 MySQL、Redis、Celery、真实模型 Provider 和 Replay/Repro 的剩余缺口。
+  - 新增 `scripts/verify_release_candidate.ps1`，提供 `docs`、`targeted`、`release` 三档验证，避免小改动后反复运行全量测试。
+  - 新增 `scripts/smoke_production_like.ps1`，复用 `docker-compose.yml`，在显式传 `-StartCompose` 时验证 MySQL + Redis + Celery + API/Worker 异步执行链路。
+  - 更新 `docker-compose.yml`，为 MySQL/Redis 增加 healthcheck，并让 API 容器安装 Celery 依赖后再使用 Celery executor。
+  - 更新 `.gitignore`，忽略历史 `tmp-report-debug*/` 与 `tmp-report-gate-debug/` 调试目录。
+  - 更新 `docs/RELEASE_READINESS.md` 和 `docs/RUNTIME_SMOKE.md`，记录分层验证和 production-like smoke 使用方式。
+- 验证策略：
+  - 本批主要是文档、脚本和忽略规则改动，不立即跑后端/前端全量测试。
+  - `.\scripts\verify_release_candidate.ps1 -Scope docs`：通过。
+  - PowerShell 语法解析：`scripts/verify_release_candidate.ps1`、`scripts/smoke_production_like.ps1`、`scripts/smoke_runtime.ps1` 均通过。
+  - `docker-compose.yml` PyYAML 结构检查：通过，确认 mysql/redis/api/worker 服务、healthcheck 和 `service_healthy` 依赖存在。
+  - `docker compose -f docker-compose.yml config`：未执行成功，当前机器未安装或未暴露 `docker` 命令；未启动任何容器。
+  - `git diff --check`：通过，仅 Windows LF/CRLF 提示。
+  - `git status --short --branch --untracked-files=all`：不再显示 `.runtime-smoke/`、`.e2e-artifacts/` 或历史 `tmp-report-*` 调试目录。
+  - 仅在后续改动触碰 API/前端契约时运行 targeted；发布候选前再集中执行 `-Scope release`。
 
 ### 2026-06-05 发布候选体验与运行时硬化
 
@@ -53,7 +79,7 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - 当前限制：
   - 本轮最终验证栈已通过，但尚未做 MySQL/Redis/Celery/真实模型 provider 的环境级 smoke。
   - MySQL/Redis/Celery 仍以代码路径、fake adapter 和可选编排资产为主，真实容器 smoke 仍是发布前单独事项。
-  - 当前工作树尚未提交；`tmp-report-debug*` 是历史未跟踪调试目录，保持不触碰。
+  - 当前分支已有发布候选提交 `e387cb7`，后续新增优化会单独提交；`tmp-report-debug*` 是历史调试目录，已通过 `.gitignore` 排除。
 
 ## 发布候选提交前检查
 

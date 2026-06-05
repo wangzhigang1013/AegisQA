@@ -51,6 +51,24 @@ FastAPI health
 - `AEGISQA_STORAGE_BACKEND` 和 `AEGISQA_STORE_ROOT` 是否指向预期环境。
 - 是否有旧数据或旧进程污染当前 smoke。
 
+## 生产类 Smoke
+
+真实 MySQL、Redis、Celery 和 API/Worker 联动不放进默认本地 smoke，避免每次回归都启动 Docker。需要验证生产类环境时，使用：
+
+```powershell
+.\scripts\smoke_production_like.ps1 -StartCompose
+```
+
+该脚本复用仓库根目录的 `docker-compose.yml`，启动 MySQL、Redis、API 和 Worker，检查 `/governance/runtime-status` 中的 MySQL/Celery/Redis 状态，然后使用 `POST /tasks/{task_id}/execute?background=true` 提交后台任务并轮询完成。
+
+如果已经手动启动了 compose 服务，可复用当前 API：
+
+```powershell
+.\scripts\smoke_production_like.ps1 -ApiUrl "http://127.0.0.1:8000"
+```
+
+该 smoke 仍默认使用 mock 模型 Provider；真实模型 Provider 需要单独验证 secret_ref、连接测试、token usage 和 cost source。
+
 ## 生产部署前仍需补充
 
 发布前还需要单独验证：
