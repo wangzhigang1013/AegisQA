@@ -67,6 +67,9 @@ import type {
   TaskPreflightResult,
   TaskResultsExportDownload,
   TaskTraceFlow,
+  StepDebugPayload,
+  StepPromptDebugRequest,
+  StepReplayRequest,
   TraceTree,
   WorkflowDraftRecord,
   WorkflowGraph,
@@ -803,6 +806,18 @@ export const api = {
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<TaskTraceFlow>(`/tasks/${taskId}/trace-flow${suffix}`);
   },
+  replayRunItemStep: (runId: string, itemId: string, stepId: string, body: StepReplayRequest = {}) =>
+    request<StepDebugPayload>(`/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/steps/${encodeURIComponent(stepId)}/replay`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  debugRunItemStepPrompt: (runId: string, itemId: string, stepId: string, body: StepPromptDebugRequest = {}) =>
+    request<StepDebugPayload>(`/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/steps/${encodeURIComponent(stepId)}/prompt-debug`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  runItemStepReproBundle: (runId: string, itemId: string, stepId: string) =>
+    request<StepDebugPayload>(`/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/steps/${encodeURIComponent(stepId)}/repro-bundle`),
   executeRun: (runId: string) => request<RunRecord>(`/runs/${runId}/execute`, { method: 'POST' }),
   pauseRun: (runId: string) => request<RunRecord>(`/runs/${runId}/pause`, { method: 'POST' }),
   resumeRun: (runId: string) => request<RunRecord>(`/runs/${runId}/resume`, { method: 'POST' }),

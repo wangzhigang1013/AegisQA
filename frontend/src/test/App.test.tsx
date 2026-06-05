@@ -790,6 +790,65 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/workflow_config/)).toBeInTheDocument();
   });
 
+  it('Trace Flow Step 抽屉调用 Replay、Prompt Debug 和 Repro Bundle 接口', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const requests: { url: string; method?: string; body?: string }[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push({ url, method: init?.method, body: String(init?.body ?? '') });
+      if (url.endsWith('/runs/run-demo/items/item-demo/steps/answer/replay') && init?.method === 'POST') {
+        return jsonResponse({
+          mode: 'replay',
+          status: 'skipped',
+          message: 'Replay 已解析原始输入和历史输出；mock_llm_calls=true 时不会重新执行 Skill。',
+          resolved_input: { prompt: '什么是 Trace?' },
+          raw_output: { answer: '模型回答' },
+          validated_output: { answer: '模型回答' },
+        });
+      }
+      if (url.endsWith('/runs/run-demo/items/item-demo/steps/answer/prompt-debug') && init?.method === 'POST') {
+        return jsonResponse({
+          mode: 'prompt_debug',
+          status: 'skipped',
+          rendered_prompt: '什么是 Trace?',
+          token_usage: { total_tokens: 12 },
+          prompt_calls: [{ prompt_name: 'answer_prompt', status: 'succeeded' }],
+          message: 'Prompt Debug 已返回历史 prompt trace。',
+        });
+      }
+      if (url.endsWith('/runs/run-demo/items/item-demo/steps/answer/repro-bundle')) {
+        return jsonResponse({
+          bundle_type: 'step_repro_bundle',
+          schema_version: 'aegisqa.step_repro_bundle.v1',
+          resolved_input: { prompt: '什么是 Trace?' },
+          raw_output: { answer: '模型回答' },
+          skill_manifest: { skill_id: 'llm.call@0.1.0' },
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/tasks/task-demo/trace');
+    expect(await screen.findByText('item-demo')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Steps' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Replay Step' }));
+    expect(await screen.findByText('Step 调试：answer')).toBeInTheDocument();
+    expect((await screen.findAllByText(/mock_llm_calls=true/)).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prompt Debug' }));
+    expect(await screen.findByText('Prompt Debug 已返回历史 prompt trace。')).toBeInTheDocument();
+    expect((await screen.findAllByText(/answer_prompt/)).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 Repro Bundle' }));
+    expect((await screen.findAllByText(/aegisqa.step_repro_bundle.v1/)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/llm.call@0.1.0/).length).toBeGreaterThan(0);
+
+    expect(requests.some((request) => request.url.endsWith('/runs/run-demo/items/item-demo/steps/answer/replay') && request.method === 'POST')).toBe(true);
+    expect(requests.some((request) => request.url.endsWith('/runs/run-demo/items/item-demo/steps/answer/prompt-debug') && request.method === 'POST')).toBe(true);
+    expect(requests.some((request) => request.url.endsWith('/runs/run-demo/items/item-demo/steps/answer/repro-bundle') && request.method === undefined)).toBe(true);
+  });
+
   it('Trace Flow 可返回执行中心并重新打开来源任务详情', async () => {
     await renderWorkbench('/tasks/task-demo/trace?return_task_id=task-demo');
 

@@ -1,12 +1,26 @@
 import { ApartmentOutlined, ArrowLeftOutlined, BranchesOutlined, DatabaseOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Descriptions, Empty, List, Row, Space, Tabs, Tag, Timeline, Typography } from 'antd';
+import { Alert, Button, Card, Col, Descriptions, Drawer, Empty, List, Row, Space, Tabs, Tag, Timeline, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { workbenchActionId, workbenchActionTargetUrl } from '../actions/actionRouter';
-import { api } from '../api/client';
+import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
+import type { TaskTraceFlow, WorkbenchAction } from '../types';
+
+type TraceItem = TaskTraceFlow['items'][number];
+type TraceStep = TraceItem['steps'][number];
+type StepDebugMode = 'detail' | 'replay' | 'prompt_debug' | 'repro_bundle';
+
+type StepDebugState = {
+  item: TraceItem;
+  step: TraceStep;
+  mode: StepDebugMode;
+  loading: boolean;
+  result: Record<string, unknown> | null;
+  error: string | null;
+};
 
 export function TraceFlowPage() {
   const { taskId } = useParams();
@@ -26,6 +40,26 @@ export function TraceFlowPage() {
     if (!traceFlow?.items.length) return null;
     return traceFlow.items.find((item) => item.item_id === selectedItemId) ?? traceFlow.items[0];
   }, [selectedItemId, traceFlow?.items]);
+  const [stepDebug, setStepDebug] = useState<StepDebugState | null>(null);
+
+  const openStepDebug = async (item: TraceItem, step: TraceStep, mode: StepDebugMode) => {
+    const baseState: StepDebugState = { item, step, mode, loading: mode !== 'detail', result: null, error: null };
+    setStepDebug(baseState);
+    if (mode === 'detail') {
+      return;
+    }
+    const runId = traceFlow?.attempt.run_id;
+    if (!runId) {
+      setStepDebug({ ...baseState, loading: false, error: '当前 Trace Flow 缺少 run_id，无法调用 Step 调试接口。' });
+      return;
+    }
+    try {
+      const result = await loadStepDebugResult(mode, runId, item.item_id, step.step_id);
+      setStepDebug({ ...baseState, loading: false, result });
+    } catch (error) {
+      setStepDebug({ ...baseState, loading: false, error: formatApiError(error) });
+    }
+  };
 
   return (
     <section className="page-stack">
@@ -153,9 +187,13 @@ export function TraceFlowPage() {
                                   {step.available_actions?.length ? (
                                     <Space wrap>
                                       {step.available_actions.map((action) => (
-                                        <Button key={workbenchActionId(action)} size="small" href={workbenchActionTargetUrl(action) ?? undefined} disabled={action.enabled === false || action.disabled}>
-                                          {action.label}
-                                        </Button>
+                                        <StepActionButton
+                                          key={workbenchActionId(action)}
+                                          action={action}
+                                          item={selectedItem}
+                                          step={step}
+                                          onOpenDebug={openStepDebug}
+                                        />
                                       ))}
                                     </Space>
                                   ) : null}
@@ -191,7 +229,93 @@ export function TraceFlowPage() {
       ) : (
         <Empty description="正在等待 Trace Flow 数据。" />
       )}
+      <StepDebugDrawer
+        state={stepDebug}
+        onClose={() => setStepDebug(null)}
+        onRun={(mode) => {
+          if (stepDebug) {
+            void openStepDebug(stepDebug.item, stepDebug.step, mode);
+          }
+        }}
+      />
     </section>
+  );
+}
+
+function StepActionButton({
+  action,
+  item,
+  step,
+  onOpenDebug,
+}: {
+  action: WorkbenchAction;
+  item: TraceItem;
+  step: TraceStep;
+  onOpenDebug: (item: TraceItem, step: TraceStep, mode: StepDebugMode) => void;
+}) {
+  const actionId = workbenchActionId(action);
+  const mode = stepDebugModeFromAction(actionId);
+  if (mode) {
+    return (
+      <Button size="small" disabled={action.enabled === false || action.disabled} onClick={() => onOpenDebug(item, step, mode)}>
+        {action.label}
+      </Button>
+    );
+  }
+  const targetUrl = workbenchActionTargetUrl(action);
+  return (
+    <Button size="small" href={targetUrl ?? undefined} disabled={action.enabled === false || action.disabled}>
+      {action.label}
+    </Button>
+  );
+}
+
+function StepDebugDrawer({
+  state,
+  onClose,
+  onRun,
+}: {
+  state: StepDebugState | null;
+  onClose: () => void;
+  onRun: (mode: StepDebugMode) => void;
+}) {
+  const step = state?.step;
+  return (
+    <Drawer title={step ? `Step 调试：${step.step_id}` : 'Step 调试'} width={860} open={Boolean(state)} onClose={onClose}>
+      {state && step ? (
+        <Space direction="vertical" className="drawer-stack" size="large">
+          <Descriptions bordered column={1} size="small">
+            <Descriptions.Item label="Item">{state.item.item_id}</Descriptions.Item>
+            <Descriptions.Item label="Skill">{step.skill_ref}</Descriptions.Item>
+            <Descriptions.Item label="状态"><Tag color={stepStatusColor(step.status)}>{step.status}</Tag></Descriptions.Item>
+            <Descriptions.Item label="耗时">{Math.round(step.latency_ms)}ms</Descriptions.Item>
+          </Descriptions>
+          <Space wrap>
+            <Button loading={state.loading && state.mode === 'replay'} onClick={() => onRun('replay')}>重新 Replay Step</Button>
+            <Button loading={state.loading && state.mode === 'prompt_debug'} onClick={() => onRun('prompt_debug')}>运行 Prompt Debug</Button>
+            <Button loading={state.loading && state.mode === 'repro_bundle'} onClick={() => onRun('repro_bundle')}>刷新 Repro Bundle</Button>
+          </Space>
+          {state.loading ? <Alert type="info" showIcon message="正在加载 Step 调试结果。" /> : null}
+          {state.error ? <Alert type="error" showIcon message="Step 调试失败" description={state.error} /> : null}
+          {state.result?.message ? <Alert type="info" showIcon message={String(state.result.message)} /> : null}
+          {state.result ? (
+            <Card size="small" title="调试结果预览">
+              <JsonBlock value={state.result} />
+            </Card>
+          ) : null}
+          <Tabs
+            items={[
+              { key: 'resolved_input', label: 'Resolved Input', children: <JsonBlock value={step.resolved_input ?? step.input} /> },
+              { key: 'raw_output', label: 'Raw Output', children: <JsonBlock value={step.raw_output ?? step.output} /> },
+              { key: 'validated_output', label: 'Validated Output', children: <JsonBlock value={step.validated_output ?? step.output} /> },
+              { key: 'schema_errors', label: 'Schema Errors', children: <JsonBlock value={step.schema_errors ?? []} /> },
+              { key: 'llm_calls', label: 'LLM Calls', children: <JsonBlock value={step.prompt_calls ?? []} /> },
+              { key: 'debug_result', label: stepDebugResultLabel(state.mode), children: <JsonBlock value={state.result ?? { status: 'not_loaded' }} /> },
+            ]}
+          />
+        </Space>
+      ) : null}
+    </Drawer>
   );
 }
 
@@ -209,4 +333,32 @@ function stepStatusColor(status: string): string {
   if (['running', 'queued', 'pending'].includes(status)) return 'blue';
   if (status === 'skipped') return 'default';
   return 'orange';
+}
+
+function stepDebugModeFromAction(actionId: string): StepDebugMode | null {
+  if (actionId === 'view_step_detail') return 'detail';
+  if (actionId === 'replay_step') return 'replay';
+  if (actionId === 'prompt_debug') return 'prompt_debug';
+  if (actionId === 'open_repro_bundle') return 'repro_bundle';
+  return null;
+}
+
+function stepDebugResultLabel(mode: StepDebugMode): string {
+  if (mode === 'replay') return 'Replay Result';
+  if (mode === 'prompt_debug') return 'Prompt Debug Result';
+  if (mode === 'repro_bundle') return 'Repro Bundle';
+  return 'Step Snapshot';
+}
+
+function loadStepDebugResult(mode: StepDebugMode, runId: string, itemId: string, stepId: string) {
+  if (mode === 'replay') {
+    return api.replayRunItemStep(runId, itemId, stepId, { mock_llm_calls: true });
+  }
+  if (mode === 'prompt_debug') {
+    return api.debugRunItemStepPrompt(runId, itemId, stepId, { mock_llm_calls: true });
+  }
+  if (mode === 'repro_bundle') {
+    return api.runItemStepReproBundle(runId, itemId, stepId);
+  }
+  return Promise.resolve({});
 }

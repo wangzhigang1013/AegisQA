@@ -459,3 +459,22 @@ export type TaskTraceFlow = {
   }[];
 };
 
+export type StepDebugPayload = Record<string, unknown>;
+
+export type StepReplayRequest = {
+  input_mode?: 'original' | 'override';
+  override_input?: Record<string, unknown>;
+  override_config?: Record<string, unknown>;
+  disable_cache?: boolean;
+  mock_llm_calls?: boolean;
+  role?: string;
+  actor?: string;
+};
+
+export type StepPromptDebugRequest = {
+  variables?: Record<string, unknown>;
+  mock_llm_calls?: boolean;
+  role?: string;
+  actor?: string;
+};
+

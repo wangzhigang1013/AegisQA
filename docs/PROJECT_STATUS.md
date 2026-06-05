@@ -20,10 +20,26 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - 新增 production-like smoke 脚本骨架，显式 `-StartCompose` 时才启动 Docker 验证 MySQL、Redis、Celery 和 API/Worker。
 - 新增真实模型 Provider smoke 脚本，默认只验证连接别名和密钥不回显，显式 `-LiveCall` 时才发真实模型请求。
 - 新增 Step Replay、Prompt Debug 和 Repro Bundle 后端 API，Trace Flow 动作入口不再只是空链接。
+- Trace Flow Step 调试抽屉已接入 Replay、Prompt Debug、Repro Bundle 调用，前端可直接查看接口返回证据。
 - `docker-compose.yml` 已补 MySQL/Redis healthcheck，并确保 API 容器安装 Celery 后再启用 Celery executor。
 - 历史 `tmp-report-debug*` 与 `tmp-report-gate-debug/` 调试目录已加入忽略规则，避免污染 `git status`。
 
 ## 最近改动
+
+### 2026-06-05 Trace Flow Step 调试抽屉接入
+
+- 改动摘要：继续落实优化计划 P3，把 Trace Flow 页面中已有的 Step 动作按钮接到真实后端调试接口，并在同一个 Step 抽屉中展示 resolved/raw/validated/schema/LLM call 与接口返回预览。
+- 主要变更：
+  - 新增前端 API client 方法：`replayRunItemStep`、`debugRunItemStepPrompt`、`runItemStepReproBundle`。
+  - Trace Flow 的 `Replay Step`、`Prompt Debug`、`导出 Repro Bundle` 从占位链接改为按钮调用，不再跳转到无效查询页。
+  - 新增 Step 调试抽屉，展示 Step 基础信息、Resolved Input、Raw Output、Validated Output、Schema Errors、LLM Calls 和调试结果预览。
+  - 更新 `frontend/src/test/App.test.tsx`，覆盖三个动作会请求对应后端接口并展示返回证据。
+- 验证：
+  - 红灯验证：`npm test -- App.test.tsx -t "Trace Flow Step 抽屉"` 初始失败，失败原因为页面中没有可调用的 `Replay Step` 按钮。
+  - `npm test -- App.test.tsx -t "Trace Flow Step 抽屉"`：1 passed。
+  - `npm test -- App.test.tsx -t "Trace Flow"`：4 passed。
+  - `npm run typecheck`：passed。
+  - 本批只触碰 Trace Flow 前端接入、类型和状态文档，没有运行前端全量、E2E 或后端全量；浏览器级 E2E 仍作为下一步补齐。
 
 ### 2026-06-05 Step Replay / Debug / Repro 后端闭环
 
