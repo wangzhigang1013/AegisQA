@@ -79,6 +79,29 @@ def test_skill_package_records_contract_and_approval_metadata(tmp_path) -> None:
     assert after_approval["approval_history"][-1]["role"] == "Skill Developer"
 
 
+def test_skill_package_upload_persists_original_zip_in_artifact_store(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    package_payload = _plugin_zip()
+
+    uploaded = client.post(
+        "/skills/packages/upload",
+        json={"filename": "echo.zip", "content_base64": package_payload},
+    ).json()
+
+    artifact = uploaded["artifact"]
+    assert artifact["kind"] == "skill_packages"
+    assert artifact["artifact_id"] == f"packages/{uploaded['package_id']}/echo.zip"
+    assert artifact["metadata"]["package_id"] == uploaded["package_id"]
+    assert artifact["metadata"]["skill_id"] == "plugin.echo@0.1.0"
+    assert artifact["metadata"]["runtime_mode"] == uploaded["runtime_mode"]
+    saved_payload = client.app.state.artifact_store.read_bytes(artifact["kind"], artifact["artifact_id"])
+    assert saved_payload == base64.b64decode(package_payload)
+
+    stored = client.get("/skills/packages").json()[0]
+    assert stored["artifact"]["sha256"] == artifact["sha256"]
+
+
 def test_skill_package_rejects_oversized_return_payload(tmp_path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)

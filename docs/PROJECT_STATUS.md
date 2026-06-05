@@ -12,6 +12,7 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - Step Replay、Prompt Debug、Repro Bundle 均有 Viewer 权限拒绝回归；Repro Bundle GET 已补权限门禁和审计。
 - 新增 `ArtifactStore` / `LocalArtifactStore`，提供本地产物写入、读取、元数据、大小限制和路径安全检查，并挂载到 `app.state.artifact_store`。
 - Step Repro Bundle 已写入 ArtifactStore 的 `repro_bundles` 命名空间，并在 API 响应中返回 artifact metadata，导出产物不再只是瞬时 JSON。
+- Skill Package 上传原始 zip 已写入 ArtifactStore 的 `skill_packages` 命名空间，上传响应和包记录会返回 artifact metadata，后续可按 sha256 与 artifact_id 追溯原始包。
 - 模型网关 provider HTTP/network 错误详情会统一脱敏，避免外部服务回显 Authorization 或 API key 时泄漏。
 - Skill Package 上传会记录可执行/二进制文件、直接模型 SDK 调用和疑似硬编码 API key 的结构化 warning。
 - Trace Flow、Trace Tree 和 Report 页面加载失败时显示结构化错误码和 `trace_id`，便于定位后端请求。
@@ -36,6 +37,21 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - 历史 `tmp-report-debug*` 与 `tmp-report-gate-debug/` 调试目录已加入忽略规则，避免污染 `git status`。
 
 ## 最近改动
+
+### 2026-06-05 Skill Package ArtifactStore 接入
+
+- 改动摘要：继续补齐 ArtifactStore 主资产接入，把 Skill Package 上传的原始 zip 从普通本地文件提升为可追溯、可校验、可读回的产物记录。
+- 主要变更：
+  - `POST /skills/packages/upload` 调用 `_install_skill_package` 时注入 `ctx.artifact_store`。
+  - `_install_skill_package` 将通过校验并注册成功的原始 zip 写入 ArtifactStore 的 `skill_packages` 命名空间。
+  - 上传响应和 `skill_packages` 持久化记录新增 `artifact` 元数据，包含 `kind`、`artifact_id`、`size_bytes`、`sha256`、`content_type`、`storage_path`、业务 metadata 和 `created_at`。
+  - 上传文件名先规整为安全 basename 后写入本地包目录和 ArtifactStore；原始文件名保留在 `original_filename`。
+  - 新增回归测试，验证 API 返回的 artifact metadata 可用于从 `app.state.artifact_store` 读回原始 zip。
+- 验证：
+  - 红灯验证：`python -m pytest tests/test_skill_package_security.py::test_skill_package_upload_persists_original_zip_in_artifact_store -q` 初始失败，缺少 `uploaded["artifact"]`。
+  - `python -m pytest tests/test_skill_package_security.py::test_skill_package_upload_persists_original_zip_in_artifact_store -q`：1 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - `python -m pytest tests/test_skill_package_security.py tests/test_artifact_store.py -q`：21 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - 本批只触碰 Skill Package ArtifactStore 接入和定向测试，没有运行后端全量、前端测试或 E2E。
 
 ### 2026-06-05 Repro Bundle ArtifactStore 接入
 

@@ -73,7 +73,7 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             target=request.filename,
             actor=request.actor,
         )
-        record = _install_skill_package(ctx.store, ctx.registry, request)
+        record = _install_skill_package(ctx.store, ctx.registry, ctx.artifact_store, request)
         ctx.audit_service.record(
             actor=request.actor,
             role=request.role,

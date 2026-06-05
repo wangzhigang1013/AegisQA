@@ -11,7 +11,7 @@
 | 模块 | UI | API | 持久化 | 使用真实 Runtime 数据 | 阻断效果 | 测试覆盖 | Mock/Shell 状态 | 处理决策 | Required Fix |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Dataset | 已接入 Dataset 页面和上传入口 | `/datasets/*` | JSON/SQLite/MySQL adapter | 是，Task/Report 使用真实 Dataset Version | Task 创建前可被 Preflight 阻断 | 后端、前端、E2E | 内置示例只用于本地演示 | 保留主流程 | 生产 smoke 中验证 MySQL 下 Dataset rows 与 metadata 一致 |
-| Skill | Skill 市场、审批、合约测试 | `/skills/*`、Agent Skill 包路由 | package record、uploaded package | 是，Workflow/Task 使用已审批 Skill | 未审批/未启用 Skill 可阻断 Workflow/Task | 后端、前端、E2E | 示例 Skill 和 mock model 可用于离线验证；包安全 warning 已覆盖可执行文件、直连模型 SDK、疑似 API key | 保留主流程 | 继续补依赖隔离、签名校验和真实示例包发布回归 |
+| Skill | Skill 市场、审批、合约测试 | `/skills/*`、Agent Skill 包路由 | package record、uploaded package、ArtifactStore skill package zip | 是，Workflow/Task 使用已审批 Skill | 未审批/未启用 Skill 可阻断 Workflow/Task | 后端、前端、E2E | 示例 Skill 和 mock model 可用于离线验证；包安全 warning 已覆盖可执行文件、直连模型 SDK、疑似 API key；上传原始 zip 已可按 artifact metadata 读回 | 保留主流程 | 继续补依赖隔离、签名校验和真实示例包发布回归 |
 | Workflow | Workflow 市场和设计器 | `/workflow-*` | Workflow draft/version | 是，Task 运行引用发布版本 | Graph invalid、mapping invalid 可阻断发布/Preflight | 后端、前端、E2E | 模板是演示资产，不应冒充用户流程 | 保留主流程 | 继续减少模板/demo 对空态的影响 |
 | Task | 执行中心和 Task 抽屉 | `/tasks/*` | Task/Run/Attempt | 是，状态来自真实 Run | Task 创建和执行前有 Preflight/Gate 阻断 | 后端、前端、E2E | 本地同步执行和线程池是真实本地路径 | 保留主流程 | 在 Celery worker 下验证异步执行、暂停、取消 |
 | Preflight | Task 创建向导和详情证据 | `/tasks/preflight` | Task snapshot | 是，读取 Dataset/Workflow/Skill 状态 | 是，阻断 Task 创建或要求显式放行 | 后端、前端 | 无假通过 | 保留主流程 | 增加生产 smoke 中 blocking preflight 场景 |

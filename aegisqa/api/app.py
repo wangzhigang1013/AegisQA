@@ -8,6 +8,7 @@ Badcase 和 Judge Audit。为了本地 MVP 简洁，上传接口同时提供 `fr
 from __future__ import annotations
 
 import base64
+from dataclasses import asdict
 from datetime import datetime, timezone
 import json
 from math import ceil
@@ -45,7 +46,7 @@ from aegisqa.skills.packages import (
     resolve_package_entrypoint,
 )
 from aegisqa.skills.registry import SkillRegistry
-from aegisqa.storage.artifacts import LocalArtifactStore
+from aegisqa.storage.artifacts import ArtifactStore, LocalArtifactStore
 from aegisqa.storage.json_store import JsonStore
 from aegisqa.storage.mysql_store import ConnectionFactory, MySQLStore
 from aegisqa.storage.repositories import RepositoryRegistry
@@ -701,15 +702,21 @@ def _collection_id_key(collection: str) -> str:
     }.get(collection, "id")
 
 
-def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: SkillPackageUploadRequest) -> dict[str, Any]:
+def _install_skill_package(
+    store: JsonStore,
+    registry: SkillRegistry,
+    artifact_store: ArtifactStore,
+    request: SkillPackageUploadRequest,
+) -> dict[str, Any]:
     try:
         raw = base64.b64decode(request.content_base64)
     except Exception as exc:  # noqa: BLE001 - API 边界需要返回稳定错误。
         raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包内容不是合法 base64。") from exc
     package_id = f"pkg-{uuid4().hex[:12]}"
+    package_filename = _safe_skill_package_filename(request.filename)
     package_dir = store.path("uploaded_skill_packages", package_id, "package")
     package_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = store.path("uploaded_skill_packages", package_id, request.filename)
+    zip_path = store.path("uploaded_skill_packages", package_id, package_filename)
     zip_path.write_bytes(raw)
 
     try:
@@ -770,9 +777,23 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
             f"不支持的 Skill 包运行模式：{runtime_mode}",
             details={"supported": ["script", "instruction_model"]},
         )
+    artifact = artifact_store.put_bytes(
+        "skill_packages",
+        f"packages/{package_id}/{package_filename}",
+        raw,
+        content_type="application/zip",
+        metadata={
+            "package_id": package_id,
+            "filename": package_filename,
+            "original_filename": request.filename,
+            "skill_id": manifest.skill_id,
+            "runtime_mode": runtime_mode,
+        },
+    )
     record = {
         "package_id": package_id,
-        "filename": request.filename,
+        "filename": package_filename,
+        "original_filename": request.filename,
         "status": manifest.status,
         "manifest": manifest.model_dump(mode="json"),
         "package_dir": str(package_dir),
@@ -780,6 +801,7 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
         "skill_md_path": str(skill_md_path.resolve()) if skill_md_path.exists() else None,
         "runtime_mode": runtime_mode,
         "entrypoint": entrypoint,
+        "artifact": asdict(artifact),
         "package_security": package_security,
         "base_skill_id": _skill_base_id(manifest.skill_id),
         "skill_version": _skill_version_label(manifest),
@@ -796,6 +818,13 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
     }
     _save_record(store, "skill_packages", "package_id", record)
     return record
+
+
+def _safe_skill_package_filename(filename: str) -> str:
+    candidate = PurePosixPath(str(filename or "").replace("\\", "/")).name.strip()
+    if not candidate or candidate in {".", ".."}:
+        return "package.zip"
+    return candidate
 
 
 def _load_skill_packages(store: JsonStore, registry: SkillRegistry) -> None:
