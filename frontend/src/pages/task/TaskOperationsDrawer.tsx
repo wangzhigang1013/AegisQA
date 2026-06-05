@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 
 import { api, formatApiError } from '../../api/client';
-import type { TaskPreflightResult, TaskRecord } from '../../types';
+import type { TaskPreflightResult, TaskRecord, TaskResultsExportDownload } from '../../types';
 import { TaskSnapshotPanel, formatExecutionConfig } from './TaskSnapshotPanel';
 
 export type TaskAction = 'execute' | 'pause' | 'resume' | 'cancel' | 'retry' | 'attempt';
@@ -63,10 +63,10 @@ export function TaskOperationsDrawer({
             <TaskActionButton task={task} action="cancel" loading={loading} onClick={onAction} icon={<StopOutlined />} label="取消" danger />
             <TaskActionButton task={task} action="retry" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="重试失败项" />
             <TaskActionButton task={task} action="attempt" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="新建 Attempt" />
-            <Button href={`/tasks/${task.task_id}/trace`}>查看 Trace Flow</Button>
-            <Button href={`/tasks/${task.task_id}/trace-tree`}>查看 Trace Tree</Button>
-            <Button icon={<DownloadOutlined />} loading={exportResultsMutation.isPending} onClick={() => exportResultsMutation.mutate('csv')}>导出结果 CSV</Button>
-            <Button icon={<DownloadOutlined />} loading={exportResultsMutation.isPending} onClick={() => exportResultsMutation.mutate('jsonl')}>导出结果 JSONL</Button>
+            <Button href={`/tasks/${task.task_id}/trace?return_task_id=${encodeURIComponent(task.task_id)}`}>查看 Trace Flow</Button>
+            <Button href={`/tasks/${task.task_id}/trace-tree?return_task_id=${encodeURIComponent(task.task_id)}`}>查看 Trace Tree</Button>
+            <Button icon={<DownloadOutlined />} loading={exportResultsMutation.isPending && exportResultsMutation.variables === 'csv'} disabled={exportResultsMutation.isPending} onClick={() => exportResultsMutation.mutate('csv')}>导出结果 CSV</Button>
+            <Button icon={<DownloadOutlined />} loading={exportResultsMutation.isPending && exportResultsMutation.variables === 'jsonl'} disabled={exportResultsMutation.isPending} onClick={() => exportResultsMutation.mutate('jsonl')}>导出结果 JSONL</Button>
           </Space>
           {notice ? <Alert showIcon type={notice.includes('失败') ? 'error' : 'success'} message={notice} closable onClose={() => setNotice(null)} /> : null}
 
@@ -224,11 +224,10 @@ function preflightColor(status: TaskPreflightResult['status']) {
   return 'default';
 }
 
-function downloadTaskResultsExport(exported: Record<string, unknown>, task: TaskRecord) {
-  const format = typeof exported.file_format === 'string' ? exported.file_format : 'csv';
-  const content = normalizeTaskResultsExportContent(exported.content ?? exported, format);
-  const filename = `${safeTaskResultFileName(task.name || task.task_id)}_results.${format}`;
-  const blob = new Blob([content], { type: taskResultExportMimeTypes[format] ?? 'text/plain;charset=utf-8' });
+function downloadTaskResultsExport(exported: TaskResultsExportDownload, task: TaskRecord) {
+  const format = exported.file_format || 'csv';
+  const filename = exported.filename || `${safeTaskResultFileName(task.name || task.task_id)}_results.${format}`;
+  const blob = exported.blob.type ? exported.blob : new Blob([exported.blob], { type: taskResultExportMimeTypes[format] ?? 'text/plain;charset=utf-8' });
   const href = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = href;
@@ -239,13 +238,6 @@ function downloadTaskResultsExport(exported: Record<string, unknown>, task: Task
   link.remove();
   URL.revokeObjectURL(href);
   return filename;
-}
-
-function normalizeTaskResultsExportContent(content: unknown, format: string) {
-  if (typeof content === 'string') {
-    return content;
-  }
-  return JSON.stringify(content, null, format === 'json' ? 2 : 0);
 }
 
 function safeTaskResultFileName(name: string) {

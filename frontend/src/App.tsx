@@ -104,6 +104,7 @@ export function AppShell() {
                   <Route path="/skills" element={<SkillsPage />} />
                   <Route path="/workflow" element={<WorkflowMarketPage />} />
                   <Route path="/workflows" element={<WorkflowMarketPage />} />
+                  <Route path="/workflows/designer" element={<WorkflowDesignerPage />} />
                   <Route path="/workflows/designer/:draftId" element={<WorkflowDesignerPage />} />
                   <Route path="/runs" element={<RunsPage />} />
                   <Route path="/tasks/:taskId/trace" element={<TraceFlowPage />} />

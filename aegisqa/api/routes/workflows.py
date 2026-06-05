@@ -21,10 +21,14 @@ from aegisqa.api.app import (
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
 from aegisqa.engine.runner import RunRecord
+from aegisqa.security.access import require_permission
 from aegisqa.skills.parameters import SkillParameterResolver
 from aegisqa.workflows.graph import WorkflowGraph, WorkflowGraphValidationResult
 from aegisqa.workflows.models import WorkflowDraft, WorkflowVersion
 from aegisqa.workflows.templates import WorkflowTemplate
+
+
+WORKFLOW_WRITE_PERMISSION = "workflow:publish"
 
 
 def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -42,6 +46,7 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/workflow-drafts")
     def create_workflow_draft(request: WorkflowDraftCreateRequest) -> dict[str, Any]:
+        _require_workflow_write(ctx, role=request.role, actor=request.actor, action="workflow_draft.create", target=request.name)
         graph = _graph_with_name(request.graph, request.name)
         draft = {
             "draft_id": f"draft-{uuid4().hex[:12]}",
@@ -52,7 +57,7 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
             "updated_at": _now(),
         }
         _save_workflow_draft(ctx.store, draft)
-        ctx.audit_service.record(actor="api", action="workflow_draft.create", target=draft["draft_id"])
+        ctx.audit_service.record(actor=request.actor, role=request.role, action="workflow_draft.create", target=draft["draft_id"], detail={"role": request.role})
         return draft
 
     @app.get("/workflow-drafts/{draft_id}")
@@ -61,6 +66,7 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.put("/workflow-drafts/{draft_id}")
     def update_workflow_draft(draft_id: str, request: WorkflowDraftUpdateRequest) -> dict[str, Any]:
+        _require_workflow_write(ctx, role=request.role, actor=request.actor, action="workflow_draft.update", target=draft_id)
         draft = _get_workflow_draft(ctx.store, draft_id)
         graph = request.graph or WorkflowGraph(**draft["graph"])
         next_name = request.name if request.name is not None else graph.name
@@ -72,20 +78,30 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
             draft["graph"] = graph.model_dump(mode="json")
         draft["updated_at"] = _now()
         _save_workflow_draft(ctx.store, draft)
-        ctx.audit_service.record(actor="api", action="workflow_draft.update", target=draft_id)
+        ctx.audit_service.record(actor=request.actor, role=request.role, action="workflow_draft.update", target=draft_id, detail={"role": request.role})
         return draft
 
     @app.delete("/workflow-drafts/{draft_id}")
-    def delete_workflow_draft(draft_id: str) -> dict[str, Any]:
+    def delete_workflow_draft(draft_id: str, role: str = "Evaluator", actor: str = "api") -> dict[str, Any]:
+        _require_workflow_write(ctx, role=role, actor=actor, action="workflow_draft.delete", target=draft_id)
         draft = _get_workflow_draft(ctx.store, draft_id)
         draft["status"] = "deleted"
         draft["updated_at"] = _now()
         _save_workflow_draft(ctx.store, draft)
-        ctx.audit_service.record(actor="api", action="workflow_draft.delete", target=draft_id)
+        ctx.audit_service.record(actor=actor, role=role, action="workflow_draft.delete", target=draft_id, detail={"role": role})
         return draft
 
     @app.post("/workflow-drafts/{draft_id}/publish", response_model=WorkflowVersion)
-    def publish_workflow_draft(draft_id: str) -> WorkflowVersion:
+    def publish_workflow_draft(draft_id: str, role: str = "Evaluator", actor: str = "api") -> WorkflowVersion:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=role,
+            permission=WORKFLOW_WRITE_PERMISSION,
+            action="workflow.publish",
+            target=draft_id,
+            actor=actor,
+        )
         draft = _get_workflow_draft(ctx.store, draft_id)
         graph = WorkflowGraph(**draft["graph"])
         graph.name = draft["name"]
@@ -99,7 +115,7 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
         draft["published_version_id"] = version.version_id
         draft["updated_at"] = _now()
         _save_workflow_draft(ctx.store, draft)
-        ctx.audit_service.record(actor="api", action="workflow_draft.publish", target=draft_id, detail={"version_id": version.version_id})
+        ctx.audit_service.record(actor=actor, role=role, action="workflow_draft.publish", target=draft_id, detail={"role": role, "version_id": version.version_id})
         return version
 
     @app.post("/workflow-graphs/validate", response_model=WorkflowGraphValidationResult)
@@ -108,12 +124,21 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/workflow-graphs/publish", response_model=WorkflowVersion)
     def publish_workflow_graph(request: WorkflowGraphPublishRequest) -> WorkflowVersion:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            permission=WORKFLOW_WRITE_PERMISSION,
+            action="workflow.publish",
+            target=request.graph.name,
+            actor=request.actor,
+        )
         validation = ctx.graph_service.validate(request.graph)
         if not validation.ok:
             raise HTTPException(status_code=400, detail={"message": "Workflow Graph 校验失败", "errors": [error.model_dump(mode="json") for error in validation.errors]})
         version = ctx.workflow_service.publish(ctx.graph_service.to_workflow_draft(request.graph))
         ctx.workflows[version.version_id] = version
-        ctx.audit_service.record(actor="api", action="workflow_graph.publish", target=version.version_id)
+        ctx.audit_service.record(actor=request.actor, role=request.role, action="workflow_graph.publish", target=version.version_id, detail={"role": request.role, "graph_name": request.graph.name})
         return version
 
     @app.post("/workflow-graphs/dry-run", response_model=RunRecord)
@@ -155,23 +180,46 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
         return {"workflow_name": workflow.name, "nodes": nodes}
 
     @app.post("/workflows/publish", response_model=WorkflowVersion)
-    def publish_workflow(draft: WorkflowDraft) -> WorkflowVersion:
+    def publish_workflow(draft: WorkflowDraft, role: str = "Evaluator", actor: str = "api") -> WorkflowVersion:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=role,
+            permission=WORKFLOW_WRITE_PERMISSION,
+            action="workflow.publish",
+            target=draft.name,
+            actor=actor,
+        )
         version = ctx.workflow_service.publish(draft)
         ctx.workflows[version.version_id] = version
-        ctx.audit_service.record(actor="api", action="workflow.publish", target=version.version_id)
+        ctx.audit_service.record(actor=actor, role=role, action="workflow.publish", target=version.version_id, detail={"role": role, "workflow_name": draft.name})
         return version
 
     @app.post("/workflows/{version_id:path}/copy")
     def copy_workflow(version_id: str, request: WorkflowCopyRequest) -> dict[str, Any]:
+        _require_workflow_write(ctx, role=request.role, actor=request.actor, action="workflow.copy", target=version_id)
         draft = ctx.workflow_service.copy_workflow(version_id, name=request.name)
-        ctx.audit_service.record(actor="api", action="workflow.copy", target=version_id, detail={"new_name": draft.name})
+        ctx.audit_service.record(actor=request.actor, role=request.role, action="workflow.copy", target=version_id, detail={"role": request.role, "new_name": draft.name})
         return draft.model_dump(mode="json")
 
     @app.post("/workflows/{version_id:path}/archive", response_model=WorkflowVersion)
-    def archive_workflow(version_id: str) -> WorkflowVersion:
+    def archive_workflow(version_id: str, role: str = "Evaluator", actor: str = "api") -> WorkflowVersion:
+        _require_workflow_write(ctx, role=role, actor=actor, action="workflow.archive", target=version_id)
         archived = ctx.workflow_service.archive(version_id)
-        ctx.audit_service.record(actor="api", action="workflow.archive", target=version_id)
+        ctx.audit_service.record(actor=actor, role=role, action="workflow.archive", target=version_id, detail={"role": role})
         return archived
+
+
+def _require_workflow_write(ctx: RouteContext, *, role: str, actor: str, action: str, target: str) -> None:
+    require_permission(
+        ctx.access_control,
+        ctx.audit_service,
+        role=role,
+        permission=WORKFLOW_WRITE_PERMISSION,
+        action=action,
+        target=target,
+        actor=actor,
+    )
 
 
 def _graph_with_name(graph: WorkflowGraph, name: str) -> WorkflowGraph:

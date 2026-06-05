@@ -16,15 +16,44 @@ except ImportError:  # pragma: no cover - 本地测试环境默认不安装 Cele
 if Celery is not None:
     app = Celery("aegisqa", broker="redis://redis:6379/0", backend="redis://redis:6379/1")
 
+    @app.task(name="aegisqa.execute_task", rate_limit="10/s")
+    def execute_task(task_id: str, store_root: str = "data/aegisqa_store", storage_backend: str = "json") -> dict[str, str]:
+        """在 Worker 进程里执行一个 Task 绑定的 Run。"""
+
+        from aegisqa.api.app import _get_record, _now, _refresh_task_from_run, _save_record, create_app
+
+        worker_app = create_app(store_root=store_root, storage_backend=storage_backend, task_executor_backend="local_thread")
+        store = worker_app.state.store
+        runner = worker_app.state.runner
+        audit_service = worker_app.state.audit_service
+        task = _get_record(store, "tasks", task_id)
+
+        def refresh_progress(current_run) -> None:  # noqa: ANN001 - Worker 只透传 RunRecord 给共享刷新函数。
+            latest_task = _get_record(store, "tasks", task_id)
+            _refresh_task_from_run(store, latest_task, current_run)
+
+        try:
+            run = runner.execute_run(task["run_id"], progress_callback=refresh_progress)
+        except Exception as exc:  # noqa: BLE001 - Worker 边界必须把失败落库，避免 Task 永远 running。
+            failed_run = runner.get_run(task["run_id"])
+            failed_run.status = "failed"
+            failed_run.finished_at = _now()
+            runner._save_run(failed_run)
+            latest_task = _get_record(store, "tasks", task_id)
+            refreshed = _refresh_task_from_run(store, latest_task, failed_run)
+            refreshed["last_error"] = str(exc)
+            _save_record(store, "tasks", "task_id", refreshed)
+            audit_service.record(actor="worker", action="task.execute.failed", target=task_id, detail={"error": str(exc)})
+            return {"task_id": task_id, "run_id": failed_run.run_id, "status": "failed"}
+        return {"task_id": task_id, "run_id": run.run_id, "status": run.status}
+
     @app.task(name="aegisqa.execute_item", rate_limit="10/s")
     def execute_item(item_id: str) -> dict[str, str]:
-        """生产 Worker 的任务壳。
+        """兼容旧的 item 级消息契约。
 
-        真正执行时应通过 item_id 查询数据库并调用 WorkflowRunner 的 item 级执行逻辑。
-        当前 MVP 的单进程 Runner 已验证相同轻量消息契约。
+        当前 API 侧已经按 Task 提交 Celery 任务；保留该任务名，避免旧 worker 配置启动失败。
         """
 
-        return {"item_id": item_id, "status": "accepted"}
+        return {"item_id": item_id, "status": "accepted", "message": "请使用 aegisqa.execute_task 提交完整 Task。"}
 else:
     app = None
-

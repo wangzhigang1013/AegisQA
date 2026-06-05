@@ -277,6 +277,15 @@ Workflow 引用方式见 [docs/AGENT_SKILL_PACKAGE_GUIDE.md](docs/AGENT_SKILL_PA
 
 如果插件包非常大，当前 base64 JSON 上传方式不适合长期使用。后续生产方案应升级为 multipart 上传、对象存储、依赖隔离、包大小限制、压缩炸弹检测和沙箱执行。
 
+## 快速教程
+
+以下教程把示例包、Agent Skill 指南和主流程串成同一条路径：
+
+- [5 分钟跑通 ASR/QA 评测](docs/tutorials/5-minute-asr-qa-eval.md)：从上传数据、上传 Skill、发布 Workflow、执行 Task 到导出报告。
+- [写一个脚本型 Skill](docs/tutorials/write-script-skill.md)：说明 `runtime.mode=script`、`scripts/run.py:run`、权限、依赖限制和合约测试。
+- [接入真实模型](docs/tutorials/connect-real-model.md)：说明 `/model-gateway/connections`、`secret_ref`、环境变量和 `model_connection_id`。
+- [Skill 示例包索引](docs/SKILL_EXAMPLES_INDEX.md)：整理桌面 `skills` zip 示例和仓库内可复现源码。
+
 ## 主启动路径
 
 ### 1. 启动后端

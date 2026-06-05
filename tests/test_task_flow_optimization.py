@@ -247,7 +247,7 @@ def test_repair_task_retest_action_creates_attempt_and_compares_result(tmp_path:
 
     result = client.post(
         f"/repair-tasks/{repair['repair_task_id']}/actions",
-        json={"action": "retest_and_compare"},
+        json={"action": "retest_and_compare", "role": "Evaluator", "actor": "repair_retester"},
     ).json()
 
     assert result["action"] == "retest_and_compare"
@@ -264,6 +264,11 @@ def test_repair_task_retest_action_creates_attempt_and_compares_result(tmp_path:
     assert refreshed_task["run_id"] == result["result"]["new_run_id"]
     assert refreshed_task["attempts"][0]["run_id"] == executed["run_id"]
     assert refreshed_task["attempts"][1]["report"]["run_id"] == result["result"]["new_run_id"]
+    events = client.get("/audit-events", params={"target": executed["task_id"]}).json()
+    attempt_event = next(event for event in events if event["action"] == "task.attempt.create_from_repair")
+    assert attempt_event["actor"] == "repair_retester"
+    assert attempt_event["role"] == "Evaluator"
+    assert attempt_event["detail"]["role"] == "Evaluator"
 
 
 def test_repair_task_can_generate_contextual_remediation_plan_after_retest(tmp_path: Path) -> None:
@@ -588,7 +593,7 @@ def test_repair_task_version_diff_actions_materialize_candidate_and_workflow_dra
     )
     draft_result = client.post(
         f"/repair-tasks/{repair['repair_task_id']}/actions",
-        json={"action": "create_workflow_draft_from_version_diff"},
+        json={"action": "create_workflow_draft_from_version_diff", "role": "Evaluator", "actor": "draft_actioner"},
     )
 
     assert candidate_result.status_code == 200
@@ -607,6 +612,11 @@ def test_repair_task_version_diff_actions_materialize_candidate_and_workflow_dra
     answer = next(node for node in draft["graph"]["nodes"] if node["node_id"] == "answer")
     assert answer["config"]["prompt_version"] == "prompt-flow-v0"
     assert draft_payload["repair_task"]["action_history"][-1]["action"] == "create_workflow_draft_from_version_diff"
+    events = client.get("/audit-events", params={"target": draft["draft_id"]}).json()
+    draft_event = next(event for event in events if event["action"] == "workflow_draft.create_from_version_diff")
+    assert draft_event["actor"] == "draft_actioner"
+    assert draft_event["role"] == "Evaluator"
+    assert draft_event["detail"]["role"] == "Evaluator"
 
 
 def test_prompt_skill_candidates_are_reviewed_before_draft_creation(tmp_path: Path) -> None:
@@ -1153,7 +1163,7 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
 
     applied_baseline = client.post(
         f"/experiment-baseline-suggestions/{baseline_suggestion['suggestion_id']}/apply",
-        json={"actor": "release_owner", "note": "候选版本通过发布门禁，应用为新 baseline。"},
+        json={"actor": "release_owner", "role": "Admin", "note": "候选版本通过发布门禁，应用为新 baseline。"},
     ).json()
     assert applied_baseline["suggestion"]["status"] == "applied"
     assert applied_baseline["baseline"]["current_experiment_id"] == retest["candidate_experiment"]["experiment_id"]
@@ -1167,7 +1177,7 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
     assert listed_notifications[0]["notification_id"] == applied_baseline["notifications"][0]["notification_id"]
     acknowledged_notification = client.post(
         f"/baseline-change-notifications/{listed_notifications[0]['notification_id']}/ack",
-        json={"actor": "qa_owner", "note": "已同步给评测负责人。"},
+        json={"actor": "qa_owner", "role": "Evaluator", "note": "已同步给评测负责人。"},
     ).json()
     assert acknowledged_notification["status"] == "acknowledged"
     assert acknowledged_notification["acknowledged_by"] == "qa_owner"
@@ -1184,7 +1194,7 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
 
     rolled_back_baseline = client.post(
         f"/experiment-baseline-suggestions/{baseline_suggestion['suggestion_id']}/rollback",
-        json={"actor": "release_owner", "note": "回滚到原 baseline。"},
+        json={"actor": "release_owner", "role": "Admin", "note": "回滚到原 baseline。"},
     ).json()
     assert rolled_back_baseline["suggestion"]["status"] == "rolled_back"
     assert rolled_back_baseline["baseline"]["current_experiment_id"] == baseline_experiment["experiment_id"]
@@ -1197,3 +1207,17 @@ def test_prompt_skill_candidate_retest_requires_published_draft_and_returns_thre
         f"/baseline-change-notifications?baseline_id={rolled_back_baseline['baseline']['baseline_id']}&status=unread"
     ).json()
     assert rollback_notifications[0]["action"] == "rollback"
+
+    audit_events = client.get("/audit-events").json()
+    apply_events = [event for event in audit_events if event["action"] == "experiment_baseline.apply"]
+    ack_events = [event for event in audit_events if event["action"] == "baseline_change_notification.ack"]
+    rollback_events = [event for event in audit_events if event["action"] == "experiment_baseline.rollback"]
+    assert apply_events[-1]["actor"] == "release_owner"
+    assert apply_events[-1]["role"] == "Admin"
+    assert apply_events[-1]["detail"]["role"] == "Admin"
+    assert ack_events[-1]["actor"] == "qa_owner"
+    assert ack_events[-1]["role"] == "Evaluator"
+    assert ack_events[-1]["detail"]["role"] == "Evaluator"
+    assert rollback_events[-1]["actor"] == "release_owner"
+    assert rollback_events[-1]["role"] == "Admin"
+    assert rollback_events[-1]["detail"]["role"] == "Admin"

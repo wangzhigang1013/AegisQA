@@ -18,7 +18,7 @@ from uuid import uuid4
 import yaml
 
 from aegisqa.core.errors import AegisQAError
-from aegisqa.models.gateway import ModelGateway
+from aegisqa.models.gateway import ModelGateway, model_response_usage_metrics
 from aegisqa.skills.base import BaseSkill, SkillManifest, SkillResult
 from aegisqa.skills.registry import SkillRegistry
 
@@ -90,12 +90,14 @@ class AgentInstructionSkill(BaseSkill):
                 ),
             },
         ]
-        response = ModelGateway.from_env().generate(
+        response = ModelGateway.from_env(connection_id=config.get("model_connection_id")).generate(
             messages=messages,
             model=config.get("model"),
             temperature=config.get("temperature"),
             max_tokens=config.get("max_tokens"),
         )
+        metrics = model_response_usage_metrics(response, connection_id=config.get("model_connection_id"))
+        metrics["latency_ms"] = response.latency_ms
         # answer/text 两个字段保持同值：answer 更符合评测语义，text 更方便和模型节点互通。
         return SkillResult(
             output={
@@ -104,10 +106,7 @@ class AgentInstructionSkill(BaseSkill):
                 "skill_id": self.manifest.skill_id,
                 "runtime_mode": AGENT_SKILL_RUNTIME_MODE,
             },
-            metrics={
-                "latency_ms": response.latency_ms,
-                "model_total_tokens": response.usage.get("total_tokens", 0),
-            },
+            metrics=metrics,
             artifacts={"model": response.model, "provider": response.provider, "usage": response.usage},
             logs=["Agent Skill 安全模式：已读取 SKILL.md/references，未执行本机脚本或命令。"],
         )

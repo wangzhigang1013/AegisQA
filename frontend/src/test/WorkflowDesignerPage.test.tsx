@@ -26,6 +26,66 @@ describe('Workflow 设计器深度交互', () => {
     });
   });
 
+  it('模型连接参数使用连接别名下拉并写入 Workflow config', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/model-gateway/connections')) {
+        return jsonResponse([
+          {
+            connection_id: 'qwen-prod',
+            name: 'Qwen 生产',
+            provider: 'openai_compatible',
+            base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+            secret_ref: 'env:QWEN_API_KEY',
+            default_model: 'qwen-plus',
+            timeout_seconds: 60,
+            enabled: true,
+            api_key_configured: true,
+            api_key_masked: 'sk-q...1234',
+          },
+        ]);
+      }
+      if (url.endsWith('/skills')) {
+        return jsonResponse(demoSkills.map((skill) => (
+          skill.skill_id === 'llm.call@0.1.0'
+            ? {
+                ...skill,
+                config_schema: {
+                  ...skill.config_schema,
+                  properties: {
+                    ...(skill.config_schema.properties ?? {}),
+                    model_connection_id: {
+                      type: 'string',
+                      title: '模型连接',
+                      description: '选择治理页维护的模型连接别名。',
+                    },
+                  },
+                },
+              }
+            : skill
+        )));
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'Skill 参数 model_connection_id' }));
+    fireEvent.click(await screen.findByText('Qwen 生产（qwen-prod）'));
+    fireEvent.click(screen.getByRole('button', { name: /保存草稿/ }));
+
+    await waitFor(() => {
+      const saveCall = vi
+        .mocked(globalThis.fetch)
+        .mock.calls.find(([input, init]) => String(input).endsWith('/workflow-drafts/draft-test') && init?.method === 'PUT');
+      expect(saveCall).toBeTruthy();
+      const body = JSON.parse(String(saveCall?.[1]?.body ?? '{}'));
+      const answerNode = body.graph.nodes.find((node: { node_id: string }) => node.node_id === 'answer');
+      expect(answerNode.config).toMatchObject({ model_connection_id: 'qwen-prod' });
+    });
+  });
+
   it('可选输入字段留空时不会写入草稿 input_mapping', async () => {
     const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
     vi.mocked(globalThis.fetch).mockImplementation((input, init) => {

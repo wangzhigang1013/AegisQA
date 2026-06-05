@@ -6,8 +6,12 @@ from aegisqa.api.routes.governance import register_governance_routes
 from aegisqa.api.routes.judge import register_judge_routes
 from aegisqa.api.routes.models import register_model_routes
 from aegisqa.api.routes.productization import register_productization_routes
+from aegisqa.api.routes.repair_tasks import register_repair_task_routes
 from aegisqa.api.routes.reports import register_report_routes
 from aegisqa.api.routes.skills import register_skill_routes
+from aegisqa.api.routes.task_lifecycle import register_task_lifecycle_routes
+from aegisqa.api.routes.task_preflight import register_task_preflight_routes
+from aegisqa.api.routes.task_reports import register_task_report_routes
 from aegisqa.api.routes.tasks import register_task_routes
 from aegisqa.api.routes.workflows import register_workflow_routes
 
@@ -18,8 +22,12 @@ __all__ = [
     "register_judge_routes",
     "register_model_routes",
     "register_productization_routes",
+    "register_repair_task_routes",
     "register_report_routes",
     "register_skill_routes",
+    "register_task_lifecycle_routes",
+    "register_task_preflight_routes",
+    "register_task_report_routes",
     "register_task_routes",
     "register_workflow_routes",
 ]

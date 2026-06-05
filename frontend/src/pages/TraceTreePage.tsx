@@ -1,14 +1,16 @@
-import { BranchesOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, BranchesOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Card, Col, Descriptions, Empty, Row, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, Descriptions, Empty, Row, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { api } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 
 export function TraceTreePage() {
   const { taskId } = useParams();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [tracePage, setTracePage] = useState(1);
   const tracePageSize = 8;
   const traceQuery = useQuery({
@@ -17,6 +19,7 @@ export function TraceTreePage() {
     enabled: Boolean(taskId),
   });
   const traceTree = traceQuery.data;
+  const returnTaskId = searchParams.get('return_task_id') || taskId;
 
   return (
     <section className="page-stack">
@@ -24,6 +27,11 @@ export function TraceTreePage() {
         eyebrow="调用树"
         title="Trace Tree"
         description="按 Item 展开 Skill Step 调用树，查看每一步的输入、输出、耗时、错误和缓存命中。"
+        primaryAction={
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(returnTaskId ? `/runs?task_id=${encodeURIComponent(returnTaskId)}` : '/runs')}>
+            返回任务详情
+          </Button>
+        }
       />
 
       {traceQuery.isError ? <Alert type="error" showIcon message="Trace Tree 加载失败，请确认任务已经执行并生成 Run。" /> : null}

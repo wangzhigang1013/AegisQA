@@ -4,6 +4,7 @@ import { Alert, Button, Card, Checkbox, Form, Input, Modal, Select, Space, Table
 import { useState, type Key } from 'react';
 
 import { api, formatApiError } from '../api/client';
+import { DataTableShell, PageSection } from '../components/LayoutPrimitives';
 import { PageHeader } from '../components/PageHeader';
 import type { AnnotationTask } from '../types';
 
@@ -98,9 +99,29 @@ export function AnnotationQueuePage() {
     onError: (error) => setNotice(`批量审核失败：${formatApiError(error)}`),
   });
 
+  const dispatchMutation = useMutation({
+    mutationFn: () =>
+      api.dispatchAnnotationQueue({
+        label_field: 'scene',
+        sla_hours: 48,
+        overdue_strategy: 'oldest_first',
+        assignees: [
+          { assignee: 'billing_reviewer', capacity: 5, labels: ['billing', 'payment'] },
+          { assignee: 'policy_reviewer', capacity: 5, labels: ['policy', 'safety'] },
+          { assignee: 'qa_owner', capacity: 10, labels: [] },
+        ],
+      }),
+    onSuccess: async (result) => {
+      setNotice(`自动分派完成：已分派 ${result.assigned_count} 条，跳过 ${result.skipped_count} 条。`);
+      await queryClient.invalidateQueries({ queryKey: ['annotation-queue'] });
+    },
+    onError: (error) => setNotice(`自动分派失败：${formatApiError(error)}`),
+  });
+
   const candidateSummary = summarizeCandidates(candidatesQuery.data ?? []);
   const queueItems = queueQuery.data?.items ?? [];
   const queuePagination = queueQuery.data?.pagination;
+  const queueSummary = queueQuery.data?.summary;
 
   function resetQueuePaging() {
     setQueuePage(1);
@@ -179,60 +200,86 @@ export function AnnotationQueuePage() {
 
       <Card
         className="flat-card"
+        title="负责人负载与 SLA"
+        extra={<Button icon={<UserAddOutlined />} loading={dispatchMutation.isPending} onClick={() => dispatchMutation.mutate()}>自动分派</Button>}
+      >
+        <Space direction="vertical" className="full-width-control">
+          <Space wrap>
+            <Tag color="blue">待处理 {queueSummary?.total_open ?? queueItems.filter((item) => item.status !== 'reviewed').length}</Tag>
+            <Tag color="purple">已分派 {queueSummary?.total_assigned ?? queueItems.filter((item) => item.assignee && item.status !== 'reviewed').length}</Tag>
+            <Tag color={(queueSummary?.total_overdue ?? 0) > 0 ? 'red' : 'green'}>SLA超时 {queueSummary?.total_overdue ?? 0}</Tag>
+          </Space>
+          <Space wrap>
+            {(queueSummary?.owners ?? summarizeOwners(queueItems)).map((owner) => (
+              <Tag key={owner.assignee} color={owner.overdue_count ? 'red' : owner.assignee === '未分派' ? 'gold' : 'blue'}>
+                {owner.assignee}：{owner.backlog} / SLA超时 {owner.overdue_count}
+              </Tag>
+            ))}
+          </Space>
+        </Space>
+      </Card>
+
+      <PageSection
         title="审核队列"
+        testId="annotation-queue-table-section"
         extra={
           <Button type="primary" disabled={!selectedRowKeys.length} onClick={() => setBulkReviewOpen(true)}>
             批量审核
           </Button>
         }
       >
-        <Table
-          rowKey="task_id"
-          loading={queueQuery.isLoading}
-          dataSource={queueItems}
-          rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys, getCheckboxProps: (record) => ({ disabled: record.status === 'reviewed' }) }}
-          pagination={{
-            current: queuePagination?.page ?? queuePage,
-            pageSize: queuePagination?.page_size ?? queuePageSize,
-            total: queuePagination?.total_items ?? queueItems.length,
-            showSizeChanger: false,
-            onChange: (page) => {
-              setSelectedRowKeys([]);
-              setQueuePage(page);
-            },
-          }}
-          columns={[
-            { title: '来源任务', dataIndex: 'source_task_name', render: (value) => value || '-' },
-            { title: '样本', dataIndex: 'item_id', render: (value) => <code>{value}</code> },
-            { title: '状态', dataIndex: 'status', render: renderStatus },
-            { title: '负责人', dataIndex: 'assignee', render: (value) => value || '未分派' },
-            { title: '优先级', dataIndex: 'priority', render: (value) => <Tag color={value === 'high' ? 'red' : 'blue'}>{value}</Tag> },
-            { title: '原因', dataIndex: 'reason' },
-            {
-              title: '操作',
-              render: (_, record) => (
-                <Space>
-                  <Button
-                    size="small"
-                    icon={<UserAddOutlined />}
-                    disabled={record.status === 'reviewed'}
-                    loading={assignMutation.isPending}
-                    onClick={() => assignMutation.mutate({ task: record, nextAssignee: 'current_user' })}
-                  >
-                    领取
-                  </Button>
-                  <Button size="small" onClick={() => openAssign(record)} disabled={record.status === 'reviewed'}>
-                    分派
-                  </Button>
-                  <Button size="small" type="primary" icon={<AuditOutlined />} onClick={() => openReview(record)}>
-                    审核
-                  </Button>
-                </Space>
-              ),
-            },
-          ]}
-        />
-      </Card>
+        <DataTableShell testId="annotation-queue-table-shell">
+          <Table
+            rowKey="task_id"
+            loading={queueQuery.isLoading}
+            scroll={{ x: 'max-content' }}
+            dataSource={queueItems}
+            rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys, getCheckboxProps: (record) => ({ disabled: record.status === 'reviewed' }) }}
+            pagination={{
+              current: queuePagination?.page ?? queuePage,
+              pageSize: queuePagination?.page_size ?? queuePageSize,
+              total: queuePagination?.total_items ?? queueItems.length,
+              showSizeChanger: false,
+              onChange: (page) => {
+                setSelectedRowKeys([]);
+                setQueuePage(page);
+              },
+            }}
+            columns={[
+              { title: '来源任务', dataIndex: 'source_task_name', render: (value) => value || '-' },
+              { title: '样本', dataIndex: 'item_id', render: (value) => <code>{value}</code> },
+              { title: '状态', dataIndex: 'status', render: renderStatus },
+              { title: '负责人', dataIndex: 'assignee', render: (value) => value || '未分派' },
+              { title: '业务标签', dataIndex: 'business_label', render: (value) => value || '-' },
+              { title: 'SLA', render: (_, record) => renderSla(record.sla_status, record.due_at) },
+              { title: '优先级', dataIndex: 'priority', render: (value) => <Tag color={value === 'high' ? 'red' : 'blue'}>{value}</Tag> },
+              { title: '原因', dataIndex: 'reason' },
+              {
+                title: '操作',
+                render: (_, record) => (
+                  <Space>
+                    <Button
+                      size="small"
+                      icon={<UserAddOutlined />}
+                      disabled={record.status === 'reviewed'}
+                      loading={assignMutation.isPending}
+                      onClick={() => assignMutation.mutate({ task: record, nextAssignee: 'current_user' })}
+                    >
+                      领取
+                    </Button>
+                    <Button size="small" onClick={() => openAssign(record)} disabled={record.status === 'reviewed'}>
+                      分派
+                    </Button>
+                    <Button size="small" type="primary" icon={<AuditOutlined />} onClick={() => openReview(record)}>
+                      审核
+                    </Button>
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        </DataTableShell>
+      </PageSection>
 
       <Modal
         title="审核样本"
@@ -332,8 +379,41 @@ function summarizeCandidates(candidates: { kind: string }[]) {
   };
 }
 
+function summarizeOwners(tasks: AnnotationTask[]) {
+  const owners = new Map<string, { assignee: string; backlog: number; overdue_count: number }>();
+  tasks
+    .filter((task) => task.status !== 'reviewed')
+    .forEach((task) => {
+      const assignee = task.assignee || '未分派';
+      const current = owners.get(assignee) ?? { assignee, backlog: 0, overdue_count: 0 };
+      current.backlog += 1;
+      if (task.overdue || task.sla_status === 'overdue') {
+        current.overdue_count += 1;
+      }
+      owners.set(assignee, current);
+    });
+  return [...owners.values()];
+}
+
 function renderStatus(status: string) {
   const color = status === 'reviewed' ? 'green' : status === 'assigned' ? 'blue' : 'gold';
   const label = status === 'reviewed' ? '已审核' : status === 'assigned' ? '已分派' : '待领取';
   return <Tag color={color}>{label}</Tag>;
+}
+
+function renderSla(status?: string | null, dueAt?: string | null) {
+  const color = status === 'overdue' ? 'red' : status === 'unassigned' ? 'gold' : status === 'reviewed' ? 'green' : 'blue';
+  const label = status === 'overdue' ? '已超时' : status === 'unassigned' ? '未分派' : status === 'reviewed' ? '已审核' : 'SLA内';
+  return (
+    <Space size={4} wrap>
+      <Tag color={color}>{label}</Tag>
+      {dueAt ? <Typography.Text type="secondary">{formatAnnotationTime(dueAt)}</Typography.Text> : null}
+    </Space>
+  );
+}
+
+function formatAnnotationTime(value: string) {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return value;
+  return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
 }

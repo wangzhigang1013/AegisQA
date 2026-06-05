@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from aegisqa.models.gateway import ModelGateway
+from aegisqa.models.gateway import ModelGateway, model_response_usage_metrics
 from aegisqa.skills.base import BaseSkill, SkillManifest, SkillResult
 
 
@@ -196,6 +196,7 @@ class LLMCallSkill(BaseSkill):
             "type": "object",
             "properties": {
                 "model": {"type": "string"},
+                "model_connection_id": {"type": "string"},
                 "temperature": {"type": "number"},
                 "api_key": {"type": "string"},
             },
@@ -214,15 +215,17 @@ class LLMCallSkill(BaseSkill):
     def run(self, inputs: dict[str, Any], config: dict[str, Any] | None = None) -> SkillResult:
         config = config or {}
         prompt = inputs["prompt"]
-        response = ModelGateway.from_env().generate(
+        response = ModelGateway.from_env(connection_id=config.get("model_connection_id")).generate(
             prompt=prompt,
             model=config.get("model"),
             temperature=config.get("temperature"),
         )
-        tokens = int(response.usage.get("total_tokens") or max(1, math.ceil(len(response.text) / 2)))
+        usage_metrics = model_response_usage_metrics(response, connection_id=config.get("model_connection_id"))
+        tokens = int(usage_metrics.get("total_tokens") or max(1, math.ceil(len(response.text) / 2)))
+        usage_metrics["tokens"] = tokens
         return SkillResult(
             output={"answer": response.text, "tokens": tokens, "latency_ms": response.latency_ms},
-            metrics={"tokens": tokens, "model_provider": response.provider},
+            metrics=usage_metrics,
             logs=["通过 AegisQA 统一模型网关完成模型调用。"],
         )
 
@@ -240,6 +243,7 @@ class ModelChatSkill(BaseSkill):
             "type": "object",
             "properties": {
                 "model": {"type": "string"},
+                "model_connection_id": {"type": "string"},
                 "temperature": {"type": "number"},
                 "max_tokens": {"type": "integer"},
                 "response_format": {"type": "object"},
@@ -272,7 +276,7 @@ class ModelChatSkill(BaseSkill):
 
     def run(self, inputs: dict[str, Any], config: dict[str, Any] | None = None) -> SkillResult:
         config = config or {}
-        response = ModelGateway.from_env().generate(
+        response = ModelGateway.from_env(connection_id=config.get("model_connection_id")).generate(
             prompt=inputs.get("prompt"),
             messages=inputs.get("messages"),
             model=config.get("model"),
@@ -287,8 +291,8 @@ class ModelChatSkill(BaseSkill):
             "usage": response.usage,
             "latency_ms": response.latency_ms,
         }
-        total_tokens = response.usage.get("total_tokens")
-        metrics = {"model_latency_ms": response.latency_ms}
+        metrics = model_response_usage_metrics(response, connection_id=config.get("model_connection_id"))
+        total_tokens = metrics.get("total_tokens")
         if isinstance(total_tokens, (int, float)):
             metrics["tokens"] = total_tokens
         return SkillResult(output=output, metrics=metrics, logs=["通过 AegisQA 统一模型网关完成模型调用。"])

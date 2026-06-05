@@ -1,4 +1,4 @@
-import { Button, Space, Typography } from 'antd';
+import { Button, Typography } from 'antd';
 import type { ReactNode } from 'react';
 
 type PageHeaderProps = {
@@ -16,7 +16,7 @@ export function PageHeader({ eyebrow, title, description, primaryAction }: PageH
         <Typography.Title level={1}>{title}</Typography.Title>
         <Typography.Paragraph>{description}</Typography.Paragraph>
       </div>
-      {primaryAction ? <Space>{primaryAction}</Space> : null}
+      {primaryAction ? <div className="page-header-actions">{primaryAction}</div> : null}
     </header>
   );
 }

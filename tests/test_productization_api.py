@@ -30,6 +30,17 @@ def _write_many_jsonl(path: Path, count: int) -> None:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _write_scene_jsonl(path: Path) -> None:
+    rows = [
+        {"question": "账单样本 1", "reference": "参考答案 1", "expected_label": "fail", "scene": "billing"},
+        {"question": "账单样本 2", "reference": "参考答案 2", "expected_label": "fail", "scene": "billing"},
+        {"question": "政策样本 1", "reference": "参考答案 3", "expected_label": "fail", "scene": "policy"},
+    ]
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
 def _graph_payload() -> dict:
     return {
         "name": "产品化增强验证 Workflow",
@@ -89,6 +100,15 @@ def _executed_run_with_row_count(client: TestClient, tmp_path: Path, count: int)
     data_path = tmp_path / f"productization-{count}.jsonl"
     _write_many_jsonl(data_path, count)
     dataset = client.post("/datasets/from-path", json={"name": f"productization_dataset_{count}", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    run = client.post("/runs", json={"workflow": workflow, "dataset_id": dataset["dataset_id"], "dataset_version": dataset["version"]}).json()
+    return client.post(f"/runs/{run['run_id']}/execute").json()
+
+
+def _executed_scene_run(client: TestClient, tmp_path: Path) -> dict:
+    data_path = tmp_path / "productization-scenes.jsonl"
+    _write_scene_jsonl(data_path)
+    dataset = client.post("/datasets/from-path", json={"name": "productization_scene_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
     workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
     run = client.post("/runs", json={"workflow": workflow, "dataset_id": dataset["dataset_id"], "dataset_version": dataset["version"]}).json()
     return client.post(f"/runs/{run['run_id']}/execute").json()
@@ -337,3 +357,42 @@ def test_annotation_queue_supports_server_side_pagination_without_breaking_legac
     assigned_page = client.get("/annotation-queue", params={"status": "assigned", "page": 1, "page_size": 5}).json()
     assert assigned_page["pagination"]["total_items"] == 1
     assert assigned_page["items"][0]["assignee"] == "qa_owner"
+
+
+def test_annotation_queue_auto_dispatch_respects_capacity_labels_and_sla_summary(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    run = _executed_scene_run(client, tmp_path)
+
+    seed = client.post("/annotation-queue/seed-from-run", json={"run_id": run["run_id"], "strategy": "all", "limit": 3}).json()
+    assert seed["created_count"] == 3
+
+    dispatched = client.post(
+        "/annotation-queue/dispatch",
+        json={
+            "label_field": "scene",
+            "sla_hours": 8,
+            "overdue_strategy": "oldest_first",
+            "assignees": [
+                {"assignee": "billing_reviewer", "capacity": 1, "labels": ["billing"]},
+                {"assignee": "policy_reviewer", "capacity": 1, "labels": ["policy"]},
+            ],
+        },
+    ).json()
+
+    assert dispatched["assigned_count"] == 2
+    assert dispatched["skipped_count"] == 1
+    assert dispatched["skipped"][0]["reason"] == "capacity_exhausted"
+    assignments = {task["item_id"]: task for task in dispatched["tasks"]}
+    assert any(task["business_label"] == "billing" and task["assignee"] == "billing_reviewer" for task in assignments.values())
+    assert any(task["business_label"] == "policy" and task["assignee"] == "policy_reviewer" for task in assignments.values())
+    assert all(task["due_at"] for task in dispatched["tasks"])
+
+    page = client.get("/annotation-queue", params={"page": 1, "page_size": 10}).json()
+    assert page["summary"]["total_open"] == 3
+    assert page["summary"]["total_assigned"] == 2
+    owner_backlog = {owner["assignee"]: owner for owner in page["summary"]["owners"]}
+    assert owner_backlog["billing_reviewer"]["backlog"] == 1
+    assert owner_backlog["policy_reviewer"]["backlog"] == 1
+    assert owner_backlog["未分派"]["backlog"] == 1
+    assert page["items"][0]["sla_status"] in {"within_sla", "unassigned"}

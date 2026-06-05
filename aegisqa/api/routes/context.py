@@ -13,6 +13,7 @@ class RouteContext:
     """
 
     store: Any
+    repositories: Any
     registry: Any
     audit_service: Any
     dataset_service: Any
@@ -20,6 +21,7 @@ class RouteContext:
     workflow_service: Any
     graph_service: Any
     runner: Any
+    task_executor: Any
     badcases: Any
     judge_profiles: Any
     access_control: Any

@@ -1,6 +1,7 @@
 """Workflow 管理服务。"""
 
 from __future__ import annotations
+from typing import Any
 from uuid import uuid4
 
 from aegisqa.skills.registry import SkillRegistry
@@ -12,9 +13,10 @@ from aegisqa.workflows.validation import validate_workflow_step_contracts
 class WorkflowService:
     """支持发布、复制、归档 Workflow。"""
 
-    def __init__(self, store: JsonStore, registry: SkillRegistry) -> None:
+    def __init__(self, store: JsonStore, registry: SkillRegistry, workflow_repository: Any | None = None) -> None:
         self.store = store
         self.registry = registry
+        self.workflow_repository = workflow_repository
 
     def publish(self, draft: WorkflowDraft) -> WorkflowVersion:
         issues = validate_workflow_step_contracts(self.registry, draft.steps, include_skill_availability=True)
@@ -41,17 +43,27 @@ class WorkflowService:
         return workflow
 
     def get(self, version_id: str) -> WorkflowVersion:
-        payload = self.store.read_json(["workflows", f"{_safe(version_id)}.json"])
-        if not payload:
-            raise KeyError(f"Workflow 不存在：{version_id}")
+        if self.workflow_repository:
+            try:
+                payload = self.workflow_repository.get(version_id)
+            except KeyError as exc:
+                raise KeyError(f"Workflow 不存在：{version_id}") from exc
+        else:
+            payload = self.store.read_json(["workflows", f"{_safe(version_id)}.json"])
+            if not payload:
+                raise KeyError(f"Workflow 不存在：{version_id}")
         return WorkflowVersion(**payload)
 
     def list_versions(self) -> list[WorkflowVersion]:
         """列出已发布 Workflow 版本，支撑前端下拉选择与执行中心创建 Run。"""
 
-        return [WorkflowVersion(**payload) for payload in self.store.list_json(["workflows"])]
+        payloads = self.workflow_repository.list() if self.workflow_repository else self.store.list_json(["workflows"])
+        return [WorkflowVersion(**payload) for payload in payloads]
 
     def _save(self, workflow: WorkflowVersion) -> None:
+        if self.workflow_repository:
+            self.workflow_repository.save(workflow.model_dump(mode="json"))
+            return
         self.store.write_json(["workflows", f"{_safe(workflow.version_id)}.json"], workflow.model_dump(mode="json"))
 
 

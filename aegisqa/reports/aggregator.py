@@ -61,15 +61,56 @@ def aggregate_run_report(run: RunRecord) -> RunReport:
     """把 Item/Step 明细聚合成 Run 级报告。"""
 
     total = len(run.items)
-    completed = sum(1 for item in run.items if item.status == "succeeded")
-    failed = sum(1 for item in run.items if item.status == "failed")
-    latencies = [step.latency_ms for item in run.items for step in item.steps if step.status == "succeeded"]
-    labels = [_item_label(item) for item in run.items]
-    pass_count = sum(1 for label in labels if label == "pass")
+    completed = 0
+    failed = 0
+    pass_count = 0
+    latencies: list[float] = []
     error_distribution: dict[str, int] = {}
     badcases: list[ReportBadcase] = []
+    numeric_values: dict[str, list[float]] = {}
+    token_totals = {"prompt_tokens": 0.0, "completion_tokens": 0.0, "total_tokens": 0.0}
+    cost_total = 0.0
+    cost_sources: set[str] = set()
+    currency: str | None = None
+    billing_observed = False
 
+    # 报告接口会被任务详情、治理概览、导出和实验对比频繁调用。这里把状态、
+    # Badcase、latency、item metrics 与模型 usage 收敛到一次遍历，避免大 Run
+    # 在一个请求里反复扫描 item 明细。
     for item in run.items:
+        if item.status == "succeeded":
+            completed += 1
+        if item.status == "failed":
+            failed += 1
+        label = _item_label(item)
+        if label == "pass":
+            pass_count += 1
+        for key, value in item.metrics.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                numeric_values.setdefault(key, []).append(float(value))
+        for step in item.steps:
+            if step.status == "succeeded":
+                latencies.append(step.latency_ms)
+            step_metrics = step.metrics if isinstance(step.metrics, dict) else {}
+            step_observed = False
+            for key in token_totals:
+                metric_value = _numeric_metric(step_metrics.get(key))
+                if metric_value is None:
+                    continue
+                token_totals[key] += metric_value
+                step_observed = True
+            cost = _numeric_metric(step_metrics.get("cost"))
+            if cost is not None:
+                cost_total += cost
+                step_observed = True
+            source = step_metrics.get("cost_source")
+            if isinstance(source, str) and source:
+                cost_sources.add(source)
+            metric_currency = step_metrics.get("cost_currency")
+            if isinstance(metric_currency, str) and metric_currency:
+                currency = metric_currency
+            billing_observed = billing_observed or step_observed
+
         if item.error:
             error_type = item.error.get("type", "Unknown")
             error_distribution[error_type] = error_distribution.get(error_type, 0) + 1
@@ -83,7 +124,6 @@ def aggregate_run_report(run: RunRecord) -> RunReport:
             )
             continue
 
-        label = _item_label(item)
         score = _item_score(item)
         if label == "fail" or (score is not None and score < 0.6):
             badcases.append(
@@ -97,7 +137,14 @@ def aggregate_run_report(run: RunRecord) -> RunReport:
                 )
             )
 
-    metrics = _aggregate_numeric_metrics(run)
+    metrics = {f"avg_{key}": mean(items) for key, items in numeric_values.items() if items}
+    if billing_observed:
+        metrics.update({key: _metric_total(value) for key, value in token_totals.items()})
+        metrics["cost"] = cost_total
+        metrics["cost_source"] = _combined_cost_source(cost_sources)
+        metrics["cost_sources"] = sorted(cost_sources)
+        if currency:
+            metrics["cost_currency"] = currency
     metrics.update(
         {
             "count": total,
@@ -245,7 +292,69 @@ def _aggregate_numeric_metrics(run: RunRecord) -> dict[str, Any]:
         for key, value in item.metrics.items():
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 values.setdefault(key, []).append(float(value))
-    return {f"avg_{key}": mean(items) for key, items in values.items() if items}
+    metrics = {f"avg_{key}": mean(items) for key, items in values.items() if items}
+    metrics.update(_aggregate_step_billing_metrics(run))
+    return metrics
+
+
+def _aggregate_step_billing_metrics(run: RunRecord) -> dict[str, Any]:
+    """从 Step metrics 汇总模型网关真实 usage，避免用平均 token 粗估账单。"""
+
+    token_totals = {"prompt_tokens": 0.0, "completion_tokens": 0.0, "total_tokens": 0.0}
+    cost_total = 0.0
+    cost_sources: set[str] = set()
+    currency: str | None = None
+    observed = False
+    for item in run.items:
+        for step in item.steps:
+            metrics = step.metrics if isinstance(step.metrics, dict) else {}
+            step_observed = False
+            for key in token_totals:
+                value = _numeric_metric(metrics.get(key))
+                if value is None:
+                    continue
+                token_totals[key] += value
+                step_observed = True
+            cost = _numeric_metric(metrics.get("cost"))
+            if cost is not None:
+                cost_total += cost
+                step_observed = True
+            source = metrics.get("cost_source")
+            if isinstance(source, str) and source:
+                cost_sources.add(source)
+            metric_currency = metrics.get("cost_currency")
+            if isinstance(metric_currency, str) and metric_currency:
+                currency = metric_currency
+            observed = observed or step_observed
+    if not observed:
+        return {}
+    result: dict[str, Any] = {key: _metric_total(value) for key, value in token_totals.items()}
+    result["cost"] = cost_total
+    result["cost_source"] = _combined_cost_source(cost_sources)
+    result["cost_sources"] = sorted(cost_sources)
+    if currency:
+        result["cost_currency"] = currency
+    return result
+
+
+def _numeric_metric(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _metric_total(value: float) -> int | float:
+    return int(value) if float(value).is_integer() else value
+
+
+def _combined_cost_source(cost_sources: set[str]) -> str:
+    if not cost_sources:
+        return "provider_usage.missing"
+    if len(cost_sources) == 1:
+        return next(iter(cost_sources))
+    return "mixed"
 
 
 def _p95(values: list[float]) -> float:

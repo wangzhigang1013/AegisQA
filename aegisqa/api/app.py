@@ -29,8 +29,10 @@ from aegisqa.audit.service import AuditService
 from aegisqa.core.errors import AegisQAError
 from aegisqa.datasets.service import DatasetService
 from aegisqa.engine.runner import RunRecord, RunRequest, WorkflowRunner
+from aegisqa.engine.task_executor import TaskExecutor, create_task_executor
 from aegisqa.judge.audit import JudgeAuditResult, audit_judge_profile
 from aegisqa.judge.profiles import JudgeProfile, JudgeProfileService, StoredJudgeAudit
+from aegisqa.models.gateway import load_model_gateway_config_from_store
 from aegisqa.reports.aggregator import RunReport, aggregate_run_report
 from aegisqa.security.access import AccessControl
 from aegisqa.skills.base import SkillManifest
@@ -43,11 +45,19 @@ from aegisqa.skills.packages import (
 )
 from aegisqa.skills.registry import SkillRegistry
 from aegisqa.storage.json_store import JsonStore
+from aegisqa.storage.mysql_store import ConnectionFactory, MySQLStore
+from aegisqa.storage.repositories import RepositoryRegistry
 from aegisqa.storage.sqlite_store import SQLiteStore
 from aegisqa.workflows.graph import WorkflowGraph, WorkflowGraphService, WorkflowGraphValidationResult
 from aegisqa.workflows.models import WorkflowDraft, WorkflowVersion
 from aegisqa.workflows.service import WorkflowService
 from aegisqa.workflows.templates import WorkflowTemplate, WorkflowTemplateService
+
+
+MAX_SKILL_PACKAGE_FILES = 200
+MAX_SKILL_PACKAGE_FILE_BYTES = 1_000_000
+MAX_SKILL_PACKAGE_TOTAL_BYTES = 1_500_000
+SKILL_PACKAGE_DEPENDENCY_FILES = {"requirements.txt", "pyproject.toml"}
 
 
 class DatasetFromPathRequest(BaseModel):
@@ -56,6 +66,8 @@ class DatasetFromPathRequest(BaseModel):
     golden: bool = False
     label_field: str | None = None
     answer_field: str | None = None
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class DatasetUploadRequest(BaseModel):
@@ -65,6 +77,8 @@ class DatasetUploadRequest(BaseModel):
     golden: bool = False
     label_field: str | None = None
     answer_field: str | None = None
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class SourceMaterializeRequest(BaseModel):
@@ -73,6 +87,16 @@ class SourceMaterializeRequest(BaseModel):
     golden: bool = False
     label_field: str | None = None
     answer_field: str | None = None
+    actor: str = "api"
+    role: str = "Evaluator"
+
+
+class DatasetRepairVersionRequest(BaseModel):
+    drop_duplicate_rows: bool = True
+    fill_missing: dict[str, Any] = Field(default_factory=dict)
+    reason: str = ""
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class RunCreateRequest(BaseModel):
@@ -83,6 +107,8 @@ class RunCreateRequest(BaseModel):
     concurrency: int | None = None
     sample_repeat_times: int | None = None
     rate_limits: dict[str, float] = Field(default_factory=dict)
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class BadcaseCreateRequest(BaseModel):
@@ -106,6 +132,8 @@ class JudgeAuditRequest(BaseModel):
     human_labels: list[str]
     judge_labels: list[str]
     positive_label: str = "pass"
+    actor: str = "api"
+    role: str = "Reviewer"
 
 
 class ProfileAuditRequest(BaseModel):
@@ -113,6 +141,8 @@ class ProfileAuditRequest(BaseModel):
     human_labels: list[str]
     judge_labels: list[str]
     positive_label: str = "pass"
+    actor: str = "api"
+    role: str = "Reviewer"
 
 
 class JudgeCrossValidationRequest(BaseModel):
@@ -123,10 +153,14 @@ class JudgeCrossValidationRequest(BaseModel):
 
 class FieldTypeCorrectionRequest(BaseModel):
     field_type: str
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class WorkflowCopyRequest(BaseModel):
     name: str | None = None
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class JudgeProfileCreateRequest(BaseModel):
@@ -136,6 +170,8 @@ class JudgeProfileCreateRequest(BaseModel):
     rubric: dict[str, Any]
     threshold: float
     output_schema: dict[str, Any]
+    actor: str = "api"
+    role: str = "Reviewer"
 
 
 class WorkflowGraphValidateRequest(BaseModel):
@@ -145,6 +181,8 @@ class WorkflowGraphValidateRequest(BaseModel):
 
 class WorkflowGraphPublishRequest(BaseModel):
     graph: WorkflowGraph
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class WorkflowGraphDryRunRequest(BaseModel):
@@ -163,11 +201,15 @@ class WorkflowParameterPreviewRequest(BaseModel):
 class WorkflowDraftCreateRequest(BaseModel):
     name: str
     graph: WorkflowGraph
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class WorkflowDraftUpdateRequest(BaseModel):
     name: str | None = None
     graph: WorkflowGraph | None = None
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class BadcaseBulkCorrectionRequest(BaseModel):
@@ -181,11 +223,15 @@ class BadcaseBulkCorrectionRequest(BaseModel):
 
 class SkillGovernanceRequest(BaseModel):
     reason: str = ""
+    actor: str = "api"
+    role: str = "Skill Developer"
 
 
 class SkillPackageUploadRequest(BaseModel):
     filename: str
     content_base64: str
+    actor: str = "api"
+    role: str = "Skill Developer"
 
 
 class TaskCreateRequest(BaseModel):
@@ -206,6 +252,8 @@ class TaskCreateRequest(BaseModel):
     cost_budget: float | None = None
     skill_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
     allow_blocked_preflight: bool = False
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class TaskExecutionTemplateCreateRequest(BaseModel):
@@ -215,6 +263,8 @@ class TaskExecutionTemplateCreateRequest(BaseModel):
     quality_gate: dict[str, Any] = Field(default_factory=dict)
     execution_config: dict[str, Any] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class TaskPreflightRequest(BaseModel):
@@ -227,46 +277,61 @@ class TaskPreflightRequest(BaseModel):
     cost_budget: float | None = None
     sample_repeat_times: int | None = None
     skill_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class ReportExportRequestCreate(BaseModel):
     file_format: str = "json"
     requester_role: str = "Viewer"
+    actor: str = "api"
     reason: str = ""
     expires_at: str | None = None
 
 
 class ReportExportApprovalRequest(BaseModel):
     approver_role: str = "Admin"
+    actor: str = "api"
     note: str = ""
 
 
 class ReportExportRevokeRequest(BaseModel):
     requester_role: str = "Viewer"
+    actor: str = "api"
     reason: str = ""
 
 
 class RepairTaskStartRequest(BaseModel):
     owner: str
+    role: str = "Evaluator"
+    actor: str = "api"
 
 
 class RepairTaskAssignRequest(BaseModel):
     owner: str
     due_at: str | None = None
+    role: str = "Evaluator"
+    actor: str = "api"
 
 
 class RepairTaskResolveRequest(BaseModel):
     resolution_note: str
+    role: str = "Evaluator"
+    actor: str = "api"
 
 
 class RepairTaskReopenRequest(BaseModel):
     reason: str
+    role: str = "Evaluator"
+    actor: str = "api"
 
 
 class RepairTaskActionRequest(BaseModel):
     action: str
     assignee: str | None = None
     limit: int = 20
+    role: str = "Evaluator"
+    actor: str = "api"
 
 
 class ExperimentFromRunRequest(BaseModel):
@@ -274,6 +339,8 @@ class ExperimentFromRunRequest(BaseModel):
     name: str
     baseline_run_id: str | None = None
     tags: list[str] = Field(default_factory=list)
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class AssertionRuleRequest(BaseModel):
@@ -308,6 +375,8 @@ class CIGateConfigRequest(BaseModel):
     description: str = ""
     gates: list[CIGateRuleRequest]
     status: str = "active"
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class CIGateEvaluateRequest(BaseModel):
@@ -316,6 +385,8 @@ class CIGateEvaluateRequest(BaseModel):
     config_id: str | None = None
     run_id: str | None = None
     task_id: str | None = None
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class AnnotationSeedRequest(BaseModel):
@@ -323,16 +394,37 @@ class AnnotationSeedRequest(BaseModel):
     strategy: str = "failed_or_low_score"
     limit: int = 50
     assignee: str | None = None
+    actor: str = "api"
+    role: str = "Evaluator"
+
+
+class AnnotationDispatchAssigneeRequest(BaseModel):
+    assignee: str
+    capacity: int = Field(default=5, ge=1)
+    labels: list[str] = Field(default_factory=list)
+
+
+class AnnotationDispatchRequest(BaseModel):
+    assignees: list[AnnotationDispatchAssigneeRequest]
+    label_field: str | None = "scene"
+    sla_hours: int = Field(default=48, ge=1, le=720)
+    overdue_strategy: str = "oldest_first"
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class AnnotationAssignRequest(BaseModel):
     assignee: str
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class AnnotationReviewRequest(BaseModel):
     human_label: str
     note: str = ""
     add_to_golden: bool = False
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
 class AnnotationBulkReviewRequest(AnnotationReviewRequest):
@@ -342,32 +434,56 @@ class AnnotationBulkReviewRequest(AnnotationReviewRequest):
 class RedTeamScanRequest(BaseModel):
     task_id: str | None = None
     run_id: str | None = None
+    actor: str = "api"
+    role: str = "Evaluator"
 
 
-def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend: str | None = None) -> FastAPI:
+def create_app(
+    store_root: Path | str = "data/aegisqa_store",
+    *,
+    storage_backend: str | None = None,
+    mysql_connection_factory: ConnectionFactory | None = None,
+    task_executor: TaskExecutor | None = None,
+    task_executor_backend: str | None = None,
+) -> FastAPI:
     """创建可测试、可嵌入的 FastAPI 应用。"""
 
-    store = _create_store(store_root, storage_backend=storage_backend)
+    if str(store_root) == "data/aegisqa_store":
+        store_root = os.getenv("AEGISQA_STORE_ROOT", str(store_root))
+    resolved_storage_backend = (storage_backend or os.getenv("AEGISQA_STORAGE_BACKEND") or "json").lower()
+    store = _create_store(store_root, storage_backend=resolved_storage_backend, mysql_connection_factory=mysql_connection_factory)
+    repositories = RepositoryRegistry(store)
+    setattr(store, "repositories", repositories)
+    # 模型网关配置允许通过前端保存，本地 store 中有记录时要在启动阶段恢复到运行期。
+    load_model_gateway_config_from_store(store)
     registry = SkillRegistry.with_builtin_skills()
     _load_skill_packages(store, registry)
     load_agent_skills_from_store(store, registry)
     dataset_service = DatasetService(store)
-    runner = WorkflowRunner(store, dataset_service, registry)
+    runner = WorkflowRunner(store, dataset_service, registry, run_repository=repositories.runs)
+    task_executor = create_task_executor(
+        task_executor=task_executor,
+        backend=task_executor_backend,
+        store_root=store.root,
+        storage_backend=resolved_storage_backend,
+    )
     badcases = BadcaseService(store)
-    workflow_service = WorkflowService(store, registry)
+    workflow_service = WorkflowService(store, registry, workflow_repository=repositories.workflows)
     graph_service = WorkflowGraphService(registry)
     template_service = WorkflowTemplateService(registry)
     judge_profiles = JudgeProfileService(store)
-    audit_service = AuditService(store)
+    audit_service = AuditService(store, audit_repository=repositories.audit_events)
     access_control = AccessControl()
     workflows: dict[str, WorkflowVersion] = {}
 
     app = FastAPI(title="AegisQA", version="0.1.0")
     app.state.store = store
-    app.state.storage_backend = (storage_backend or os.getenv("AEGISQA_STORAGE_BACKEND") or "json").lower()
+    app.state.repositories = repositories
+    app.state.storage_backend = resolved_storage_backend
     app.state.registry = registry
     app.state.dataset_service = dataset_service
     app.state.runner = runner
+    app.state.task_executor = task_executor
     app.state.badcases = badcases
     app.state.workflow_service = workflow_service
     app.state.graph_service = graph_service
@@ -428,8 +544,12 @@ def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend
         register_judge_routes,
         register_model_routes,
         register_productization_routes,
+        register_repair_task_routes,
         register_report_routes,
         register_skill_routes,
+        register_task_lifecycle_routes,
+        register_task_preflight_routes,
+        register_task_report_routes,
         register_task_routes,
         register_workflow_routes,
     )
@@ -437,6 +557,7 @@ def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend
 
     route_context = RouteContext(
         store=store,
+        repositories=repositories,
         registry=registry,
         audit_service=audit_service,
         dataset_service=dataset_service,
@@ -444,6 +565,7 @@ def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend
         workflow_service=workflow_service,
         graph_service=graph_service,
         runner=runner,
+        task_executor=task_executor,
         badcases=badcases,
         judge_profiles=judge_profiles,
         access_control=access_control,
@@ -457,6 +579,10 @@ def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend
     register_dataset_routes(app, route_context)
     register_workflow_routes(app, route_context)
     register_report_routes(app, route_context)
+    register_task_preflight_routes(app, route_context)
+    register_task_lifecycle_routes(app, route_context)
+    register_repair_task_routes(app, route_context)
+    register_task_report_routes(app, route_context)
     register_task_routes(app, route_context)
     register_productization_routes(app, route_context)
     register_judge_routes(app, route_context)
@@ -464,12 +590,14 @@ def create_app(store_root: Path | str = "data/aegisqa_store", *, storage_backend
     return app
 
 
-def _create_store(store_root: Path | str, *, storage_backend: str | None = None) -> JsonStore | SQLiteStore:
+def _create_store(store_root: Path | str, *, storage_backend: str | None = None, mysql_connection_factory: ConnectionFactory | None = None) -> JsonStore | SQLiteStore | MySQLStore:
     backend = (storage_backend or os.getenv("AEGISQA_STORAGE_BACKEND") or "json").lower()
     if backend == "json":
         return JsonStore(store_root)
     if backend == "sqlite":
         return SQLiteStore(store_root)
+    if backend == "mysql":
+        return MySQLStore(store_root, connection_factory=mysql_connection_factory)
     raise ValueError(f"不支持的存储后端：{backend}")
 
 
@@ -505,18 +633,32 @@ def _list_workflow_drafts(store: JsonStore, status: str | None = None) -> list[d
 
 
 def _save_record(store: JsonStore, collection: str, id_key: str, record: dict[str, Any]) -> None:
-    store.write_json([collection, f"{record[id_key]}.json"], record)
+    _repositories_for_store(store).collection(collection, id_key).save(record)
 
 
 def _get_record(store: JsonStore, collection: str, record_id: str) -> dict[str, Any]:
-    payload = store.read_json([collection, f"{record_id}.json"])
-    if not payload:
-        raise KeyError(f"{collection} 记录不存在：{record_id}")
-    return payload
+    return _repositories_for_store(store).collection(collection, _collection_id_key(collection)).get(record_id)
 
 
 def _list_records(store: JsonStore, collection: str) -> list[dict[str, Any]]:
-    return store.list_json([collection])
+    return _repositories_for_store(store).collection(collection, _collection_id_key(collection)).list()
+
+
+def _repositories_for_store(store: JsonStore) -> RepositoryRegistry:
+    repositories = getattr(store, "repositories", None)
+    if repositories is None:
+        repositories = RepositoryRegistry(store)
+        setattr(store, "repositories", repositories)
+    return repositories
+
+
+def _collection_id_key(collection: str) -> str:
+    return {
+        "tasks": "task_id",
+        "runs": "run_id",
+        "workflows": "version_id",
+        "skill_packages": "package_id",
+    }.get(collection, "id")
 
 
 def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: SkillPackageUploadRequest) -> dict[str, Any]:
@@ -532,7 +674,7 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
 
     try:
         with zipfile.ZipFile(zip_path) as archive:
-            _safe_extract_zip(archive, package_dir)
+            package_security = _safe_extract_zip(archive, package_dir)
     except zipfile.BadZipFile as exc:
         raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包必须是合法 zip 文件。") from exc
 
@@ -554,10 +696,16 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
         manifest_payload = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
         if not isinstance(manifest_payload, dict):
             raise AegisQAError("SKILL_PACKAGE_MANIFEST_INVALID", "skill.yaml 或 skill.json 必须是对象。")
+        if "permissions" not in manifest_payload:
+            raise AegisQAError(
+                "SKILL_PACKAGE_PERMISSIONS_REQUIRED",
+                "脚本型或参数型 Agent Skill 必须在 manifest 中显式声明 permissions，空列表表示无需额外权限。",
+            )
         # runtime 是平台执行声明，不属于 Workflow 组件合约；从 manifest 中剥离后再交给 SkillManifest。
         runtime_payload = manifest_payload.pop("runtime", {}) or {}
         if not isinstance(runtime_payload, dict):
             raise AegisQAError("SKILL_PACKAGE_RUNTIME_INVALID", "runtime 必须是对象。")
+        _reject_unsupported_skill_package_dependencies(package_dir, runtime_payload)
         manifest = SkillManifest(**manifest_payload)
     manifest.enabled = False
     manifest.status = "pending_review"
@@ -592,9 +740,14 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
         "skill_md_path": str(skill_md_path.resolve()) if skill_md_path.exists() else None,
         "runtime_mode": runtime_mode,
         "entrypoint": entrypoint,
+        "package_security": package_security,
+        "base_skill_id": _skill_base_id(manifest.skill_id),
+        "skill_version": _skill_version_label(manifest),
         "last_contract_ok": False,
         "last_contract_result": None,
         "last_contract_at": None,
+        "contract_history": [],
+        "approval_history": [],
         "approved_by": None,
         "approved_at": None,
         "approval_note": None,
@@ -639,20 +792,100 @@ def _update_skill_package_status(store: JsonStore, manifest: SkillManifest) -> N
     _save_record(store, "skill_packages", "package_id", package)
 
 
-def _mark_skill_package_approved(store: JsonStore, skill_id: str, approval_note: str) -> None:
+def _mark_skill_package_approved(store: JsonStore, skill_id: str, approval_note: str, *, actor: str = "api", role: str | None = None) -> None:
     package = _find_skill_package(store, skill_id)
     if not package:
         return
     # 审批元数据写在插件包记录上，方便前端在市场和治理页同时展示生命周期证据。
-    package["approved_by"] = "api"
+    package["approved_by"] = actor
+    if role:
+        package["approved_by_role"] = role
     package["approved_at"] = _now()
     package["approval_note"] = approval_note
+    _append_skill_package_lifecycle_event(package, action="approve", actor=actor, role=role, reason=approval_note)
     package["updated_at"] = _now()
     _save_record(store, "skill_packages", "package_id", package)
 
 
-def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> None:
+def _record_skill_package_contract_result(store: JsonStore, skill_id: str, result: dict[str, Any], *, actor: str = "api") -> dict[str, Any] | None:
+    package = _find_skill_package(store, skill_id)
+    if not package:
+        return None
+    package["last_contract_ok"] = bool(result.get("ok"))
+    package["last_contract_result"] = result
+    package["last_contract_at"] = _now()
+    history = package.setdefault("contract_history", [])
+    if isinstance(history, list):
+        history.append(
+            {
+                "ok": bool(result.get("ok")),
+                "actor": actor,
+                "created_at": package["last_contract_at"],
+                "latency_ms": result.get("latency_ms"),
+                "error": result.get("error"),
+                "code": result.get("code"),
+                "message": result.get("message"),
+            }
+        )
+    package["updated_at"] = _now()
+    _save_record(store, "skill_packages", "package_id", package)
+    return package
+
+
+def _record_skill_package_lifecycle_event(
+    store: JsonStore,
+    skill_id: str,
+    *,
+    action: str,
+    actor: str = "api",
+    role: str | None = None,
+    reason: str = "",
+    target_skill_id: str | None = None,
+) -> dict[str, Any] | None:
+    package = _find_skill_package(store, skill_id)
+    if not package:
+        return None
+    _append_skill_package_lifecycle_event(package, action=action, actor=actor, role=role, reason=reason, target_skill_id=target_skill_id)
+    package["updated_at"] = _now()
+    _save_record(store, "skill_packages", "package_id", package)
+    return package
+
+
+def _append_skill_package_lifecycle_event(
+    package: dict[str, Any],
+    *,
+    action: str,
+    actor: str = "api",
+    role: str | None = None,
+    reason: str = "",
+    target_skill_id: str | None = None,
+) -> None:
+    history = package.setdefault("approval_history", [])
+    if not isinstance(history, list):
+        package["approval_history"] = history = []
+    event = {"action": action, "actor": actor, "reason": reason, "created_at": _now()}
+    if role:
+        event["role"] = role
+    if target_skill_id:
+        event["target_skill_id"] = target_skill_id
+    history.append(event)
+
+
+def _skill_base_id(skill_id: str) -> str:
+    return skill_id.rsplit("@", 1)[0] if "@" in skill_id else skill_id
+
+
+def _skill_version_label(manifest: SkillManifest) -> str:
+    if manifest.version:
+        return manifest.version
+    return manifest.skill_id.rsplit("@", 1)[1] if "@" in manifest.skill_id else "unversioned"
+
+
+def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> dict[str, Any]:
     destination = destination.resolve()
+    file_count = 0
+    total_size = 0
+    max_file_size = 0
     for member in archive.infolist():
         filename = member.filename.replace("\\", "/")
         parts = PurePosixPath(filename).parts
@@ -662,6 +895,33 @@ def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> None:
                 "插件包包含非法路径，禁止绝对路径或跨目录文件。",
                 details={"filename": member.filename},
             )
+        if member.is_dir():
+            continue
+        file_count += 1
+        if file_count > MAX_SKILL_PACKAGE_FILES:
+            raise AegisQAError(
+                "SKILL_PACKAGE_TOO_MANY_FILES",
+                "插件包文件数量超过安全限制。",
+                details={"file_count": file_count, "max_files": MAX_SKILL_PACKAGE_FILES},
+            )
+        max_file_size = max(max_file_size, member.file_size)
+        if member.file_size > MAX_SKILL_PACKAGE_FILE_BYTES:
+            raise AegisQAError(
+                "SKILL_PACKAGE_FILE_TOO_LARGE",
+                "插件包内单个文件超过安全限制。",
+                details={
+                    "filename": member.filename,
+                    "file_size_bytes": member.file_size,
+                    "max_file_size_bytes": MAX_SKILL_PACKAGE_FILE_BYTES,
+                },
+            )
+        total_size += member.file_size
+        if total_size > MAX_SKILL_PACKAGE_TOTAL_BYTES:
+            raise AegisQAError(
+                "SKILL_PACKAGE_TOO_LARGE",
+                "插件包解压后的总大小超过安全限制。",
+                details={"total_size_bytes": total_size, "max_total_size_bytes": MAX_SKILL_PACKAGE_TOTAL_BYTES},
+            )
         target = (destination / member.filename).resolve()
         if destination not in target.parents and target != destination:
             raise AegisQAError(
@@ -670,6 +930,35 @@ def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> None:
                 details={"filename": member.filename},
             )
     archive.extractall(destination)
+    return {
+        "file_count": file_count,
+        "total_size_bytes": total_size,
+        "max_file_size_bytes": max_file_size,
+        "limits": {
+            "max_files": MAX_SKILL_PACKAGE_FILES,
+            "max_file_size_bytes": MAX_SKILL_PACKAGE_FILE_BYTES,
+            "max_total_size_bytes": MAX_SKILL_PACKAGE_TOTAL_BYTES,
+        },
+    }
+
+
+def _reject_unsupported_skill_package_dependencies(package_dir: Path, runtime_payload: dict[str, Any]) -> None:
+    """本地子进程运行时不安装第三方依赖，先在上传阶段给出稳定错误。"""
+
+    dependencies = runtime_payload.get("dependencies")
+    if dependencies:
+        raise AegisQAError(
+            "SKILL_PACKAGE_DEPENDENCIES_UNSUPPORTED",
+            "当前本地 Skill 包运行模式不支持声明第三方依赖；请移除 runtime.dependencies 后再上传。",
+            details={"field": "runtime.dependencies"},
+        )
+    dependency_files = sorted(name for name in SKILL_PACKAGE_DEPENDENCY_FILES if (package_dir / name).exists())
+    if dependency_files:
+        raise AegisQAError(
+            "SKILL_PACKAGE_DEPENDENCIES_UNSUPPORTED",
+            "当前本地 Skill 包运行模式不支持随包安装第三方依赖；请移除依赖文件后再上传。",
+            details={"files": dependency_files},
+        )
 
 
 def _first_existing(root: Path, names: list[str]) -> Path | None:
@@ -1013,14 +1302,19 @@ def _build_quality_decision(task: dict[str, Any], run: RunRecord, report: RunRep
 def _build_budget_status(task: dict[str, Any], report: RunReport) -> dict[str, Any]:
     """把任务预算转成报告级状态。
 
-    当前本地内置 Skill 没有真实云厂商账单，因此先用报告中的 cost 指标；
-    若没有 cost，则按 token 数做保守估算。这样报告不会假装拥有精确账单，
-    但仍能在同一批任务间稳定发现成本预算风险。
+    预算只消费模型网关写入的 usage/cost 聚合结果；未返回价格时成本按 0
+    入账，并通过 cost_source 明确暴露来源，避免把 token 粗估伪装成真实账单。
     """
 
     execution_config = task.get("execution_config", {})
     budget = execution_config.get("cost_budget") if isinstance(execution_config, dict) else None
     cost_used = _estimate_report_cost(report)
+    cost_source = str(report.metrics.get("cost_source") or "provider_usage.missing")
+    prompt_tokens = _metric_number(report.metrics.get("prompt_tokens"))
+    completion_tokens = _metric_number(report.metrics.get("completion_tokens"))
+    total_tokens = _metric_number(report.metrics.get("total_tokens"))
+    cost_currency = report.metrics.get("cost_currency")
+    basis_label = _budget_cost_basis_label(cost_source)
     if not isinstance(budget, (int, float)) or budget <= 0:
         return {
             "status": "not_set",
@@ -1028,26 +1322,36 @@ def _build_budget_status(task: dict[str, Any], report: RunReport) -> dict[str, A
             "cost_used": cost_used,
             "budget_remaining": None,
             "usage_ratio": None,
-            "message": "当前任务未设置成本预算，仅展示估算成本。",
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "cost_source": cost_source,
+            "cost_currency": cost_currency,
+            "message": f"{basis_label}：当前任务未设置成本预算。",
         }
 
     budget_value = float(budget)
     usage_ratio = cost_used / budget_value if budget_value else 0.0
     if cost_used > budget_value:
         status = "exceeded"
-        message = "估算成本已超过任务预算，建议降低样本量、并发或模型单价后重新执行。"
+        message = f"{basis_label}已超过任务预算，建议降低样本量、并发或模型单价后重新执行。"
     elif usage_ratio >= 0.8:
         status = "warning"
-        message = "估算成本已接近任务预算，建议在正式批量执行前复核成本门禁。"
+        message = f"{basis_label}已接近任务预算，建议在正式批量执行前复核成本门禁。"
     else:
         status = "ok"
-        message = "估算成本仍在任务预算内。"
+        message = f"{basis_label}仍在任务预算内。"
     return {
         "status": status,
         "cost_budget": budget_value,
         "cost_used": cost_used,
         "budget_remaining": max(0.0, budget_value - cost_used),
         "usage_ratio": usage_ratio,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "cost_source": cost_source,
+        "cost_currency": cost_currency,
         "message": message,
     }
 
@@ -1330,7 +1634,11 @@ def _build_experiment_snapshot(run: RunRecord, *, name: str, baseline_run: RunRe
             "p95_latency_ms": baseline_report.p95_latency_ms,
             "cost": float(baseline_report.metrics.get("cost", 0) or 0),
         }
-        diff = {key: metrics.get(key, 0) - baseline_metrics.get(key, 0) for key in sorted(set(metrics) | set(baseline_metrics))}
+        diff = {
+            key: _numeric_delta(metrics.get(key), baseline_metrics.get(key))
+            for key in sorted(set(metrics) | set(baseline_metrics))
+            if _is_number(metrics.get(key)) and _is_number(baseline_metrics.get(key))
+        }
     return {
         "experiment_id": f"exp-{uuid4().hex[:12]}",
         "name": name,
@@ -1373,10 +1681,31 @@ def _estimate_report_cost(report: RunReport) -> float:
     cost = report.metrics.get("cost")
     if isinstance(cost, (int, float)):
         return float(cost)
-    avg_tokens = report.metrics.get("avg_tokens")
-    if isinstance(avg_tokens, (int, float)):
-        return float(avg_tokens) * report.completed_items * 0.00001
     return 0.0
+
+
+def _metric_number(value: Any) -> int | float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value) if float(value).is_integer() else float(value)
+    return None
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _numeric_delta(current: Any, baseline: Any) -> float:
+    return float(current) - float(baseline)
+
+
+def _budget_cost_basis_label(cost_source: str) -> str:
+    if cost_source.startswith("provider_usage.") and cost_source not in {"provider_usage.tokens_unpriced", "provider_usage.missing"}:
+        return "模型网关 usage 成本"
+    if cost_source == "provider_usage.tokens_unpriced":
+        return "模型网关 token usage 未返回价格"
+    return "模型网关未返回成本"
 
 
 def _scan_texts_for_item(item: dict[str, Any]) -> dict[str, str]:

@@ -2,9 +2,2663 @@
 
 ## 当前阶段
 
-任务结果导出与统一模型网关优化阶段。本阶段补齐两项关键产品深度能力：执行中心任务详情可直接导出每条样本的运行结果 CSV/JSONL，解决“跑完的数据无法拿走”的问题；平台新增统一模型网关与 `model.chat@0.1.0` 内置 Skill，避免每个业务 Skill 重复实现模型 API 调用、鉴权、超时和响应解析。
+模型接入配置可用性、导出安全、审计归因、执行器性能、Dashboard/概览首屏轻量化、Run 列表轻量分页、Run Trace 分页、Badcase 列表分页、RunReport 聚合性能、JSON Store 并发稳定性、SQLite 审计流一致性、MySQL JSONL 流并发一致性和 legacy Run HTML 导出安全转义优化完成，生产页面 demo 数据兜底收口继续推进。当前治理页已经把模型服务、Provider 和默认模型都做成下拉/候选式选择；Provider 下拉只暴露 `mock` 与 `openai_compatible` 两个用户语义选项，`deepseek-v4-flash`、`qwen-plus` 等具体模型只能进入默认模型下拉；默认模型搜索只过滤候选，不再把任意搜索词变成可保存选项；前端会把早期误存为模型名的 Provider 自动迁移成 `openai_compatible`，并把原值保留为默认模型候选，后端仍兼容迁移早期误存的 Provider。模型网关配置保存、连接别名增删改和连接测试现在统一要求 `model:configure` 权限；Viewer 会被结构化拒绝并写入 forbidden 审计，Admin 成功操作会记录真实请求 `actor` 与 `role`，且审计日志不会记录明文 API Key。Task 创建、执行、新建 Attempt、暂停、恢复、取消和重试失败项现在具备权限/审计闭环：Viewer 无法控制任务，Evaluator 默认可继续使用执行中心，成功审计记录真实 actor/role；Task Preflight 和执行参数模板创建也已接入 `run:create` 门禁，Viewer 不能创建任务前证据或执行模板，Evaluator 默认兼容旧前端，成功/拒绝审计记录真实 actor/role。legacy Run 创建、执行、取消、暂停、恢复和重试失败项现在也已补齐权限和审计：创建要求 `run:create`，控制动作要求 `run:control`，默认不传 role/actor 的旧脚本仍按 `Evaluator/api` 兼容执行，显式 Viewer 会被结构化拒绝。Judge Profile 创建、一次性 Judge 审计和 Profile 审计现在统一要求 `judge:audit` 权限；默认不传 role/actor 的旧页面和脚本仍按 `Reviewer/api` 兼容执行，显式 Viewer 会被结构化拒绝，成功/拒绝审计记录真实 actor/role。Workflow 草稿创建/更新/删除、草稿发布、Graph 发布、线性发布、复制和归档也已统一走 `workflow:publish` 门禁并记录真实 actor/role，避免可执行资产变更只能追溯到 `api`。Repair Task 生成、领取、指派、完成、重开和后续动作现在统一要求 `badcase:correct`，Viewer 只读角色会被结构化拒绝，成功/拒绝审计记录真实 actor/role，默认 Evaluator 调用保持兼容。Annotation Queue 生成、自动分派、指派、单条审核和批量审核现在统一要求 `annotation:review`，Evaluator/Reviewer 可操作，Viewer 会被结构化拒绝；人工审核候选资产和成功审计会记录真实 actor/role。Candidate Assets 的单条审核、批量审核、批量指派、批量归档、逾期升级、生成 Workflow 草稿、候选复跑、创建晋升审批和晋升审批结论现在统一要求 `candidate:govern`，Evaluator/Reviewer 可操作，Viewer 会被结构化拒绝；成功/拒绝审计记录真实 actor/role，候选复跑和晋升发布资产也不再固定追溯到 `api`。Red Team 扫描、Experiment 快照创建、CI Gate 创建和 CI Gate 评估现在统一要求 `redteam:scan`、`experiment:create`、`ci_gate:manage` 权限；Viewer 会被结构化拒绝，Evaluator 成功审计记录真实 actor/role，避免安全扫描、实验快照和发布门禁资产只能追溯到泛化 `api`。Dataset Source 物化和字段类型修正现在继续要求 `dataset:create` 权限，拒绝审计使用具体动作 `dataset.source_materialize` / `dataset.field_type.correct`，成功审计记录请求 actor/role，避免数据集来源和字段治理动作只能追溯到 `api`。WorkflowRunner 已把 Run 快照落盘改为批量保存，并把暂停/取消信号拆成轻量控制文件；`GET /dashboard/summary` 与 `GET /runs` 显式分页均使用不含 item 明细的轻量摘要；概览页、Experiment 和 CI Gate 不再请求 legacy `/runs` 完整列表；`GET /runs/{run_id}/trace` 和 `GET /badcases` 均支持兼容式服务端分页；`aggregate_run_report` 已收敛为单次遍历 Run Item；`JsonStore.list_json()` 已遵守文档级文件锁，避免 Windows 并发读取 Skill 包列表时阻塞 `os.replace` 写入导致合约测试偶发 500；`SQLiteStore.append_jsonl()` 已用 `BEGIN IMMEDIATE` 串行化 row_index 分配，避免并发审计事件写入撞主键或丢事件；`MySQLStore` 已用 MySQL named lock 串行化同一 JSONL stream 的覆盖写和 append，避免审计事件并发追加重复分配 `row_index`；Skill 上传、审批、禁用、废弃和回滚成功审计现在会记录请求 `actor` 与 `role`，避免关键 Skill 生命周期变更只能追溯到泛化 `api`；Task 原始结果导出成功审计现在会记录请求 `actor` 与 `role`，避免敏感样本级数据下载只能追溯到泛化 `api`；Task 结果 CSV 与 Task 报告 CSV 已对 `= + - @` 公式前缀做单引号转义，避免用户样本、Preflight、Badcase 或分层文本被 Excel/WPS 当公式执行；Run 级 legacy HTML 报告导出已对 run_id 和完整 JSON payload 做 HTML escape，避免用户样本或模型输出中的脚本片段进入导出页面；本轮后端全量通过，上一轮 `npm run e2e` 已在 6 workers 下全量 14 passed。
 
 ## 最近改动
+
+### 2026-06-05 收尾独立审计与后续建议
+
+- 改动摘要：在“第二轮修复后轻量复扫”之后，再用独立角度复查诊断动作覆盖、生产 demo 兜底、固定 actor 和空白格式，作为连续第二轮无 P0/P1 的收尾证据。
+- 变更文件：
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - PowerShell 比对 `aegisqa/reports/diagnostics.py` 实际产出的诊断动作集合与 `frontend/src/pages/ReportsPage.tsx` 前端处理集合。
+  - `rg -n "from ['\"]\\.\\./data/demo|from ['\"]\\.\\./\\.\\./data/demo|demoSkills|demoWorkflowGraph|demoTask|demoBadcase" frontend\src -S -g "!**/*.test.*" -g "!**/test/**"`
+  - `rg -n -e 'actor\s*=\s*"api"' -e "actor\s*=\s*'api'" -e '"actor"\s*:\s*"api"' -e "'actor'\s*:\s*'api'" aegisqa\api aegisqa\security aegisqa\engine aegisqa\skills -g "*.py"`
+  - `git diff --check`
+- 测试结果：
+  - 诊断动作覆盖：`diagnostics` 与 `frontend` 均包含 `audit_judge_profile`、`create_segment_ci_gate`、`fix_dataset_fields`、`open_dataset_lineage`、`open_parameter_governance`、`open_trace_flow`、`plan_workflow_parameter_changes`、`retry_failed_items`、`review_badcases`、`seed_annotation_queue`，`missing=none`。
+  - 生产前端 demo 兜底复扫：无命中。
+  - 生产后端固定 `actor="api"` 复扫：无命中。
+  - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。
+- 当前结论：
+  - 连续两轮修复后轻量审计均未发现新的 P0/P1 可执行优化项。
+  - 后端 `python -m pytest -q` 通过；前端 `npm run typecheck`、`npm test`、`npm run build`、`npm run e2e` 均通过。
+  - 本轮未启动真实 Docker/MySQL/Redis/Celery 服务；MySQL/Redis/Celery 仍以契约测试、fake adapter 和代码路径验证为主，真实生产部署前建议单独做容器化冒烟。
+- 后续低优先级建议：
+  - P2：将报告中心诊断动作和修复任务动作的动作定义抽成共享常量，减少前后端字符串漂移风险。
+  - P2：为 Docker Compose 的 MySQL/Redis/Celery 增加本地一键 smoke 脚本和 GitHub Actions 可选矩阵。
+  - P2：继续拆分超长历史状态文档，保留首页摘要，把历史批次迁移到归档文件，提升阅读效率。
+- 下一步：
+  - 若需要继续开发，建议先进入真实容器环境冒烟或提交当前工作树；当前“小团队长期试用”的核心高优先级缺口已收敛到可收尾状态。
+
+### 2026-06-05 第二轮修复后轻量复扫
+
+- 改动摘要：在报告中心参数风险诊断动作修复并通过前后端门禁后，执行第二轮修复后轻量复扫，重点检查生产代码是否仍有 demo 数据兜底、固定 `actor="api"`、未接入的诊断动作和空白格式问题。
+- 变更文件：
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `rg -n "from ['\"]\\.\\./data/demo|from ['\"]\\.\\./\\.\\./data/demo|demoSkills|demoWorkflowGraph|demoTask|demoBadcase" frontend\src -S -g "!**/*.test.*" -g "!**/test/**"`
+  - `rg -n -e 'actor\s*=\s*"api"' -e "actor\s*=\s*'api'" -e '"actor"\s*:\s*"api"' -e "'actor'\s*:\s*'api'" aegisqa\api aegisqa\security aegisqa\engine aegisqa\skills -g "*.py"`
+  - `rg -n "TODO|FIXME|NotImplemented|not implemented|待实现|coming soon|当前诊断动作暂不支持|暂不支持" aegisqa\api aegisqa\engine aegisqa\skills frontend\src\pages frontend\src\components -S`
+  - `git diff --check`
+- 测试结果：
+  - 生产前端 demo 兜底复扫：无命中。
+  - 生产后端固定 `actor="api"` 复扫：无命中。
+  - 未实现/暂不支持复扫：仅剩 `repair_tasks.py` 和 `ReportsPage.tsx` 的未知动作防御性兜底；当前后端诊断模块实际会产出的动作已接入前端处理路径。
+  - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。
+- 下一步：
+  - 已由顶部“收尾独立审计与后续建议”完成连续第二轮复扫；剩余事项按 P2 后续建议处理。
+
+### 2026-06-05 P1 报告诊断参数变更动作闭环修复
+
+- 改动摘要：第二轮轻量审计发现后端任务诊断会返回 `plan_workflow_parameter_changes`，但报告中心只显示裸动作名，点击后进入“当前诊断动作暂不支持”的失败分支。现在报告中心把该动作显示为“规划 Workflow 参数变更”，点击后会先生成/复用修复任务，再调用 `/repair-tasks/{repair_task_id}/actions` 执行已有参数 diff 与回滚计划生成逻辑，并刷新报告和修复任务缓存。
+- TDD 证据：
+  - RED：新增 `报告中心支持从参数风险诊断规划 Workflow 参数变更`，模拟 `parameter_risk` 根因返回 `plan_workflow_parameter_changes`；修复前找不到中文按钮，只能看到裸动作名。
+  - GREEN：修复后按钮可点击，前端调用 `/tasks/{task_id}/repair-tasks/from-diagnostics` 与 `/repair-tasks/repair-demo/actions`，并展示“参数变更计划已生成”。
+- 变更文件：
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/ReportsPage.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/ReportsPage.test.tsx -t "参数风险诊断"`
+  - `cd frontend && npm test -- src/test/ReportsPage.test.tsx`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `python -m pytest -q`
+  - 固定 `actor="api"` 生产代码复扫与 `TODO/FIXME/暂不支持` 复扫
+- 测试结果：
+  - 参数风险诊断目标测试：先 RED 后 GREEN，1 passed。
+  - 报告中心前端回归：15 passed。
+  - 前端类型检查：`tsc -b` 通过。
+  - 前端全量 Vitest：12 个测试文件、133 passed。
+  - 前端生产构建：通过，Vite 构建完成。
+  - Playwright E2E：14 passed，覆盖上传、Skill 审批、Workflow 发布、Task 执行、报告、Badcase、CI Gate、Annotation Queue 和 Workflow 画布。
+  - 后端全量：100% passed；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 固定 `actor="api"` 生产代码复扫：无命中；`暂不支持` 剩余命中为报告诊断和修复任务 API 的防御性兜底，当前后端诊断动作已全部接入前端处理路径。
+- 下一步：
+  - 执行 `git diff --check` 并记录结果；随后进行一轮最终轻量审计，如果没有新的 P0/P1，再把剩余低优先级建议收敛到后续建议。
+
+### 2026-06-05 模型 Provider 下拉体验确认
+
+- 改动摘要：响应“把这个做成一个下拉列表”的模型网关配置诉求，复核治理页实际实现，确认 `Provider` 已是下拉选择而不是自由输入；具体模型名如 `deepseek-v4-flash` 不再允许填入 Provider，而是进入“默认模型”下拉候选，历史误填配置会在前端迁移为 `openai_compatible` 协议并保留原模型名。
+- 变更文件：
+  - `docs/PROJECT_STATUS.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "历史误填的模型名 Provider|模型网关配置|模型连接别名"`
+- 测试结果：
+  - 目标前端测试：1 个测试文件命中 3 个用例，3 passed；确认 Provider 下拉只展示“离线 Mock”和“真实模型服务（OpenAI-compatible）”，不会把 `deepseek-v4-flash` 当作 Provider 选项；历史误填的模型名会迁移到默认模型下拉。
+- 下一步：
+  - 如用户当前浏览器仍看到输入框或旧错误，刷新前端页面；若使用的是构建产物服务，需要重新运行前端构建或重启前端服务。
+
+### 2026-06-05 完整前后端门禁复验
+
+- 改动摘要：在连续修复 Baseline 生产切换审计归因与 Skill package 生命周期元数据归因后，重新执行后端全量、前端类型检查、前端全量单测、生产构建和 Playwright 主链路 E2E，确认当前工作台主路径仍可用。
+- 变更文件：
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest -q --durations=20`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 后端全量：100% passed；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 前端 typecheck：通过。
+  - 前端 Vitest：12 个测试文件、132 passed。
+  - 前端 build：通过，Vite 生产构建完成。
+  - Playwright E2E：14 passed，覆盖数据集上传、Agent Skill 包上传审批、Workflow 发布、任务创建执行、报告沉淀 Badcase、CI Gate、Annotation Queue 和 Workflow 画布深度交互。
+  - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。
+- 当前审计结论：
+  - 固定 `actor="api"` 复扫在生产路由代码中无命中；无显式 role 的审计调用仅剩系统自动事件 `task.report.export.expire`，该事件属于后台自动过期行为，当前不列为 P0/P1。
+- 下一步：
+  - 进行第二轮轻量审计，重点复扫生产页面 demo fallback、不可达按钮和剩余高优先级状态一致性问题；如果仍无 P0/P1，则把剩余低优先级建议收敛到后续建议并进入目标收尾。
+
+### 2026-06-05 P0 Skill package 生命周期元数据真实操作者归因修复
+
+- 改动摘要：继续收敛 Skill 资产治理证据。`/skills/{skill_id}/approve` 的成功审计已记录真实 actor/role，但插件包记录自身的 `approved_by` 和 `approval_history` 仍由 `_mark_skill_package_approved()` 固定写成 `api`；这会导致 Skill 市场/治理页展示的生命周期证据与审计日志不一致。
+- TDD 证据：
+  - RED：升级 `test_skill_package_records_contract_and_approval_metadata`，审批上传插件包时传入 `actor=dora`、`role=Skill Developer`，并断言插件包记录 `approved_by`、`approved_by_role` 与 `approval_history[-1]`；修复前 `approved_by` 仍为 `api`。
+  - GREEN：修复后插件包审批元数据和生命周期历史均记录请求 actor/role；Skill 审批、禁用、废弃和版本回滚相关的包生命周期事件也支持 role。
+- 代码修复：
+  - `aegisqa/api/app.py`：`_mark_skill_package_approved()`、`_record_skill_package_lifecycle_event()` 和 `_append_skill_package_lifecycle_event()` 增加兼容式 `actor/role` 参数；审批元数据新增 `approved_by_role`；生命周期历史在有 role 时写入 `role`。
+  - `aegisqa/api/routes/skills.py`：Skill package 审批、禁用、废弃、回滚目标/来源事件统一透传请求 actor/role，避免包记录仍固定为 `api`。
+  - `tests/test_skill_package_security.py`：补充插件包审批元数据与审批历史 actor/role 断言。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/skills.py`
+  - `tests/test_skill_package_security.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_skill_package_security.py::test_skill_package_records_contract_and_approval_metadata -q`
+  - `python -m pytest tests\test_skill_package_security.py tests\test_agent_skill_package_upload.py tests\test_agent_skill_runtime_matrix.py -q`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_skill_market_versions.py -q`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - Skill package 审批元数据目标测试：RED 后 GREEN，1 passed。
+  - Skill 包安全 / Agent Skill 上传 / Agent Skill 运行矩阵组合：16 passed。
+  - 权限硬化全文件：12 passed。
+  - Skill 市场版本治理：2 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.41 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端 Skill package 生命周期元数据和测试断言；前端读取 `approved_by` 的 wire shape 保持兼容，仅新增 `approved_by_role` 和历史事件 `role`。
+- 下一步：
+  - 继续复扫剩余固定 actor/role 写入口；若只剩测试 fixture 或不可达兼容 helper，再转入前端完整门禁与 E2E 收尾审计。
+
+### 2026-06-05 P0 Baseline 生产切换审计 role 归因修复
+
+- 改动摘要：继续收敛候选资产晋升后的生产 Baseline 切换链路。`POST /experiment-baseline-suggestions/{suggestion_id}/apply|rollback` 已有 `baseline:apply` 权限门禁，Baseline 变更提醒 `ack` 也会记录操作者，但成功审计此前没有写入请求 role，导致 `experiment_baseline.apply`、`experiment_baseline.rollback` 和 `baseline_change_notification.ack` 的审计 role 回退成 actor 名，发布治理链路缺少角色上下文。
+- TDD 证据：
+  - RED：升级 `test_prompt_skill_candidate_retest_requires_published_draft_and_returns_three_way_metrics`，给 baseline apply/ack/rollback 请求传入 `role` 并断言审计事件 `role` 与 `detail.role`；修复前 `experiment_baseline.apply` 的 role 为 `release_owner`，不是请求中的 `Admin`。
+  - GREEN：修复后 Baseline 应用、变更提醒创建、提醒确认和 Baseline 回滚的成功审计均记录真实 actor/role，并在 detail 中保留 role。
+- 代码修复：
+  - `aegisqa/api/routes/productization.py`：`BaselineChangeNotificationAckRequest` 新增兼容式 `role` 字段；Baseline apply/rollback 审计、Baseline 变更提醒创建审计和 ack 审计均传入 request role，并写入 `detail.role`；通知记录新增 `role` 字段，便于后续页面或审计导出展示生产切换操作者角色。
+  - `tests/test_task_flow_optimization.py`：在候选资产复跑、晋升审批、Baseline apply、提醒 ack、影响分析和 rollback 的完整链路测试中补充 actor/role 审计断言。
+- 变更文件：
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_task_flow_optimization.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py::test_prompt_skill_candidate_retest_requires_published_draft_and_returns_three_way_metrics -q`
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "baseline or promotion or candidate"`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_ci_baseline_production_flow.py -q`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - Baseline 生产切换审计目标测试：RED 后 GREEN，1 passed。
+  - Candidate / Baseline / Promotion 组合：10 passed。
+  - 权限硬化全文件：12 passed。
+  - CI Baseline 生产流：2 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.30 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端 Baseline 审计字段与测试断言；新增 `role` 字段为兼容式，旧前端不传 role 时仍按默认值运行。
+- 下一步：
+  - 继续审计旧 `app.py` 中 Skill package 兼容函数和其它边缘审计事件是否仍固定 `actor=api` 或缺少 role；若剩余只是不被路由调用的兼容 helper，需要用调用证据区分 P0/P1 与低优先级清理。
+
+### 2026-06-05 P0 报告导出审批流真实操作者审计归因修复
+
+- 改动摘要：继续收敛敏感报告外发链路。报告导出审批申请、审批、拒绝、撤销和 Viewer 凭审批下载报告都会影响包含 Task 摘要、Preflight、Badcase 和样本结果的敏感资料外发；此前审批流多处把角色名当作 actor，例如 `Admin` / `Viewer`，无法追溯实际操作者，Reviewer 无权审批也没有统一 forbidden 审计。
+- TDD 证据：
+  - RED：升级 `test_viewer_can_export_task_report_after_admin_approval` 与 `test_report_export_request_lifecycle_reject_revoke_and_expire`，修复前 `approved_by_actor` / `rejected_by_actor` 缺失，审计 actor 仍是角色名。
+  - GREEN：修复后导出申请、审批、拒绝、撤销、导出成功和导出拒绝均记录真实 actor/role；Reviewer 无权审批保留原错误码 `REPORT_EXPORT_APPROVAL_FORBIDDEN`，同时写入 forbidden 审计。
+- 代码修复：
+  - `aegisqa/api/app.py`：`ReportExportRequestCreate`、`ReportExportApprovalRequest`、`ReportExportRevokeRequest` 新增兼容式 `actor` 字段，默认仍为 `api`。
+  - `aegisqa/api/routes/tasks.py`：报告导出申请保存 `requester_actor`；审批/拒绝/撤销记录 `approved_by_actor`、`rejected_by_actor`、`revoked_by_actor`；审计事件使用请求 actor/role；无权审批补 forbidden 审计；导出拒绝审计支持真实 actor。
+  - `aegisqa/api/routes/task_reports.py`：Task 报告 JSON/CSV/HTML 导出和离线包导出新增兼容式 `actor` 查询参数，并透传给审批校验与成功审计。
+  - `tests/test_task_center_api.py`：补充报告外发审批申请、拒绝审批、批准、凭审批导出、拒绝、撤销的真实 actor/role 断言。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/api/routes/task_reports.py`
+  - `tests/test_task_center_api.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py::test_viewer_can_export_task_report_after_admin_approval tests\test_task_center_api.py::test_report_export_request_lifecycle_reject_revoke_and_expire -q`
+  - `python -m pytest tests\test_task_center_api.py -q -k "report_export or result_export or offline_package or export_request or approval"`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_task_report_badcase_pagination.py tests\test_api_interaction_contract.py -q`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - 报告导出审批真实操作者目标测试：RED 后 GREEN，2 passed。
+  - 报告导出/审批/离线包组合：6 passed。
+  - 权限硬化全文件：12 passed。
+  - Task Report Badcase 分页与 API 交互契约组合：8 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.30 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端报告外发审批与审计归因；新增字段和查询参数均为兼容式，旧前端不传 actor 仍可运行。
+- 下一步：
+  - 继续审计 baseline apply/rollback、baseline 变更提醒 ack 和候选资产晋升发布链路里是否还有边缘审计事件缺少 role 或真实 actor；若后续连续两轮审计不再发现 P0/P1，则进入完整前端 typecheck/test/build/e2e 收尾。
+
+### 2026-06-05 P0 Repair Task 派生 Attempt / Workflow 草稿审计归因修复
+
+- 改动摘要：继续收敛修复闭环派生资产。Repair Task 动作 `retest_and_compare` 会创建新的 Task Attempt 并复跑，`create_workflow_draft_from_version_diff` 会根据版本差异生成可发布 Workflow 草稿；此前外层修复动作审计已记录请求 actor/role，但内部派生 Attempt 和草稿审计仍固定 `actor=api`。
+- TDD 证据：
+  - RED：升级 `test_repair_task_retest_action_creates_attempt_and_compares_result` 与 `test_repair_task_version_diff_actions_materialize_candidate_and_workflow_draft`，修复前 `task.attempt.create_from_repair` 和 `workflow_draft.create_from_version_diff` 审计 actor 仍为 `api`。
+  - GREEN：修复后 Repair Task 派生 Attempt 和 Workflow 草稿成功审计均记录请求 actor/role，并在 detail 中保留 role。
+- 代码修复：
+  - `aegisqa/api/routes/repair_tasks.py`：`retest_and_compare`、`create_workflow_draft_from_version_diff` 动作把请求 actor/role 透传给共享 helper。
+  - `aegisqa/api/routes/tasks.py`：`_repair_action_retest_and_compare()` 和 `_repair_action_create_workflow_draft_from_version_diff()` 支持兼容式 actor/role 参数；派生 Attempt 与 Workflow 草稿审计不再固定 `api`。
+  - `tests/test_task_flow_optimization.py`：补充 Repair Task 复跑 Attempt 和版本差异草稿的真实审计归因断言。
+- 变更文件：
+  - `aegisqa/api/routes/repair_tasks.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_flow_optimization.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_flow_optimization.py::test_repair_task_retest_action_creates_attempt_and_compares_result tests\test_task_flow_optimization.py::test_repair_task_version_diff_actions_materialize_candidate_and_workflow_draft -q`
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "repair_task or prompt_skill_candidate"`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_productization_api.py -q -k "candidate or annotation or ci_gate"`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - Repair Task 派生资产审计目标测试：RED 后 GREEN，2 passed。
+  - Repair Task / Prompt Skill Candidate 组合：21 passed。
+  - 权限硬化全文件：12 passed。
+  - Candidate / Annotation / CI Gate 产品化组合：9 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.22 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端修复任务派生资产审计归因；前端请求 shape 不变。
+- 下一步：
+  - 继续审计其它固定 `actor=api` 写入口，重点看报告导出审批、baseline 变更和从候选资产晋升发布链路中仍未归因的边缘审计事件；若连续两轮只剩低优先级文档或审美项，再进入完整前端门禁收尾。
+
+### 2026-06-05 P0 Agent Skill 本机导入权限与审计归因修复
+
+- 改动摘要：继续收敛 Skill 资产治理入口。`POST /agent-skills/import` 会把本机 `SKILL.md` 风格 Agent Skill 导入为可被 Workflow 引用的 Skill 资产；此前该入口没有统一权限门禁，Viewer 也能导入，成功审计固定 `actor=api`。
+- TDD 证据：
+  - RED：新增 `test_agent_skill_import_requires_permission_and_records_actor_role`，修复前 Viewer 调用 `POST /agent-skills/import` 返回 200。
+  - GREEN：修复后 Agent Skill 本机导入统一要求 `skill:register`；Viewer 被 `FORBIDDEN` 结构化拒绝；Skill Developer 成功审计记录真实 actor/role。
+- 代码修复：
+  - `aegisqa/api/routes/agent_skills.py`：`AgentSkillImportRequest` 新增兼容式 `actor/role` 字段，默认保持 `api/Skill Developer`；导入前接入 `require_permission()`；成功审计记录请求 actor/role、source_dir 和 runtime_mode。
+  - `tests/test_access_control_hardening.py`：新增 Agent Skill import 权限拒绝与成功审计归因回归。
+- 变更文件：
+  - `aegisqa/api/routes/agent_skills.py`
+  - `tests/test_access_control_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_access_control_hardening.py::test_agent_skill_import_requires_permission_and_records_actor_role -q`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_agent_skill_runtime.py tests\test_agent_skill_runtime_matrix.py -q`
+  - `python -m pytest tests\test_agent_skill_package_upload.py tests\test_skill_package_security.py -q`
+  - `python -m pytest tests\test_model_gateway.py::test_model_gateway_api_status_test_and_builtin_skill_contract tests\test_api.py::test_audit_events_can_be_filtered_by_actor_and_action -q`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - Agent Skill import 权限与审计目标测试：RED 后 GREEN，1 passed。
+  - 权限硬化全文件：12 passed。
+  - Agent Skill 本机导入/上传运行矩阵：3 passed。
+  - Agent Skill zip 上传与 Skill 包安全组合：15 passed。
+  - 模型网关 Skill 合约与审计过滤组合：2 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.27 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端 Agent Skill 本机导入治理入口；前端主入口仍是 zip 上传，wire shape 兼容。
+- 下一步：
+  - 继续审计固定 `actor=api` 的剩余写入口，优先看 Repair Task 动作内部复跑生成 Attempt、从修复任务生成 Workflow 草稿和其它会派生可执行资产的治理动作。
+
+### 2026-06-05 P0 Task Preflight / 执行参数模板权限与审计归因修复
+
+- 改动摘要：继续收敛任务创建前证据链。`POST /tasks/preflight` 会读取 Dataset/Workflow 并落盘创建前预检证据，`POST /task-execution-templates` 会保存后续任务参数模板；此前模板创建没有统一门禁，Preflight 和模板创建成功审计固定 `actor=api`。
+- TDD 证据：
+  - RED：新增 `test_task_preflight_and_template_routes_require_permission_and_record_actor_role`，修复前 Viewer 调用 `POST /task-execution-templates` 返回 200。
+  - GREEN：修复后执行参数模板创建和 Task Preflight 统一要求 `run:create`；Viewer 被 `FORBIDDEN` 结构化拒绝；Evaluator 成功审计记录真实 actor/role。
+- 代码修复：
+  - `aegisqa/api/app.py`：`TaskExecutionTemplateCreateRequest`、`TaskPreflightRequest` 新增兼容式 `actor/role` 字段，默认保持 `api/Evaluator`。
+  - `aegisqa/api/routes/task_preflight.py`：执行模板创建和 Task Preflight 接入 `require_permission()`；成功模板创建记录请求 actor/role；Preflight 保存时透传请求 actor/role。
+  - `aegisqa/api/routes/tasks.py`：`_save_task_preflight()` 支持 actor/role 参数并把成功审计归因到请求操作者。
+  - `tests/test_access_control_hardening.py`：新增 Task Preflight 与执行模板权限拒绝和成功审计归因回归。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/task_preflight.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_access_control_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_access_control_hardening.py::test_task_preflight_and_template_routes_require_permission_and_record_actor_role -q`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_task_center_api.py -q -k "preflight or execution_template or task_creation"`
+  - `python -m pytest tests\test_api_interaction_contract.py tests\test_api.py::test_api_runs_full_mvp_flow -q`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - Task Preflight / 执行模板权限与审计目标测试：RED 后 GREEN，1 passed。
+  - 权限硬化全文件：11 passed。
+  - Task Preflight / 执行模板 / 创建任务组合：11 passed。
+  - API 交互契约与 MVP 主链路组合：8 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.33 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端 Task Preflight/模板权限与审计；前端不传 role/actor 时仍使用默认 Evaluator/api，wire shape 兼容。
+- 下一步：
+  - 继续审计剩余固定 `actor=api` 的写入口，优先看 Agent Skill import、Repair Task 动作内部复跑生成 Attempt 和从修复任务生成 Workflow 草稿。
+
+### 2026-06-05 P0 Judge Profile / Judge 审计权限与审计归因修复
+
+- 改动摘要：继续收敛评测可信度治理链路。`POST /judge-audits`、`POST /judge-profiles` 和 `POST /judge-profiles/{profile_id}/audits` 会创建 Judge Profile 或生成裁判审计结果；此前这些入口没有统一门禁，成功审计固定 `actor=api`。
+- TDD 证据：
+  - RED：新增 `test_judge_governance_write_routes_require_permission_and_record_actor_role`，修复前 Viewer 调用 `POST /judge-audits` 返回 200。
+  - GREEN：修复后 Judge Profile 创建、一次性 Judge 审计和 Profile 审计统一要求 `judge:audit`；Viewer 被 `FORBIDDEN` 结构化拒绝；Reviewer 成功审计记录真实 actor/role。
+- 代码修复：
+  - `aegisqa/api/app.py`：`JudgeAuditRequest`、`ProfileAuditRequest`、`JudgeProfileCreateRequest` 新增兼容式 `actor/role` 字段，默认 `api/Reviewer`，保持旧前端与旧脚本不传字段时可继续使用。
+  - `aegisqa/api/routes/judge.py`：Judge 写入口统一接入 `require_permission()`；成功创建 Profile、一次性审计和 Profile 审计均写入 success 审计，并记录请求 actor/role 和数据集上下文。
+  - `tests/test_access_control_hardening.py`：新增 Judge 治理写入口权限拒绝与成功审计归因回归。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/judge.py`
+  - `tests/test_access_control_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_access_control_hardening.py::test_judge_governance_write_routes_require_permission_and_record_actor_role -q`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_api.py::test_api_runs_full_mvp_flow tests\test_api_interaction_contract.py::test_badcase_judge_and_export_actions tests\test_risk_analytics_hardening.py::test_judge_audit_trends_returns_accuracy_and_kappa_series tests\test_trustworthy_evaluation_enhancements.py::test_judge_cross_validation_returns_pairwise_agreement -q`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - Judge 治理权限与审计目标测试：RED 后 GREEN，1 passed。
+  - 权限硬化全文件：10 passed。
+  - Judge/API 兼容组合：4 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.32 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端 Judge 写入口权限/审计；前端不传 role/actor 时仍使用默认 Reviewer/api，wire shape 兼容。
+- 下一步：
+  - Task Preflight 已在后一批修复；继续审计 Agent Skill import、Repair Task 动作内部复跑生成 Attempt 和从修复任务生成 Workflow 草稿。
+
+### 2026-06-05 P0 legacy Run 写入口权限与审计归因修复
+
+- 改动摘要：继续收敛真实执行链路。`POST /runs` 是底层 Attempt 创建入口，`POST /runs/{run_id}/execute|retry-failed|cancel|pause|resume` 能直接改变 Run 状态；此前这些 legacy 入口未统一鉴权，pause/resume 成功审计固定为 `actor=api`，execute/cancel/retry-failed 缺少成功审计。
+- TDD 证据：
+  - RED：新增 `test_legacy_run_write_routes_require_permission_and_record_actor_role`，修复前 Viewer 调用 `POST /runs` 返回 200。
+  - GREEN：修复后 `POST /runs` 要求 `run:create`，底层 Run execute/retry/cancel/pause/resume 要求 `run:control`；Viewer 被 `FORBIDDEN` 结构化拒绝；Evaluator 成功审计记录真实 actor/role。
+- 代码修复：
+  - `aegisqa/api/app.py`：`RunCreateRequest` 新增兼容式 `actor/role` 字段，默认保持 `api/Evaluator`。
+  - `aegisqa/api/routes/tasks.py`：legacy Run 创建和控制入口接入 `require_permission()`；成功创建、执行、重试、取消、暂停、恢复均写入 success 审计，并记录请求 actor/role 和执行状态。
+  - `tests/test_access_control_hardening.py`：新增 legacy Run 写入口权限拒绝与成功审计归因回归。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_access_control_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_access_control_hardening.py::test_legacy_run_write_routes_require_permission_and_record_actor_role -q`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_api.py::test_api_runs_full_mvp_flow tests\test_api_interaction_contract.py -q -k "run or runs or full_mvp_flow"`
+  - `python -m pytest tests\test_task_center_api.py -q -k "task_attempt_and_control or lifecycle or background_execute"`
+  - `python -m pytest -q --durations=20`
+  - `git diff --check`
+- 测试结果：
+  - legacy Run 写入口权限与审计目标测试：RED 后 GREEN，1 passed。
+  - 权限硬化全文件：9 passed。
+  - legacy Run API / 交互契约组合：4 passed。
+  - Task 生命周期 / 后台执行组合：5 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.16 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 空白检查：通过，仅有 Windows LF/CRLF 提示。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端 legacy Run 写入口权限/审计；前端不传 role/actor 时仍使用默认 Evaluator/api，wire shape 兼容。
+- 下一步：
+  - Judge Profile 创建/审计已在后一批修复；继续审计 Agent Skill import、Task Preflight 和从修复任务生成 Workflow 草稿。
+
+### 2026-06-05 P0 Dataset Source 物化 / 字段修正权限与审计归因修复
+
+- 改动摘要：继续收敛 Dataset 治理写入口。Source 物化会创建新的 Dataset Version，字段类型修正会改变后续 Workflow 映射和 Task Preflight 判断；此前这两个成功审计固定 `actor=api`，Source 物化的拒绝审计也复用了泛化 `dataset.create` action。
+- TDD 证据：
+  - RED：新增 `test_dataset_governance_write_routes_require_permission_and_record_actor_role`，修复前 Viewer 调用 Source 物化虽然会被拒绝，但 forbidden 审计 action 仍是 `dataset.create`，成功审计也不能归因到请求 actor。
+  - GREEN：修复后 Source 物化和字段类型修正继续要求 `dataset:create`；Viewer 被 `FORBIDDEN` 结构化拒绝；Source 物化拒绝审计使用 `dataset.source_materialize`，字段修正拒绝审计使用 `dataset.field_type.correct`；Evaluator 成功审计记录真实 actor/role。
+- 代码修复：
+  - `aegisqa/api/routes/datasets.py`：Source 物化权限检查 action 改为 `dataset.source_materialize`；Source 物化和字段类型修正成功审计使用请求 actor/role，并在 detail 中记录 role。
+  - `tests/test_access_control_hardening.py`：新增 Dataset 治理写入口权限拒绝与成功审计归因回归。
+- 变更文件：
+  - `aegisqa/api/routes/datasets.py`
+  - `tests/test_access_control_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_access_control_hardening.py::test_dataset_governance_write_routes_require_permission_and_record_actor_role -q`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_dataset_governance.py tests\test_api.py::test_api_runs_full_mvp_flow tests\test_api_frontend_contract.py -q -k "dataset or source or full_mvp_flow"`
+  - `python -m pytest tests\test_p0_hardening.py -q -k dataset_upload`
+  - `python -m pytest -q --durations=20`
+  - `git diff --check`
+- 测试结果：
+  - Dataset 治理权限与审计目标测试：RED 后 GREEN，1 passed。
+  - 权限硬化全文件：8 passed。
+  - Dataset 治理 / API 主链路 / 前端契约组合：3 passed。
+  - Dataset 上传 P0 回归：1 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.20 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 空白检查：通过，仅有 Windows LF/CRLF 提示。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端 Dataset 治理写入口权限/审计；前端不传 role/actor 时仍使用默认 Evaluator/api，wire shape 兼容。
+- 下一步：
+  - 继续审计剩余固定 `actor=api` 的写入口，优先看 legacy Run pause/resume、Judge Profile 创建/审计、Agent Skill import、Task Preflight 和从修复任务生成 Workflow 草稿。
+
+### 2026-06-05 P0 Red Team / Experiment / CI Gate 权限与审计归因修复
+
+- 改动摘要：继续收敛产品化治理写入口。Red Team 扫描会生成安全风险记录，Experiment 会沉淀可对比快照，CI Gate 创建和评估会影响发布阻断判断；此前这些入口没有统一门禁，成功审计固定为 `actor=api`。
+- TDD 证据：
+  - RED：新增 `test_quality_governance_write_routes_require_permission_and_record_actor_role`，修复前 Viewer 调用 `POST /red-team/scans` 返回 200。
+  - GREEN：修复后 Red Team 扫描要求 `redteam:scan`，Experiment 快照创建要求 `experiment:create`，CI Gate 创建和评估要求 `ci_gate:manage`；Viewer 被 `FORBIDDEN` 结构化拒绝，Evaluator 成功审计记录真实 actor/role。
+- 代码修复：
+  - `aegisqa/api/app.py`：`RedTeamScanRequest`、`ExperimentFromRunRequest`、`CIGateConfigRequest`、`CIGateEvaluateRequest` 新增兼容式 `actor/role` 字段，默认保持 `api/Evaluator`。
+  - `aegisqa/security/access.py`：Evaluator 增加 `redteam:scan`、`experiment:create`、`ci_gate:manage`，保持评测负责人默认可做安全扫描、实验快照和门禁评估。
+  - `aegisqa/api/routes/productization.py`：新增统一治理写入口鉴权 helper；Red Team、Experiment、CI Gate 写入口先鉴权再读取资源或写入资产；成功审计补齐 actor/role。
+  - `tests/test_access_control_hardening.py`：新增 Red Team / Experiment / CI Gate 写入口权限拒绝与成功审计归因回归。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/security/access.py`
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_access_control_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_access_control_hardening.py::test_quality_governance_write_routes_require_permission_and_record_actor_role -q`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_productization_api.py -q -k "ci_gate or experiment or red_team"`
+  - `python -m pytest tests\test_ci_baseline_production_flow.py -q`
+  - `python -m pytest -q --durations=20`
+  - `git diff --check`
+- 测试结果：
+  - Red Team / Experiment / CI Gate 权限与审计目标测试：RED 后 GREEN，1 passed。
+  - 权限硬化全文件：7 passed。
+  - 产品化 Red Team / Experiment / CI Gate 组合回归：6 passed。
+  - CI baseline 生产流回归：2 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.24 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 空白检查：通过，仅有 Windows LF/CRLF 提示。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端治理写入口权限/审计；前端不传 role/actor 时仍使用默认 Evaluator/api，wire shape 兼容。
+- 下一步：
+  - 继续审计剩余固定 `actor=api` 的写入口，优先看 Dataset Source 物化、字段类型修正、legacy Run 控制、Judge Profile 管理、Agent Skill import 和从修复任务生成 Workflow 草稿这些会改变数据、治理或运行状态的动作。
+
+### 2026-06-05 P0 Candidate Assets 权限与审计归因修复
+
+- 改动摘要：继续审计候选资产治理链路。Prompt/Skill 候选资产可以被审批、批量指派、归档、逾期升级、生成 Workflow 草稿、复跑生成 Experiment、创建 Workflow 晋升审批并沉淀 baseline/release 资产；此前这些入口没有统一门禁，部分成功审计仍固定 `actor=api`。
+- TDD 证据：
+  - RED：新增 `test_candidate_asset_write_routes_require_permission_and_record_actor_role`，修复前 Viewer 调用 `POST /prompt-skill-candidates/{candidate_id}/review` 返回 200。
+  - GREEN：修复后候选资产单条审核、批量审核、批量指派、批量归档、逾期升级、生成 Workflow 草稿、候选复跑、创建晋升审批和晋升审批结论统一要求 `candidate:govern`；Viewer 被 `FORBIDDEN` 结构化拒绝；Evaluator/Reviewer 成功操作记录真实 actor/role，候选复跑和晋升发布资产成功审计也记录真实 actor/role。
+- 代码修复：
+  - `aegisqa/security/access.py`：Evaluator/Reviewer 增加 `candidate:govern`，保持小团队评测负责人和审核人可处理候选资产治理。
+  - `aegisqa/api/routes/productization.py`：新增候选资产动作请求模型和 `_require_candidate_govern()`；候选资产 review/bulk-review/bulk-assign/bulk-archive/bulk-retest/escalate/workflow-draft/retest/promotion-review/approve/reject 统一鉴权；成功审计补齐 role；复跑和晋升发布资产 helper 不再固定 `api`。
+  - `tests/test_access_control_hardening.py`：新增候选资产写入口权限拒绝、成功审计归因和 reviewer/actor 回归。
+- 变更文件：
+  - `aegisqa/security/access.py`
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_access_control_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_access_control_hardening.py::test_candidate_asset_write_routes_require_permission_and_record_actor_role -q`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "prompt_skill_candidate or candidate"`
+  - `python -m pytest tests\test_ci_baseline_production_flow.py -q`
+  - `python -m pytest tests\test_productization_api.py -q -k "candidate or ci_gate or experiment"`
+  - `python -m pytest -q --durations=20`
+  - `git diff --check`
+- 测试结果：
+  - Candidate Assets 权限与审计目标测试：RED 后 GREEN，1 passed。
+  - 权限硬化全文件：6 passed。
+  - 候选资产任务流回归：9 passed。
+  - CI baseline 生产流回归：2 passed。
+  - 产品化 candidate/ci_gate/experiment 组合回归：7 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.54 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 空白检查：通过，仅有 Windows LF/CRLF 提示。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端 Candidate Assets 权限/审计；前端不传 role/actor 时仍使用默认 Evaluator/api，wire shape 兼容。
+- 下一步：
+  - 继续审计 Red Team、Experiment 和 CI Gate 写入口是否仍存在固定 `actor=api` 或缺少角色门禁；当前搜索仍显示 `red_team.scan`、`experiment.create`、`ci_gate.create`、`ci_gate.evaluate` 是下一批 P0 候选。
+
+### 2026-06-05 P0 Annotation Queue 权限与审计归因修复
+
+- 改动摘要：继续审计人工审核链路。Annotation Queue 的生成、自动分派、指派、单条审核和批量审核会写入人工标签、Golden/Assertion 候选资产和后续 Judge/Workflow 优化依据；此前这些入口没有统一门禁，成功审计也固定 `actor=api`，候选资产 reviewer 也无法追溯实际操作者。
+- TDD 证据：
+  - RED：新增 `test_annotation_queue_write_routes_require_permission_and_record_actor_role`，修复前 Viewer 调用 `POST /annotation-queue/seed-from-run` 返回 200。
+  - GREEN：修复后 Annotation Queue 写入口统一要求 `annotation:review`；Viewer 被 `FORBIDDEN` 结构化拒绝；Evaluator 成功操作记录真实 actor/role，单条/批量审核生成的候选资产 reviewer 使用真实 actor。
+- 代码修复：
+  - `aegisqa/security/access.py`：Evaluator 增加 `annotation:review`，保持小团队评测负责人默认可处理人工审核；Reviewer 保持原有审核权限。
+  - `aegisqa/api/app.py`：Annotation Queue 请求模型新增兼容式 `actor/role` 字段，默认仍为 `api/Evaluator`。
+  - `aegisqa/api/routes/productization.py`：新增 `ANNOTATION_REVIEW_PERMISSION` 和 `_require_annotation_review()`；seed、dispatch、assign、review、bulk-review 统一鉴权；成功审计记录请求 actor/role；审核候选资产 reviewer 改为真实 actor。
+  - `tests/test_access_control_hardening.py`：新增 Annotation Queue 权限拒绝、成功审计归因和候选资产 reviewer 回归。
+- 变更文件：
+  - `aegisqa/security/access.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_access_control_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_access_control_hardening.py::test_annotation_queue_write_routes_require_permission_and_record_actor_role -q`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_productization_api.py -q -k "annotation"`
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "annotation or repair_task"`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - Annotation Queue 权限与审计目标测试：RED 后 GREEN，1 passed。
+  - 权限硬化全文件：5 passed。
+  - Annotation Queue 产品化回归：5 passed。
+  - Repair Task/Annotation 组合回归：13 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.24 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端 Annotation Queue 权限/审计；前端不传 role/actor 时仍使用默认 Evaluator/api，wire shape 兼容。
+- 下一步：
+  - 继续审计 Candidate Assets、CI Gate、Red Team、Experiment 和 Judge 等产品化写操作是否仍存在固定 `actor=api` 或缺少角色门禁；优先处理能改变发布、baseline 或模型治理的入口。
+
+### 2026-06-05 P0 Repair Task 权限与审计归因修复
+
+- 改动摘要：继续审计可改变治理链路的写操作。Repair Task 的生成、领取、指派、完成、重开和后续动作会创建人工审核样本、CI Gate 评估、复跑 Attempt、候选资产或 Workflow 草稿；此前这些入口没有统一门禁，`assign`、状态流转和动作成功审计还会固定记录为 `actor=api`。
+- TDD 证据：
+  - RED：新增 `test_repair_task_write_routes_require_permission_and_record_actor_role`，修复前 Viewer 调用 `POST /repair-tasks/{repair_task_id}/start` 返回 200。
+  - GREEN：修复后 Repair Task 生成、状态流转、指派和动作统一要求 `badcase:correct`；Viewer 被 `FORBIDDEN` 结构化拒绝；Evaluator 成功操作记录真实 actor/role。
+- 代码修复：
+  - `aegisqa/api/app.py`：Repair Task 请求模型新增兼容式 `actor/role` 字段，默认仍为 `api/Evaluator`。
+  - `aegisqa/api/routes/repair_tasks.py`：新增 `REPAIR_TASK_WRITE_PERMISSION` 和 `_require_repair_task_write()`；生成、领取、指派、完成、重开和动作入口统一鉴权；成功审计记录请求 actor/role。
+  - `aegisqa/api/routes/tasks.py`：`_transition_repair_task()` 与 `_append_repair_task_action()` 支持接收 actor/role，避免共享 helper 固定写入 `api`。
+  - `tests/test_access_control_hardening.py`：新增 Repair Task 权限拒绝与成功审计归因回归。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/repair_tasks.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_access_control_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_access_control_hardening.py::test_repair_task_write_routes_require_permission_and_record_actor_role -q`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "repair_task"`
+  - `python -m pytest tests\test_productization_api.py -q -k "annotation or candidate or ci_gate"`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - Repair Task 权限与审计目标测试：RED 后 GREEN，1 passed。
+  - 权限硬化全文件：4 passed。
+  - Repair Task 后端闭环回归：13 passed。
+  - 产品化 Annotation/Candidate/CI Gate 组合回归：9 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 7.02 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端 Repair Task 权限/审计；前端不传 role/actor 时仍使用默认 Evaluator/api，wire shape 兼容。
+- 下一步：
+  - 继续审计 Annotation Queue、Candidate Assets、CI Gate、Red Team、Experiment 和 Judge 等产品化写操作是否仍存在固定 `actor=api` 或缺少角色门禁；优先处理能改变发布、审核或 baseline 的入口。
+
+### 2026-06-05 P0 Workflow 资产权限与审计归因修复
+
+- 改动摘要：继续审计可执行资产治理。Workflow 草稿创建、更新、删除、复制、归档以及发布动作会影响后续任务可选择的流程版本；此前草稿创建/更新/删除、复制、归档没有门禁，成功审计也固定 `actor=api`，导致 Viewer 可写资产且无法追责实际操作者。
+- TDD 证据：
+  - RED：新增 `test_workflow_asset_write_routes_require_workflow_permission`，修复前 Viewer 调用 `POST /workflow-drafts` 返回 200。
+  - RED：新增 `test_workflow_asset_success_audit_records_request_actor_and_role`，修复前 `workflow_draft.create` 成功审计仍为 `actor=api`。
+  - GREEN：修复后 Workflow 草稿创建/更新/删除、复制、归档要求 `workflow:publish`；草稿发布、Graph 发布、线性发布、复制、归档和草稿生命周期成功审计均记录请求 actor/role。
+- 代码修复：
+  - `aegisqa/api/app.py`：`WorkflowDraftCreateRequest`、`WorkflowDraftUpdateRequest` 和 `WorkflowCopyRequest` 增加兼容式 `actor/role` 字段，默认仍为 `api/Evaluator`。
+  - `aegisqa/api/routes/workflows.py`：新增 `_require_workflow_write()`；草稿创建/更新/删除、复制、归档接入 `workflow:publish` 门禁；发布与资产操作成功审计改为真实 actor/role。
+  - `tests/test_workflow_graph_hardening.py`：新增 Workflow 资产权限拒绝与成功审计归因回归。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/workflows.py`
+  - `tests/test_workflow_graph_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_workflow_graph_hardening.py::test_workflow_asset_write_routes_require_workflow_permission tests\test_workflow_graph_hardening.py::test_workflow_asset_success_audit_records_request_actor_and_role -q`
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q`
+  - `python -m pytest tests\test_access_control_hardening.py tests\test_task_center_api.py -q -k "workflow or task_attempt_and_control or lifecycle"`
+  - `python -m pytest tests\test_api_interaction_contract.py tests\test_model_gateway.py -q`
+  - `python -m pytest -q --durations=20`
+  - `git diff --check`
+- 测试结果：
+  - Workflow 资产权限与审计目标测试：RED 后 GREEN，2 passed。
+  - Workflow Graph 硬化全文件：15 passed。
+  - 权限硬化和任务生命周期组合回归：6 passed。
+  - API 交互契约与模型网关组合回归：18 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 7.02 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 空白检查：通过，仅有 Windows LF/CRLF 提示。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端 Workflow 资产权限/审计；前端请求不传 actor/role 时仍使用默认 Evaluator/api，wire shape 兼容。
+- 下一步：
+  - 继续审计 Repair Task、Annotation Queue、Candidate Assets 和 CI Gate 等治理写操作是否仍存在固定 `actor=api` 或缺少角色门禁；若后续连续两轮没有 P0/P1 缺口，再执行完整前端 typecheck/test/build/e2e 做收尾审计。
+
+### 2026-06-05 P0 Task 执行控制权限与审计归因修复
+
+- 改动摘要：继续审计真实执行链路。`POST /tasks/{task_id}/pause|resume|cancel|retry-failed` 和 `POST /tasks/{task_id}/attempts` 会改变任务执行状态或创建新 Attempt；此前控制接口没有权限门禁，也没有成功审计，Viewer 可以暂停任务，Task 创建成功审计也固定 `actor=api`。
+- TDD 证据：
+  - RED：新增 `test_task_attempt_and_control_routes_require_permission_and_record_actor_role`，修复前 Viewer 调用 `POST /tasks/{task_id}/pause` 返回 200。
+  - GREEN：修复后暂停、恢复、取消、重试失败项需要 `run:control`；新建 Attempt 需要 `run:create`；Viewer 请求写 forbidden 审计，Evaluator 默认仍可操作，成功审计记录请求 actor/role。
+- 代码修复：
+  - `aegisqa/security/access.py`：Evaluator 增加 `run:control`，保持执行中心默认角色可继续暂停/恢复/取消/重试。
+  - `aegisqa/api/routes/task_lifecycle.py`：Task 创建、同步/后台执行、提交失败、执行失败、新建 Attempt、暂停、恢复、取消、重试失败项统一记录真实 actor/role；控制接口先鉴权再读取和修改任务状态。
+  - `tests/test_access_control_hardening.py`：新增 Task 控制权限和成功审计归因回归。
+- 变更文件：
+  - `aegisqa/security/access.py`
+  - `aegisqa/api/routes/task_lifecycle.py`
+  - `tests/test_access_control_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_access_control_hardening.py::test_task_attempt_and_control_routes_require_permission_and_record_actor_role -q`
+  - `python -m pytest tests\test_access_control_hardening.py tests\test_task_center_api.py -q -k "task_attempt_and_control or task_lifecycle_report_and_trace_tree or background_execute or task_lifecycle"`
+  - `python -m pytest tests\test_model_gateway.py tests\test_api.py::test_audit_events_can_be_filtered_by_actor_and_action -q`
+  - `python -m pytest tests\test_api_interaction_contract.py -q`
+  - `python -m pytest -q --durations=20`
+  - `git diff --check`
+- 测试结果：
+  - Task 控制权限与审计目标测试：RED 后 GREEN，1 passed。
+  - 权限硬化与任务生命周期组合回归：5 passed。
+  - 模型网关与审计过滤组合回归：12 passed。
+  - API 交互契约回归：7 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 7.25 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 空白检查：通过，仅有 Windows LF/CRLF 提示。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端权限/审计；前端调用不传 role/actor 时仍使用默认 Evaluator/api，不影响现有按钮 wire shape。
+- 下一步：
+  - 继续审计 Workflow 草稿创建/更新/删除、复制/归档和发布成功审计，避免资产管理动作仍固定 `api` 或缺少角色门禁。
+
+### 2026-06-05 P0 模型网关治理权限与审计归因修复
+
+- 改动摘要：继续审计敏感治理动作。模型网关配置、模型连接别名和连接测试涉及 Base URL、Secret 引用、临时 API Key 和真实模型调用成本；此前这些接口没有 `require_permission()` 门禁，Viewer 也能保存配置或运行连接测试，成功审计还固定记录为 `actor=api`。
+- TDD 证据：
+  - RED：新增 `test_model_gateway_write_and_test_routes_require_admin_permission`，修复前 Viewer 调用 `PUT /model-gateway/config` 返回 200。
+  - RED：新增 `test_model_gateway_success_audit_records_actor_and_role_without_plaintext_secret`，修复前成功审计仍为 `actor=api`。
+  - GREEN：修复后配置保存、连接创建/更新/删除和连接测试都要求 `model:configure`；Viewer 请求返回 `FORBIDDEN` 并写入 forbidden 审计；Admin 成功审计记录请求 actor/role，且审计内容不包含明文 API Key。
+- 代码修复：
+  - `aegisqa/api/routes/models.py`：模型网关配置、连接别名增删改和连接测试统一接入 `model:configure` 权限；请求体兼容新增 `role/actor`，默认仍为 `Admin/api`，旧前端不传也保持兼容；连接测试先鉴权再读取配置和发起模型调用。
+  - `tests/test_model_gateway.py`：新增模型网关权限拒绝、成功审计归因和明文密钥不入审计回归。
+- 变更文件：
+  - `aegisqa/api/routes/models.py`
+  - `tests/test_model_gateway.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_model_gateway.py::test_model_gateway_write_and_test_routes_require_admin_permission tests\test_model_gateway.py::test_model_gateway_success_audit_records_actor_and_role_without_plaintext_secret -q`
+  - `python -m pytest tests\test_model_gateway.py tests\test_access_control_hardening.py tests\test_api.py::test_audit_events_can_be_filtered_by_actor_and_action -q`
+  - `python -m pytest tests\test_agent_skill_package_upload.py tests\test_agent_skill_runtime_matrix.py tests\test_skill_package_security.py -q`
+  - `python -m pytest -q --durations=20`
+  - `git diff --check`
+- 测试结果：
+  - 模型网关权限与审计目标测试：RED 后 GREEN，2 passed。
+  - 模型网关、权限硬化和审计过滤组合回归：14 passed。
+  - Agent Skill 上传/运行矩阵和 Skill 包安全组合回归：16 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 7.03 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 空白检查：通过，仅有 Windows LF/CRLF 提示。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端模型网关治理权限和审计字段，前端 wire shape 兼容且默认 role/actor 不变。
+- 下一步：
+  - 继续审计其它任务控制和治理写操作是否仍存在成功审计固定 `api` 或缺少角色门禁的问题，优先看 Workflow 草稿/发布、Task pause/resume/cancel/retry 和 Repair Task 动作。
+
+### 2026-06-05 P0 Skill 生命周期成功审计归因修复
+
+- 改动摘要：继续审计敏感治理动作的成功审计。Skill 上传、审批、禁用、废弃、回滚都会影响 Workflow 是否能引用某个能力，属于生产治理关键动作；此前拒绝事件通过 `require_permission()` 能记录请求 actor/role，但成功事件里多处固定 `actor="api"`，导致实际操作者无法从审计日志追责。
+- TDD 证据：
+  - RED：新增 `test_skill_lifecycle_success_audit_records_request_actor_and_role`，用 `actor=alice/bob/carol` 分别执行 disable/approve/deprecate，修复前 `skill.disable` 审计事件仍为 `actor=api`。
+  - GREEN：修复后 `skill.disable`、`skill.approve`、`skill.deprecate` 成功事件均记录请求 actor 与 `Skill Developer` role，detail 保留 reason/role。
+- 代码修复：
+  - `aegisqa/api/routes/skills.py`：`skill_package.upload`、`skill.rollback`、`skill.disable`、`skill.approve`、`skill.deprecate` 成功审计使用请求 actor/role；detail 增加 role 与 reason/filename/target_skill_id 等上下文。
+  - `tests/test_access_control_hardening.py`：新增 Skill 生命周期成功审计归因回归。
+- 变更文件：
+  - `aegisqa/api/routes/skills.py`
+  - `tests/test_access_control_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_access_control_hardening.py::test_skill_lifecycle_success_audit_records_request_actor_and_role -q`
+  - `python -m pytest tests\test_access_control_hardening.py tests\test_skill_package_security.py tests\test_skill_market_versions.py -q`
+  - `python -m pytest tests\test_agent_skill_package_upload.py tests\test_agent_skill_runtime_matrix.py tests\test_api.py::test_audit_events_can_be_filtered_by_actor_and_action -q`
+  - `python -m pytest -q --durations=20`
+  - `git diff --check`
+- 测试结果：
+  - Skill 生命周期审计目标测试：RED 后 GREEN，1 passed。
+  - 权限、Skill 包安全和 Skill 版本治理组合回归：15 passed。
+  - Agent Skill 上传/运行矩阵和审计过滤组合回归：6 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 7.52 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 空白检查：通过，仅有 Windows CRLF 提示。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端审计记录字段，前端 wire shape 与页面行为不变。
+- 下一步：
+  - 继续审计模型网关配置保存和连接别名增删改的审计归因；这些动作涉及模型服务地址与 Secret 引用，同样应支持 actor/role 追责。
+
+### 2026-06-05 P0 原始结果导出审计归因修复
+
+- 改动摘要：继续审计“跑完任务后下载原始结果”的敏感链路。`GET /tasks/{task_id}/results/export` 已有 `report:export` 权限门禁，但成功导出的审计事件此前固定写 `actor=api`，忽略请求中的 `actor` 和 `role`；这会导致 Reviewer/Evaluator 下载包含原始 `row.*`、模型输出和指标的样本级结果后，审计日志无法追责到实际操作者。
+- TDD 证据：
+  - RED：新增 `test_task_result_export_records_request_actor_and_role_for_audit`，用 `role=Reviewer&actor=alice` 导出 JSONL，修复前审计事件仍为 `actor=api`。
+  - GREEN：修复后审计事件顶层记录 `actor=alice`、`role=Reviewer`，detail 中也保留 `role=Reviewer`、导出格式和行数等证据。
+- 代码修复：
+  - `aegisqa/api/routes/task_reports.py`：`task.results.export` 成功审计从固定 `actor="api"` 改为使用请求 `actor`，并显式传入 `role`；detail 增加 `role`。
+  - `tests/test_task_center_api.py`：新增原始结果导出成功审计归因回归。
+- 变更文件：
+  - `aegisqa/api/routes/task_reports.py`
+  - `tests/test_task_center_api.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py::test_task_result_export_records_request_actor_and_role_for_audit -q`
+  - `python -m pytest tests\test_task_center_api.py -q -k "result_export or report_export or export_request or offline_package or audit"`
+  - `python -m pytest tests\test_api.py::test_audit_events_can_be_filtered_by_actor_and_action tests\test_api_interaction_contract.py tests\test_task_report_badcase_pagination.py -q`
+  - `python -m pytest -q --durations=20`
+  - `git diff --check`
+- 测试结果：
+  - 原始结果导出审计目标测试：RED 后 GREEN，1 passed。
+  - 任务导出/审批/审计组合回归：4 passed。
+  - 审计过滤、API 交互契约和报告 Badcase 分页回归：9 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.43 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 空白检查：通过，仅有 Windows CRLF 提示。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端审计记录字段，前端 wire shape 与页面行为不变。
+- 下一步：
+  - 继续审计其它敏感导出和治理动作的审计归因是否存在固定 actor 或缺少 role 的情况，优先看离线包导出、Skill 审批、模型网关配置保存和任务控制动作。
+
+### 2026-06-05 P0 CSV 导出公式注入防护
+
+- 改动摘要：继续审计“跑完任务后导出结果”的真实使用链路。发现 Task 级样本结果 CSV 会导出原始 `row.*`、`context.*`、`metrics.*`，Task 报告 CSV 会导出 Preflight、质量决策、分层分析和 Badcase；这些单元格此前只做普通 CSV 转义，没有处理 `=HYPERLINK(...)`、`+SUM(...)`、`@cmd`、`-1+2` 等表格公式前缀。用户下载后用 Excel/WPS 打开时，文本可能被当公式解释。
+- TDD 证据：
+  - RED：新增 `test_task_result_csv_export_escapes_formula_like_cells`，修复前 `row.question` 原样以 `=HYPERLINK` 开头，`row.reference` 原样以 `+SUM` 开头。
+  - RED：新增 `test_task_report_csv_export_escapes_formula_like_cells`，修复前报告 CSV 的 Preflight summary、status、check message、质量决策、分层字段和 Badcase reason 原样包含公式前缀。
+  - GREEN：修复后危险单元格统一加前置单引号，例如 `'=HYPERLINK(...)`、`'+SUM(...)`、`'@cmd`，并且包含左侧空白的 ` \t@cmd` 也会被识别。
+- 代码修复：
+  - `aegisqa/api/routes/tasks.py`：新增 `_csv_formula_safe_text()`；`_csv_scalar()` 统一调用该 helper；`_build_task_report_export_csv()` 通过内部 `write_row()` 让所有单元格先转安全标量再写出。
+  - `tests/test_task_center_api.py`：新增公式注入数据集 helper 与两个 CSV 导出安全回归。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_center_api.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py::test_task_result_csv_export_escapes_formula_like_cells tests\test_task_center_api.py::test_task_report_csv_export_escapes_formula_like_cells -q`
+  - `python -m pytest tests\test_task_center_api.py -q -k "result_export or report_export or formula_like or legacy_run_report_html_export or lifecycle_report"`
+  - `python -m pytest tests\test_api.py tests\test_api_interaction_contract.py tests\test_task_report_badcase_pagination.py -q`
+  - `python -m pytest -q --durations=20`
+  - `git diff --check`
+- 测试结果：
+  - CSV 公式注入目标测试：RED 后 GREEN，2 passed。
+  - 任务结果/报告导出组合回归：6 passed。
+  - API、交互契约和报告 Badcase 分页回归：12 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.38 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 空白检查：通过，仅有 Windows CRLF 提示。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、Playwright，因为本批只改后端 CSV 导出安全和后端测试；前端下载 wire shape 保持字符串内容不变，只是危险 CSV 单元格前置单引号。
+- 下一步：
+  - 继续审计导出/离线包路径的脱敏一致性，重点看 ZIP 离线包中的 JSON、HTML、CSV 是否都复用同一套安全策略，并检查大结果导出是否需要限速、审计字段和大小水位线。
+
+### 2026-06-05 P1 模型配置下拉化与历史坏 Provider 迁移
+
+- 改动摘要：按用户要求把模型接入配置进一步收敛成清晰下拉。治理页主模型网关和模型连接别名仍通过“模型服务模板”选择 DeepSeek、Qwen、OpenAI 或本地兼容服务；`Provider` 下拉只允许 `mock` 与 `openai_compatible`；`默认模型 / 连接默认模型` 是候选下拉并支持搜索过滤，但不再把搜索词临时变成自定义可保存选项。
+- 兼容修复：如果本地历史配置里已经把 `deepseek-v4-flash` 之类模型名误存到 `provider`，打开配置弹窗时前端会自动把 `provider` 迁移为 `openai_compatible`，并把原值放到默认模型下拉候选里；保存时不会再提交 `"provider":"deepseek-v4-flash"`。
+- TDD 证据：
+  - RED：新增 `治理页会把历史误填的模型名 Provider 迁移成模型下拉值`，修复前保存请求仍提交 `"provider":"deepseek-v4-flash"`。
+  - GREEN：修复后保存请求提交 `"provider":"openai_compatible"` 与 `"default_model":"deepseek-v4-flash"`。
+- 变更文件：
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "历史误填的模型名 Provider|模型网关配置|模型连接别名"`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - 目标交互测试：3 passed、71 skipped。
+  - 前端类型检查：通过。
+- 本轮未执行：
+  - 未重跑前端全量 Vitest、build、Playwright 和后端测试；本批只改治理页模型配置表单和前端交互测试。
+- 下一步：
+  - 如果后续还要支持用户自定义任意模型名，建议新增“自定义模型候选管理”入口，把自定义模型显式登记到模板候选中，而不是在默认模型搜索框里隐式创建。
+
+### 2026-06-04 P0 Legacy Run HTML 报告导出转义
+
+- 改动摘要：继续审计报告/结果导出路径。任务级样本结果导出已经是 `StreamingResponse`，但 legacy `/runs/{run_id}/report/export?file_format=html` 仍把 Python dict 直接插入 `<pre>`，没有 HTML escape。该入口虽然是兼容 Run 级导出，但旧脚本或前端兼容入口仍可能使用；RunReport badcase payload 会包含用户原始 row、context 和模型输出，如果样本里有 `<script>`，导出的 HTML 会原样包含脚本片段。本轮对 legacy Run HTML 导出做 JSON 序列化和 HTML 转义，`run_id` 也同步转义。
+- TDD 证据：
+  - RED：新增 `test_legacy_run_report_html_export_escapes_badcase_payload`，构造包含 `<script>alert(1)</script>` 的失败样本，修复前 HTML 导出包含原始 `<script>`。
+  - GREEN：修复后导出内容不含原始脚本，包含 `&lt;script&gt;alert(1)&lt;/script&gt;`。
+- 代码修复：
+  - `aegisqa/api/routes/reports.py`：Run 级 HTML 导出使用 `json_dumps(payload)` 后 `html.escape()`，并转义 `run_id`。
+  - `tests/test_task_center_api.py`：新增 legacy Run HTML 导出转义回归。
+- 变更文件：
+  - `aegisqa/api/routes/reports.py`
+  - `tests/test_task_center_api.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py::test_legacy_run_report_html_export_escapes_badcase_payload -q`
+  - `python -m pytest tests\test_task_center_api.py -q -k "report_export or result_export or legacy_run_report_html_export or lifecycle_report"`
+  - `python -m pytest tests\test_api.py tests\test_api_interaction_contract.py tests\test_task_report_badcase_pagination.py tests\test_task_center_api.py::test_task_lifecycle_report_and_trace_tree tests\test_task_center_api.py::test_legacy_run_report_html_export_escapes_badcase_payload -q`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - Legacy Run HTML 导出目标测试：RED 后 GREEN，1 passed。
+  - 任务报告/结果导出目标回归：4 passed。
+  - API、交互契约、报告 Badcase 分页和任务报告组合回归：14 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.79 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、E2E，因为本批只改后端 legacy HTML 导出安全转义和后端测试；前端调用该接口时 wire shape 保持不变。
+- 下一步：
+  - 继续审计其它导出入口的安全边界，重点看 CSV 公式注入、Badcase JSONL 大量导出和离线 zip 包内 HTML/CSV 的转义与脱敏一致性。
+
+### 2026-06-04 P1 MySQL JSONL 流并发写一致性
+
+- 改动摘要：继续沿着上一轮 SQLite 审计流一致性做仓储层审计。发现 `MySQLStore.append_jsonl()` 也存在“先 `select max(row_index)+1` 再 `insert`”的并发窗口：两个 API 请求可能同时读到相同 next index，随后撞上 `(stream_key, row_index)` 主键，导致审计事件追加 500 或证据缺失。本轮对 MySQL JSONL 的 `write_jsonl()` 和 `append_jsonl()` 增加按 stream_key 派生的 MySQL named lock，保证同一 JSONL stream 的覆盖写、追加写和 row_index 分配串行化。
+- TDD 证据：
+  - RED：新增 `test_mysql_store_append_jsonl_preserves_concurrent_audit_rows`，fake MySQL 用 barrier 让两个线程同时读到 `audit/events.jsonl-0`，修复前其中一个线程报 `Duplicate entry 'audit/events.jsonl-0' for key 'jsonl_rows.PRIMARY'`。
+  - GREEN：`MySQLStore` 获取 named lock 后，两个并发审计事件稳定写入，JSONL 行数为 2，镜像 `audit_events` 表也包含两条事件。
+- 代码修复：
+  - `aegisqa/storage/mysql_store.py`：新增 `MYSQL_JSONL_LOCK_TIMEOUT_SECONDS`、`_jsonl_stream_lock()`、`_acquire_jsonl_lock()`、`_release_jsonl_lock()` 和 `_jsonl_lock_name()`；`write_jsonl()` 与 `append_jsonl()` 都在同一 stream lock 内执行。
+  - `tests/test_mysql_store_adapter.py`：fake MySQL 增加 named lock、主键冲突和并发 next_index race 模拟；新增 MySQL JSONL 并发追加回归。
+- 变更文件：
+  - `aegisqa/storage/mysql_store.py`
+  - `tests/test_mysql_store_adapter.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_mysql_store_adapter.py::test_mysql_store_append_jsonl_preserves_concurrent_audit_rows -q`
+  - `python -m pytest tests\test_mysql_store_adapter.py tests\test_sqlite_store_adapter.py tests\test_repository_contracts.py -q`
+  - `python -m pytest tests\test_api.py::test_audit_events_can_be_filtered_by_actor_and_action tests\test_task_center_api.py tests\test_skill_package_security.py tests\test_mysql_store_adapter.py -q`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - MySQL 并发 JSONL 目标测试：RED 后 GREEN，1 passed。
+  - MySQL/SQLite/Repository 组合回归：13 passed。
+  - 审计、任务中心、Skill 包和 MySQL 组合回归：38 passed。
+  - 后端全量：100% passed；最慢 1000 行执行测试约 6.55 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未启动真实 MySQL/Docker 服务；本轮使用 fake MySQL 契约测试证明 SQL 调用顺序和并发语义，真实外部服务验证仍属于部署环境验证项。
+  - 未重跑前端 typecheck、Vitest、build、E2E，因为本批只改后端 MySQL 存储事务语义和后端测试；上一轮前端目标测试已通过。
+- 下一步：
+  - 继续审计 Repository/导出/报告路径是否还有“读取完整大对象”的 P1 性能问题；重点看 Task Report 导出和 Run Item 明细是否已经可以分页或流式输出。
+
+### 2026-06-04 P1 模型 Provider 下拉选项收敛
+
+- 改动摘要：按用户反馈继续优化模型网关配置表单。之前 Provider 虽然已经是下拉，但仍把 `openai`、`compatible`、`offline`、`demo` 等兼容别名暴露给用户，容易再次把“协议 Provider”和“厂商/模型名”混在一起。本轮把主模型网关和模型连接别名里的 Provider 下拉收敛为两个用户需要理解的选项：离线 Mock 与真实模型服务（OpenAI-compatible）。DeepSeek、Qwen、OpenAI 和本地兼容服务继续通过“模型服务模板”选择，具体模型名继续通过“默认模型 / 连接默认模型”下拉选择。
+- TDD 证据：
+  - RED：新增前端测试断言 Provider 下拉不能出现 `OpenAI 兼容别名`、`兼容协议别名`、`离线别名`、`Demo 别名`；修复前连接别名弹窗仍出现 `OpenAI 兼容别名`，目标测试失败。
+  - GREEN：移除前端 Provider 下拉里的兼容别名后，目标测试通过。
+- 变更文件：
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "模型网关配置|模型连接别名"`
+- 测试结果：
+  - RED 后 GREEN，2 passed、71 skipped。
+- 本轮未执行：
+  - 未重跑全量前端测试、build、Playwright 和后端测试；本批只收敛治理页模型 Provider 下拉选项，并已用目标交互测试覆盖。
+- 下一步：
+  - 如果继续优化模型接入，可把 Provider、模型服务模板和默认模型候选改为后端 `GET /model-gateway/options` 返回，避免未来新增服务商时同时改前端常量。
+
+### 2026-06-04 P1 SQLite 审计流并发写一致性
+
+- 改动摘要：继续审计 SQLite 轻量模式的长期试用风险。发现 `SQLiteStore.append_jsonl()` 先 `select max(row_index)+1` 再 `insert`，默认 deferred 事务会让多个并发请求同时读到同一个 next index，随后撞上 `(stream_key, row_index)` 主键。审计日志、Annotation、报告导出审批和治理动作都依赖 append-only 事件流；小团队多人同时操作时，这会表现为 500 或丢失审计证据。本轮给 SQLite JSONL 覆盖写和追加写显式加 `BEGIN IMMEDIATE`，让同一个 SQLite 文件内的 row_index 分配与写入串行化。
+- TDD 证据：
+  - RED：新增 `test_sqlite_store_append_jsonl_preserves_concurrent_rows`，20 个线程各写 20 条审计流，修复前出现 19 个 `UNIQUE constraint failed: jsonl_rows.stream_key, jsonl_rows.row_index`。
+  - GREEN：修复后并发测试稳定写入 400 条，排序后事件序号完整。
+- 代码修复：
+  - `aegisqa/storage/sqlite_store.py`：`write_jsonl()` 与 `append_jsonl()` 在读写同一 stream 前执行 `begin immediate`，避免覆盖写和追加写交错，也避免并发 append 同时分配相同 row_index。
+  - `tests/test_sqlite_store_adapter.py`：新增 SQLite JSONL 并发写一致性回归。
+- 变更文件：
+  - `aegisqa/storage/sqlite_store.py`
+  - `tests/test_sqlite_store_adapter.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_sqlite_store_adapter.py::test_sqlite_store_append_jsonl_preserves_concurrent_rows -q`
+  - `python -m pytest tests\test_sqlite_store_adapter.py tests\test_repository_contracts.py tests\test_json_store_locking.py -q`
+  - `python -m pytest tests\test_api.py::test_audit_events_can_be_filtered_by_actor_and_action tests\test_task_center_api.py tests\test_skill_package_security.py tests\test_sqlite_store_adapter.py -q`
+  - `python -m pytest -q --durations=20`
+  - `git diff --check`
+- 测试结果：
+  - SQLite 并发 JSONL 目标测试：RED 后 GREEN，1 passed。
+  - SQLite/Repository/JSON Store 锁回归：11 passed。
+  - 审计、任务中心、Skill 包和 SQLite 组合回归：38 passed。
+  - 后端全量：100% passed；最慢 1000 行测试约 6.93 秒；SQLite 并发测试约 1.31 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 空白检查：通过，仅有 Windows CRLF 提示。
+- 本轮未执行：
+  - 未重跑前端 typecheck、Vitest、build、E2E，因为本批只改后端 SQLite 存储事务和后端测试；上一轮前端全量与 E2E 已通过。
+- 下一步：
+  - 继续审计 MySQL adapter 的 JSONL append 事务语义和 fake connection 测试覆盖；如果无法实跑 MySQL/Docker，需要在状态文件中明确环境限制并至少强化契约测试。
+
+### 2026-06-04 P0/P1 JSON Store 并发读锁与全量 E2E 收束
+
+- 改动摘要：继续处理上一轮全量 Playwright 暴露的唯一失败：`task-workflow.spec.ts` 在上传 Skill 包后立刻运行合约测试时返回 500。日志定位到 `POST /skills/{skill_id}/contract-test` 写回 `skill_packages/pkg-*.json` 的 `os.replace`，Windows 报 `PermissionError [WinError 5]`。根因不是 Skill 合约执行失败，而是 `JsonStore.write_json/read_json/iter_jsonl` 已使用 per-file lock，但 `list_json()` 扫描集合时直接 `read_text()`，前端和 E2E 并发轮询 `GET /skills` / `GET /skills/packages` 时可能持有读句柄，阻塞同一文件的原子替换。本轮让 `list_json()` 读取每个文档时也遵守同一把文档锁。
+- TDD 证据：
+  - RED：新增 `test_json_store_list_json_waits_for_document_file_lock`，人为持有 `skill_packages/pkg-a.json.lock` 后并发调用 `list_json(["skill_packages"])`，修复前测试失败，证明列表读取绕过文件锁。
+  - GREEN：修复后目标测试通过，原失败 E2E 单测 `task-workflow.spec.ts` 通过，全量 Playwright 14 passed。
+- 代码修复：
+  - `aegisqa/storage/json_store.py`：`list_json()` 对每个 JSON 文档读取前进入 `FileLock(self._lock_path(path))`，并在文件被并发删除时跳过。
+  - `tests/test_repository_contracts.py`：新增 JSON Store 列表读锁并发回归测试。
+- 变更文件：
+  - `aegisqa/storage/json_store.py`
+  - `tests/test_repository_contracts.py`
+  - `docs/PROJECT_STATUS.md`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+- 验证命令：
+  - `python -m pytest tests\test_repository_contracts.py::test_json_store_list_json_waits_for_document_file_lock -q`
+  - `python -m pytest tests\test_repository_contracts.py tests\test_skill_package_security.py -q`
+  - `cd frontend && npm run e2e -- task-workflow.spec.ts`
+  - `cd frontend && npm run e2e`
+  - `python -m pytest -q --durations=20`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm test`
+- 测试结果：
+  - JSON Store 列表读锁目标测试：RED 后 GREEN，1 passed。
+  - Repository + Skill 包安全回归：16 passed。
+  - 原失败 Playwright 用例：1 passed。
+  - 全量 Playwright E2E：14 passed，6 workers。
+  - 后端全量：100% passed；最慢 1000 行测试约 7.03 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+  - 前端类型检查：通过。
+  - 前端生产构建：通过。
+  - 前端单测：12 files、131 passed。
+- 下一步：
+  - 继续下一轮审计，优先查找是否仍有 P0/P1 缺口；重点关注 JSON Store 之外的并发写路径、SQLite 轻量模式下的长期试用体验，以及是否还有页面把旧失败/超时结论保留在文档或 UI 中。
+
+### 2026-06-04 P1 Dashboard 与产品页 Run 摘要轻量化
+
+- 改动摘要：继续审计 Run 列表轻量分页后的产品页调用链，发现 `/dashboard/summary` 仍调用 `ctx.runner.list_runs()` 构造全部 RunRecord；React 概览页为了展示一句“底层 Run 仍保留为执行批次”也会请求 legacy `/runs` 完整列表；Experiment 和 CI Gate 页面用 legacy `/runs` 填 Run 选择器。随着 Run Item、Step Trace、context 增长，这些首屏和选择器会无谓拉取完整 Attempt 明细。本轮把 Dashboard 改为 `list_run_summaries()`，只在计算最近 completed Run 的 pass_rate 时读取一条完整 Run；概览页直接使用 Dashboard `run_count`；Experiment/CI Gate 用 `GET /runs?page=1&page_size=100` 的轻量摘要填下拉。
+- TDD 证据：
+  - RED：新增 `test_dashboard_summary_uses_run_summaries_without_listing_full_items`，把 `runner.list_runs` 替换为会抛错的测试替身，修复前 `/dashboard/summary` 直接失败。
+  - RED：新增前端测试“概览页不再请求底层 Run 完整列表”，修复前请求记录中出现 legacy `/runs`。
+  - RED：更新 Experiment 与 CI Gate 页面测试，要求它们请求 `/runs?page=1&page_size=100` 且不请求 legacy `/runs`，修复前均失败。
+  - GREEN：后端和前端目标测试全部通过。
+- 代码修复：
+  - `aegisqa/api/routes/governance.py`：Dashboard 使用 `list_run_summaries()` 计算 run_count、latest_run 和状态计数；最近 completed report 只按摘要中的 run_id 读取一条完整 Run；latest_run 改为轻量摘要，不返回 `items` / `queue_messages`。
+  - `frontend/src/pages/OverviewPage.tsx`：移除 `api.runs` 查询，使用 Dashboard `run_count` 决定是否展示底层 Run 提示。
+  - `frontend/src/api/client.ts`：新增 `runsPage()` client，调用兼容式轻量分页。
+  - `frontend/src/types/task.ts`：新增 `RunSummary` 与 `RunPageResult`，Dashboard `latest_run` 改为轻量摘要类型。
+  - `frontend/src/pages/ExperimentsPage.tsx`、`frontend/src/pages/CIGatesPage.tsx`：Run 下拉改为读取轻量分页摘要。
+  - `frontend/src/test/App.test.tsx`、`frontend/src/test/workbenchTestHarness.tsx`：新增/更新页面请求契约和分页 mock。
+- 变更文件：
+  - `aegisqa/api/routes/governance.py`
+  - `tests/test_api_interaction_contract.py`
+  - `frontend/src/pages/OverviewPage.tsx`
+  - `frontend/src/pages/ExperimentsPage.tsx`
+  - `frontend/src/pages/CIGatesPage.tsx`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/types/task.ts`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_api_interaction_contract.py::test_dashboard_summary_uses_run_summaries_without_listing_full_items -q`
+  - `python -m pytest tests\test_api_interaction_contract.py::test_runs_support_compatible_lightweight_server_side_pagination tests\test_api_interaction_contract.py::test_dashboard_summary_uses_run_summaries_without_listing_full_items tests\test_api_interaction_contract.py::test_frontend_list_and_summary_api_contract -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "概览页不再请求底层 Run 完整列表"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Experiment 页面展示|CI Gate 页面支持"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "概览页|首页|Experiment|CI Gate"`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - Dashboard 轻量摘要目标测试：RED 后 GREEN，1 passed。
+  - Run/Dashboard 后端目标回归：3 passed。
+  - 概览页 Run 请求目标测试：RED 后 GREEN，1 passed。
+  - Experiment/CI Gate Run 摘要请求目标测试：RED 后 GREEN，2 passed。
+  - 首页/Experiment/CI Gate 前端回归：6 passed。
+  - 前端类型检查：通过。
+  - 后端测试仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 尚未重跑前端生产构建和 Playwright E2E；下一步会在继续审计或收束本批次时补跑。
+- 下一步：
+  - 继续检查其它产品页是否仍在请求 legacy `/runs` 完整列表；如果只剩真正需要完整 Run 明细的动作，再进入 Run Item JSONL/SQLite 明细拆分设计。
+
+### 2026-06-04 P1 Run 列表轻量分页
+
+- 改动摘要：继续审计 Run Item 持久化拆分前的容量风险，发现 `/tasks`、Run Trace 和 Badcase 列表已经支持兼容式分页，但底层 `GET /runs` 仍固定返回 `RunRecord[]`，会在列表场景把每个 Run 的完整 `items`、`queue_messages`、Step 轨迹和 context 一起序列化。虽然产品主执行中心已经围绕 Task 列表运行，但 Experiment、CI Gate 和旧脚本仍可能读取 `/runs` 作为 Attempt 列表。本轮新增兼容式轻量分页：不带分页参数时保持旧完整数组；带 `page/page_size` 时返回 `{ items, pagination }`，其中每个 item 只包含 Run 摘要、计数、Workflow/Dataset 引用和时间，不返回样本明细。
+- TDD 证据：
+  - RED：新增 `test_runs_support_compatible_lightweight_server_side_pagination`，修复前 `GET /runs?page=2&page_size=2` 仍返回 list，访问 `pagination` 失败。
+  - GREEN：实现后目标测试通过，并验证 legacy `/runs` 仍包含 `items` 与 `queue_messages`，分页响应不包含这两个大字段，且支持 `status=completed` 过滤后分页。
+- 代码修复：
+  - `aegisqa/engine/runner.py`：新增 `list_run_summaries()` 和 `_run_summary_from_payload()`，从持久化 Run JSON 直接计算列表摘要，避免为列表构造完整 `RunItem` 对象。
+  - `aegisqa/api/routes/tasks.py`：`GET /runs` 增加 `status/dataset_id/workflow_version_id/page/page_size` 参数；无分页保持旧 `RunRecord[]`，显式分页时返回轻量摘要分页对象。
+  - `tests/test_api_interaction_contract.py`：新增 Run 列表兼容式轻量分页契约测试。
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`：补充 Run 列表分页能力。
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`：更新 FR-EX-01 与市场对标 Task/Run 说明。
+- 变更文件：
+  - `aegisqa/engine/runner.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_api_interaction_contract.py`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_api_interaction_contract.py::test_runs_support_compatible_lightweight_server_side_pagination -q`
+  - `python -m pytest tests\test_api_interaction_contract.py tests\test_api.py tests\test_task_center_api.py::test_task_lifecycle_report_and_trace_tree tests\test_platform_core.py::test_workflow_runner_batches_full_run_snapshot_writes -q`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - Run 列表轻量分页目标测试：RED 后 GREEN，1 passed。
+  - Run/Task/API 相关回归：12 passed。
+  - 后端全量：100% passed，用时约 62.3 秒；最慢 1000 行测试约 6.49 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端门禁，因为本批次只改后端兼容 API、后端测试和文档；前端当前执行中心使用 `GET /tasks?page=...`，未改前端 wire shape。
+- 下一步：
+  - 继续审计 Run Item 从单个 Run JSON 拆分为 JSONL/SQLite item 表的可行性；当前轻量分页已降低列表序列化成本，但完整 Run 详情、报告和导出仍会读取完整 Run 明细。
+
+### 2026-06-04 P1 RunReport 单次遍历聚合
+
+- 改动摘要：继续审计 Run Report 聚合与 Run Item 持久化容量风险，发现 `aggregate_run_report` 会对同一个 `run.items` 至少重复遍历 7 次，分别统计完成/失败、latency、label、Badcase、item metrics 和 step billing metrics。报告中心、治理概览、导出、实验对比、修复任务等入口都会调用该函数，随着 Run Item 增长会放大 CPU 和对象访问成本。本轮把 RunReport 聚合收敛为单次遍历，在同一循环里完成状态、Badcase、latency、item metrics、模型 token/cost usage 汇总，保持输出字段兼容。
+- TDD 证据：
+  - RED：新增 `test_aggregate_run_report_scans_items_once`，用可计数 `CountingItems` 包装 Run items，修复前 `items.iteration_count == 7`。
+  - GREEN：重构后目标测试通过，`items.iteration_count == 1`，同时验证 pass_rate、badcase_count、total_tokens 和 cost 仍正确。
+- 代码修复：
+  - `aegisqa/reports/aggregator.py`：`aggregate_run_report` 改为单次遍历 Run Item；在循环内累计 completed/failed/pass_count、latencies、error_distribution、badcases、item numeric metrics、step billing token/cost/cost_source/currency。
+  - `tests/test_platform_core.py`：新增 `CountingItems` 和 RunReport 单次遍历回归测试。
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`：更新 FR-RP-01 Run 指标聚合说明，记录单次遍历性能边界。
+- 变更文件：
+  - `aegisqa/reports/aggregator.py`
+  - `tests/test_platform_core.py`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_platform_core.py::test_aggregate_run_report_scans_items_once -q`
+  - `python -m pytest tests\test_platform_core.py::test_workflow_runner_executes_chunked_items_and_generates_report tests\test_task_center_api.py::test_task_lifecycle_report_and_trace_tree tests\test_task_report_badcase_pagination.py -q`
+  - `python -m pytest tests\test_platform_core.py tests\test_task_center_api.py::test_task_lifecycle_report_and_trace_tree tests\test_task_report_badcase_pagination.py tests\test_report_segment_analysis.py -q`
+  - `python -m pytest tests\test_product_extensions.py tests\test_productization_api.py tests\test_risk_analytics_hardening.py tests\test_trustworthy_evaluation_enhancements.py -q`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - RunReport 单次遍历目标测试：RED 后 GREEN，1 passed。
+  - 平台核心报告与任务报告目标回归：3 passed。
+  - 平台核心、任务报告、分层分析回归：21 passed。
+  - 产品化、风险分析、可信评估回归：23 passed。
+  - 后端全量：100% passed，用时约 59.2 秒；最慢 1000 行测试约 6.55 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端门禁，因为本批次只改后端聚合器、后端测试和文档；前端 API wire shape 未变。
+- 下一步：
+  - 继续审计 Run Item 持久化拆分：当前 RunRecord 仍把所有 items 保存在单个 Run JSON 中，已通过批量保存缓解写入频率，但长期任务历史容量仍可进一步通过 JSONL/SQLite item 表优化。
+
+### 2026-06-04 P1 Badcase 列表兼容式服务端分页
+
+- 改动摘要：继续第二轮 P0/P1 审计，发现 Task Report、Trace Flow、Trace Tree、Run Trace 已支持服务端分页，但独立 `GET /badcases` 仍只返回数组，筛选后也会一次性返回所有 Badcase。Badcase 是人工纠错、Golden 回流和治理复盘的主对象之一，大量历史坏例会拖慢列表接口和前端解析。本轮给 `GET /badcases` 增加兼容式分页：不带 `page/page_size` 时保持 legacy 数组响应；带分页参数时返回 `{ items, pagination }`，并支持先按 status/problem_type/reason/skill/query/score 筛选后分页。`/badcases/export` 仍导出全量，不被分页截断。
+- TDD 证据：
+  - RED：新增 `test_badcases_support_compatible_server_side_pagination`，修复前 `GET /badcases?page=2&page_size=5` 仍返回 list，访问 `pagination` 失败。
+  - GREEN：实现分页后，目标测试通过，验证 legacy 数组响应、分页响应、筛选后分页和全量导出都符合预期。
+- 代码修复：
+  - `aegisqa/api/routes/reports.py`：`GET /badcases` 新增 `Request`、`page`、`page_size` 参数；按 query 参数是否包含分页字段决定返回 legacy 数组或分页对象；新增 `_paginate_payloads` 复用分页结构。
+  - `tests/test_api_interaction_contract.py`：新增 Badcase 兼容式服务端分页测试。
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`：补充 Badcase 状态流转里的分页能力和覆盖证据。
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`：更新 FR-RP-03 Badcase 明细筛选验收描述。
+- 变更文件：
+  - `aegisqa/api/routes/reports.py`
+  - `tests/test_api_interaction_contract.py`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_api_interaction_contract.py::test_badcases_support_compatible_server_side_pagination -q`
+  - `python -m pytest tests\test_api_interaction_contract.py tests\test_api_frontend_contract.py::test_source_materialize_trace_badcase_filter_and_error_contract tests\test_full_prd_gap_closure.py tests\test_product_extensions.py -q`
+  - `python -m pytest tests\test_trace_flow_api.py tests\test_task_report_badcase_pagination.py -q`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - Badcase 分页目标测试：RED 后 GREEN，1 passed。
+  - Badcase/API 相关回归：13 passed。
+  - Trace/Task Report Badcase 分页回归：4 passed。
+  - 后端全量：100% passed，用时约 59.7 秒；最慢 1000 行测试约 6.48 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端门禁，因为本批次只改后端 API、后端测试和文档；上一批已经完成 `npm run typecheck`、`npm test`、`npm run build` 和 `npm run e2e`。
+- 下一步：
+  - 继续审计 Run Report 聚合是否仍需对更大数据量做摘要缓存，或把 Run Item 从单个大 JSON 拆分到 JSONL/SQLite 表以提升长期任务历史容量。
+
+### 2026-06-04 P1 Run Trace 兼容式服务端分页
+
+- 改动摘要：审计发现 Trace Tree、Trace Flow 已有服务端分页，但底层 `GET /runs/{run_id}/trace` 仍会一次性返回所有 Run Item。单个 item 包含 `context_snapshot`、metrics、Step 输入输出和错误，任务样本变多后会造成网络传输和 JSON 序列化压力。本轮给 Run Trace 增加兼容式分页：无 `page/page_size` 参数时保持 legacy 完整响应；带分页参数时只返回当前页 items，并附带 pagination。
+- TDD 证据：
+  - RED：新增 `test_run_trace_supports_compatible_server_side_pagination`，修复前请求 `/runs/{run_id}/trace?page=2&page_size=5` 没有 `pagination` 字段，仍返回全部 12 条。
+  - GREEN：实现分页后，目标测试通过，并验证 legacy 无分页请求仍不含 `pagination` 且返回全部 items。
+- 代码修复：
+  - `aegisqa/api/routes/reports.py`：`GET /runs/{run_id}/trace` 新增 `Request`、`page`、`page_size` 参数；通过 query 参数是否出现判断是否启用分页；抽出 `_run_trace_item_payload` 保持分页前后 item wire shape 一致。
+  - `tests/test_trace_flow_api.py`：新增 Run Trace 兼容式分页回归测试。
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`：补充 Run Trace 底层 Attempt 轨迹分页能力。
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`：更新 FR-EX-05 Step 轨迹验收描述。
+- 变更文件：
+  - `aegisqa/api/routes/reports.py`
+  - `tests/test_trace_flow_api.py`
+  - `docs/INTERACTION_ACCEPTANCE_MATRIX.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `python -m pytest tests\test_trace_flow_api.py::test_run_trace_supports_compatible_server_side_pagination -q`
+  - `python -m pytest tests\test_trace_flow_api.py tests\test_trace_tree_pagination.py tests\test_task_center_api.py::test_task_lifecycle_report_and_trace_tree tests\test_api_interaction_contract.py -q`
+  - `python -m pytest tests\test_model_gateway.py tests\test_platform_core.py::test_runner_handles_1000_rows_with_lightweight_queue_and_rate_limit -q`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - 前端类型检查：通过。
+  - 前端单测：12 个测试文件、130 passed。
+  - 前端生产构建：通过，3836 modules transformed。
+  - Playwright E2E：14 passed。
+  - Run Trace 目标测试：RED 后 GREEN，1 passed。
+  - Trace/Task/API 相关后端回归：10 passed。
+  - 模型网关 + 1000 行执行回归：10 passed。
+  - 后端全量：100% passed，用时约 61.2 秒；最慢 1000 行测试约 6.46 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 下一步：
+  - 继续第二轮 P0/P1 审计，重点检查仍未分页的 Badcase 全量列表、Run Report 聚合和 Run Item 持久化拆分是否已经达到“小团队长期试用”要求。
+
+### 2026-06-04 P1 模型 Provider 历史配置迁移与执行器落盘性能优化
+
+- 改动摘要：继续收尾模型接入下拉化后的后端兼容问题，并修复全量后端测试暴露出的 1000 行 Workflow 执行测试过慢问题。旧版 UI 曾允许把具体模型名误填进 Provider，例如 `deepseek-v4-flash`、`qwen-plus`；现在后端加载本地配置时会自动迁移为 `openai_compatible`，并把原 Provider 值保留到 `default_model`。同时 WorkflowRunner 不再每条样本都完整读写 Run JSON，而是按批次保存执行快照，暂停/取消通过 `run_controls/{run_id}.json` 小文件传播。
+- 根因证据：
+  - Provider 问题：新增测试证明 `settings/model_gateway.json` 或 `settings/model_gateway_connections.json` 中的历史 Provider 值会导致运行期配置不兼容，修复后会自动迁移并回写本地 store。
+  - 性能问题：`test_runner_handles_1000_rows_with_lightweight_queue_and_rate_limit` 在优化前单独执行超过 180 秒仍未结束；分段 profiling 显示 `execute_run` 约 200 秒，瓶颈是每条样本前后读取完整 Run JSON、每条样本后完整写 Run JSON。
+- 代码修复：
+  - `aegisqa/models/gateway.py`：新增 `SUPPORTED_MODEL_PROVIDERS`、历史 Provider 迁移逻辑，并在主配置和连接别名加载时自动迁移、脱敏、回写。
+  - `aegisqa/api/routes/models.py`：复用模型网关模块里的 Provider 白名单，避免 API 路由和底层网关白名单分叉。
+  - `tests/test_model_gateway.py`：新增主配置和连接别名的历史 Provider 迁移测试。
+  - `tests/conftest.py`：新增全局测试隔离夹具，默认清空模型网关环境变量与运行期全局状态，避免本机真实模型配置污染单测。
+  - `aegisqa/engine/runner.py`：新增 `progress_save_interval_items`，默认每 25 条或遇到失败/暂停/取消时保存完整 Run；新增轻量 `run_controls` 控制文件，执行循环只读小控制文件检查暂停/取消。
+  - `tests/test_platform_core.py`：新增 `CountingJsonStore` 和批量保存回归测试，锁住“批量执行不能逐条完整读写 Run 快照”的性能边界。
+- 变更文件：
+  - `aegisqa/models/gateway.py`
+  - `aegisqa/api/routes/models.py`
+  - `aegisqa/engine/runner.py`
+  - `tests/test_model_gateway.py`
+  - `tests/test_platform_core.py`
+  - `tests/conftest.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_model_gateway.py -q`
+  - `python -m pytest tests\test_platform_core.py::test_workflow_runner_batches_full_run_snapshot_writes tests\test_platform_core.py::test_workflow_runner_honors_pause_requested_during_active_execution -q`
+  - `Measure-Command { python -m pytest tests\test_platform_core.py::test_runner_handles_1000_rows_with_lightweight_queue_and_rate_limit -q --durations=5 }`
+  - `python -m pytest tests\test_platform_core.py -q --durations=10`
+  - `python -m pytest -q --durations=20`
+- 测试结果：
+  - 模型网关测试：9 passed。
+  - 批量保存与暂停控制目标测试：2 passed。
+  - 1000 行目标测试：约 17.03 秒完成；平台核心整文件中该测试约 15.87 秒；全量 pytest 中该测试约 12.44 秒。
+  - 平台核心测试：17 passed。
+  - 后端全量测试：100% passed，用时约 130.1 秒；仍有 Windows `.pytest_cache` warning，不影响功能结果。
+- 本轮未执行：
+  - 未重跑前端 `npm test/typecheck/build`，因为本批次只改后端、后端测试夹具和状态文档；前端模型默认模型下拉在上一条记录中已完成目标测试、类型检查和构建。
+- 下一步：
+  - 如果继续性能收口，可把 Run item 明细拆成 JSONL 或 SQLite 表，完整 Run 只保存摘要；这样大批量任务的报告、分页和 trace tree 会比当前“批量保存完整 Run”更稳。
+
+### 2026-06-04 P1 模型默认模型下拉化
+
+- 改动摘要：按用户要求把模型接入里仍需手写的“默认模型”做成下拉列表。治理页“配置模型网关”和“新增模型连接”两个弹窗中，`默认模型` / `连接默认模型` 均改为可搜索 Select；选择 DeepSeek、Qwen、OpenAI、本地兼容服务模板后，会联动展示该服务常用模型候选。Provider 仍然是底层协议下拉，具体模型名不再填到 Provider。
+- 交互细节：
+  - DeepSeek 模板候选：`deepseek-chat`、`deepseek-reasoner`、`deepseek-v4-flash`。
+  - Qwen 模板候选：`qwen-plus`、`qwen-max`、`qwen-turbo`、`qwen-long`。
+  - OpenAI 模板候选：`gpt-4o-mini`、`gpt-4o`、`gpt-4.1-mini`、`gpt-4.1`。
+  - 本地兼容服务候选：`local-model`、`qwen2.5`、`llama3.1`、`deepseek-r1`。
+  - 如果已有配置或搜索词不在候选中，也会进入下拉选项，避免新模型名被前端限制。
+- TDD 证据：
+  - RED：先改 `frontend/src/test/App.test.tsx`，要求“默认模型”和“连接默认模型”必须是 `combobox` 并能从下拉选择 `deepseek-chat`；修复前 2 failed，失败点为找不到对应 combobox，页面仍是普通输入框。
+  - GREEN：实现 Select 下拉后，目标测试 2 passed。
+- 代码修复：
+  - `frontend/src/pages/GovernancePage.tsx`：`modelServiceTemplates` 增加 `default_models` 候选；新增 `buildDefaultModelOptions`；通过 `Form.useWatch` 按模板/当前值/搜索词生成模型下拉选项；主模型网关和连接别名表单的默认模型字段改为可搜索 Select。
+  - `frontend/src/test/App.test.tsx`：模型网关配置和模型连接别名测试改为验证默认模型下拉行为。
+- 变更文件：
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "模型网关配置|模型连接别名"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run build`
+  - `git diff --check`
+- 测试结果：
+  - 目标测试：2 passed。
+  - 前端类型检查：`tsc -b` 通过。
+  - 前端生产构建：`vite build` 通过，3836 modules transformed。
+  - 空白检查：未发现空白错误；仍有 Windows LF/CRLF 转换 warning，不影响结果。
+- 本轮未执行：
+  - 未重跑后端 `python -m pytest -q`，因为本轮只改治理页前端表单、前端测试和状态文档。
+  - 未重跑全量 Playwright E2E，当前改动只影响治理页模型配置弹窗，已用前端目标测试覆盖主交互。
+- 下一步：
+  - 如果继续优化模型接入，可把模型候选从前端静态模板升级为后端 `GET /model-gateway/options`，未来按 Provider 或连接别名动态返回可用模型。
+
+### 2026-06-04 P1 数据集页 demo 字段预览兜底移除
+
+- 同步说明：该批次已在上一轮完成并验证，本次补记到项目状态，避免进度丢失。
+- 改动摘要：继续生产误导兜底审计，定位到 `DatasetsPage` 在没有真实 Dataset Version 时会回退展示 `fieldPreview` demo 字段，导致空项目也能看到 `row.question`、`row.reference`、`row.expected_label`。本轮移除生产页 `fieldPreview` 兜底，真实为空时展示“暂无 Dataset Version”的空态，并把顶部说明改为动态文案。
+- 代码修复：
+  - `frontend/src/pages/DatasetsPage.tsx`：移除 `fieldPreview` 导入；无真实数据时 `previewRows=[]`；字段映射说明根据真实字段动态生成；表格空态提示用户先上传 CSV/JSONL 或通过 Source Skill 物化数据。
+  - `frontend/src/test/DatasetsPage.test.tsx`：新增空 `/datasets` 不展示 demo 字段的回归测试。
+  - `frontend/e2e/task-upload.spec.ts`：新增真实浏览器空列表不展示 `row.question` 的 E2E。
+- 变更文件：
+  - `frontend/src/pages/DatasetsPage.tsx`
+  - `frontend/src/test/DatasetsPage.test.tsx`
+  - `frontend/e2e/task-upload.spec.ts`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/DatasetsPage.test.tsx -t "接口没有 Dataset"`
+  - `cd frontend && npm test -- src/test/DatasetsPage.test.tsx`
+  - `cd frontend && npm run e2e -- task-upload.spec.ts`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `rg -n "from '../data/demo'|fieldPreview|demoWorkflowGraph|demoSkills" frontend/src/pages frontend/src/components frontend/src/App.tsx -S --glob '!**/*.test.*'`
+- 测试结果：
+  - RED：目标测试修复前失败，`row.question` 出现在空数据集页面说明中。
+  - GREEN：`DatasetsPage.test.tsx` 2 passed。
+  - 数据集上传 Playwright：2 passed。
+  - 前端类型检查：通过。
+  - 前端生产构建：通过，3836 modules transformed。
+  - Playwright E2E 全量：14 passed。
+  - 生产页 demo 引用复扫：无生产命中。
+- 下一步：
+  - 继续审计 Report、Run、Overview 是否还有静态 demo fallback 影响空项目判断。
+
+### 2026-06-04 P1 Workflow 设计器直接入口空白画布
+
+- 改动摘要：继续上一批生产误导审计，发现 `/workflows/designer` 无草稿路由没有注册，用户直接访问会出现空主区和 React Router `No routes matched`；同时设计器组件内部默认 state 仍基于 `demoWorkflowGraph`，一旦该入口被注册就会默认出现 RAG demo。当前批次补齐无草稿设计器路由，并把设计器默认图改成空白 Source->Output；模板加载改为读取 `/workflow-templates` 返回的真实 graph，缺 graph 时才回退空白图。
+- 根因证据：
+  - RED：新增 `Workflow 设计器直接入口使用空白画布，不默认注入 RAG demo graph`，修复前失败并输出 `No routes matched location "/workflows/designer"`。
+  - 源码证据：修复前 `WorkflowDesignerPage.tsx` 初始 `nodes/edges/workflowName/selectedNodeId` 都来自 `demoWorkflowGraph`，`loadSelectedWorkflow(template)` 也固定加载 demo graph。
+- 代码修复：
+  - `frontend/src/App.tsx`：新增 `/workflows/designer` 路由，直接进入设计器时不再空白。
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`：移除生产页 `demoWorkflowGraph` 导入；新增 `createBlankWorkflowGraph`，默认画布为 `未命名 Workflow` + Source->Output；模板加载优先使用模板 graph。
+  - `frontend/src/test/App.test.tsx`：新增直接入口回归测试，断言不显示 RAG demo 名称、`llm.call@0.1.0` 和 `字段路径 prompt`。
+  - `frontend/e2e/workflow-designer.spec.ts`：新增 Playwright 直接入口测试，覆盖真实浏览器里的 `/workflows/designer` 空白画布。
+- 变更文件：
+  - `frontend/src/App.tsx`
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/e2e/workflow-designer.spec.ts`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 设计器直接入口"`
+  - `cd frontend && npm test -- src/test/App.test.tsx src/test/WorkflowDesignerPage.test.tsx -t "Workflow"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run e2e -- workflow-designer.spec.ts`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `rg -n "demoWorkflowGraph" frontend/src -S --glob '!frontend/src/test/**' --glob '!frontend/dist/**' --glob '!frontend/node_modules/**'`
+- 测试结果：
+  - RED：直接入口目标测试修复前 1 failed，确认无路由且无法进入设计器。
+  - GREEN：直接入口目标测试 1 passed。
+  - Workflow 相关前端回归：2 个测试文件、27 passed。
+  - 前端类型检查：`tsc -b` 通过。
+  - Workflow 设计器 Playwright：7 passed。
+  - 前端生产构建：`vite build` 通过，3837 modules transformed。
+  - Playwright E2E 全量：13 passed。
+  - 源码复扫：生产页面不再引用 `demoWorkflowGraph`；剩余命中仅在 `frontend/src/pages/workflowDesigner/graphModel.test.ts` 测试 fixture 中。
+- 下一步：
+  - 继续审计是否还有“静态 demo 数据参与生产页面默认展示”的路径，优先关注 Dataset、Report、Run 详情的空态和 mock fallback。
+  - 继续压缩前端全量 Vitest 耗时，当前测试已通过但重页面测试仍偏慢。
+
+### 2026-06-04 P0/P1 Workflow 市场 demo graph 注入移除
+
+- 改动摘要：按目标模式继续审计生产误导风险，定位到 `WorkflowMarketPage` 会把 RAG demo graph 用作真实新建草稿、模板创建和发布版本复制的兜底。这会让用户明明没有选择 `question/reference` 字段，却在创建任务 Preflight 中看到这些旧示例字段。本轮改为：新建 Workflow 只生成最小 Source->Output 空白图；模板接口返回真实可编辑 graph，前端从模板创建时只使用模板 graph；复制发布版本时优先复制版本 graph，缺 graph 时才按 steps 生成线性图，最后才回退空白图。
+- 根因证据：
+  - RED：`cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 市场新建|Workflow 市场从模板"` 修复前 2 failed，新建请求体仍包含 `llm.call@0.1.0`，模板创建也返回 demo graph 的 `answer/judge_a/judge_b/join_quality/report` 节点。
+  - RED：`python -m pytest tests/test_api.py::test_api_runs_full_mvp_flow -q` 修复前失败，`/workflow-templates` 的 RAG 模板没有 `graph` 字段。
+- 代码修复：
+  - `frontend/src/pages/WorkflowMarketPage.tsx`：移除 `demoWorkflowGraph` 导入；新增 `createBlankWorkflowGraph`、`graphFromTemplate`、`graphFromWorkflowVersion` 和 `isWorkflowGraph`，确保市场页不再偷偷生成 RAG demo graph。
+  - `aegisqa/workflows/templates.py`：`WorkflowTemplate` 新增可选 `graph` 字段；内置 RAG、ASR、Prompt 模板会把线性 steps 转为 Source -> Skill... -> Output 的可视化图。
+  - `tests/test_api.py`：主 API 链路断言 `/workflow-templates` 返回的 RAG 模板包含 nodes、edges 和 `llm.call@0.1.0` Skill 节点。
+  - `frontend/e2e/workflow-designer.spec.ts`：需要 RAG 流程的 E2E 用例改为通过 API 显式创建测试 graph；市场“新建 Workflow”只用于验证空白流程和 Palette，不再依赖产品默认 demo。
+  - `frontend/src/test/App.test.tsx`：新增/维护市场新建与模板创建回归测试，覆盖不回退 demo graph。
+- 变更文件：
+  - `frontend/src/pages/WorkflowMarketPage.tsx`
+  - `aegisqa/workflows/templates.py`
+  - `tests/test_api.py`
+  - `frontend/e2e/workflow-designer.spec.ts`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 市场新建|Workflow 市场从模板"`
+  - `python -m pytest tests/test_api.py::test_api_runs_full_mvp_flow -q`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest tests/test_api.py::test_api_runs_full_mvp_flow tests/test_product_extensions.py::test_skill_governance_templates_exports_rbac_and_audit -q`
+  - `cd frontend && npm run e2e -- workflow-designer.spec.ts`
+  - `cd frontend && npm test -- src/test/App.test.tsx src/test/WorkflowDesignerPage.test.tsx`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `git diff --check`
+- 测试结果：
+  - RED：前端目标测试修复前 2 failed，后端目标测试修复前 1 failed，均证明 demo graph/template graph 问题真实存在。
+  - GREEN：前端目标测试 2 passed；后端目标测试通过。
+  - 前端类型检查：`tsc -b` 通过。
+  - 后端模板相关回归：2 passed。
+  - Workflow 设计器浏览器 E2E：6 passed。
+  - 相关前端回归：`App.test.tsx` + `WorkflowDesignerPage.test.tsx` 共 77 passed。
+  - 前端生产构建：`vite build` 通过，3837 modules transformed。
+  - Playwright E2E 全量：12 passed。
+  - 后端全量：`python -m pytest -q` 100% passed；第一次与 E2E 并行运行超过 5 分钟未返回，停止孤儿 pytest 后单独重跑通过；仍有 Windows `.pytest_cache` warning，不影响结果。
+  - 前端全量单测：12 个测试文件、128 tests passed。
+  - 空白检查：`git diff --check` 未发现空白错误，仅输出 Windows LF/CRLF 转换 warning。
+- 下一步：
+  - 该条目记录的 `WorkflowDesignerPage` 直接入口默认图风险已在后续 `2026-06-04 P1 Workflow 设计器直接入口空白画布` 批次完成。
+  - 继续压缩前端重页面测试耗时，当前全量 Vitest 通过但耗时较长。
+
+### 2026-06-04 P0/P1 前端 demo Skill 兜底移除
+
+- 改动摘要：按目标模式继续审计生产误导风险，定位到 `SkillsPage` 和 `WorkflowDesignerPage` 在 `/skills` 返回空数组时会使用 `demoSkills` 作为兜底，导致 Skill 市场和 Workflow Palette 展示不存在的 LLM 示例 Skill。该行为会影响新团队试用时对资产状态的判断，本轮改为只展示后端真实 Skill 列表；真实为空时展示明确空态，引导上传 Agent Skill 包并完成合约测试和审批。
+- 根因证据：
+  - RED：新增目标测试 `Skill 市场接口为空时不展示 demo Skill 兜底` 和 `Workflow Skill Palette 在真实 Skill 为空时不展示 demo Skill 兜底`，修复前失败，页面仍出现 `Deterministic LLM Call`。
+  - 源码复扫：修复前 `frontend/src/pages/SkillsPage.tsx` 与 `frontend/src/pages/WorkflowDesignerPage.tsx` 均存在 `skillsQuery.data?.length ? skillsQuery.data : demoSkills`。
+- 代码修复：
+  - `frontend/src/pages/SkillsPage.tsx`：移除 `demoSkills` 导入，Skill 表格只使用 `Array.isArray(skillsQuery.data) ? skillsQuery.data : []`；接口失败时展示错误 Alert；空列表展示“暂无 Skill，请上传 Agent Skill 包并完成合约测试和审批。”
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`：移除 `demoSkills` 导入，Workflow Palette 和 Inspector Skill 选择只使用后端真实 Skill。
+  - `frontend/src/pages/workflowDesigner/SkillPalettePanel.tsx`：新增空状态，真实 Skill 为空时显示“暂无可用 Skill，请先在 Skill 市场上传并审批启用。”；搜索无结果时显示“未找到匹配 Skill”。
+  - `frontend/src/test/App.test.tsx`：新增两个回归测试，覆盖 Skill 市场和 Workflow Palette 不再使用 demo Skill 兜底。
+- 变更文件：
+  - `frontend/src/pages/SkillsPage.tsx`
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/pages/workflowDesigner/SkillPalettePanel.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "demo Skill 兜底"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test -- src/test/App.test.tsx src/test/WorkflowDesignerPage.test.tsx`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `rg -n "demoSkills|skillsQuery\\.data\\?\\.length \\? skillsQuery\\.data : demoSkills|demo Skill|暂无可用 Skill" frontend/src -S --glob '!frontend/src/test/**'`
+  - `git diff --check`
+- 测试结果：
+  - RED：目标测试修复前 2 failed，确认空 `/skills` 仍展示 `Deterministic LLM Call`。
+  - GREEN：目标测试 2 passed。
+  - 前端类型检查：`tsc -b` 通过。
+  - 相关前端回归：`App.test.tsx` + `WorkflowDesignerPage.test.tsx` 共 76 passed。
+  - 前端全量单测：12 个测试文件、127 tests passed。
+  - 前端生产构建：`vite build` 通过，3837 modules transformed。
+  - Playwright E2E：12 passed，覆盖上传 Dataset/Agent Skill、Workflow 画布、发布、任务执行、报告和 Annotation Queue 主链路。
+  - 源码复扫：生产页面不再命中 `demoSkills` 运行时兜底；命中项仅剩测试 fixture 与新的空态文案。
+  - 空白检查：`git diff --check` 未发现空白错误，仅有 Windows LF/CRLF 转换 warning。
+- 本轮未执行：
+  - `python -m pytest -q` 未在本批次重跑，因为本轮只改前端页面、前端测试和状态文档；上一轮完整后端门禁已通过且没有后端文件改动。
+- 下一步：
+  - 该条目记录的 `WorkflowMarketPage` demo graph 风险已在后续 `2026-06-04 P0/P1 Workflow 市场 demo graph 注入移除` 批次完成；下一轮继续审计 `WorkflowDesignerPage` 直接入口的默认图兜底。
+
+### 2026-06-04 模型服务模板下拉与前端全量验证收尾
+
+- 改动摘要：继续完成“模型服务模板下拉”交互的收尾验证，并处理全量前端测试暴露出的稳定性问题。治理页新增模型服务模板后，用户不再需要把 DeepSeek、Qwen、OpenAI 等服务商名称误填到 Provider；Provider 保留为底层协议下拉，默认模型保留为可编辑输入。Workflow 市场的已发布版本“编辑”按钮在关联草稿加载期间显示 loading/禁用，避免用户误点无效状态。
+- 代码修复：
+  - `frontend/vitest.config.ts`：把前端单测超时时间从 10 秒放宽到 30 秒。Ant Design 表格、弹窗、路由懒加载和报告页测试在全量并行时会超过 10 秒；本次先用目标测试证明断言未坏，再调整测试门限，避免把正常重页面渲染误判成失败。
+  - `frontend/src/test/App.test.tsx`：Workflow 市场“编辑已发布版本”测试改为定位具体发布版本所在表格行，并等待编辑按钮可用；模型网关测试改为通过服务模板下拉选择 DeepSeek。
+  - `frontend/src/pages/WorkflowMarketPage.tsx`：已发布版本编辑按钮增加 `draftsQuery.isLoading` 对应的 loading/disabled 状态；只有找到原发布草稿后才允许直接编辑。
+  - `frontend/src/pages/GovernancePage.tsx`：治理页模型网关和模型连接弹窗提供模型服务模板下拉，模板自动回填 Provider、Base URL、Secret 引用和默认模型。
+- 变更文件：
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/pages/WorkflowMarketPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/vitest.config.ts`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `git diff --check`
+- 测试结果：
+  - 后端全量：100% 通过；输出显示 177 个测试进度点全部完成，仍有 Windows `.pytest_cache` 已知 warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+  - 前端全量单测：12 个测试文件、125 个测试全部 passed。
+  - 前端生产构建：`vite build` 通过，3837 modules transformed。
+  - Playwright E2E：12 passed，覆盖上传 Dataset/Agent Skill、Workflow 发布、任务创建执行、报告沉淀、Workflow 画布核心交互等链路。
+  - 空白检查：`git diff --check` 未发现空白错误，仅输出 Windows LF/CRLF 转换 warning。
+- 下一步：
+  - 可以人工打开治理页验证“模型服务模板”下拉：选择 DeepSeek 模板后，Provider 应为 `openai_compatible`，Base URL 为 `https://api.deepseek.com/v1`，默认模型为 `deepseek-chat`。
+  - 后续低优先级优化建议：继续削减少量前端重页面测试耗时，并审计前端 demo fallback 是否可能在生产环境造成误导。
+
+### 2026-06-04 模型服务模板下拉完成
+
+- 改动摘要：在治理页“配置模型网关”和“新增模型连接”弹窗中新增模型服务模板下拉。模板覆盖离线 Mock、DeepSeek、阿里云百炼/Qwen、OpenAI 官方、本地 OpenAI-compatible 服务；选择模板后自动回填底层 Provider、Base URL、默认模型和 Secret 引用。Provider 下拉继续保留，用于高级用户手动选择协议类型。
+- 交互修复：
+  - DeepSeek 模板自动填入 `provider=openai_compatible`、`base_url=https://api.deepseek.com/v1`、`secret_ref=env:DEEPSEEK_API_KEY`、`default_model=deepseek-chat`。
+  - Qwen 模板自动填入 `provider=openai_compatible`、`base_url=https://dashscope.aliyuncs.com/compatible-mode/v1`、`secret_ref=env:QWEN_API_KEY`、`default_model=qwen-plus`。
+  - OpenAI、本地兼容服务和离线 Mock 也提供对应预设，降低模型接入配置门槛。
+- 变更文件：
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "治理页可以"`
+- 测试结果：
+  - 前端类型检查：`tsc -b` 通过。
+  - 目标测试：2 passed，覆盖模型网关主配置和多模型连接别名的模板下拉、自动填充、保存请求不落盘临时 API Key。
+  - 说明：本轮未重跑全量 `npm test`、`npm run build` 和 E2E；此次为治理页局部交互优化，已用目标测试覆盖核心路径。
+- 下一步：
+  - 用户在前端配置 DeepSeek 时，应选择“DeepSeek（OpenAI-compatible）”模板，再把具体模型按需填到“默认模型”，例如 `deepseek-chat` 或服务商实际支持的模型名。
+
+### 2026-06-04 目标模式权限弹窗修复
+
+- 改动摘要：定位“另一个目标模式会话即使选择完全访问仍反复申请权限/弹窗”的根因。最近 AegisQA 目标线程的 session 记录显示实际 turn context 为 `approval_policy=never`、`sandbox_policy=danger-full-access`，没有发现模型主动使用 `require_escalated` 的工具调用；但全局 `C:\Users\17343\.codex\config.toml` 没有设置默认 `approval_policy` / `sandbox_mode`，`codex doctor` 因此解析为 `approval OnRequest + restricted sandbox`。同时旧 `[windows] sandbox = "elevated"` 从历史配置沿用，可能导致 Windows 层面的提权弹窗。
+- 配置修复：
+  - 已备份原配置到 `C:\Users\17343\.codex\config.toml.pre-permission-fix-20260604_194859.bak`。
+  - `C:\Users\17343\.codex\config.toml` 新增 `approval_policy = "never"`。
+  - `C:\Users\17343\.codex\config.toml` 新增 `sandbox_mode = "danger-full-access"`。
+  - 移除旧 `[windows] sandbox = "elevated"` 配置。
+- 变更文件：
+  - `C:\Users\17343\.codex\config.toml`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `codex doctor`
+  - `codex --strict-config doctor`
+  - `Get-Content C:\Users\17343\.codex\config.toml | Select-String 'approval_policy|sandbox_mode|\[windows\]|sandbox = '`
+- 测试结果：
+  - RED：修复前 `codex doctor` 显示 `restricted fs + restricted network · approval OnRequest`。
+  - GREEN：修复后普通和 strict `codex doctor` 均显示 `unrestricted fs + enabled network · approval Never`。
+  - 当前配置中只剩 `approval_policy = "never"` 与 `sandbox_mode = "danger-full-access"`，不再存在 `[windows] sandbox = "elevated"`。
+- 下一步：
+  - 新建目标模式线程时应继承全局不审批、不沙箱配置；若仍弹窗，优先检查是否是插件/Windows UAC/外部程序自身弹窗，而不是 Codex approval policy。
+
+### 2026-06-04 第二轮高优先级审计与临时目录忽略
+
+- 改动摘要：在上一轮后端、前端、构建和 E2E 全量门禁通过后，继续执行第二轮高优先级审计。复核 `git status`、`docs/PROJECT_STATUS.md`、潜在缺口关键词和 `tmp-debug-redis/` 临时目录。未发现新的 P0/P1 代码缺口；关键词命中主要来自历史状态记录、教程和 Secret 管理说明，当前模型网关代码已包含“不把明文密钥写入本地 store”的持久化保护。`tmp-debug-redis/` 确认为 Redis 限流调试产生的本地数据目录，本轮仅加入 `.gitignore`，不删除用户本地文件。
+- 变更文件：
+  - `.gitignore`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `git status --short --branch`
+  - `rg -n "TODO|TBD|未实现|待补|待接入|不安全|明文|生产误导|假装|FIXME|XXX" aegisqa frontend docs tests -S`
+  - `rg --files tmp-debug-redis`
+- 测试结果：
+  - 当前工作区仍有大量待提交产品化改动；`tmp-debug-redis/` 已识别为调试临时目录。
+  - 关键词审计未发现新的可执行 P0/P1 缺口；命中项为历史记录、教程文本、计划文件或 Secret 安全说明。
+  - 上一轮门禁证据仍为最新完整门禁：`python -m pytest -q` 通过、`npm run typecheck` 通过、`npm test` 125 passed、`npm run build` 通过、`npm run e2e` 12 passed。
+- 下一步：
+  - 当前连续审计未发现新的 P0/P1 可执行优化项。剩余事项属于发布整理和外部环境验证：拆分/提交当前大改动，在具备 Docker 的机器上补跑 Redis/Celery/MySQL compose 实机验证。
+- 最终审计结论：
+  - AegisQA 当前仍保持 FastAPI + React/Vite 架构，Task 作为产品主对象、Run 作为底层 Attempt，现有 Task/Run/Workflow/Skill/Report/Governance 主接口保持增量兼容。
+  - 连续两轮审计未发现新的 P0/P1 可执行缺口；剩余事项为提交拆分、发布说明和 Docker 环境实机验证，均属于低优先级发布整理或外部环境条件。
+  - 本地无 Docker 命令环境，Redis/Celery/MySQL compose 实机验证已明确记录为需要具备 Docker 的机器补跑，未假装通过。
+
+### 2026-06-04 前端懒加载测试稳定化与全量门禁复核
+
+- 改动摘要：按目标模式重新审计当前工作树后，先运行后端全量、前端类型检查和前端全量单测。后端全量与类型检查通过，但前端全量 Vitest 最初有 2 个失败：`lazyRoutes.test.tsx` 的概览页懒加载测试和 `lazyCharts.test.tsx` 的报告页导入测试均在 10 秒超时。定位后确认是测试导入链太重导致全量并行环境下不稳定，不是业务断言失败。本轮将路由懒加载测试中的真实概览页替换为轻量 mock，测试仍保留“不预加载 Reports/Judge 页面”的核心断言；随后重新运行前端全量、生产构建和真实 E2E，全部通过。
+- 变更文件：
+  - `frontend/src/test/lazyRoutes.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - 后端全量：通过；仍有 Windows `.pytest_cache` warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+  - RED：前端全量最初失败 2 个懒加载测试，失败原因均为 10 秒超时。
+  - GREEN：`npm test -- src/test/lazyRoutes.test.tsx src/test/lazyCharts.test.tsx` 通过，4 passed。
+  - 前端全量：12 个测试文件、125 个测试全部 passed。
+  - 前端生产构建：`vite build` 通过。
+  - E2E：`npm run e2e` 使用真实 FastAPI + Vite + Chrome，12 passed。
+- 下一步：
+  - 当前门禁已恢复；下一轮审计建议优先检查未提交改动的提交拆分、`tmp-debug-redis/` 临时目录是否应清理，以及是否要在具备 Docker 的机器上补跑 Redis/Celery/MySQL 实机验证。
+
+### 2026-06-04 后续优化计划收尾审计完成
+
+- 改动摘要：对 P0-01 至 P2-25 的完成记录、关键文件结构和全量验证进行最终审计。全量后端测试最初暴露两个回归：多形态 Agent Skill Workflow 需要 `row` 根对象映射但表达式语言未放行；任务诊断用例中的行级缺失字段被 Preflight 当成硬阻断。已分别在映射器和 Preflight 严重级别判断中修复。
+- 代码修复：
+  - `aegisqa/core/mapper.py`：受控表达式允许只读根对象 `row`、`context`、`metrics`、`artifacts`、`steps`、`errors`，用于脚本/说明型 Skill 接收完整行或上下文对象。
+  - `aegisqa/api/routes/tasks.py`：`workflow_input_expressions` 检查区分字段整体缺失和行级缺值；字段整体缺失仍由 `field_mapping` 阻断，字段存在但部分样本缺值记为 warning，交给报告诊断归因。
+- 变更文件：
+  - `aegisqa/core/mapper.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_agent_skill_runtime_matrix.py::test_agent_skill_runtime_matrix_import_upload_contract_workflow_and_reload -q`
+  - `python -m pytest tests\test_task_diagnostics.py::test_task_diagnostics_endpoint_explains_data_quality_and_parameters -q`
+  - `python -m pytest tests\test_task_center_api.py -q -k "preflight_reports_input_template_expression_error_position or creation_blocks_failed_preflight or recomputes_preflight"`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run e2e`
+  - `docker --version`
+  - `docker compose version`
+- 测试结果：
+  - RED：后端全量最初失败 2 个用例，分别是 `/workflow-graphs/publish` 拒绝 `row` 根对象映射，以及 `/tasks` 因行级 `row.reference` 缺值返回 `TASK_PREFLIGHT_BLOCKED`。
+  - GREEN：两个目标失败用例通过，Preflight 硬阻断回归 3 passed。
+  - 全量回归：`python -m pytest -q` 通过；仍有 Windows `.pytest_cache` warning，不影响结果。
+  - 前端回归：`npm run typecheck` 通过，`npm test` 12 files / 125 tests passed，`npm run build` 成功生成生产包。
+  - E2E：`npm run e2e` 使用隔离端口启动真实 FastAPI + Vite，12 tests passed。
+  - Docker：当前机器未安装 `docker` 命令，因此 Redis/Celery/MySQL 的 compose 实机验证未在本机执行；相关代码和非容器测试已完成，容器验证留给具备 Docker 的环境。
+- 下一步：
+  - 25 项计划已进入代码冻结前状态；建议后续只做发布说明、提交拆分和在具备 Docker 的机器上补跑 MySQL/Redis/Celery 生产模式实机验证。
+
+### 2026-06-04 P2-25 文档与示例包整理完成
+
+- 改动摘要：把桌面 `skills` 示例、README、Agent Skill 包上传指南和 PRD 验收矩阵统一到一组可导航教程里。新增“5 分钟跑通 ASR/QA 评测”“写一个脚本型 Skill”“接入真实模型”三篇教程，以及 `docs/SKILL_EXAMPLES_INDEX.md` 示例包索引。
+- 文档能力：
+  - README 新增“快速教程”入口，串联三篇教程和示例包索引。
+  - `docs/AGENT_SKILL_PACKAGE_GUIDE.md` 新增配套教程入口，保留正确相对链接和仓库路径文本。
+  - `docs/PRD_ACCEPTANCE_MATRIX.md` 新增文档教程验证说明。
+  - `docs/SKILL_EXAMPLES_INDEX.md` 记录 `C:\Users\17343\Desktop\skills` 下的现成 zip、Skill ID、类型和推荐用途。
+- 示例包能力：
+  - `examples/skills/ap_asr_lookup_small` 提供小型 AP ASR 查表脚本型 Skill，使用包内 `data/ap_cache_sample.csv` 和相对路径读取资源。
+  - `examples/skills/answer_compare_rule` 提供 QA 规则评测脚本型 Skill，输出 `score/label/reason`。
+  - `examples/skills/README.md` 给出新机器重新打包 zip 的 `Compress-Archive` 命令。
+- 变更文件：
+  - `README.md`
+  - `docs/AGENT_SKILL_PACKAGE_GUIDE.md`
+  - `docs/PRD_ACCEPTANCE_MATRIX.md`
+  - `docs/SKILL_EXAMPLES_INDEX.md`
+  - `docs/tutorials/5-minute-asr-qa-eval.md`
+  - `docs/tutorials/write-script-skill.md`
+  - `docs/tutorials/connect-real-model.md`
+  - `examples/skills/README.md`
+  - `examples/skills/ap_asr_lookup_small/SKILL.md`
+  - `examples/skills/ap_asr_lookup_small/skill.yaml`
+  - `examples/skills/ap_asr_lookup_small/data/ap_cache_sample.csv`
+  - `examples/skills/ap_asr_lookup_small/scripts/run.py`
+  - `examples/skills/answer_compare_rule/SKILL.md`
+  - `examples/skills/answer_compare_rule/skill.yaml`
+  - `examples/skills/answer_compare_rule/scripts/run.py`
+  - `tests/test_documentation_tutorials.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_documentation_tutorials.py -q`
+  - PowerShell 临时目录打包验证：`Compress-Archive -Path examples\skills\ap_asr_lookup_small\* ...` 与 `Compress-Archive -Path examples\skills\answer_compare_rule\* ...`
+- 测试结果：
+  - RED：文档一致性测试最初失败在 `docs/tutorials/5-minute-asr-qa-eval.md` 缺失。
+  - GREEN：文档一致性测试 1 passed，覆盖三篇教程、示例包索引、README 和 Agent Skill 指南互链，以及模型网关关键参数。
+  - 示例包打包：`ap_asr_lookup_small.zip` 和 `answer_compare_rule.zip` 均在临时目录生成成功。
+  - 仍有 Windows `.pytest_cache` warning，不影响测试结果。
+- 下一步：
+  - P2-25 已满足“5 分钟跑通 ASR/QA 评测、写一个脚本型 Skill、接入真实模型、新机器可重新打包示例 Skill”的核心验收；建议下一轮做全量 `python -m pytest -q`、`cd frontend && npm test`、`cd frontend && npm run build` 和 E2E 稳定性复核。
+
+### 2026-06-04 P2-24 UI 布局系统统一完成
+
+- 改动摘要：建立前端布局原语 `PageSection`、`ActionToolbar`、`DataTableShell`，把执行中心、报告页、候选资产中心、Annotation Queue 的主宽表迁移到统一滚动容器。补充卡片内 AntD 表格兜底样式，报告页顶部 Trace/红队/导出操作区改为可换行布局，修复窄屏下操作区把页面宽度撑到 1090px 的问题。
+- 前端能力：
+  - `PageSection` 统一复用现有 `flat-card` 视觉，并补充 `page-section` 宽度约束。
+  - `ActionToolbar` 默认换行，适配筛选项、按钮组和报告页顶部操作区。
+  - `DataTableShell` 约束宽表在内部横向滚动，重点页面表格增加 `scroll={{ x: 'max-content' }}` 或保留既有滚动配置。
+  - `PageHeader` 的 `primaryAction` 外壳从不可换行 `Space` 改为响应式 `.page-header-actions`。
+- 变更文件：
+  - `frontend/src/components/LayoutPrimitives.tsx`
+  - `frontend/src/components/PageHeader.tsx`
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/pages/CandidateAssetsPage.tsx`
+  - `frontend/src/pages/AnnotationQueuePage.tsx`
+  - `frontend/src/styles.css`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "宽表|横向滚动"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告页宽表"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "宽表|横向滚动|Annotation Queue"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "宽表|横向滚动|Annotation Queue|候选资产中心"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && node --input-type=module -` 执行 390px Playwright 检查脚本，使用系统 Chrome 打开 `/runs`、`/reports`、`/candidate-assets`、`/annotation-queue`
+- 测试结果：
+  - RED：布局目标测试最初失败在缺少 `runs-task-table-section`、`reports-export-history-section`、`candidate-assets-table-section` 等统一容器；报告页补测失败在缺少 `reports-header-actions`。
+  - GREEN：布局目标测试 7 passed，覆盖执行中心、报告页、候选资产中心、Annotation Queue 的统一宽表容器和受影响的标注队列回归。
+  - 回归：候选资产中心与 Annotation Queue 相关前端回归 13 passed；`npm run typecheck` 通过。
+  - 真实页面检查：项目 Playwright 自带 Chromium 未下载，改用系统 Chrome 执行同一检查；390px 视口下 4 个路由 `documentWidth=390`、`overflows=[]`、`headerOverlaps=[]`，截图保存在 `frontend/test-results/p2-24-layout/`。
+- 下一步：
+  - P2-24 已满足“统一布局组件、宽表内部滚动、重点页面窄屏检查、表头不遮挡”的核心验收；后续继续 P2-25 文档与示例包整理。
+
+### 2026-06-04 P2-23 报告分享与离线包完成
+
+- 改动摘要：新增 `GET /tasks/{task_id}/report/offline-package`，生成可外发的离线审计 zip 包。离线包复用报告导出审批机制，`file_format=offline_zip` 可创建审批请求；Viewer 未审批会被 `REPORT_EXPORT_FORBIDDEN` 拦截，审批后才能下载。
+- 后端能力：
+  - 离线包包含 `manifest.json`、`report.html`、`report.csv`、`preflight.json`、`workflow_snapshot.json`、`skill_manifests.json`、`dataset_schema.json`。
+  - 包内 Workflow snapshot、Skill manifest、Preflight、Dataset schema 都走 `redact_secrets(...)`，避免 API Key、Secret、Token 等敏感配置泄漏。
+  - `/tasks/{task_id}/report` 的 `export_links` 增加 `offline_package`。
+  - 审计事件继续使用 `task.report.export`，detail 标记 `file_format=offline_zip`、`approval_request_id`、`preflight_id` 和包文件清单。
+- 前端能力：
+  - 报告页新增“导出离线包”按钮，Evaluator/Reviewer/Admin 可直接下载，Viewer 需要“申请离线包导出审批”。
+  - API client 增加二进制 zip 下载方法，按 `Content-Disposition` 解析文件名并触发浏览器下载。
+- 变更文件：
+  - `aegisqa/api/routes/task_reports.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `frontend/src/types/report.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `tests/test_task_center_api.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q -k "offline_package"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告页支持导出离线审计包"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest tests\test_task_center_api.py -q -k "offline_package or preflight_evidence or viewer_can_export_task_report_after_admin_approval or report_export_request_lifecycle"`
+  - `python -m pytest tests\test_task_report_badcase_pagination.py tests\test_product_extensions.py -q -k "export or report"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "报告|导出"`
+- 测试结果：
+  - RED：目标测试最初失败在离线包路由 404；实现后又暴露 DatasetVersion 无 `field_paths`，已改为根据 `field_schema` 生成 `row.xxx` 路径。
+  - GREEN：离线包目标测试 1 passed，覆盖 zip 文件清单、审批后 Viewer 下载、敏感 `api_key` 脱敏和审计记录。
+  - 回归：任务报告 Preflight/Viewer 审批/审批生命周期 3 passed；报告导出相关回归 3 passed；前端报告/导出分组 2 passed；typecheck 通过。
+  - 仍有 Windows `.pytest_cache` warning，不影响测试结果。
+- 下一步：
+  - P2-23 已满足“报告 HTML、CSV、Preflight、Workflow snapshot、Skill manifest、Dataset schema、敏感配置脱敏、Viewer 权限和导出审批复用”的核心验收；后续继续 P2-24 UI 布局系统统一。
+
+### 2026-06-04 P2-22 Skill 市场版本管理完成
+
+- 改动摘要：Skill 包记录从单版本审批状态扩展为版本族生命周期视图。上传包会记录 `base_skill_id`、`skill_version`、合约测试历史和审批历史；`GET /skills/{skill_id}/versions` 返回同一版本族的版本清单、最新启用版本和相邻 manifest 差异；`POST /skills/{skill_id}/rollback` 支持把当前版本废弃并回滚启用目标历史版本。
+- 后端能力：
+  - 合约测试会追加 `contract_history`，审批、禁用、废弃、回滚会追加 `approval_history`。
+  - 版本历史按 `skill_id` 的 `@` 前缀聚合，返回每个版本的状态、运行时、manifest、合约历史、审批历史和 `diff_from_previous`。
+  - 回滚要求同一版本族且目标版本通过合约测试，回滚后目标版本 `approved/enabled`，源版本 `deprecated/disabled`。
+  - Workflow 发布仍保存精确 `skill_ref`，例如 `plugin.echo@0.1.0`；新版本被废弃不会影响旧版本继续被历史 Workflow 引用和回放。
+- 前端能力：
+  - Skill 详情抽屉新增“版本历史”，展示版本族、当前启用版本、各版本状态和 manifest 差异。
+  - 详情页展示“合约测试历史”和“审批历史”，并提供“回滚到此版本”操作。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/skills.py`
+  - `frontend/src/types/skill.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/SkillsPage.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `tests/test_skill_market_versions.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_skill_market_versions.py -q`
+  - `python -m pytest tests\test_skill_package_security.py -q -k "records_contract_and_approval_metadata or hide_builtin"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Skill 市场详情展示版本历史"`
+  - `python -m pytest tests\test_skill_market_versions.py tests\test_skill_package_security.py tests\test_agent_skill_package_upload.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Skill"`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - RED：后端目标测试最初失败在 `/skills/{skill_id}/versions` 不存在；前端目标测试最初失败在详情抽屉没有“版本历史”。
+  - GREEN：Skill 版本管理后端目标测试 2 passed，覆盖版本族历史、manifest 对比、回滚和精确版本引用。
+  - 回归：Skill 包安全 + Agent Skill 包上传 17 passed；前端 Skill 分组 9 passed；typecheck 通过。
+  - 仍有 Windows `.pytest_cache` warning，不影响测试结果。
+- 下一步：
+  - P2-22 已满足“版本历史、合约测试历史、审批历史、版本对比、回滚、Workflow 固定具体版本、禁用新版不影响旧版回放”的核心验收；后续继续 P2-23 报告分享与离线包。
+
+### 2026-06-04 P2-21 Workflow 表达式语言增强完成
+
+- 改动摘要：`input_mapping` 从单纯路径读取扩展为受控表达式语言，支持 `row.scene ?? "general"` 默认值、`if(row.locale == "zh", row.zh_question, row.en_question)` 简单条件，以及 `Q={{ row.question }}` 字符串模板；表达式解释器只接受白名单语法，危险 token、函数调用和任意代码语法会返回结构化 `MappingPathError`。
+- 后端能力：
+  - `resolve_input_mapping(...)` 改为通过 `evaluate_mapping_expression(...)` 求值，旧的 `row.xxx/context.xxx/metrics.xxx/steps.xxx` 路径保持兼容。
+  - 新增 `validate_mapping_expression(...)` 静态校验，Workflow 图发布和线性 Workflow 合约校验会拦截不安全表达式。
+  - 新增 `collect_mapping_row_fields(...)`，字段映射预检能理解模板和条件中的 `row.xxx` 依赖，默认值左侧路径不再被误判为硬必需字段。
+  - Task Preflight 新增 `workflow_input_expressions` 检查，基于 dataset preview 逐行解析输入表达式，报告 `step_id`、`field_path`、`expression`、`row_index`、`missing_path` 和类型错误。
+- 变更文件：
+  - `aegisqa/core/mapper.py`
+  - `aegisqa/workflows/validation.py`
+  - `aegisqa/workflows/graph.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_platform_core.py`
+  - `tests/test_task_center_api.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_platform_core.py -q -k "controlled_expressions or arbitrary_code"`
+  - `python -m pytest tests\test_task_center_api.py -q -k "unsafe_input_mapping_expression or input_template_expression"`
+  - `python -m pytest tests\test_platform_core.py -q -k "resolve_input_mapping or workflow_runner"`
+  - `python -m pytest tests\test_task_center_api.py -q -k "preflight or task_lifecycle or task_result_export"`
+  - `python -m pytest tests\test_workflow_graph_hardening.py -q -k "publish_workflow_draft_returns_structured_validation_errors"`
+- 测试结果：
+  - RED：目标测试最初失败在表达式仍被当作路径读取、危险表达式未在发布阶段拦截、Preflight 缺少 `workflow_input_expressions` 检查。
+  - GREEN：表达式目标测试 4 passed，覆盖默认值、条件、模板、危险代码拒绝、发布结构化错误和 Preflight 缺失路径定位。
+  - 回归：平台核心映射/Runner 9 passed；任务中心 Preflight/生命周期/导出 11 passed；Workflow Graph 结构化校验 1 passed。
+  - 仍有 Windows `.pytest_cache` warning，不影响测试结果。
+- 下一步：
+  - P2-21 已满足“默认值、简单条件、字符串模板、禁止任意代码、发布校验和 Preflight 错误定位”的代码侧验收；后续继续 P2-22 Skill 市场版本管理。
+
+### 2026-06-04 P2-20 分布式限流与并发控制完成
+
+- 改动摘要：限流器从单进程 `InMemoryRateLimiter` 扩展为可选 Redis token bucket。生产模式通过 `AEGISQA_RATE_LIMIT_BACKEND=redis` 和 `AEGISQA_REDIS_URL` 启用，多个 worker 对同一 Skill 共用 Redis key；Step trace 继续记录 `rate_limit_wait_ms` 和 `rate_limited_count`。
+- 后端能力：
+  - 新增 `RedisRateLimiter`，用 Redis Lua 脚本原子完成读取 next_allowed、计算等待、写回下一次可用时间。
+  - 新增 `create_rate_limiter(...)` 工厂，默认 `memory`，支持 `redis` 后端。
+  - `WorkflowRunner` 支持 `rate_limiter_factory` 注入，便于测试和后续 worker 运行时替换。
+  - `/governance/runtime-status` 在 `AEGISQA_RATE_LIMIT_BACKEND=redis` 时把 Redis 组件标记为 `configured / 已配置`。
+- 基础设施：
+  - `pyproject.toml` 新增 `redis>=5`。
+  - `docker-compose.yml` 的 API/worker 增加 `AEGISQA_RATE_LIMIT_BACKEND=redis` 与 `AEGISQA_REDIS_URL`。
+- 变更文件：
+  - `aegisqa/engine/rate_limit.py`
+  - `aegisqa/engine/runner.py`
+  - `aegisqa/api/routes/governance.py`
+  - `docker-compose.yml`
+  - `pyproject.toml`
+  - `tests/test_redis_rate_limiter.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_redis_rate_limiter.py -q`
+  - `python -m pytest tests\test_redis_rate_limiter.py -q -k "governance_runtime_status"`
+  - `python -m pytest tests\test_platform_core.py -q -k "rate_limit or workflow_runner"`
+  - `python -m pytest tests\test_api.py -q -k "governance_runtime_status"`
+  - `python -m pytest tests\test_task_center_api.py -q -k "execute"`
+- 测试结果：
+  - RED：Redis 目标测试最初失败在缺少 `RedisRateLimiter`；治理运行态测试最初失败在 Redis 仍显示 `not_connected`。
+  - GREEN：Redis 目标测试 3 passed，覆盖两个 limiter 实例共享同一 token bucket、WorkflowRunner Step trace 记录等待与限流次数、治理页 Redis 状态识别。
+  - 平台核心限流/Runner 回归：5 passed，确认默认 memory backend 和 1000 行轻量队列仍可运行。
+  - 任务执行回归：3 passed；治理默认状态回归：1 passed。
+  - 本机仍无 Docker 命令，Redis/MySQL compose 实跑未执行；代码侧通过 fake Redis 和常规执行回归验证。
+  - 仍有 Windows `.pytest_cache` warning，不影响测试结果。
+- 下一步：
+  - P2-20 已满足“多 worker 下同一 Skill rate limit 生效、Step trace 记录等待时间和限流次数”的代码侧验收；后续继续 P2-21 Workflow 表达式语言增强。
+
+### 2026-06-04 P2-19 MySQL Repository 真实接入完成
+
+- 改动摘要：MySQL 从 schema/compose 占位升级为可启用的后端 adapter。`MySQLStore` 复用 `read_json/write_json/list_json/jsonl` 最小接口，现有 Dataset/Workflow/Run/Task 服务无需改调用方式；同时将 Task、Run、Workflow、AuditEvent 写入 MySQL 专用核心表，保留通用 `json_documents/jsonl_rows` 作为兼容层。
+- 后端能力：
+  - 新增 `aegisqa.storage.mysql_store.MySQLStore`，支持 `AEGISQA_MYSQL_HOST/PORT/DATABASE/USER/PASSWORD` 环境变量和 PyMySQL 连接。
+  - `create_app(..., storage_backend="mysql")` 与 `AEGISQA_STORAGE_BACKEND=mysql` 可启用 MySQL 后端；测试场景可注入 `mysql_connection_factory`。
+  - Task、Run、Workflow 写入通用文档表后同步镜像到 `tasks`、`runs`、`workflow_versions`；审计事件写入 `jsonl_rows` 后同步镜像到 `audit_events`。
+  - Dataset rows、上传文件和 Skill 包仍通过 `store.path(...)` 保留在文件系统，避免把大对象塞进 MySQL。
+  - `/governance/runtime-status` 能识别 MySQLStore，启用时 storage backend 显示 `mysql`，MySQL 组件显示 `configured / 已配置`。
+- 基础设施：
+  - `infra/mysql/schema.sql` 新增 `tasks`、`json_documents`、`jsonl_rows`，扩展 `runs.run_json/updated_at` 与审计 `role/result/trace_id`。
+  - `docker-compose.yml` 新增 `api` 服务，并给 API/worker 注入 MySQL、Redis、Celery 环境变量。
+  - `pyproject.toml` 新增 `pymysql` 与 `uvicorn[standard]` 依赖。
+  - `aegisqa/infrastructure/manifest.py` 的 production adapter 更新为 `aegisqa.storage.mysql_store.MySQLStore`。
+- 变更文件：
+  - `aegisqa/storage/mysql_store.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/governance.py`
+  - `aegisqa/infrastructure/manifest.py`
+  - `infra/mysql/schema.sql`
+  - `docker-compose.yml`
+  - `pyproject.toml`
+  - `tests/test_mysql_store_adapter.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_mysql_store_adapter.py -q`
+  - `python -m pytest tests\test_mysql_store_adapter.py -q -k "governance_runtime_status"`
+  - `python -m pytest tests\test_repository_contracts.py tests\test_sqlite_store_adapter.py -q`
+  - `python -m pytest tests\test_api.py -q -k "governance_runtime_status"`
+  - `python -m pytest tests\test_task_center_api.py -q`
+  - `docker compose version`
+- 测试结果：
+  - RED：MySQL adapter 测试最初失败在缺少 `aegisqa.storage.mysql_store`；MySQL 运行态测试最初失败在 storage backend 被识别为 `json`。
+  - GREEN：MySQL adapter 目标测试 3 passed，覆盖 Repository contract、FastAPI 任务主链路和治理运行态识别；测试通过内存 DB-API 假体模拟 MySQL，不依赖本机 Docker。
+  - JSON/SQLite Repository 回归：7 passed，确认本地开发模式未回归。
+  - 治理 API 回归：1 passed；任务中心回归：19 passed。
+  - `docker compose version` 未通过，原因是当前 Windows 环境没有 `docker` 命令，无法执行 compose 实跑。
+  - 仍有 Windows `.pytest_cache` warning，不影响测试结果。
+- 下一步：
+  - P2-19 已满足“Repository 抽象后实现 MySQL adapter、Task/Run/Workflow/AuditEvent 首批迁移到 MySQL、JSON/SQLite 继续可用”的代码侧验收；Docker 实跑需在安装 Docker 的机器上执行。后续继续 P2-20 分布式限流与并发控制。
+
+### 2026-06-04 P1-18 治理页统一运维驾驶舱完成
+
+- 改动摘要：治理页从零散运行状态描述升级为统一运维驾驶舱。后端 `/governance/runtime-status` 在保留旧字段兼容的同时新增 `components` 清单；前端把组件状态汇总为“运行态驾驶舱”表格，展示状态、后端/模式、说明、文档入口和配置入口，避免把 MySQL、Redis、Celery 占位资产误展示为已启用。
+- 后端能力：
+  - 新增统一 runtime component 结构，字段包含 `component_id`、`name`、`backend`、`status`、`status_label`、`message`、`doc_url`、`config_url` 和 `risk_level`。
+  - storage、executor、model gateway、skill sandbox、MySQL、Redis、Celery 都进入同一清单。
+  - MySQL、Redis 固定报告 `not_connected / 未接入`；Celery 仅在执行器后端真实配置为 `celery` 时显示 `configured`。
+  - 旧 `storage`、`executor`、`model_gateway`、`skill_sandbox`、`external_services` 字段继续保留，并补充文档/配置入口字段。
+- 前端能力：
+  - `RuntimeStatus` 类型新增 `RuntimeStatusComponent` 和入口字段。
+  - 治理页新增“运行态驾驶舱”表格，统一展示可用、演示、未配置、未接入、已配置状态。
+  - 对旧 runtime status 响应提供前端兼容转换，避免旧 mock 或旧后端返回时驾驶舱为空。
+- 变更文件：
+  - `aegisqa/api/routes/governance.py`
+  - `tests/test_api.py`
+  - `frontend/src/types/governance.ts`
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_api.py -q -k "governance_runtime_status"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "运行态驾驶舱"`
+  - `python -m pytest tests\test_api.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "治理"`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - RED：后端目标测试最初失败在 `/governance/runtime-status` 缺少 `components`；前端目标测试最初找不到“运行态驾驶舱”。
+  - GREEN：后端目标测试 1 passed，确认组件清单覆盖 7 类运行组件，每项都有中文状态、文档入口和配置入口字段，MySQL/Redis 均为 `not_connected / 未接入`。
+  - 前端目标测试 1 passed，确认治理页展示运行态驾驶舱、未接入状态，以及“存储后端文档”“模型网关配置”“Redis文档”等入口。
+  - 后端治理 API 回归：4 passed；仍有 Windows `.pytest_cache` warning，不影响结果。
+  - 前端治理页回归：6 passed。
+  - 前端类型检查：`tsc -b` 通过。
+- 下一步：
+  - P1-18 已满足“汇总模型连接、Skill 风险、审计日志、生产边界；展示 storage/executor/model/sandbox 状态；不误导 MySQL/Redis 已启用；每个状态有文档或配置入口”的验收；后续继续 P2-19 MySQL Repository 真实接入。
+
+### 2026-06-04 P1-17 Annotation Queue 分派策略完成
+
+- 改动摘要：Annotation Queue 从手动领取扩展为可配置自动分派。后端新增 `/annotation-queue/dispatch`，按负责人容量、业务标签和 SLA 策略把 pending 样本分派给 reviewer；分页列表新增 summary，返回 open/assigned/overdue 总数和每个负责人的 backlog/SLA；前端队列页展示“负责人负载与 SLA”卡片，并提供自动分派按钮。
+- 后端能力：
+  - 新增 `AnnotationDispatchRequest` / `AnnotationDispatchAssigneeRequest`，支持 `assignees[].capacity`、`assignees[].labels`、`label_field`、`sla_hours` 和 `overdue_strategy`。
+  - `/annotation-queue/dispatch` 只处理 pending 样本，按业务标签优先匹配 owner，容量不足时返回 `skipped`，成功分派时写入 `assignee`、`business_label`、`due_at`、`dispatch_strategy` 和 SLA 状态。
+  - `/annotation-queue?page=...` 响应新增 `summary`，包含 `total_open`、`total_assigned`、`total_pending`、`total_overdue` 和 owner backlog。
+  - 手动分派仍保留旧接口，并补充 SLA 状态；未分页 `/annotation-queue` 仍保持数组响应兼容旧前端和概览页。
+- 前端能力：
+  - `AnnotationTask` 类型新增 `business_label`、`due_at`、`sla_status`、`overdue`。
+  - `AnnotationQueuePageResult` 新增 `summary`，新增 `AnnotationDispatchResult` 类型和 `api.dispatchAnnotationQueue(...)`。
+  - 队列页新增“负责人负载与 SLA”卡片，显示待处理、已分派、SLA 超时和每个负责人 backlog。
+  - 审核队列表格新增业务标签和 SLA 列，自动分派成功后刷新队列并显示分派/跳过数量。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_productization_api.py`
+  - `frontend/src/types/candidate.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/AnnotationQueuePage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_productization_api.py -q -k "auto_dispatch"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "负责人 backlog"`
+  - `python -m pytest tests\test_productization_api.py -q -k "annotation_queue"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Annotation Queue"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+- 测试结果：
+  - RED：后端目标测试最初在 `/annotation-queue/dispatch` 响应缺少 `assigned_count`；前端目标测试最初找不到“负责人负载与 SLA”。
+  - GREEN：后端目标测试 1 passed，覆盖标签匹配、容量不足 skipped、due_at 写入和分页 summary owner backlog。
+  - Annotation Queue 后端回归：5 passed，覆盖手动分派、审核回流、来源任务筛选、批量审核生成 Golden/Assertion 候选、服务端分页和自动分派。
+  - Annotation Queue 前端回归：3 passed，覆盖来源筛选/领取/审核回流、自动分派 workload/SLA 展示和服务端分页。
+  - 前端类型检查：`tsc -b` 通过。
+  - 后端全量 Pytest：163 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端全量 Vitest：12 个测试文件、119 passed。
+- 下一步：
+  - P1-17 已满足“按负责人容量、业务标签、逾期策略自动分派、队列页展示负责人 backlog 和 SLA、批量审核/Golden/候选资产不回归”的验收；后续继续 P1-18 治理页统一运维驾驶舱，汇总 storage/executor/model/sandbox 真实运行状态。
+
+### 2026-06-04 P1-16 真实成本与 token 账单完成
+
+- 改动摘要：模型调用账单从“报告层按 avg_tokens 粗估”改为“模型网关 usage 进入 Step，再由报告聚合”。内置 `llm.call`、`model.chat`、Agent 安全模式 Skill 和说明型包 Skill 都会把 `prompt_tokens`、`completion_tokens`、`total_tokens`、`cost`、`cost_source`、`model_name`、`model_provider` 写入 Step metrics；Task Report 汇总真实 usage，预算状态和报告中心直接展示 token 与成本来源。
+- 后端能力：
+  - 新增 `model_response_usage_metrics(...)`，统一解析 OpenAI-compatible usage 中的 prompt/completion/total tokens、`total_cost/cost` 和 currency。
+  - `RunItemStep.metrics` 对模型 Step 记录 token、cost、cost_source、模型名、Provider、连接别名和模型耗时。
+  - `aggregate_run_report` 从 Step metrics 汇总 `prompt_tokens`、`completion_tokens`、`total_tokens`、`cost`、`cost_source/cost_sources` 与 `cost_currency`。
+  - `_build_budget_status` 只消费模型网关 usage/cost，未返回价格时按 0 入账并显式标记来源，不再用 avg_tokens 估算。
+  - Experiment snapshot diff 只对数值字段计算差值，避免 `cost_source` 等字符串账单来源参与减法。
+- 前端能力：
+  - `BudgetStatus` 类型新增 prompt/completion/total tokens、cost_source 和 cost_currency。
+  - 报告中心“成本预算”卡片展示 Prompt、Completion、Total token 和成本来源。
+  - Score Analytics 表头从“估算成本”调整为“成本”，避免误导真实 usage 账单来源。
+- 变更文件：
+  - `aegisqa/models/gateway.py`
+  - `aegisqa/skills/examples.py`
+  - `aegisqa/skills/agent_skills.py`
+  - `aegisqa/skills/packages.py`
+  - `aegisqa/reports/aggregator.py`
+  - `aegisqa/api/app.py`
+  - `tests/test_model_usage_billing.py`
+  - `frontend/src/types/report.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/ReportsPage.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_model_usage_billing.py -q`
+  - `cd frontend && npm test -- src/test/ReportsPage.test.tsx -t "模型 usage"`
+  - `python -m pytest tests\test_model_gateway.py tests\test_risk_analytics_hardening.py tests\test_task_center_api.py -q`
+  - `cd frontend && npm test -- src/test/ReportsPage.test.tsx`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "candidate_retest or promotion or baseline or ci_gate"`
+  - `python -m pytest tests\test_model_usage_billing.py tests\test_task_flow_optimization.py::test_prompt_skill_candidate_retest_requires_published_draft_and_returns_three_way_metrics -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+- 测试结果：
+  - RED：后端目标测试最初失败在 Step metrics 缺少 `prompt_tokens`；前端目标测试最初失败在报告页找不到 `Prompt 17`。
+  - GREEN：后端目标测试 1 passed，覆盖假的 OpenAI-compatible usage/cost 写入 Step、Report metrics 和 budget_status。
+  - 前端目标测试 1 passed，确认报告中心展示 Prompt/Completion/Total token 与 `provider_usage.total_cost` 来源。
+  - 模型网关、风险预算和任务中心回归：31 passed，覆盖 mock 离线模型、模型连接别名、任务报告预算和执行中心主链路。
+  - 报告中心全量 Vitest：14 passed。
+  - 前端类型检查：`tsc -b` 通过。
+  - 后端全量第一次因 120 秒超时未得到结果；使用 240 秒超时重跑后 `python -m pytest -q` 162 passed。期间发现并修复 Experiment diff 对字符串 `cost_source` 做减法的回归，定向候选资产复跑测试通过。
+  - 前端全量 Vitest：12 个测试文件、118 passed。
+  - 仍有 Windows `.pytest_cache` 创建 warning，不影响测试结果。
+- 下一步：
+  - P1-16 已满足“每个 Step 记录 token/cost、Task Report 聚合预算状态、mock 模型保持离线可跑、真实模型调用后报告显示 token 与成本来源”的验收；后续继续 P1-17 Annotation Queue 分派策略，补容量、业务标签和 SLA 分派。
+
+### 2026-06-04 P1-15 CI Gate 与 Baseline 生产流程完成
+
+- 改动摘要：候选 Workflow 晋升、Baseline apply 和报告中心发布上下文完成生产化收口。`ready_to_release` 晋升审批必须有 active CI Gate 并通过门禁才会生成 baseline suggestion 与 release record；Baseline apply 再次强制执行 CI Gate guard，记录门禁评估、影响分析和审批意见；Task Report 新增 release context，报告中心可看到当前任务关联的 baseline 和发布记录。
+- 后端能力：
+  - Workflow 晋升审批缺少 active CI Gate 时返回 `WORKFLOW_PROMOTION_CI_GATE_REQUIRED`，门禁失败时返回 `WORKFLOW_PROMOTION_CI_GATE_BLOCKED`。
+  - Baseline apply 前强制执行 active CI Gate，缺少门禁、缺少候选 Run 或门禁失败分别返回结构化错误码。
+  - Baseline apply 成功后写入 `ci_gate_guard_status`、`ci_gate_evaluation_ids`、`apply_ci_gate_guard_status`、`apply_ci_gate_evaluation_ids` 与 `apply_impact`。
+  - Release record 记录 `approved_by`、`approval_note`、`approved_at`，并与 Task Report 的 release context 关联。
+- 前端能力：
+  - 候选资产中心在 Baseline 应用后展示应用门禁状态。
+  - 报告中心新增“Baseline 与发布记录”卡片，展示当前 baseline、发布记录、门禁状态和审批意见。
+  - 前端类型补齐 baseline suggestion、baseline history、release record 与 Task Report release context 字段。
+- 变更文件：
+  - `aegisqa/api/routes/productization.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_ci_baseline_production_flow.py`
+  - `frontend/src/types/experiment.ts`
+  - `frontend/src/types/report.ts`
+  - `frontend/src/pages/CandidateAssetsPage.tsx`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/ReportsPage.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_ci_baseline_production_flow.py -q`
+  - `python -m pytest tests\test_task_flow_optimization.py -q -k "promotion or baseline or ci_gate or candidate"`
+  - `python -m pytest tests\test_productization_api.py tests\test_access_control_hardening.py -q`
+  - `cd frontend && npm test -- src/test/ReportsPage.test.tsx -t "围绕任务展示"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "候选资产中心支持晋升审批"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `git diff --check -- aegisqa/api/routes/productization.py aegisqa/api/routes/tasks.py tests/test_ci_baseline_production_flow.py frontend/src/types/experiment.ts frontend/src/types/report.ts frontend/src/pages/CandidateAssetsPage.tsx frontend/src/pages/ReportsPage.tsx frontend/src/test/App.test.tsx frontend/src/test/ReportsPage.test.tsx frontend/src/test/workbenchTestHarness.tsx`
+- 测试结果：
+  - RED：后端目标测试最初确认无 CI Gate 时 Workflow 晋升和 Baseline apply 仍返回 200；前端目标测试最初找不到“Baseline 与发布记录”。
+  - GREEN：`tests\test_ci_baseline_production_flow.py` 2 passed，覆盖晋升审批 gate required 和 baseline apply guard/impact 写入。
+  - 候选/CI/Baseline 相关回归：`tests\test_task_flow_optimization.py -k "promotion or baseline or ci_gate or candidate"` 10 passed。
+  - 产品化与权限回归：`tests\test_productization_api.py tests\test_access_control_hardening.py` 11 passed。
+  - 报告中心定向：1 passed，确认报告展示 baseline 和 release record。
+  - 候选资产中心定向：1 passed，确认页面展示 Baseline 应用门禁状态。
+  - 前端类型检查：`tsc -b` 通过。
+  - 后端全量 Pytest：161 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端全量 Vitest：12 个测试文件、117 passed。
+  - `git diff --check`：无空白错误，仅有 Windows 换行提示。
+- 下一步：
+  - P1-15 已满足“未通过 gate 不允许标记 ready_to_release、报告中心能看到当前任务对应 baseline 和发布记录”的验收；后续继续 P1-16，记录真实模型 usage 的 prompt_tokens、completion_tokens 与 cost，并在 Task Report 聚合预算状态。
+
+### 2026-06-04 P1-14 数据集字段治理增强完成
+
+- 改动摘要：Dataset Version 新增字段治理诊断与修复版生成能力。后端按流式 rows 扫描计算字段覆盖率、缺失率、唯一值数量、重复样本数、重复组和治理建议；数据集页新增“字段治理诊断”卡片，支持从 Repair Task 现有 `/datasets?dataset_id=...&version=...` 链接直接定位版本，并基于诊断一键生成修复版 Dataset Version。
+- 后端能力：
+  - 新增 `GET /datasets/{dataset_id}/versions/{version}/quality`，返回 `summary`、字段级诊断和重复样本组。
+  - 新增 `POST /datasets/{dataset_id}/versions/{version}/repair-version`，支持去重与缺失字段默认补值，保持同一 `dataset_id` 并生成下一版。
+  - 修复版 Dataset 的 `source_type=dataset_repair`，`source_ref` 记录 `parent_version_id`、去重策略、补值字段和修复原因，Lineage 可追溯。
+  - 修复版写入新的 `rows.jsonl`，不修改旧版本，旧任务仍可追溯原始数据。
+- 前端能力：
+  - `DatasetsPage` 支持读取 URL 上的 `dataset_id/version` 并自动选中对应版本。
+  - 当前 Dataset Version 展示样本数、缺失字段数、重复样本数、字段覆盖率、缺失行、唯一值和治理建议。
+  - “生成修复版 Dataset Version”按钮会根据诊断建议填充缺失字段默认值并去重，成功后选中新版本并刷新数据集列表和诊断。
+- 变更文件：
+  - `aegisqa/datasets/service.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/datasets.py`
+  - `tests/test_dataset_governance.py`
+  - `frontend/src/types/dataset.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/DatasetsPage.tsx`
+  - `frontend/src/test/DatasetsPage.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_dataset_governance.py -q`
+  - `cd frontend && npm test -- src/test/DatasetsPage.test.tsx`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest tests\test_api.py tests\test_api_interaction_contract.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "数据集"`
+  - `python -m pytest tests\test_dataset_governance.py tests\test_api.py tests\test_api_interaction_contract.py -q`
+  - `cd frontend && npm test`
+  - `python -m pytest -q`
+  - `git diff --check -- aegisqa/datasets/service.py aegisqa/api/app.py aegisqa/api/routes/datasets.py tests/test_dataset_governance.py frontend/src/types/dataset.ts frontend/src/api/client.ts frontend/src/pages/DatasetsPage.tsx frontend/src/test/DatasetsPage.test.tsx frontend/src/test/workbenchTestHarness.tsx`
+- 测试结果：
+  - RED：后端目标测试最初 404，确认质量诊断接口不存在；前端目标测试最初找不到“字段治理诊断”，确认页面没有治理入口。
+  - GREEN：`tests\test_dataset_governance.py` 1 passed，覆盖字段缺失率、重复样本率、重复组、修复版 v2 和 lineage 父版本引用。
+  - 前端字段治理目标测试 1 passed，确认页面展示覆盖率和重复样本，并向修复接口提交 `drop_duplicate_rows=true` 与诊断补值。
+  - 数据集前端回归：`App.test.tsx -t "数据集"` 3 passed，上传入口、Lineage 抽屉和 Workflow 数据集禁用说明未回归。
+  - 后端相关回归：`tests\test_api.py tests\test_api_interaction_contract.py` 8 passed；联合数据集治理测试 9 passed。
+  - 前端类型检查：`tsc -b` 通过。
+  - 前端全量 Vitest：12 个测试文件、117 passed。
+  - 后端全量 Pytest：159 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - `git diff --check`：无空白错误，仅有 Windows 换行提示。
+- 下一步：
+  - P1-14 已满足字段覆盖率、缺失率、重复率展示，以及基于诊断结果生成修复版 Dataset Version 并保留 lineage 的验收；后续继续 P1-15，将 CI Gate、Baseline 应用和候选晋升收口成生产发布流程。
+
+### 2026-06-04 P1-13 报告中心大任务分页深化完成
+
+- 改动摘要：将 Task Report 的大明细从“后端一次性聚合、前端局部分页”继续推进为服务端分页。`GET /tasks/{task_id}/report` 新增 Step 分布、分层分析、诊断根因、诊断 Step 健康度的分页和搜索参数；报告中心对应区域增加搜索框、分页器和加载态，翻页或筛选都会重新请求后端，导出路径仍可通过 `include_all_badcases=true` 获取完整明细，避免离线报告被截断。
+- 后端能力：
+  - `step_page / step_page_size / step_query`：分页与搜索 Step 分布。
+  - `segment_page / segment_page_size / segment_query`：分页与搜索分层分析。
+  - `root_cause_page / root_cause_page_size / root_cause_query`：分页与搜索诊断根因。
+  - `diagnostic_step_page / diagnostic_step_page_size`：分页诊断 Step 健康度。
+  - 响应新增 `step_distribution_pagination`、`segments_pagination`、`diagnostics_pagination`，保持旧字段名和数组结构兼容。
+- 前端能力：
+  - 报告中心 Step 分布支持按 Step/Skill 搜索和服务端翻页。
+  - 分层分析支持按字段或取值搜索和服务端翻页。
+  - 根因诊断支持按根因、证据或建议搜索和服务端翻页。
+  - Step 健康度复用 Step 搜索，并按服务端页码加载。
+- 变更文件：
+  - `aegisqa/api/routes/task_reports.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_center_api.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/types/report.ts`
+  - `frontend/src/pages/ReportsPage.tsx`
+  - `frontend/src/pages/report/ReportSegmentAnalysis.tsx`
+  - `frontend/src/test/ReportsPage.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q -k "lifecycle_report"`
+  - `cd frontend && npm test -- src/test/ReportsPage.test.tsx -t "Step 分布使用服务端分页"`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test -- src/test/ReportsPage.test.tsx`
+  - `python -m pytest tests\test_task_center_api.py -q`
+  - `cd frontend && npm test`
+  - `git diff --check -- aegisqa/api/routes/task_reports.py aegisqa/api/routes/tasks.py tests/test_task_center_api.py frontend/src/api/client.ts frontend/src/types/report.ts frontend/src/pages/ReportsPage.tsx frontend/src/pages/report/ReportSegmentAnalysis.tsx frontend/src/test/ReportsPage.test.tsx`
+- 测试结果：
+  - RED：后端目标测试最初在第 2 页 Step 分布断言失败，确认报告接口未按 `step_page` 返回分页明细；前端目标测试最初找不到第 2 页按钮，确认 Step 分布仍是本地展示。
+  - GREEN：后端 `lifecycle_report` 定向测试通过，覆盖 Step 分布和诊断 Step 健康度第 2 页。
+  - 报告中心 Step 分布目标测试 1 passed，确认翻页请求 `step_page=2&step_page_size=3`，搜索请求 `step_query=judge`。
+  - 前端类型检查：`tsc -b` 通过。
+  - 报告中心全量 Vitest：13 passed。
+  - 后端任务中心 API 测试：19 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端全量 Vitest：11 个测试文件、116 passed。
+  - `git diff --check`：无空白错误，仅有 Windows 换行提示。
+- 下一步：
+  - P1-13 已满足“报告、Badcase、Trace、Step 明细按服务端分页加载”的阶段目标中的报告和 Step 细化；后续继续 P1-14 数据集字段治理增强，补字段覆盖率、缺失率、重复率和基于诊断结果生成修复版 Dataset Version。
+
+### 2026-06-04 P1-12 前端类型拆分与 API schema 对齐完成
+
+- 改动摘要：将 `frontend/src/types.ts` 拆成领域类型模块，并保留原 `../types` 统一入口。现有页面、组件和 `frontend/src/api/client.ts` 不需要改 import；`types.ts` 只负责 barrel export，避免类型定义继续在单文件内膨胀。
+- 拆分边界：
+  - `types/common.ts`：通用 API 错误。
+  - `types/dataset.ts`：Dataset Version、Summary、Lineage。
+  - `types/skill.ts`：Skill manifest、合约测试、包治理和 Agent Skill 发现/导入记录。
+  - `types/workflow.ts`：Workflow graph、校验结果、版本、草稿和参数预览。
+  - `types/task.ts`：Run、Task、Preflight、Repair Task、参数治理和 Trace。
+  - `types/report.ts`：Task Report、导出、诊断、质量决策、预算、红队、Score Analytics 和断言结果。
+  - `types/governance.ts`：模型网关、运行状态和审计事件。
+  - `types/judge.ts`：Judge Profile、审计记录、交叉验证和趋势。
+  - `types/candidate.ts`：Annotation Queue、候选资产、复测、批量治理和晋升评审。
+  - `types/experiment.ts`：Experiment、Baseline、通知、影响分析和发布产物。
+  - `types/ci.ts`：CI Gate 配置、评估和分页结果。
+- 测试补齐：新增 `typesBarrelBoundaries.test.ts`，要求 `types.ts` 保持短 barrel、包含各领域导出，并用类型级 smoke test 确认旧 `../types` 入口仍能导出 Task、Workflow、Skill、Dataset、Report、Model Gateway 和 Audit 关键类型。
+- 变更文件：
+  - `frontend/src/types.ts`
+  - `frontend/src/types/common.ts`
+  - `frontend/src/types/dataset.ts`
+  - `frontend/src/types/skill.ts`
+  - `frontend/src/types/workflow.ts`
+  - `frontend/src/types/task.ts`
+  - `frontend/src/types/report.ts`
+  - `frontend/src/types/governance.ts`
+  - `frontend/src/types/judge.ts`
+  - `frontend/src/types/candidate.ts`
+  - `frontend/src/types/experiment.ts`
+  - `frontend/src/types/ci.ts`
+  - `frontend/src/test/typesBarrelBoundaries.test.ts`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/typesBarrelBoundaries.test.ts`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test`
+  - `git diff --check -- frontend/src/types.ts frontend/src/types frontend/src/test/typesBarrelBoundaries.test.ts`
+- 测试结果：
+  - RED：类型 barrel 结构测试最初失败在 `types.ts` 不包含 `export * from './types/common';`，确认尚未拆分。
+  - GREEN：类型 barrel 结构测试 2 passed，覆盖 barrel 边界和旧入口关键类型导出。
+  - 前端类型检查：`tsc -b` 通过，跨领域 `import type` 关系完整。
+  - 前端全量 Vitest：11 个测试文件、115 passed。
+  - `git diff --check`：无空白错误，仅有 Windows 换行提示。
+- 下一步：
+  - P1-12 已满足“所有 imports 通过 typecheck、API client 类型仍集中导出、页面不感知迁移”的验收；后续可继续 P1-13，将报告中心 Trace/Step/Badcase 明细进一步服务端分页。
+
+### 2026-06-04 P1-11 Workflow 画布组件拆分完成
+
+- 改动摘要：将 `WorkflowDesignerPage.tsx` 的展示职责拆到 `workflowDesigner` 目录下的聚焦组件，主页面只保留 Workflow 状态、查询、mutation、历史栈和业务回调编排。主文件行数从 1348 降到 780，降低后续维护和继续拆分成本。
+- 拆分边界：
+  - `WorkflowDraftLoaderPanel.tsx`：流程/草稿/模板加载、数据集选择、样本数、流程名称和字段预览。
+  - `SkillPalettePanel.tsx`：Skill 搜索、可用性提示、添加 Skill 节点和结构节点。
+  - `WorkflowCanvasPanel.tsx`：ReactFlow 画布、撤销/重做/自动布局/删除选中工具栏。
+  - `WorkflowInspectorPanel.tsx`：节点基础配置、Skill 参数、字段映射、高级 JSON、连线和参数预览。
+  - `WorkflowConsolePanel.tsx`：校验、试运行、结果/错误/JSON Console。
+  - `SkillDetailDrawer.tsx` 与 `WorkflowIssuePanels.tsx`：Skill schema 详情和校验问题/修复建议复用展示。
+- 测试补齐：新增 `workflowComponentBoundaries.test.ts`，要求核心组件边界存在，并约束主页面行数不超过 900 行，防止后续重新膨胀。
+- 变更文件：
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/pages/workflowDesigner/WorkflowDraftLoaderPanel.tsx`
+  - `frontend/src/pages/workflowDesigner/SkillPalettePanel.tsx`
+  - `frontend/src/pages/workflowDesigner/SkillDetailDrawer.tsx`
+  - `frontend/src/pages/workflowDesigner/WorkflowCanvasPanel.tsx`
+  - `frontend/src/pages/workflowDesigner/WorkflowInspectorPanel.tsx`
+  - `frontend/src/pages/workflowDesigner/WorkflowConsolePanel.tsx`
+  - `frontend/src/pages/workflowDesigner/WorkflowIssuePanels.tsx`
+  - `frontend/src/test/workflowComponentBoundaries.test.ts`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/workflowComponentBoundaries.test.ts`
+  - `cd frontend && npm test -- src/test/workflowComponentBoundaries.test.ts src/test/WorkflowDesignerPage.test.tsx`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Workflow 发布失败"`
+  - `cd frontend && npm test`
+  - `cd frontend && npx playwright test e2e/workflow-designer.spec.ts`
+- 测试结果：
+  - RED：结构测试最初失败在 `WorkflowCanvasPanel.tsx` 不存在，确认拆分尚未完成。
+  - GREEN：结构测试 + Workflow 设计器 Vitest 7 passed，覆盖组件边界、Skill 参数、模型连接下拉、字段映射、校验、字段预览和发布前保存。
+  - 类型检查过程：第一次 `tsc -b` 抓到 Inspector JSON parser 少传 `field`、模板选项类型过窄、结构测试依赖 Node types；修复后 `tsc -b` 通过。
+  - 前端全量回归过程：第一次全量 Vitest 112 passed / 1 failed，失败是 IssueList 搬迁后错误码被渲染成“错误码 / 节点”，旧界面和测试期待精确错误码；恢复错误码展示和旧校验码修复建议后，失败用例单测通过。
+  - 前端全量 Vitest：10 个测试文件、113 passed。
+  - Workflow 画布 Playwright：6 passed，覆盖 Palette 新增、删除、校验发布、键盘删除、草稿回放、字段映射回放和试运行结果。
+- 下一步：
+  - P1-11 已满足“Workflow 现有 Vitest + Playwright 通过、保存草稿/字段映射/参数预览/试运行/发布行为不变”的验收；下一项推进 P1-12，把 `frontend/src/types.ts` 拆为领域类型并保留 barrel export。
+
+### 2026-06-04 P1-10 多模型连接别名前端补齐
+
+- 改动摘要：治理页新增“模型连接别名”区域，支持连接列表、启停状态、Secret 引用展示、新增/编辑/删除连接，以及通过 `model_connection_id` 调用 `/model-gateway/test` 做别名连接测试。连接保存 payload 明确排除临时 `api_key` 字段，只保存 `secret_ref`、Provider、Base URL、默认模型、超时和启用状态。连接列表对非数组响应做防御式归一化，避免旧测试 mock 或异常响应导致 Ant Table 崩溃。
+- Workflow 接入：Workflow 设计器加载 `/model-gateway/connections`，`SkillConfigEditor` 遇到 `model_connection_id` 参数时渲染连接别名下拉，选项显示“显示名称（连接 ID）”，禁用的连接只展示不可选。草稿保存时仍写入原有 Skill config，不改变 Workflow API wire shape。
+- 测试补齐：新增治理页测试覆盖连接新增、保存不落临时 API Key、按别名测试、删除；新增 Workflow 设计器测试覆盖 `model_connection_id` 下拉选择并写入草稿 payload。
+- 变更文件：
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/pages/WorkflowDesignerPage.tsx`
+  - `frontend/src/pages/workflowDesigner/SkillConfigEditor.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/WorkflowDesignerPage.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "治理页"`
+  - `cd frontend && npm test -- src/test/WorkflowDesignerPage.test.tsx`
+  - `python -m pytest tests\test_model_gateway.py -q`
+  - `cd frontend && npm run typecheck`
+  - `git diff --check`
+  - `cd frontend && npm test`
+- 测试结果：
+  - RED：治理页旧 mock 回归最初在 Ant Table 报 `rawData.some is not a function`，根因是 `/model-gateway/connections` 在部分测试中返回非数组对象；修复为数组归一化后恢复。
+  - 治理页定向：5 passed / 56 skipped，覆盖 Skill 审批、模型网关配置、模型连接别名管理和权限矩阵。
+  - Workflow 设计器定向：6 passed，覆盖参数 schema 渲染、模型连接下拉、字段映射、校验、分页和发布前保存。
+  - 后端模型网关回归：7 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+  - `git diff --check`：无空白错误，仅有 Windows 换行提示。
+  - 前端全量 Vitest：9 个测试文件、112 passed。
+- 下一步：
+  - P1-10 已完成“治理页管理连接别名”和“Workflow Skill config 可选择 `model_connection_id`”的主要验收；后续可在任务快照/报告侧进一步显式展示连接别名、模型名、参数和脱敏 Secret ref，并继续推进 P1-11 / P1-12。
+
+### 2026-06-04 P0-07 E2E 稳定性与端口隔离完成
+
+- 改动摘要：新增 `task-flow-helpers.ts` 作为真实端到端 fixture 和 API/UI 辅助层，负责生成 JSONL 样本、打包插件型 Skill、上传/审批 Skill、物化 Dataset、发布 Workflow、创建/执行 Task、校验报告和 Trace Flow。删除原超长 `task-flow.spec.ts`，拆成四个可独立运行的阶段化 spec：
+  - `task-upload.spec.ts`：只验证 Dataset 上传、Agent Skill 包上传、合约测试与审批。
+  - `task-workflow.spec.ts`：通过 API 准备已审批 Skill，通过 UI 创建 Workflow 草稿，再发布并验证市场可见。
+  - `task-execution.spec.ts`：通过 API 准备 Dataset/Skill/Workflow，通过执行中心 UI 真实创建并运行 Task。
+  - `task-report.spec.ts`：通过 API 准备并执行 Task，再通过报告中心 UI 验证报告导出、Badcase 沉淀和 Trace Flow。
+- Workflow E2E 修复：旧 `workflow-designer.spec.ts` 仍按早期交互假设“点击新建后立即进入画布”，完整 E2E 暴露 6 个 Workflow 用例卡在新建弹窗；已统一新增 `createWorkflowDraft(...)` helper，按真实交互填写名称并确认创建。随后收窄过时选择器：`校验当前画布`、`校验并发布`、草稿行 `编辑` 按钮，以及试运行后 JSON 面板中的 `queue_messages/item_id`，避免和 tooltip/toast 文案冲突。
+- 变更文件：
+  - `frontend/e2e/task-flow-helpers.ts`
+  - `frontend/e2e/task-upload.spec.ts`
+  - `frontend/e2e/task-workflow.spec.ts`
+  - `frontend/e2e/task-execution.spec.ts`
+  - `frontend/e2e/task-report.spec.ts`
+  - `frontend/e2e/task-flow.spec.ts`
+  - `frontend/e2e/workflow-designer.spec.ts`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npx playwright test --list`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npx playwright test e2e/task-upload.spec.ts e2e/task-workflow.spec.ts e2e/task-execution.spec.ts e2e/task-report.spec.ts`
+  - `cd frontend && npm run e2e`
+  - `cd frontend && npx playwright test e2e/workflow-designer.spec.ts`
+  - `cd frontend && npm run e2e`
+  - `cd frontend && npm run e2e`
+- 测试结果：
+  - Playwright 清单：6 个 spec、12 个测试，确认拆分后的上传/Workflow/执行/报告 spec 被发现。
+  - 前端类型检查：`tsc -b` 通过。
+  - 任务链路定向 E2E：4 passed，覆盖上传、Workflow、执行中心真实执行、报告 Badcase 与 Trace Flow。
+  - 首次完整 E2E：6 passed / 6 failed，失败均集中在旧 `workflow-designer.spec.ts`；根因是测试未处理新建弹窗，并且部分按钮/结果选择器已随 UI 演进变化。
+  - Workflow 定向修复过程：第一次修入口后 2 passed / 4 failed，继续按失败截图修正选择器；最终 `workflow-designer.spec.ts` 6 passed。
+  - 完整 E2E 连续两次通过：第一次 12 passed，第二次 12 passed，确认隔离端口、独立 store、真实 FastAPI/Vite 启动路径和服务清理稳定。
+- 下一步：
+  - P0-07 已满足“`npm run e2e` 本机连续 2 次通过”的验收；后续可把 Playwright 产物中的后端/前端日志路径写入 CI 失败摘要，继续推进 P1-10 治理页多模型连接管理、P1-11 Workflow 页面组件拆分、P1-12 前端类型拆分。
+
+### 2026-06-04 P0-06 巨型任务路由拆分完成
+
+- 改动摘要：新增三个聚焦路由模块：
+  - `task_lifecycle.py`：`POST /tasks`、`POST /tasks/{task_id}/execute`、`attempts`、`pause`、`resume`、`cancel`、`retry-failed`。
+  - `task_preflight.py`：`GET /task-preflights/{preflight_id}`、`GET/POST /task-execution-templates`、`POST /tasks/preflight`。
+  - `repair_tasks.py`：`GET /repair-tasks`、修复树、开始/指派/完成/重开、动作执行，以及 `POST /tasks/{task_id}/repair-tasks/from-diagnostics`。
+- 路由注册：`routes/__init__.py` 导出新 register 函数，`create_app()` 按 Preflight、Lifecycle、Repair、Reports、Task 查询兼容入口顺序注册，保证 `/tasks/preflight` 等具体路径不会被 `/tasks/{task_id}` 影子匹配。`tasks.py` 删除重复 route 定义，保留任务列表/详情、诊断、参数治理、Trace Tree/Flow、Run 兼容接口和共享 helper，复杂业务 helper 暂时不做大规模搬迁，降低循环 import 和行为漂移风险。
+- 变更文件：
+  - `aegisqa/api/routes/task_lifecycle.py`
+  - `aegisqa/api/routes/task_preflight.py`
+  - `aegisqa/api/routes/repair_tasks.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/api/routes/__init__.py`
+  - `aegisqa/api/app.py`
+  - `tests/test_task_route_modules.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_route_modules.py -q`
+  - `python -m pytest tests\test_task_center_api.py -q`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_task_route_modules.py tests\test_task_center_api.py tests\test_task_flow_optimization.py tests\test_api.py tests\test_access_control_hardening.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - RED：新增结构测试最初失败在 `aegisqa.api.routes.task_lifecycle` 模块不存在，确认拆分尚未完成。
+  - GREEN：结构测试 1 passed，确认三个聚焦模块和 register 函数存在，关键 URL 仍注册在 app 中。
+  - 任务中心回归：19 passed；权限收口回归：1 passed。
+  - 任务路由拆分、任务中心、产品化闭环、基础 API 和权限收口组合回归：47 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 后端全量：158 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+- 下一步：
+  - P0-06 后续可继续把共享 helper 逐步迁入领域模块或 service，但当前 URL 行为和注册边界已完成；下一项优先推进 P0-07，把 `task-flow.spec.ts` 拆成可独立运行的上传、Workflow、执行、报告阶段，并连续跑两次完整 E2E。
+
+### 2026-06-04 P1-18 治理页统一运维驾驶舱第一阶段
+
+- 改动摘要：新增 `GET /governance/runtime-status`，后端按当前 `ctx.store`、`ctx.task_executor`、`ModelGateway.from_env().status()` 和 Skill 包沙箱常量返回运行状态事实。响应区分 `available / configured / demo / not_configured / not_connected`，并显式说明 MySQL schema、Redis 和 Celery worker 在当前运行中是否真实接入。治理页原静态“生产适配边界已移至文档”卡片升级为“运行状态与生产边界”，展示存储后端、执行器、模型网关、Skill 沙箱、MySQL、Redis、Celery 和沙箱限制；前端对运行状态字段做防御式可空读取，避免接口异常或旧 mock 缺字段时整页崩溃。
+- 变更文件：
+  - `aegisqa/api/routes/governance.py`
+  - `tests/test_api.py`
+  - `frontend/src/types.ts`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_api.py -q -k "runtime_status"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "治理页面权限矩阵"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "治理页"`
+  - `python -m pytest tests\test_api.py tests\test_model_gateway.py tests\test_access_control_hardening.py -q`
+  - `python -m pytest -q`
+  - `cd frontend && npm test`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - RED：后端目标测试最初失败在 `/governance/runtime-status` 返回 404，确认运行状态接口未实现。
+  - GREEN：后端 runtime-status 目标测试 1 passed，覆盖 storage/executor/model_gateway/skill_sandbox/external_services 的事实状态。
+  - 前端治理页定向：先暴露出运行状态卡对部分字段缺少深层可空保护，修复后治理页 4 个相关测试通过。
+  - 后端组合回归：12 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 后端全量：157 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端全量：9 个测试文件、110 passed。
+  - 前端类型检查：`tsc -b` 通过。
+- 下一步：
+  - P1-10 的治理页连接列表和 Workflow `model_connection_id` 下拉已补齐；后续继续把 runtime-status 的状态文案同步到部署文档，并推进 Workflow 画布组件拆分。
+
+### 2026-06-04 P1-10 多模型连接别名第一阶段
+
+- 改动摘要：模型网关新增 `ModelGatewayConnectionConfig` 和运行期连接表，store 持久化路径为 `settings/model_gateway_connections.json`，只保存 `secret_ref` 等非明文字段，不落 `api_key`。新增 API：`GET /model-gateway/connections`、`POST /model-gateway/connections`、`PUT /model-gateway/connections/{connection_id}`、`DELETE /model-gateway/connections/{connection_id}`。`/model-gateway/test` 支持 `model_connection_id`；`ModelGateway.from_env(connection_id=...)` 会按别名解析配置，别名不存在时返回 `MODEL_CONNECTION_NOT_FOUND`，不静默回退默认连接。内置 `llm.call@0.1.0`、`model.chat@0.1.0`、本机 Agent Skill 和上传包说明型运行时均支持在 config 中传 `model_connection_id`。
+- 前端基础：新增 `ModelGatewayConnection` 类型和 `api.modelGatewayConnections/createModelGatewayConnection/updateModelGatewayConnection/deleteModelGatewayConnection` client 方法；治理页列表管理和 Workflow 参数下拉已在后续“P1-10 多模型连接别名前端补齐”阶段完成。
+- 变更文件：
+  - `aegisqa/models/gateway.py`
+  - `aegisqa/api/routes/models.py`
+  - `aegisqa/skills/examples.py`
+  - `aegisqa/skills/agent_skills.py`
+  - `aegisqa/skills/packages.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/types.ts`
+  - `tests/test_model_gateway.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_model_gateway.py -q -k "connections"`
+  - `python -m pytest tests\test_model_gateway.py tests\test_skill_package_security.py tests\test_agent_skill_package_upload.py tests\test_access_control_hardening.py -q`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - RED：P1-10 目标测试最初失败在 `POST /model-gateway/connections` 返回 404，确认连接别名 API 未实现。
+  - GREEN：目标测试 1 passed，覆盖连接创建、脱敏持久化、列表、指定别名测试调用、`model.chat` Skill config 选择别名、更新和删除。
+  - 模型网关、Skill 包安全、Agent Skill 上传和权限收口组合回归：23 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+- 下一步：
+  - 治理页增加多连接管理列表和“测试连接”入口；Workflow Inspector 可将 `model_connection_id` 渲染为连接下拉，而不是普通字符串输入，并在 Task 快照中显式记录连接别名和脱敏 secret ref。
+
+### 2026-06-04 P1-09 Agent Skill 依赖与镜像方案第一阶段
+
+- 改动摘要：在既有 P0-02 沙箱基础上补齐用户文档：`docs/AGENT_SKILL_PACKAGE_GUIDE.md` 新增“第三方依赖声明”章节，明确平台识别 `skill.yaml.runtime.dependencies`、`requirements.txt`、`pyproject.toml`，但本地子进程模式不会安装第三方依赖，会返回 `SKILL_PACKAGE_DEPENDENCIES_UNSUPPORTED`；同时写明未来生产容器方案，包括按 Skill 版本构建独立镜像、layer cache、依赖锁定、漏洞/许可证扫描、合约测试、CPU/内存/网络/文件系统限制，以及镜像 digest 写入 Task/Run 快照。
+- 变更文件：
+  - `docs/AGENT_SKILL_PACKAGE_GUIDE.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_skill_package_security.py -q -k "dependency"`
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+- 测试结果：
+  - Skill 依赖声明定向测试：1 passed，覆盖 `runtime.dependencies` 和 `requirements.txt` 上传拒绝。
+  - P0-08 权限收口回归：1 passed，确认文档补充没有影响后端行为。
+- 下一步：
+  - 后续生产模式接入容器运行时后，将 `runtime.dependencies` 从“拒绝”切换为“构建镜像输入”，并补镜像构建失败、依赖扫描失败和镜像 digest 快照测试。
+
+### 2026-06-04 P0-08 审计与权限收口第一阶段
+
+- 改动摘要：`AccessControl` 新增统一 `require_permission(...)` 门禁 helper，拒绝时返回 `FORBIDDEN`、HTTP 403、`required_permission`、`role` 和 trace 信息，并同步写入审计日志。`AuditEvent` 扩展 `role`、`result`、`trace_id` 字段，旧事件读取时使用默认值兼容。Dataset 上传/物化/字段修复、Workflow 发布、Skill 上传/合约测试/审批/禁用/废弃、Task 创建/执行、任务样本结果导出、Baseline apply/rollback 已接入权限检查；请求模型新增默认 `actor/role` 字段，旧接口不传时保持原有成功路径。
+- 变更文件：
+  - `aegisqa/security/access.py`
+  - `aegisqa/audit/service.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/datasets.py`
+  - `aegisqa/api/routes/workflows.py`
+  - `aegisqa/api/routes/skills.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/api/routes/task_reports.py`
+  - `aegisqa/api/routes/productization.py`
+  - `tests/test_access_control_hardening.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_access_control_hardening.py -q`
+  - `python -m pytest tests\test_access_control_hardening.py tests\test_task_center_api.py tests\test_skill_package_security.py tests\test_agent_skill_package_upload.py tests\test_product_extensions.py tests\test_task_flow_optimization.py -q`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - RED：新增 P0-08 目标测试最初失败在 Viewer 仍可上传 Dataset，确认关键写操作缺少统一门禁。
+  - GREEN：目标测试 1 passed，覆盖 Viewer 对 Dataset 上传、Workflow 发布、Task 执行、Skill 审批、Baseline apply 的拒绝，以及 denied 审计事件的 `role/result/trace_id` 字段。
+  - 组合回归：60 passed，覆盖任务中心、Skill 包安全、Agent Skill 上传、产品化闭环和基础扩展；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+- 下一步：
+  - 继续把其余写接口纳入同一权限矩阵，重点是 Annotation Queue、CI Gate、Badcase 修正、Judge 配置、模型网关配置和 Repair Task 动作；同时补治理页权限矩阵，确保前端展示和后端 `AccessControl.ROLE_PERMISSIONS` 保持一致。
+
+### 2026-06-04 P0-07 E2E 稳定性与端口隔离第一阶段
+
+- 改动摘要：Playwright 配置新增单次运行产物根目录 `.e2e-artifacts/<runId>`，其中包含独立 `store`、`api.log`、`web.log`、`test-results` 和 `playwright-report`。E2E webServer 现在固定 `reuseExistingServer=false`，避免误连开发中的旧 8010/5174 服务；后端启动时注入 `AEGISQA_STORE_ROOT`、`AEGISQA_STORAGE_BACKEND` 和 `AEGISQA_TASK_EXECUTOR`，前端仍通过 Vite 代理真实 FastAPI。`create_app()` 在默认 store root 下支持读取 `AEGISQA_STORE_ROOT`，便于 E2E 和后续 CI 使用隔离数据目录。新增 `.gitignore` 规则忽略 `.e2e-artifacts/`，并清理本次配置检查生成的临时产物。
+- 变更文件：
+  - `frontend/playwright.config.ts`
+  - `aegisqa/api/app.py`
+  - `.gitignore`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest tests\test_task_center_api.py tests\test_repository_contracts.py tests\test_model_gateway.py tests\test_skill_package_security.py -q`
+  - `cd frontend && npx playwright test --list`
+- 测试结果：
+  - 前端类型检查：`tsc -b` 通过。
+  - 任务中心、repository contract、模型网关和 Skill 包安全组合回归：40 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - Playwright 配置发现：成功列出 3 个 spec、9 个测试，确认新配置可加载并生成隔离运行参数。
+  - 本阶段未执行两次完整 `npm run e2e`，也尚未把 `task-flow.spec.ts` 拆成上传、Workflow、执行、报告四个可独立 spec；这两项继续作为 P0-07 最终验收尾项。
+- 下一步：
+  - 将 `task-flow.spec.ts` 的主链路拆成可独立运行的阶段化 spec/fixture，并在独立 store 下连续运行两次 `npm run e2e`，确认服务进程、测试数据和产物清理稳定。
+
+### 2026-06-04 P0-06 巨型任务路由拆分第一阶段
+
+- 改动摘要：新增 `aegisqa/api/routes/task_reports.py`，迁移 `/tasks/{task_id}/report`、`/tasks/{task_id}/report/export-requests`、`/report-export-requests`、`/report-export-requests/{request_id}/approve|reject|revoke`、`/tasks/{task_id}/report/export`、`/tasks/{task_id}/results/export` 等任务报告与导出相关路由。`routes/__init__.py` 和 `create_app()` 已注册 `register_task_report_routes`，原 URL、审批逻辑、流式样本结果导出和审计行为保持不变。`tasks.py` 仍保留相关 helper，供新模块复用；这是拆分第一阶段，后续还需要继续迁移 lifecycle、preflight、repair 边界。
+- 变更文件：
+  - `aegisqa/api/routes/task_reports.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/api/routes/__init__.py`
+  - `aegisqa/api/app.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q -k "task_lifecycle_report or task_result_export or report_export"`
+  - `python -m pytest tests\test_task_center_api.py tests\test_repository_contracts.py tests\test_model_gateway.py tests\test_skill_package_security.py -q`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - 任务报告、报告导出审批和样本结果导出目标回归：3 passed。
+  - 任务中心、repository contract、模型网关和 Skill 包安全组合回归：40 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+- 下一步：
+  - 继续 P0-06 剩余拆分，优先把任务生命周期创建/执行/暂停/恢复/取消迁出到 `task_lifecycle.py`，再拆 `task_preflight.py` 与 `repair_tasks.py`。
+
+### 2026-06-04 P0-05 存储层 Repository 化第一阶段
+
+- 改动摘要：新增 `aegisqa.storage.repositories`，定义 `DocumentStore` 协议、通用 `JsonDocumentRepository`、`AuditEventRepository` 和 `RepositoryRegistry`。Registry 暴露 `tasks`、`runs`、`workflows`、`skill_packages`、`audit_events` 五个核心 repository；Workflow 版本 ID 继续使用现有 safe 文件名规则，AuditEvent 保留 append-only JSONL 语义。`create_app()` 现在为当前 store 创建一次 `RepositoryRegistry` 并挂到 `app.state.repositories` / `RouteContext.repositories`，`WorkflowRunner` 使用 `repositories.runs`，`WorkflowService` 使用 `repositories.workflows`，`AuditService` 使用 `repositories.audit_events`。原 `_save_record/_get_record/_list_records` helper 也改为通过 registry 的过渡 collection repository 读写，保持现有路由调用不大规模改动，为 P0-06 拆路由和 P2 MySQL adapter 留出明确接口。
+- 变更文件：
+  - `aegisqa/storage/repositories.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/context.py`
+  - `aegisqa/engine/runner.py`
+  - `aegisqa/workflows/service.py`
+  - `aegisqa/audit/service.py`
+  - `tests/test_repository_contracts.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_repository_contracts.py -q`
+  - `python -m pytest tests\test_repository_contracts.py tests\test_sqlite_store_adapter.py tests\test_task_center_api.py tests\test_api.py -q`
+  - `python -m pytest tests\test_model_gateway.py tests\test_skill_package_security.py -q`
+- 测试结果：
+  - 新增 repository contract tests：先 RED，确认缺少 `aegisqa.storage.repositories`；实现后 JSON/SQLite 两种 backend 下 4 passed。
+  - Repository、SQLite adapter、任务中心和基础 API 回归：29 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 模型网关和 Skill 包安全回归：17 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+- 下一步：
+  - 继续 P0-06 巨型任务路由拆分，把 `task_lifecycle`、`task_reports`、`repair_tasks`、`task_preflight` 等边界拆出，并逐步把 legacy helper 调用替换成显式 repository 调用。
+
+### 2026-06-04 P0-04 长任务结果导出流式化
+
+- 改动摘要：`GET /tasks/{task_id}/results/export` 从返回 `{content: ...}` 的 JSON 对象改为服务端流式下载响应。JSONL/JSON 逐行生成，CSV 先扫描列集合和行数，再第二遍逐行写出，避免在路由层持有完整导出字符串；响应头新增 `X-AegisQA-Row-Count`、`X-AegisQA-File-Format`、`X-AegisQA-Include-Steps`、`X-AegisQA-Streaming` 和 `Content-Disposition`。导出审计事件继续写入 `task.results.export`，并记录 `streaming=true`、行数、格式、是否包含 step 明细和 content type。前端 `exportTaskResults` 改为读取 Blob 与响应头，任务详情抽屉直接触发文件下载；CSV / JSONL 按钮保留，导出时按钮进入 loading，失败会展示结构化错误。
+- 变更文件：
+  - `aegisqa/api/routes/tasks.py`
+  - `tests/test_task_center_api.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/task/TaskOperationsDrawer.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `frontend/src/types.ts`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q -k "task_result_export"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心任务详情支持导出"`
+  - `python -m pytest tests\test_task_center_api.py tests\test_model_gateway.py tests\test_skill_package_security.py tests\test_p0_hardening.py tests\test_agent_skill_package_upload.py tests\test_agent_skill_runtime_matrix.py -q`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - P0-04 后端目标用例：先 RED，确认旧接口仍返回 `application/json`；修复后通过，CSV/JSONL/JSON 均为下载响应，行数和 streaming header 正确，审计事件包含 `streaming=true`。
+  - 前端执行中心导出目标测试：先因测试 mock 使用中文 `Content-Disposition` 文件名导致 jsdom header 不稳定，改为 ASCII header 后通过；Blob 下载、CSV/JSONL URL 和成功状态均覆盖。
+  - 任务中心、模型网关、Skill 包安全、P0 hardening、Agent Skill 上传和运行矩阵组合回归：44 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+- 下一步：
+  - 继续 P0-05 存储层 Repository 化，先为 Task、Run、Workflow、SkillPackage、AuditEvent 建立 repository 接口与 contract tests。
+
+### 2026-06-04 P0-03 模型网关 Secret 管理升级
+
+- 改动摘要：模型网关配置新增 `secret_ref`，持久化时统一剔除运行期 `api_key`，`settings/model_gateway.json` 不再保存真实 API Key。后端新增本地 Secret resolver，支持 `env:NAME`、`dotenv:NAME` 和裸变量名，裸变量名会先查环境变量再查 `.env`；旧版本 store 中已有的 `api_key` 明文配置会在 `create_app()` 启动加载时自动重写为无明文版本，并在配置接口中显示为未配置明文回显。`/model-gateway/test` 支持一次性 `api_key` 或临时 `secret_ref`，只用于当前连接测试请求，不落盘。治理页将“Secret 引用”和“临时测试 API Key”拆开：保存配置只提交引用，测试连接才提交临时密钥；保存成功后仍保留弹窗内的临时密钥，方便继续测试但不持久化。
+- 变更文件：
+  - `aegisqa/models/gateway.py`
+  - `aegisqa/api/routes/models.py`
+  - `tests/test_model_gateway.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `frontend/src/types.ts`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_model_gateway.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "模型网关"`
+  - `python -m pytest tests\test_model_gateway.py tests\test_skill_package_security.py tests\test_p0_hardening.py tests\test_agent_skill_package_upload.py tests\test_agent_skill_runtime_matrix.py -q`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - P0-03 新增 Secret 管理用例：先 RED，确认响应缺少 `secret_ref`、临时 key 未进入 Authorization、旧明文 key 仍被视为已配置；修复后模型网关测试 6 passed。
+  - 前端治理页模型网关目标测试：先发现保存成功后会清空临时测试 Key，导致测试连接未带一次性 Key；修复后 2 passed。
+  - 模型网关、Skill 包安全、P0 hardening、Agent Skill 上传和运行矩阵组合回归：25 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+- 下一步：
+  - 继续 P0-04 长任务结果导出流式化，优先把 `/tasks/{task_id}/results/export` 改成服务端流式响应，并为大导出记录审计事件。
+
+### 2026-06-04 P0-02 Skill 包安全沙箱第一阶段
+
+- 改动摘要：Skill 包上传入口新增解压前安全配额校验，限制 zip 文件数量、单文件大小和解压总大小，并返回 `SKILL_PACKAGE_TOO_MANY_FILES`、`SKILL_PACKAGE_FILE_TOO_LARGE`、`SKILL_PACKAGE_TOO_LARGE` 等结构化错误码。脚本型或参数型包的 manifest 现在必须显式声明 `permissions`，空数组表示无需额外权限；本地运行模式遇到 `runtime.dependencies` 或 `requirements.txt` / `pyproject.toml` 会拒绝上传并返回 `SKILL_PACKAGE_DEPENDENCIES_UNSUPPORTED`。脚本子进程 runner 会把包根目录和权限声明传入环境，默认拦截 `open`、`Path.open`、`os.open` 等包外文件访问，并在没有网络权限时拦截 `socket.socket` / `socket.create_connection`；stdout/stderr 仍走现有脱敏和截断逻辑。审批详情页新增运行方式、入口文件、权限声明、包大小、单文件峰值、合约测试时间等审核字段。
+- 变更文件：
+  - `aegisqa/api/app.py`
+  - `aegisqa/skills/packages.py`
+  - `frontend/src/pages/skills/SkillApprovalDrawer.tsx`
+  - `frontend/src/types.ts`
+  - `tests/test_skill_package_security.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_skill_package_security.py -q -k "zip_size or permissions or dependency or outside_package or network_socket"`
+  - `python -m pytest tests\test_skill_package_security.py tests\test_p0_hardening.py tests\test_agent_skill_package_upload.py tests\test_agent_skill_runtime_matrix.py -q`
+  - `python -m pytest tests\test_task_center_api.py -q -k "injected_executor or submit_fails"`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - P0-02 新增安全目标用例：先 RED，确认超大/超量 zip、缺失 permissions、依赖声明、包外文件读取和网络 socket 均未被拦截；修复后 5 passed。
+  - Skill 包安全、P0 hardening、Agent Skill 上传和运行矩阵回归：19 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - P0-01 执行器注入和提交失败回滚回归：2 passed。
+  - 前端类型检查：`tsc -b` 通过。
+- 下一步：
+  - 继续 P0-03 模型网关 Secret 管理升级，移除 store 明文 API Key 风险，仅保存 `secret_ref` 并支持环境变量 resolver。
+
+### 2026-06-04 P0-01 TaskExecutor 后台执行器抽象
+
+- 改动摘要：新增 `TaskExecutor` 执行器抽象，`create_app()` 支持注入测试执行器或通过 `AEGISQA_TASK_EXECUTOR` 选择运行后端；默认仍使用本地线程池，保持现有 `/tasks/{task_id}/execute?background=true` 行为。后台执行开始时继续先持久化 Run/Task 的 `running` 状态，并新增 `execution_state` 记录执行器后端、Job ID、Run ID 和提交时间；即使 API 进程重建，也能从 store 查询到 running Task 的执行器证据。如果执行器提交失败，会把 Run/Task 回滚到 `queued` 并返回 `TASK_EXECUTOR_SUBMIT_FAILED`，避免留下假 running。Celery worker 新增 `aegisqa.execute_task` 任务，会在 worker 进程重建 app 依赖并执行 Task 绑定的 Run，旧 `aegisqa.execute_item` 任务名保留兼容提示。
+- 变更文件：
+  - `aegisqa/engine/task_executor.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/context.py`
+  - `aegisqa/api/routes/tasks.py`
+  - `aegisqa/workers/celery_app.py`
+  - `frontend/src/types.ts`
+  - `tests/test_task_center_api.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_task_center_api.py -q -k "injected_executor"`
+  - `python -m pytest tests\test_task_center_api.py -q -k "injected_executor or submit_fails"`
+  - `python -m pytest tests\test_task_center_api.py tests\test_platform_core.py -q -k "background_execute or pause_requested_during_active_execution or progress_after_each_item or pause"`
+  - `python -m pytest tests\test_task_center_api.py -q -k "task_background_execute or injected_executor or task_lifecycle_report"`
+  - `python -m pytest tests\test_task_center_api.py tests\test_platform_core.py tests\test_sqlite_store_adapter.py tests\test_api.py -q`
+  - `cd frontend && npm run typecheck`
+  - `git diff --check`
+- 测试结果：
+  - 新增执行器注入与重启可见性回归：先 RED，确认 `create_app()` 不支持 `task_executor` 注入；修复后 1 passed。
+  - 新增执行器提交失败回滚回归：先 RED，确认提交失败会返回 500 且可能留下 running；修复后目标用例通过，失败时 Task 恢复 `queued` 并记录 `submit_error`。
+  - 后台执行、暂停和进度相关后端回归：4 passed。
+  - Task 后台执行目标回归：3 passed。
+  - Task API、核心 Runner、SQLite Store 和基础 API 回归：39 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端类型检查：`tsc -b` 通过。
+  - 空白检查：通过，仅有仓库既有 Windows CRLF 换行提示。
+- 下一步：
+  - 继续 P0-02 Skill 包安全沙箱第一阶段，优先补 zip 总大小/单文件/文件数量限制、权限声明展示和包外路径访问阻断。
+
+### 2026-06-04 执行中心任务列表列头重叠修复
+
+- 改动摘要：修复 `/runs` 执行中心任务列表在窄视口下“任务名 / 数据源”列头看起来重叠的问题。根因是任务表格启用内部横向滚动后，Ant Design 的 `fixed: 'right'` 操作列会生成 sticky 右侧覆盖层，在窄表格视口中压到前面的列头和单元格。现在取消操作列右固定，并为所有列配置明确宽度，将 `scroll.x` 调整为 1580，让整张宽表通过表格内部横向滚动查看。
+- 变更文件：
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心任务列表使用内部横向滚动"`
+  - 使用 Browser 打开 `http://localhost:5173/runs` 并检查表格列头、页面宽度和固定右列数量。
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心"`
+  - `cd frontend && npm run typecheck`
+  - `git diff --check`
+- 测试结果：
+  - 新增列头重叠回归：先 RED，确认 `.runs-task-table .ant-table-cell-fix-right` 仍存在；修复后目标测试 1 passed。
+  - Browser 复测：`fixedRightCount=0`，`.runs-task-table .ant-table-content` 保持 `overflow-x: auto`，表格内部 `scrollWidth=1580`，页面整体 `document.scrollWidth=320`，未重新撑破背景。
+  - 执行中心相关回归：7 passed。
+  - 前端类型检查：`tsc -b` 通过。
+  - 空白检查：通过，仅有仓库既有 Windows CRLF 换行提示。
+- 下一步：
+  - 如后续其它窄屏宽表也出现 fixed 列遮挡，应优先评估是否取消 fixed 列，并用表格内部滚动承载整张表。
+
+### 2026-06-04 执行中心任务列表横向溢出修复
+
+- 改动摘要：修复 `/runs` 执行中心任务列表在窄视口下超出背景的问题。根因是 Ant Design Table 的自然宽度约 1500px，未启用内部横向滚动，同时 Ant Design 的 sider 布局在移动断点仍给主内容区留下 `width: 0` 的收缩规则，导致表格把整页横向撑开。现在任务表格设置为 `.runs-task-table` 并启用 `scroll.x`，宽表只在表格内部横向滚动；主布局补充 `min-width: 0`、`box-sizing: border-box`，移动断点下强制 `.app-main` 恢复 `width: 100%`。
+- 变更文件：
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/styles.css`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心任务列表使用内部横向滚动"`
+  - 使用 Browser 打开 `http://localhost:5173/runs` 并检查布局宽度。
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "执行中心"`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - 新增横向滚动回归：先 RED，确认 `.runs-task-table .ant-table-content` 不存在；修复后 1 passed。
+  - Browser 复测：页面整体 `document.scrollWidth` 从 1606 收回到 320；`.runs-task-table .ant-table-content` 为 `overflow-x: auto`，表格自身 `scrollWidth=1494`，宽表只在表格内部滚动。
+  - 执行中心相关回归：7 passed。
+  - 前端类型检查：`tsc -b` 通过。
+- 下一步：
+  - 其它包含宽表格的页面可按同样方式逐步加专属 `scroll.x`，避免在窄视口下撑破主背景。
+
+### 2026-06-04 Agent Skill 多形态与多提示词脚本测试
+
+- 改动摘要：新增 Agent Skill 运行时矩阵测试，覆盖本地纯 `SKILL.md` 安全模式导入、上传纯 `SKILL.md` 说明型包、上传 `instruction_model` + references 包、上传纯脚本代码包，以及上传“脚本代码 + 多提示词文件”复杂包。矩阵测试会完成发现/导入/上传、合约测试、审批、发布 Workflow，并通过执行中心真实链路 `/tasks/preflight -> /tasks -> /tasks/{task_id}/execute -> Trace/Report` 创建和执行任务；保留底层 `/runs` 直接执行作为对照，同时校验重启恢复。桌面 `skills` 目录新增真实可上传包 `agent_code_multi_prompt_router.zip`，包内包含 `prompts/summary.md`、`prompts/risk.md`、`prompts/json_schema.md`、`prompts/tone.md`，脚本入口 `scripts/run.py:run` 会按 `config.prompt_keys` 读取并组合多份提示词。
+- 变更文件/目录：
+  - `tests/test_agent_skill_runtime_matrix.py`
+  - `C:\Users\17343\Desktop\skills\agent_code_multi_prompt_router\SKILL.md`
+  - `C:\Users\17343\Desktop\skills\agent_code_multi_prompt_router\skill.yaml`
+  - `C:\Users\17343\Desktop\skills\agent_code_multi_prompt_router\scripts\run.py`
+  - `C:\Users\17343\Desktop\skills\agent_code_multi_prompt_router\prompts\summary.md`
+  - `C:\Users\17343\Desktop\skills\agent_code_multi_prompt_router\prompts\risk.md`
+  - `C:\Users\17343\Desktop\skills\agent_code_multi_prompt_router\prompts\json_schema.md`
+  - `C:\Users\17343\Desktop\skills\agent_code_multi_prompt_router\prompts\tone.md`
+  - `C:\Users\17343\Desktop\skills\agent_code_multi_prompt_router.zip`
+  - `C:\Users\17343\Desktop\skills\README.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_agent_skill_runtime_matrix.py -q`
+  - `Compress-Archive -Path C:\Users\17343\Desktop\skills\agent_code_multi_prompt_router\* -DestinationPath C:\Users\17343\Desktop\skills\agent_code_multi_prompt_router.zip -Force`
+  - 使用 `yaml.safe_load` 检查 `agent_code_multi_prompt_router/skill.yaml` 的 `skill_id`、`runtime.mode=script`、`runtime.entrypoint=scripts/run.py:run` 和 `example_config.prompt_keys`。
+  - 使用 `ZipFile` 确认 zip 根目录包含 `SKILL.md`、`skill.yaml`、`scripts/run.py` 和 4 个 `prompts/*.md`。
+  - 使用 `fastapi.testclient.TestClient(create_app(store_root=临时目录))` 上传真实 `agent_code_multi_prompt_router.zip`，运行 `/skills/{skill_id}/contract-test`，审批启用，发布包含该 Skill 的 Workflow，通过 `/tasks/preflight` 创建预检证据，通过 `/tasks` 创建任务，通过 `/tasks/{task_id}/execute` 执行任务，并读取 `/tasks/{task_id}/trace-flow` 与 `/tasks/{task_id}/report`。
+  - `python -m pytest tests\test_agent_skill_package_upload.py tests\test_agent_skill_runtime.py tests\test_agent_skill_runtime_matrix.py -q`
+- 测试结果：
+  - 新增矩阵测试：1 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 真实多提示词脚本包 zip 大小 4217 字节，zip 根目录结构正确。
+  - 真实包上传结果：`runtime_mode=script`，`entrypoint=scripts/run.py:run`。
+  - 真实包合约测试：`ok=True`，默认组合 `summary/risk/json_schema` 3 份提示词，输出包含 `selected_prompts`、`prompt_count=3`、`prompt_digest`、`rendered_prompt`。
+  - 真实包执行中心任务链路：`preflight_status=warning`，`task_status=completed`，`completed_items=1`，`failed_items=0`；Trace Flow 显示 Workflow 节点配置启用 `summary/risk/json_schema/tone` 4 份提示词，输出 `prompt_count=4` 且 `used_required_prompts=True`；任务报告 `step_distribution` 包含 `agent.code_multi_prompt_router@0.1.0`。
+  - Agent Skill 相关回归：7 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+- 下一步：
+  - 可在前端 Skill 市场上传 `C:\Users\17343\Desktop\skills\agent_code_multi_prompt_router.zip`，用合约测试输出里的 `rendered_prompt` 直观看到代码读取和组合的多份提示词。
+
+### 2026-06-04 任务详情 Trace 返回与暂停控制修复
+
+- 改动摘要：Trace Flow 和 Trace Tree 独立页面新增“返回任务详情”按钮；任务详情抽屉进入这两个页面时会携带来源 `task_id`，返回执行中心后自动重新打开对应任务详情。执行中心支持通过 `/runs?task_id=...` 直接打开任务详情。WorkflowRunner 在每个 item 执行边界合并 store 中最新的暂停/取消控制位，避免后台线程持有旧 Run 对象并在后续保存时覆盖用户点击“暂停”的状态；未完成项暂停时 Run 保持 `paused`，不再继续跑到 `completed`。
+- 变更文件：
+  - `aegisqa/engine/runner.py`
+  - `frontend/src/pages/RunsPage.tsx`
+  - `frontend/src/pages/TraceFlowPage.tsx`
+  - `frontend/src/pages/TraceTreePage.tsx`
+  - `frontend/src/pages/task/TaskOperationsDrawer.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `tests/test_platform_core.py`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_platform_core.py -q -k "pause_requested_during_active_execution or reports_progress_after_each_item"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Flow 可返回|Trace Tree 可返回"`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "Trace Flow|Trace Tree|任务详情"`
+  - `cd frontend && npm run typecheck`
+  - `python -m pytest tests\test_task_center_api.py tests\test_platform_core.py -q -k "background_execute or pause_requested_during_active_execution or progress_after_each_item or pause"`
+- 测试结果：
+  - 后端暂停与进度目标测试：2 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端 Trace 返回新增测试：2 passed。
+  - 前端 Trace/任务详情相关回归：11 passed。
+  - 前端类型检查：`tsc -b` 通过。
+  - 后端任务中心暂停/后台执行相关回归：3 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+- 下一步：
+  - 可继续把执行中心任务列表的暂停状态改成更醒目的实时反馈，例如暂停后立即禁用“暂停”并显示“已暂停，未执行项保留 pending”。
+
+### 2026-06-04 模型网关 Provider 下拉化
+
+- 改动摘要：治理页“配置模型网关”弹窗中，`Provider` 已从自由输入框改为下拉选择。历史记录中曾临时暴露 `openai`、`compatible`、`offline`、`demo` 等兼容别名；当前版本已在 2026-06-04 P1 收敛为面向用户的 `mock` 与 `openai_compatible` 两个选项。弹窗说明：“Provider 是调用协议类型，不是模型名称；DeepSeek、Qwen、GPT 等具体模型请填写到默认模型。”这样配置 DeepSeek 时应选择 `openai_compatible`，Base URL 填 DeepSeek 接口地址，默认模型填 `deepseek-v4-flash`。
+- 变更文件：
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "模型网关"`
+- 测试结果：
+  - 前端治理页模型网关目标测试：2 passed。
+- 下一步：
+  - 可进一步把常见厂商做成“厂商模板”按钮，例如 DeepSeek、OpenAI、本地 Ollama，一键回填 Base URL 和推荐 Provider。
+
+### 2026-06-04 模型网关前端配置闭环
+
+- 改动摘要：新增模型网关配置持久化接口 `GET/PUT /model-gateway/config`，配置写入本地 store 并在当前进程立即生效，项目重启时自动恢复到 `ModelGateway.from_env()` 使用的运行期配置。`GET` 接口只返回 `api_key_configured` 和 `api_key_masked`，避免把密钥明文发回浏览器。治理页“模型接入”卡片新增“配置模型网关”弹窗，可填写 Provider、Base URL、API Key、默认模型和超时秒数，并能用当前配置直接测试连接。前端 API client、类型和测试 mock 已同步。
+- 变更文件：
+  - `aegisqa/models/gateway.py`
+  - `aegisqa/api/app.py`
+  - `aegisqa/api/routes/models.py`
+  - `tests/test_model_gateway.py`
+  - `frontend/src/api/client.ts`
+  - `frontend/src/types.ts`
+  - `frontend/src/pages/GovernancePage.tsx`
+  - `frontend/src/test/App.test.tsx`
+  - `frontend/src/test/workbenchTestHarness.tsx`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - `python -m pytest tests\test_model_gateway.py -q`
+  - `cd frontend && npm test -- src/test/App.test.tsx -t "模型网关"`
+  - `cd frontend && npm run typecheck`
+- 测试结果：
+  - 后端模型网关定向测试：4 passed；仍有 Windows `.pytest_cache` 创建 warning，不影响结果。
+  - 前端治理页模型网关目标测试：2 passed。
+  - 前端类型检查：`tsc -b` 通过。
+- 下一步：
+  - 如果要接生产环境，应把当前本地明文持久化升级为 Secret Manager / KMS / Vault，并在 UI 中只保存 secret 引用。
+  - 后续可给模型网关增加多连接别名，例如 `openai-prod`、`qwen-local`、`deepseek-test`，让 Workflow 节点按别名选择模型连接。
+
+### 2026-06-04 模型型 Agent Skill 测试包
+
+- 改动摘要：按用户要求新增 3 个 `runtime.mode=instruction_model` Agent Skill 插件包，均通过平台统一模型网关生成 `answer/text`，用于测试模型调用链路。`agent.model_qa_helper@0.1.0` 用于通用问答，`agent.model_asr_summary@0.1.0` 用于 ASR 文本摘要，`agent.model_answer_judge@0.1.0` 用于回答与参考答案一致性评测。桌面 `skills/README.md` 已补充模型型 Agent Skill 的使用说明和真实模型配置提示。
+- 变更文件/目录：
+  - `C:\Users\17343\Desktop\skills\agent_model_qa_helper\SKILL.md`
+  - `C:\Users\17343\Desktop\skills\agent_model_qa_helper\skill.yaml`
+  - `C:\Users\17343\Desktop\skills\agent_model_qa_helper\references\style.md`
+  - `C:\Users\17343\Desktop\skills\agent_model_qa_helper.zip`
+  - `C:\Users\17343\Desktop\skills\agent_model_asr_summary\SKILL.md`
+  - `C:\Users\17343\Desktop\skills\agent_model_asr_summary\skill.yaml`
+  - `C:\Users\17343\Desktop\skills\agent_model_asr_summary\references\style.md`
+  - `C:\Users\17343\Desktop\skills\agent_model_asr_summary.zip`
+  - `C:\Users\17343\Desktop\skills\agent_model_answer_judge\SKILL.md`
+  - `C:\Users\17343\Desktop\skills\agent_model_answer_judge\skill.yaml`
+  - `C:\Users\17343\Desktop\skills\agent_model_answer_judge\references\rubric.md`
+  - `C:\Users\17343\Desktop\skills\agent_model_answer_judge.zip`
+  - `C:\Users\17343\Desktop\skills\README.md`
+  - `docs/PROJECT_STATUS.md`
+- 验证命令：
+  - 使用 `yaml.safe_load` 检查 3 个 `skill.yaml` 的 `skill_id`、`runtime.mode=instruction_model`、`permissions=[model:call]` 和必填输入字段。
+  - `Compress-Archive` 分别生成 `agent_model_qa_helper.zip`、`agent_model_asr_summary.zip`、`agent_model_answer_judge.zip`。
+  - 使用 `ZipFile` 确认 zip 根目录直接包含 `SKILL.md`、`skill.yaml` 和 `references/...`。
+  - 使用 `fastapi.testclient.TestClient(create_app(store_root=临时目录))` 上传 3 个 zip，逐个调用 `/skills/{skill_id}/contract-test`，并审批启用。
+  - 在临时 store 中创建包含 `task/asr_text/question/answer/reference` 的 JSONL 数据集，发布包含 3 个模型型 Agent Skill 节点的 Workflow，并执行一次 Run。
+- 测试结果：
+  - 模型网关状态：默认 `provider=mock`，`mode=offline_mock`，`ready=True`，推荐 Skill 为 `model.chat@0.1.0`。
+  - 3 个 zip 上传后均为 `runtime_mode=instruction_model`、`status=pending_review`。
+  - 3 个合约测试均 `ok=True`，输出字段均包含 `answer`、`text`、`skill_id`、`runtime_mode`，审批后状态均为 `approved`。
+  - 临时 Workflow 校验 `validation_ok=True`，执行结果 `run_status=completed`，共执行 3 个 Step，分别为 `agent.model_qa_helper@0.1.0`、`agent.model_asr_summary@0.1.0`、`agent.model_answer_judge@0.1.0`，所有 Step 输出均包含 `text`。
+- 下一步：
+  - 用户可在 Skill 市场上传桌面 3 个 `agent_model_*.zip`，运行合约测试后审批启用。
+  - 本地默认 mock 模型可离线验证平台链路；若要验证真实模型调用，需要在模型接入配置中设置 openai-compatible Provider、Base URL、API Key 和默认模型。
 
 ### 2026-06-03 任务结果导出与统一模型网关
 
@@ -3803,7 +6457,7 @@
 
 ### 2026-05-31 Workflow 发布前校验与保存/试运行回放
 
-- 改动摘要：完成阶段 2 Task 2.3。新增后端发布阻断测试，覆盖禁用或未审批 Skill、多对一缺少 Join/Aggregator、Branch 缺少条件表达式；前端发布失败时把后端结构化 `details.errors` 回填到 Console；Inspector 新增 Aggregator 聚合策略配置；Playwright 覆盖草稿保存后从市场重新打开仍保留配置，以及选择数据集后试运行回填结果。全量 E2E 暴露出插件子进程 1 秒超时在 Windows 并发测试下会误杀正常插件，本批同步把默认超时调整为 5 秒，并保留超时失败测试。
+- 改动摘要：完成阶段 2 Task 2.3。新增后端发布阻断测试，覆盖禁用或未审批 Skill、多对一缺少 Join/Aggregator、Branch 缺少条件表达式；前端发布失败时把后端结构化 `details.errors` 回填到 Console；Inspector 新增 Aggregator 聚合策略配置；Playwright 覆盖草稿保存后从市场重新打开仍保留配置，以及选择数据集后试运行回填结果。全量 E2E 当时暴露出插件子进程 1 秒超时在 Windows 并发测试下会误杀正常插件，该历史批次先把默认超时调整为 5 秒；后续已按真实任务循环需求升级到 60 秒，当前值以最新 Skill 包安全记录和代码为准。
 - 变更文件：
   - `tests/test_workflow_graph_hardening.py`
   - `aegisqa/skills/packages.py`
@@ -4787,7 +7441,7 @@
   - 前端全量：9 个测试文件、106 passed。
   - 前端构建：通过，Vite 生产包生成完成。
   - Playwright 主链路：`e2e/task-flow.spec.ts` 1 passed，覆盖上传数据、上传并审批 Skill、发布 Workflow、创建并执行任务、查看报告、纠错 Badcase 和 Trace Flow。
-  - Playwright 全量：本轮两次超过 240 秒/420 秒未返回有效输出，被命令超时截断；未记为通过。已清理 E2E 临时 8010/5174 服务，保留用户手动启动的 8000/5173 服务。
+  - Playwright 全量：本历史批次两次超过 240 秒/420 秒未返回有效输出，被命令超时截断；该历史批次没有作为通过依据。当前最新结论见本文顶部“JSON Store 并发读锁与全量 E2E 收束”，已全量 14 passed。
 - 下一步：
   - 如果继续深化 Agent Skill 包能力，优先做 multipart/对象存储上传、包大小限制、解压大小限制、依赖锁文件、容器沙箱、网络白名单、文件访问权限和资源配额。
   - 前端可继续增加 Skill 包上传前的本地 manifest 预览，提前展示 `input_schema/output_schema/config_schema/runtime`，减少用户上传后才发现 schema 错误。

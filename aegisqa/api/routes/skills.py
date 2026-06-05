@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI
+from pydantic import BaseModel
 
 from aegisqa.api.app import (
     SkillGovernanceRequest,
@@ -11,10 +12,15 @@ from aegisqa.api.app import (
     _install_skill_package,
     _mark_skill_package_approved,
     _now,
+    _list_records,
+    _record_skill_package_contract_result,
+    _record_skill_package_lifecycle_event,
     _save_record,
+    _skill_base_id,
     _update_skill_package_status,
 )
 from aegisqa.api.routes.context import RouteContext
+from aegisqa.security.access import require_permission
 from aegisqa.skills.agent_skills import (
     agent_skill_ids_from_store,
     find_agent_skill_record,
@@ -23,6 +29,13 @@ from aegisqa.skills.agent_skills import (
     update_agent_skill_status,
 )
 from aegisqa.skills.base import SkillManifest
+
+
+class SkillRollbackRequest(BaseModel):
+    target_skill_id: str
+    reason: str = ""
+    role: str = "Skill Developer"
+    actor: str = "api"
 
 
 def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -47,39 +60,136 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.get("/skills/packages")
     def list_skill_packages() -> list[dict[str, Any]]:
-        from aegisqa.api.app import _list_records
-
         return _list_records(ctx.store, "skill_packages")
 
     @app.post("/skills/packages/upload")
     def upload_skill_package(request: SkillPackageUploadRequest) -> dict[str, Any]:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            permission="skill:register",
+            action="skill_package.upload",
+            target=request.filename,
+            actor=request.actor,
+        )
         record = _install_skill_package(ctx.store, ctx.registry, request)
-        ctx.audit_service.record(actor="api", action="skill_package.upload", target=record["manifest"]["skill_id"])
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="skill_package.upload",
+            target=record["manifest"]["skill_id"],
+            detail={"filename": request.filename, "role": request.role},
+        )
         return record
 
     @app.post("/skills/{skill_id:path}/contract-test")
-    def run_skill_contract_test(skill_id: str) -> dict[str, Any]:
+    def run_skill_contract_test(skill_id: str, role: str = "Skill Developer", actor: str = "api") -> dict[str, Any]:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=role,
+            permission="skill:contract_test",
+            action="skill.contract_test",
+            target=skill_id,
+            actor=actor,
+        )
         result = ctx.registry.get(skill_id).contract_test()
-        package = _find_skill_package(ctx.store, skill_id)
-        if package:
-            package["last_contract_ok"] = bool(result.get("ok"))
-            package["last_contract_result"] = result
-            package["last_contract_at"] = _now()
-            package["updated_at"] = _now()
-            _save_record(ctx.store, "skill_packages", "package_id", package)
+        _record_skill_package_contract_result(ctx.store, skill_id, result, actor=actor)
         update_agent_skill_contract_result(ctx.store, skill_id, result)
         return {"skill_id": skill_id, **result}
 
+    @app.get("/skills/{skill_id:path}/versions")
+    def get_skill_versions(skill_id: str) -> dict[str, Any]:
+        return _build_skill_version_history(ctx, skill_id)
+
+    @app.post("/skills/{skill_id:path}/rollback")
+    def rollback_skill_version(skill_id: str, request: SkillRollbackRequest) -> dict[str, Any]:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            permission="skill:approve",
+            action="skill.rollback",
+            target=skill_id,
+            actor=request.actor,
+        )
+        source_package = _find_skill_package(ctx.store, skill_id)
+        target_package = _find_skill_package(ctx.store, request.target_skill_id)
+        if not source_package or not target_package:
+            raise ValueError("回滚只能在已上传的 Skill 包版本之间执行。")
+        if _skill_base_id(skill_id) != _skill_base_id(request.target_skill_id):
+            raise ValueError("只能回滚到同一 Skill 版本族。")
+        if not target_package.get("last_contract_ok"):
+            raise ValueError("目标版本必须先通过合约测试。")
+        target_manifest = ctx.registry.approve(request.target_skill_id)
+        _update_skill_package_status(ctx.store, target_manifest)
+        _record_skill_package_lifecycle_event(
+            ctx.store,
+            request.target_skill_id,
+            action="rollback_target",
+            actor=request.actor,
+            role=request.role,
+            reason=request.reason,
+            target_skill_id=skill_id,
+        )
+        source_manifest = ctx.registry.deprecate(skill_id, reason=request.reason)
+        _update_skill_package_status(ctx.store, source_manifest)
+        _record_skill_package_lifecycle_event(
+            ctx.store,
+            skill_id,
+            action="rollback_source",
+            actor=request.actor,
+            role=request.role,
+            reason=request.reason,
+            target_skill_id=request.target_skill_id,
+        )
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="skill.rollback",
+            target=skill_id,
+            detail={"target_skill_id": request.target_skill_id, "reason": request.reason, "role": request.role},
+        )
+        return _build_skill_version_history(ctx, request.target_skill_id)
+
     @app.post("/skills/{skill_id:path}/disable", response_model=SkillManifest)
     def disable_skill(skill_id: str, request: SkillGovernanceRequest) -> SkillManifest:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            permission="skill:approve",
+            action="skill.disable",
+            target=skill_id,
+            actor=request.actor,
+        )
         manifest = ctx.registry.disable(skill_id, reason=request.reason)
         _update_skill_package_status(ctx.store, manifest)
+        _record_skill_package_lifecycle_event(ctx.store, manifest.skill_id, action="disable", actor=request.actor, role=request.role, reason=request.reason)
         update_agent_skill_status(ctx.store, manifest)
-        ctx.audit_service.record(actor="api", action="skill.disable", target=skill_id, detail={"reason": request.reason})
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="skill.disable",
+            target=skill_id,
+            detail={"reason": request.reason, "role": request.role},
+        )
         return manifest
 
     @app.post("/skills/{skill_id:path}/approve", response_model=SkillManifest)
     def approve_skill(skill_id: str, request: SkillGovernanceRequest | None = None) -> SkillManifest:
+        actor = request.actor if request else "api"
+        role = request.role if request else "Skill Developer"
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=role,
+            permission="skill:approve",
+            action="skill.approve",
+            target=skill_id,
+            actor=actor,
+        )
         package = _find_skill_package(ctx.store, skill_id)
         if package and not package.get("last_contract_ok"):
             raise ValueError("插件包必须先通过合约测试，才能审批启用。")
@@ -89,15 +199,108 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
         manifest = ctx.registry.approve(skill_id)
         _update_skill_package_status(ctx.store, manifest)
         update_agent_skill_status(ctx.store, manifest)
-        _mark_skill_package_approved(ctx.store, manifest.skill_id, request.reason if request else "")
+        _mark_skill_package_approved(ctx.store, manifest.skill_id, request.reason if request else "", actor=actor, role=role)
         mark_agent_skill_approved(ctx.store, manifest.skill_id, request.reason if request else "")
-        ctx.audit_service.record(actor="api", action="skill.approve", target=skill_id)
+        ctx.audit_service.record(
+            actor=actor,
+            role=role,
+            action="skill.approve",
+            target=skill_id,
+            detail={"reason": request.reason if request else "", "role": role},
+        )
         return manifest
 
     @app.post("/skills/{skill_id:path}/deprecate", response_model=SkillManifest)
     def deprecate_skill(skill_id: str, request: SkillGovernanceRequest) -> SkillManifest:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            permission="skill:approve",
+            action="skill.deprecate",
+            target=skill_id,
+            actor=request.actor,
+        )
         manifest = ctx.registry.deprecate(skill_id, reason=request.reason)
         _update_skill_package_status(ctx.store, manifest)
+        _record_skill_package_lifecycle_event(ctx.store, manifest.skill_id, action="deprecate", actor=request.actor, role=request.role, reason=request.reason)
         update_agent_skill_status(ctx.store, manifest)
-        ctx.audit_service.record(actor="api", action="skill.deprecate", target=skill_id, detail={"reason": request.reason})
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="skill.deprecate",
+            target=skill_id,
+            detail={"reason": request.reason, "role": request.role},
+        )
         return manifest
+
+
+def _build_skill_version_history(ctx: RouteContext, skill_id: str) -> dict[str, Any]:
+    base_skill_id = _skill_base_id(skill_id)
+    records = [
+        _normalise_skill_version_record(record)
+        for record in _list_records(ctx.store, "skill_packages")
+        if _skill_base_id(str(record.get("manifest", {}).get("skill_id") or "")) == base_skill_id
+    ]
+    records.sort(key=lambda item: _version_sort_key(str(item.get("version") or item.get("skill_version") or "")))
+    previous_manifest: dict[str, Any] | None = None
+    versions: list[dict[str, Any]] = []
+    for record in records:
+        manifest = record.get("manifest") if isinstance(record.get("manifest"), dict) else {}
+        versions.append(
+            {
+                "skill_id": manifest.get("skill_id"),
+                "version": manifest.get("version") or record.get("skill_version"),
+                "status": record.get("status") or manifest.get("status"),
+                "enabled": bool(manifest.get("enabled")),
+                "package_id": record.get("package_id"),
+                "filename": record.get("filename"),
+                "runtime_mode": record.get("runtime_mode"),
+                "created_at": record.get("created_at"),
+                "updated_at": record.get("updated_at"),
+                "manifest": manifest,
+                "contract_history": record.get("contract_history") if isinstance(record.get("contract_history"), list) else [],
+                "approval_history": record.get("approval_history") if isinstance(record.get("approval_history"), list) else [],
+                "diff_from_previous": _diff_manifests(previous_manifest, manifest) if previous_manifest is not None else [],
+            }
+        )
+        previous_manifest = manifest
+    approved_versions = [item for item in versions if item.get("status") == "approved" and item.get("enabled")]
+    latest_approved = approved_versions[-1]["skill_id"] if approved_versions else None
+    return {
+        "base_skill_id": base_skill_id,
+        "requested_skill_id": skill_id,
+        "latest_approved_skill_id": latest_approved,
+        "versions": versions,
+    }
+
+
+def _normalise_skill_version_record(record: dict[str, Any]) -> dict[str, Any]:
+    manifest = record.get("manifest") if isinstance(record.get("manifest"), dict) else {}
+    if "base_skill_id" not in record:
+        record["base_skill_id"] = _skill_base_id(str(manifest.get("skill_id") or ""))
+    if "skill_version" not in record:
+        record["skill_version"] = str(manifest.get("version") or "")
+    record.setdefault("contract_history", [])
+    record.setdefault("approval_history", [])
+    return record
+
+
+def _diff_manifests(previous: dict[str, Any] | None, current: dict[str, Any]) -> list[dict[str, Any]]:
+    if not previous:
+        return []
+    fields = ["name", "version", "description", "tags", "scenarios", "input_schema", "output_schema", "config_schema", "permissions"]
+    diffs: list[dict[str, Any]] = []
+    for field in fields:
+        before = previous.get(field)
+        after = current.get(field)
+        if before != after:
+            diffs.append({"field": f"manifest.{field}", "from": before, "to": after})
+    return diffs
+
+
+def _version_sort_key(version: str) -> tuple[Any, ...]:
+    parts: list[Any] = []
+    for token in version.replace("-", ".").split("."):
+        parts.append(int(token) if token.isdigit() else token)
+    return tuple(parts)

@@ -1,11 +1,12 @@
 import { Alert, Input, InputNumber, Select, Space, Tag, Typography } from 'antd';
 import { useState } from 'react';
 
-import type { SkillManifest } from '../../types';
+import type { ModelGatewayConnection, SkillManifest } from '../../types';
 
 type SkillConfigEditorProps = {
   skill: SkillManifest | null;
   value: Record<string, unknown>;
+  modelConnections?: ModelGatewayConnection[];
   onChange: (value: Record<string, unknown>) => void;
 };
 
@@ -17,7 +18,7 @@ type JsonSchemaField = {
   default?: unknown;
 };
 
-export function SkillConfigEditor({ skill, value, onChange }: SkillConfigEditorProps) {
+export function SkillConfigEditor({ skill, value, modelConnections = [], onChange }: SkillConfigEditorProps) {
   const [jsonError, setJsonError] = useState<string | null>(null);
   const properties = schemaProperties(skill);
   const required = new Set(schemaRequired(skill));
@@ -51,7 +52,7 @@ export function SkillConfigEditor({ skill, value, onChange }: SkillConfigEditorP
             {required.has(field) ? <Tag color="red">必填</Tag> : null}
           </Space>
           {schema.description ? <Typography.Text type="secondary">{schema.description}</Typography.Text> : null}
-          {renderConfigControl(field, schema, value?.[field] ?? schema.default, updateField, setJsonError)}
+          {renderConfigControl(field, schema, value?.[field] ?? schema.default, updateField, setJsonError, modelConnections)}
         </Space>
       ))}
     </Space>
@@ -64,7 +65,28 @@ function renderConfigControl(
   value: unknown,
   updateField: (field: string, value: unknown) => void,
   setJsonError: (message: string | null) => void,
+  modelConnections: ModelGatewayConnection[],
 ) {
+  if (field === 'model_connection_id') {
+    return (
+      <Select
+        aria-label={`Skill 参数 ${field}`}
+        allowClear
+        showSearch
+        className="full-width-control"
+        placeholder="选择模型连接别名"
+        value={value == null || value === '' ? undefined : String(value)}
+        onChange={(nextValue) => updateField(field, nextValue ?? '')}
+        optionFilterProp="label"
+        options={modelConnections.map((connection) => ({
+          value: connection.connection_id,
+          label: `${connection.name || connection.connection_id}（${connection.connection_id}）`,
+          disabled: !connection.enabled,
+        }))}
+      />
+    );
+  }
+
   if (schema.enum?.length) {
     return (
       <Select

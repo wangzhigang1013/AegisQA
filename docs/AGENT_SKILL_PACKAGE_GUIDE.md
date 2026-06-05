@@ -2,6 +2,13 @@
 
 本文说明如何把已经写好的 Agent Skill 打成 zip 包，上传到 AegisQA Skill 市场，并作为 Workflow 组件使用。
 
+## 配套教程
+
+- [5 分钟跑通 ASR/QA 评测](tutorials/5-minute-asr-qa-eval.md)：从数据、Skill、Workflow、Task 到导出报告的主线教程。仓库路径：`docs/tutorials/5-minute-asr-qa-eval.md`
+- [写一个脚本型 Skill](tutorials/write-script-skill.md)：聚焦 `runtime.mode=script`、入口函数、权限和合约测试。仓库路径：`docs/tutorials/write-script-skill.md`
+- [接入真实模型](tutorials/connect-real-model.md)：说明模型连接别名、`secret_ref` 和 `model_connection_id`。仓库路径：`docs/tutorials/connect-real-model.md`
+- [Skill 示例包索引](SKILL_EXAMPLES_INDEX.md)：整理桌面 zip 示例和仓库内可复现源码。仓库路径：`docs/SKILL_EXAMPLES_INDEX.md`
+
 ## 设计目标
 
 AegisQA 需要把 Agent 生态里的 Skill 变成稳定的 Workflow 节点。平台关心三件事：
@@ -206,7 +213,34 @@ def run(inputs, config):
     return {"output": {"score": score}}
 ```
 
-注意：当前第一版没有做依赖安装。如果 Skill 需要第三方库，建议先只使用标准库，或把依赖接入后续的沙箱/镜像方案。
+## 第三方依赖声明
+
+平台已经能识别两种依赖声明：
+
+```yaml
+runtime:
+  mode: script
+  entrypoint: scripts/run.py:run
+  dependencies:
+    - requests==2.32.0
+```
+
+也能识别包根目录里的 `requirements.txt` 或 `pyproject.toml`。
+
+当前本地子进程运行模式不会安装这些依赖。上传包一旦包含 `runtime.dependencies`、`requirements.txt` 或 `pyproject.toml`，后端会拒绝上传并返回结构化错误码 `SKILL_PACKAGE_DEPENDENCIES_UNSUPPORTED`。这样做是为了避免第三方包污染 FastAPI 主服务环境，也避免同一台机器上的不同 Skill 互相影响。
+
+当前建议：
+
+- 只使用 Python 标准库和包内自带模块。
+- 如果确实需要第三方依赖，先把逻辑拆成不依赖外部包的最小版本，通过合约测试后再规划生产运行时。
+- 不要把第三方 wheel、venv 或 site-packages 打进 zip 包；这类包通常体积过大，也无法获得稳定的安全扫描结果。
+
+未来容器方案预留：
+
+- `skill.yaml.runtime.dependencies` 作为镜像构建输入。
+- 平台为每个 Skill 版本生成独立镜像或可复用 layer cache。
+- 构建阶段执行依赖锁定、漏洞扫描、许可证扫描和入口合约测试。
+- 运行阶段用容器限制 CPU、内存、网络、文件系统和超时，并把镜像 digest 写入 Task/Run 快照，保证历史任务可追溯。
 
 ## Workflow 中如何使用
 

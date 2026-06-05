@@ -61,6 +61,9 @@ class SQLiteStore:
     def write_jsonl(self, parts: Iterable[str], rows: Iterable[dict[str, Any]]) -> Path:
         key = _key(parts)
         with self._connection() as conn:
+            # 覆盖写入和 append 共享同一个 stream_key；先拿写锁，避免并发 append
+            # 在删除与批量插入之间插入旧流，造成审计事件顺序错乱。
+            conn.execute("begin immediate")
             conn.execute("delete from jsonl_rows where stream_key = ?", (key,))
             conn.executemany(
                 "insert into jsonl_rows(stream_key, row_index, payload, created_at) values (?, ?, ?, ?)",
@@ -74,6 +77,10 @@ class SQLiteStore:
     def append_jsonl(self, parts: Iterable[str], row: dict[str, Any]) -> None:
         key = _key(parts)
         with self._connection() as conn:
+            # SQLite 的默认 deferred 事务会让并发写入先同时读到相同 max(row_index)，
+            # 再在 insert 时撞主键。BEGIN IMMEDIATE 让 row_index 分配和 insert 成为
+            # 串行临界区，保证审计事件流在轻量 SQLite 模式下不丢事件。
+            conn.execute("begin immediate")
             next_index = conn.execute("select coalesce(max(row_index), -1) + 1 from jsonl_rows where stream_key = ?", (key,)).fetchone()[0]
             conn.execute(
                 "insert into jsonl_rows(stream_key, row_index, payload, created_at) values (?, ?, ?, ?)",

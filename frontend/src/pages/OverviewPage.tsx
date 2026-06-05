@@ -22,7 +22,6 @@ import { MetricTile } from '../components/MetricTile';
 
 export function OverviewPage() {
   const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard });
-  const runsQuery = useQuery({ queryKey: ['runs'], queryFn: api.runs });
   const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
   const skillPackagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
   const experimentsQuery = useQuery({ queryKey: ['experiments'], queryFn: () => api.experiments() });
@@ -196,7 +195,7 @@ export function OverviewPage() {
         )}
       </Card>
 
-      {runsQuery.data?.length ? (
+      {summary.run_count > 0 ? (
         <Typography.Text type="secondary">底层 Run 仍保留为执行批次，用户主线以任务为准。</Typography.Text>
       ) : null}
     </section>

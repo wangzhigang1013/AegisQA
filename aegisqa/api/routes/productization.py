@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from math import ceil
 from typing import Any
 from uuid import uuid4
@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from aegisqa.api.app import (
     AnnotationAssignRequest,
     AnnotationBulkReviewRequest,
+    AnnotationDispatchRequest,
     AnnotationReviewRequest,
     AnnotationSeedRequest,
     AssertionEvaluateRequest,
@@ -46,11 +47,27 @@ from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
 from aegisqa.engine.runner import RunRecord, RunRequest
 from aegisqa.reports.aggregator import RunReport, aggregate_run_report, compare_reports
+from aegisqa.security.access import require_permission
+
+
+ANNOTATION_REVIEW_PERMISSION = "annotation:review"
+CANDIDATE_GOVERN_PERMISSION = "candidate:govern"
+RED_TEAM_SCAN_PERMISSION = "redteam:scan"
+EXPERIMENT_CREATE_PERMISSION = "experiment:create"
+CI_GATE_MANAGE_PERMISSION = "ci_gate:manage"
+
+
+class PromptSkillCandidateActionRequest(BaseModel):
+    actor: str = "api"
+    role: str = "Evaluator"
+    note: str = ""
 
 
 class PromptSkillCandidateReviewRequest(BaseModel):
     decision: str
     reviewer: str = "api"
+    actor: str | None = None
+    role: str = "Evaluator"
     note: str = ""
 
 
@@ -58,6 +75,8 @@ class PromptSkillCandidateBulkReviewRequest(BaseModel):
     candidate_ids: list[str]
     decision: str
     reviewer: str = "api"
+    actor: str | None = None
+    role: str = "Evaluator"
     note: str = ""
 
 
@@ -65,6 +84,7 @@ class PromptSkillCandidateBulkRetestRequest(BaseModel):
     candidate_ids: list[str] | None = None
     max_count: int = 10
     actor: str = "api"
+    role: str = "Evaluator"
 
 
 class PromptSkillCandidateBulkAssignRequest(BaseModel):
@@ -72,6 +92,7 @@ class PromptSkillCandidateBulkAssignRequest(BaseModel):
     owner: str
     due_at: str | None = None
     actor: str = "api"
+    role: str = "Evaluator"
     max_open_per_owner: int | None = None
 
 
@@ -80,33 +101,63 @@ class PromptSkillCandidateBulkArchiveRequest(BaseModel):
     statuses: list[str] = ["rejected", "promoted", "retested", "promotion_rejected"]
     stale_before: str | None = None
     actor: str = "api"
+    role: str = "Evaluator"
     note: str = "归档已结束的候选资产。"
 
 
 class PromptSkillCandidateEscalateRequest(BaseModel):
     actor: str = "api"
+    role: str = "Evaluator"
     now: str | None = None
 
 
 class WorkflowPromotionReviewRequest(BaseModel):
     requester: str = "api"
+    actor: str | None = None
+    role: str = "Evaluator"
     note: str = ""
 
 
 class WorkflowPromotionReviewDecisionRequest(BaseModel):
     reviewer: str = "api"
+    actor: str | None = None
+    role: str = "Reviewer"
     note: str = ""
 
 
 class ExperimentBaselineActionRequest(BaseModel):
     actor: str = "api"
+    role: str = "Admin"
     note: str = ""
     force: bool = False
 
 
 class BaselineChangeNotificationAckRequest(BaseModel):
     actor: str = "api"
+    role: str = "Evaluator"
     note: str = ""
+
+
+def _require_quality_governance(
+    ctx: RouteContext,
+    *,
+    role: str,
+    actor: str,
+    permission: str,
+    action: str,
+    target: str,
+) -> None:
+    """治理写入口统一鉴权，保证拒绝事件和成功事件使用同一套 actor/role 语义。"""
+
+    require_permission(
+        ctx.access_control,
+        ctx.audit_service,
+        role=role,
+        permission=permission,
+        action=action,
+        target=target,
+        actor=actor,
+    )
 
 
 def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -128,11 +179,26 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
                 status_code=400,
                 details={"field": "task_id|run_id"},
             )
+        scan_target = str(request.task_id or request.run_id)
+        _require_quality_governance(
+            ctx,
+            role=request.role,
+            actor=request.actor,
+            permission=RED_TEAM_SCAN_PERMISSION,
+            action="red_team.scan",
+            target=scan_target,
+        )
         task = _get_record(ctx.store, "tasks", request.task_id) if request.task_id else None
         run = ctx.runner.get_run(task["run_id"] if task else str(request.run_id))
         scan = _build_red_team_scan(task, run)
         _save_record(ctx.store, "red_team_scans", "scan_id", scan)
-        ctx.audit_service.record(actor="api", action="red_team.scan", target=scan["scan_id"], detail={"target": scan["target"], "risk_count": scan["summary"]["risk_count"]})
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="red_team.scan",
+            target=scan["scan_id"],
+            detail={"target": scan["target"], "risk_count": scan["summary"]["risk_count"], "role": request.role},
+        )
         return scan
 
     @app.get("/score-analytics")
@@ -154,11 +220,25 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/experiments/from-run")
     def create_experiment_from_run(request: ExperimentFromRunRequest) -> dict[str, Any]:
+        _require_quality_governance(
+            ctx,
+            role=request.role,
+            actor=request.actor,
+            permission=EXPERIMENT_CREATE_PERMISSION,
+            action="experiment.create",
+            target=request.run_id,
+        )
         run = ctx.runner.get_run(request.run_id)
         baseline_run = ctx.runner.get_run(request.baseline_run_id) if request.baseline_run_id else None
         experiment = _build_experiment_snapshot(run, name=request.name, baseline_run=baseline_run, tags=request.tags)
         _save_record(ctx.store, "experiments", "experiment_id", experiment)
-        ctx.audit_service.record(actor="api", action="experiment.create", target=experiment["experiment_id"], detail={"run_id": run.run_id})
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="experiment.create",
+            target=experiment["experiment_id"],
+            detail={"run_id": run.run_id, "role": request.role},
+        )
         return experiment
 
     @app.get("/experiments")
@@ -206,22 +286,28 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/prompt-skill-candidates/bulk-assign")
     def bulk_assign_prompt_skill_candidates(request: PromptSkillCandidateBulkAssignRequest) -> dict[str, Any]:
+        _require_candidate_govern(ctx, role=request.role, actor=request.actor, action="prompt_skill_candidate.bulk_assign", target="prompt_skill_candidates")
         return _bulk_assign_prompt_skill_candidates(ctx, request)
 
     @app.post("/prompt-skill-candidates/bulk-archive")
     def bulk_archive_prompt_skill_candidates(request: PromptSkillCandidateBulkArchiveRequest) -> dict[str, Any]:
+        _require_candidate_govern(ctx, role=request.role, actor=request.actor, action="prompt_skill_candidate.bulk_archive", target="prompt_skill_candidates")
         return _bulk_archive_prompt_skill_candidates(ctx, request)
 
     @app.post("/prompt-skill-candidates/bulk-review")
     def bulk_review_prompt_skill_candidates(request: PromptSkillCandidateBulkReviewRequest) -> dict[str, Any]:
+        actor = _candidate_actor(request.actor, request.reviewer)
+        _require_candidate_govern(ctx, role=request.role, actor=actor, action="prompt_skill_candidate.bulk_review", target="prompt_skill_candidates")
         return _bulk_review_prompt_skill_candidates(ctx, request)
 
     @app.post("/prompt-skill-candidates/bulk-retest")
     def bulk_retest_prompt_skill_candidates(request: PromptSkillCandidateBulkRetestRequest) -> dict[str, Any]:
+        _require_candidate_govern(ctx, role=request.role, actor=request.actor, action="prompt_skill_candidate.bulk_retest", target="prompt_skill_candidates")
         return _bulk_retest_prompt_skill_candidates(ctx, request)
 
     @app.post("/prompt-skill-candidates/escalate-overdue")
     def escalate_overdue_prompt_skill_candidates(request: PromptSkillCandidateEscalateRequest) -> dict[str, Any]:
+        _require_candidate_govern(ctx, role=request.role, actor=request.actor, action="prompt_skill_candidate.escalate_overdue", target="prompt_skill_candidates")
         return _escalate_overdue_prompt_skill_candidates(ctx, request)
 
     @app.get("/workflow-promotion-reviews")
@@ -269,10 +355,28 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/experiment-baseline-suggestions/{suggestion_id}/apply")
     def apply_experiment_baseline_suggestion(suggestion_id: str, request: ExperimentBaselineActionRequest) -> dict[str, Any]:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            permission="baseline:apply",
+            action="experiment_baseline.apply",
+            target=suggestion_id,
+            actor=request.actor,
+        )
         return _apply_experiment_baseline_suggestion(ctx, suggestion_id, request)
 
     @app.post("/experiment-baseline-suggestions/{suggestion_id}/rollback")
     def rollback_experiment_baseline_suggestion(suggestion_id: str, request: ExperimentBaselineActionRequest) -> dict[str, Any]:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            permission="baseline:apply",
+            action="experiment_baseline.rollback",
+            target=suggestion_id,
+            actor=request.actor,
+        )
         return _rollback_experiment_baseline_suggestion(ctx, suggestion_id, request)
 
     @app.get("/baseline-change-notifications")
@@ -295,7 +399,13 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             notification["ack_note"] = request.note
             notification["updated_at"] = now
             _save_record(ctx.store, "baseline_change_notifications", "notification_id", notification)
-            ctx.audit_service.record(actor=request.actor, action="baseline_change_notification.ack", target=notification_id, detail={"suggestion_id": notification.get("suggestion_id")})
+            ctx.audit_service.record(
+                actor=request.actor,
+                role=request.role,
+                action="baseline_change_notification.ack",
+                target=notification_id,
+                detail={"role": request.role, "suggestion_id": notification.get("suggestion_id")},
+            )
         return notification
 
     @app.get("/workflow-release-records")
@@ -315,14 +425,19 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/prompt-skill-candidates/{candidate_id}/review")
     def review_prompt_skill_candidate(candidate_id: str, request: PromptSkillCandidateReviewRequest) -> dict[str, Any]:
+        actor = _candidate_actor(request.actor, request.reviewer)
+        reviewer = _candidate_reviewer(request)
+        _require_candidate_govern(ctx, role=request.role, actor=actor, action="prompt_skill_candidate.review", target=candidate_id)
         candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
-        candidate = _review_prompt_skill_candidate_record(candidate, decision=request.decision, reviewer=request.reviewer, note=request.note, now=_now())
+        candidate = _review_prompt_skill_candidate_record(candidate, decision=request.decision, reviewer=reviewer, note=request.note, now=_now())
         _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
-        ctx.audit_service.record(actor=request.reviewer or "api", action="prompt_skill_candidate.review", target=candidate_id, detail={"decision": candidate.get("status")})
+        ctx.audit_service.record(actor=actor, role=request.role, action="prompt_skill_candidate.review", target=candidate_id, detail={"role": request.role, "decision": candidate.get("status")})
         return candidate
 
     @app.post("/prompt-skill-candidates/{candidate_id}/workflow-draft")
-    def create_workflow_draft_from_prompt_skill_candidate(candidate_id: str) -> dict[str, Any]:
+    def create_workflow_draft_from_prompt_skill_candidate(candidate_id: str, request: PromptSkillCandidateActionRequest | None = None) -> dict[str, Any]:
+        request = request or PromptSkillCandidateActionRequest()
+        _require_candidate_govern(ctx, role=request.role, actor=request.actor, action="prompt_skill_candidate.create_workflow_draft", target=candidate_id)
         candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
         if candidate.get("workflow_draft_id"):
             draft = _get_workflow_draft(ctx.store, str(candidate["workflow_draft_id"]))
@@ -358,19 +473,24 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         candidate["draft_created_at"] = now
         candidate["updated_at"] = now
         _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
-        ctx.audit_service.record(actor="api", action="prompt_skill_candidate.create_workflow_draft", target=candidate_id, detail={"draft_id": draft["draft_id"]})
+        ctx.audit_service.record(actor=request.actor, role=request.role, action="prompt_skill_candidate.create_workflow_draft", target=candidate_id, detail={"role": request.role, "draft_id": draft["draft_id"]})
         return {"status": "draft_created", "candidate": candidate, "draft": draft, "target_url": f"/workflows/designer/{draft['draft_id']}"}
 
     @app.post("/prompt-skill-candidates/{candidate_id}/retest")
-    def retest_prompt_skill_candidate(candidate_id: str) -> dict[str, Any]:
+    def retest_prompt_skill_candidate(candidate_id: str, request: PromptSkillCandidateActionRequest | None = None) -> dict[str, Any]:
+        request = request or PromptSkillCandidateActionRequest()
+        _require_candidate_govern(ctx, role=request.role, actor=request.actor, action="prompt_skill_candidate.retest", target=candidate_id)
         candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
         if candidate.get("retest_task_id"):
             return _prompt_skill_candidate_retest_payload(ctx, candidate)
 
-        return _execute_prompt_skill_candidate_retest(ctx, candidate, actor="api", history_action="retest")
+        return _execute_prompt_skill_candidate_retest(ctx, candidate, actor=request.actor, role=request.role, history_action="retest")
 
     @app.post("/prompt-skill-candidates/{candidate_id}/promotion-review")
     def create_workflow_promotion_review(candidate_id: str, request: WorkflowPromotionReviewRequest | None = None) -> dict[str, Any]:
+        request = request or WorkflowPromotionReviewRequest()
+        actor = _promotion_requester(request)
+        _require_candidate_govern(ctx, role=request.role, actor=actor, action="workflow_promotion_review.create", target=candidate_id)
         candidate = _get_record(ctx.store, "prompt_skill_candidates", candidate_id)
         if candidate.get("promotion_review_id"):
             review = _get_record(ctx.store, "workflow_promotion_reviews", str(candidate["promotion_review_id"]))
@@ -392,7 +512,6 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
                 details={"candidate_id": candidate_id, "decision": recommendation.get("decision")},
             )
 
-        request = request or WorkflowPromotionReviewRequest()
         review = _build_workflow_promotion_review(candidate, request)
         candidate["status"] = "promotion_review_pending"
         candidate["promotion_review_id"] = review["review_id"]
@@ -400,19 +519,24 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         _save_record(ctx.store, "workflow_promotion_reviews", "review_id", review)
         _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
         ctx.audit_service.record(
-            actor=request.requester or "api",
+            actor=actor,
+            role=request.role,
             action="workflow_promotion_review.create",
             target=review["review_id"],
-            detail={"candidate_id": candidate_id, "workflow_version_id": review.get("candidate_workflow_version_id")},
+            detail={"role": request.role, "candidate_id": candidate_id, "workflow_version_id": review.get("candidate_workflow_version_id")},
         )
         return {"status": review["status"], "candidate": candidate, "review": review, "target_url": review["target_url"]}
 
     @app.post("/workflow-promotion-reviews/{review_id}/approve")
     def approve_workflow_promotion_review(review_id: str, request: WorkflowPromotionReviewDecisionRequest) -> dict[str, Any]:
+        actor = _promotion_reviewer(request)
+        _require_candidate_govern(ctx, role=request.role, actor=actor, action="workflow_promotion_review.approved", target=review_id)
         return _decide_workflow_promotion_review(ctx, review_id, decision="approved", request=request)
 
     @app.post("/workflow-promotion-reviews/{review_id}/reject")
     def reject_workflow_promotion_review(review_id: str, request: WorkflowPromotionReviewDecisionRequest) -> dict[str, Any]:
+        actor = _promotion_reviewer(request)
+        _require_candidate_govern(ctx, role=request.role, actor=actor, action="workflow_promotion_review.rejected", target=review_id)
         return _decide_workflow_promotion_review(ctx, review_id, decision="rejected", request=request)
 
     @app.post("/assertions/evaluate")
@@ -426,6 +550,14 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/ci-gates")
     def create_ci_gate_config(request: CIGateConfigRequest) -> dict[str, Any]:
+        _require_quality_governance(
+            ctx,
+            role=request.role,
+            actor=request.actor,
+            permission=CI_GATE_MANAGE_PERMISSION,
+            action="ci_gate.create",
+            target=request.name,
+        )
         if not request.gates:
             raise AegisQAError(
                 "CI_GATE_EMPTY",
@@ -435,7 +567,13 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             )
         config = _build_ci_gate_config(request)
         _save_record(ctx.store, "ci_gate_configs", "config_id", config)
-        ctx.audit_service.record(actor="api", action="ci_gate.create", target=config["config_id"], detail={"gate_count": len(config["gates"])})
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="ci_gate.create",
+            target=config["config_id"],
+            detail={"gate_count": len(config["gates"]), "role": request.role},
+        )
         return config
 
     @app.get("/ci-gates")
@@ -444,6 +582,14 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/ci-gates/evaluate")
     def evaluate_ci_gates(request: CIGateEvaluateRequest) -> dict[str, Any]:
+        _require_quality_governance(
+            ctx,
+            role=request.role,
+            actor=request.actor,
+            permission=CI_GATE_MANAGE_PERMISSION,
+            action="ci_gate.evaluate",
+            target=str(request.config_id or request.task_id or request.run_id or "ci_gate_evaluate"),
+        )
         gates = list(request.gates)
         if request.config_id:
             config = _get_record(ctx.store, "ci_gate_configs", request.config_id)
@@ -489,7 +635,13 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             "created_at": _now(),
         }
         _save_record(ctx.store, "ci_gate_evaluations", "evaluation_id", evaluation)
-        ctx.audit_service.record(actor="api", action="ci_gate.evaluate", target=evaluation["evaluation_id"], detail={"status": evaluation["status"], "config_id": request.config_id, "target": target})
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="ci_gate.evaluate",
+            target=evaluation["evaluation_id"],
+            detail={"status": evaluation["status"], "config_id": request.config_id, "target": target, "role": request.role},
+        )
         return evaluation
 
     @app.get("/ci-gates/evaluations")
@@ -516,6 +668,7 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/annotation-queue/seed-from-run")
     def seed_annotation_queue(request: AnnotationSeedRequest) -> dict[str, Any]:
+        _require_annotation_review(ctx, role=request.role, actor=request.actor, action="annotation_queue.seed", target=request.run_id)
         run = ctx.runner.get_run(request.run_id)
         source_task = _find_task_by_run_id(ctx.store, run.run_id)
         created: list[dict[str, Any]] = []
@@ -528,7 +681,7 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
             task = _build_annotation_task(run.run_id, item.model_dump(mode="json"), assignee=request.assignee, source_task=source_task)
             _save_record(ctx.store, "annotation_tasks", "task_id", task)
             created.append(task)
-        ctx.audit_service.record(actor="api", action="annotation_queue.seed", target=run.run_id, detail={"created_count": len(created)})
+        ctx.audit_service.record(actor=request.actor, role=request.role, action="annotation_queue.seed", target=run.run_id, detail={"role": request.role, "created_count": len(created)})
         return {"run_id": run.run_id, "created_count": len(created), "tasks": created}
 
     @app.get("/annotation-queue")
@@ -539,7 +692,8 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         page: int | None = Query(default=None, ge=1),
         page_size: int = Query(default=20, ge=1, le=100),
     ) -> list[dict[str, Any]] | dict[str, Any]:
-        tasks = _list_records(ctx.store, "annotation_tasks")
+        now = _utc_now()
+        tasks = [_with_annotation_sla_status(task, now=now) for task in _list_records(ctx.store, "annotation_tasks")]
         if status:
             tasks = [task for task in tasks if task.get("status") == status]
         if assignee:
@@ -547,27 +701,100 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         if source_task_id:
             tasks = [task for task in tasks if task.get("source_task_id") == source_task_id]
         if page is not None:
-            return _paginate_records(tasks, page=page, page_size=page_size)
+            page_result = _paginate_records(tasks, page=page, page_size=page_size)
+            page_result["summary"] = _annotation_queue_summary(tasks, now=now)
+            return page_result
         return tasks
+
+    @app.post("/annotation-queue/dispatch")
+    def dispatch_annotation_queue(request: AnnotationDispatchRequest) -> dict[str, Any]:
+        _require_annotation_review(ctx, role=request.role, actor=request.actor, action="annotation_queue.dispatch", target="annotation_queue")
+        if not request.assignees:
+            raise AegisQAError(
+                "ANNOTATION_DISPATCH_ASSIGNEES_REQUIRED",
+                "自动分派至少需要配置一个负责人。",
+                status_code=400,
+                details={"field": "assignees"},
+            )
+        now = _utc_now()
+        all_tasks = [_with_annotation_sla_status(task, now=now) for task in _list_records(ctx.store, "annotation_tasks")]
+        open_by_owner = _annotation_open_backlog_by_owner(all_tasks)
+        owner_state = _build_annotation_dispatch_owner_state(request, open_by_owner)
+        pending_tasks = [task for task in all_tasks if task.get("status") == "pending"]
+        assigned: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for task in _sort_annotation_dispatch_tasks(pending_tasks, strategy=request.overdue_strategy):
+            business_label = _annotation_business_label(task, request.label_field)
+            owner = _select_annotation_owner(owner_state, business_label)
+            if not owner:
+                skipped.append({"task_id": task.get("task_id"), "item_id": task.get("item_id"), "business_label": business_label, "reason": "capacity_exhausted"})
+                continue
+            owner["remaining"] -= 1
+            owner["assigned_count"] += 1
+            owner["backlog_after"] += 1
+            task["assignee"] = owner["assignee"]
+            task["status"] = "assigned"
+            task["business_label"] = business_label
+            task["dispatch_strategy"] = {
+                "label_field": request.label_field,
+                "overdue_strategy": request.overdue_strategy,
+                "sla_hours": request.sla_hours,
+                "matched_labels": owner["labels"],
+            }
+            task["due_at"] = (now + timedelta(hours=request.sla_hours)).isoformat()
+            task["updated_at"] = now.isoformat()
+            task = _with_annotation_sla_status(task, now=now)
+            _save_record(ctx.store, "annotation_tasks", "task_id", task)
+            assigned.append(task)
+        owner_payload = [
+            {
+                "assignee": state["assignee"],
+                "capacity": state["capacity"],
+                "labels": state["labels"],
+                "backlog_before": state["backlog_before"],
+                "backlog_after": state["backlog_after"],
+                "assigned_count": state["assigned_count"],
+                "overdue_count": state["overdue_count"],
+            }
+            for state in owner_state
+        ]
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="annotation_queue.dispatch",
+            target="annotation_queue",
+            detail={"role": request.role, "assigned_count": len(assigned), "skipped_count": len(skipped), "label_field": request.label_field, "sla_hours": request.sla_hours},
+        )
+        return {
+            "assigned_count": len(assigned),
+            "skipped_count": len(skipped),
+            "tasks": assigned,
+            "skipped": skipped,
+            "owners": owner_payload,
+        }
 
     @app.post("/annotation-queue/{task_id}/assign")
     def assign_annotation_task(task_id: str, request: AnnotationAssignRequest) -> dict[str, Any]:
+        _require_annotation_review(ctx, role=request.role, actor=request.actor, action="annotation_task.assign", target=task_id)
         task = _get_record(ctx.store, "annotation_tasks", task_id)
         task["assignee"] = request.assignee
         task["status"] = "assigned"
         task["updated_at"] = _now()
+        task = _with_annotation_sla_status(task, now=_utc_now())
         _save_record(ctx.store, "annotation_tasks", "task_id", task)
-        ctx.audit_service.record(actor="api", action="annotation_task.assign", target=task_id, detail={"assignee": request.assignee})
+        ctx.audit_service.record(actor=request.actor, role=request.role, action="annotation_task.assign", target=task_id, detail={"role": request.role, "assignee": request.assignee})
         return task
 
     @app.post("/annotation-queue/{task_id}/review")
     def review_annotation_task(task_id: str, request: AnnotationReviewRequest) -> dict[str, Any]:
-        task, _ = _review_annotation_task(ctx, task_id, request, reviewer="api")
-        ctx.audit_service.record(actor="api", action="annotation_task.review", target=task_id, detail={"add_to_golden": request.add_to_golden})
+        _require_annotation_review(ctx, role=request.role, actor=request.actor, action="annotation_task.review", target=task_id)
+        task, _ = _review_annotation_task(ctx, task_id, request, reviewer=request.actor)
+        ctx.audit_service.record(actor=request.actor, role=request.role, action="annotation_task.review", target=task_id, detail={"role": request.role, "add_to_golden": request.add_to_golden})
         return task
 
     @app.post("/annotation-queue/bulk-review")
     def bulk_review_annotation_tasks(request: AnnotationBulkReviewRequest) -> dict[str, Any]:
+        _require_annotation_review(ctx, role=request.role, actor=request.actor, action="annotation_task.bulk_review", target="annotation_queue")
         if not request.task_ids:
             raise AegisQAError(
                 "ANNOTATION_TASK_IDS_REQUIRED",
@@ -579,14 +806,20 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         candidates: list[dict[str, Any]] = []
         review_request = AnnotationReviewRequest(human_label=request.human_label, note=request.note, add_to_golden=request.add_to_golden)
         for task_id in request.task_ids:
-            task, task_candidates = _review_annotation_task(ctx, task_id, review_request, reviewer="api")
+            task, task_candidates = _review_annotation_task(ctx, task_id, review_request, reviewer=request.actor)
             reviewed_tasks.append(task)
             candidates.extend(task_candidates)
         summary = {
             "golden": sum(1 for candidate in candidates if candidate["kind"] == "golden"),
             "assertion": sum(1 for candidate in candidates if candidate["kind"] == "assertion"),
         }
-        ctx.audit_service.record(actor="api", action="annotation_task.bulk_review", target="annotation_queue", detail={"reviewed_count": len(reviewed_tasks), "candidate_summary": summary})
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="annotation_task.bulk_review",
+            target="annotation_queue",
+            detail={"role": request.role, "reviewed_count": len(reviewed_tasks), "candidate_summary": summary},
+        )
         return {"reviewed_count": len(reviewed_tasks), "tasks": reviewed_tasks, "candidate_summary": summary, "candidates": candidates}
 
     @app.get("/annotation-candidates")
@@ -600,6 +833,50 @@ def register_productization_routes(app: FastAPI, ctx: RouteContext) -> None:
         if kind:
             candidates = [candidate for candidate in candidates if candidate.get("kind") == kind]
         return candidates
+
+
+def _require_annotation_review(ctx: RouteContext, *, role: str, actor: str, action: str, target: str) -> None:
+    require_permission(
+        ctx.access_control,
+        ctx.audit_service,
+        role=role,
+        permission=ANNOTATION_REVIEW_PERMISSION,
+        action=action,
+        target=target,
+        actor=actor,
+    )
+
+
+def _candidate_actor(actor: str | None, fallback: str = "api") -> str:
+    """候选资产兼容旧请求：旧前端只传 reviewer/requester 时也能得到真实操作者。"""
+
+    return actor or fallback or "api"
+
+
+def _candidate_reviewer(request: PromptSkillCandidateReviewRequest | PromptSkillCandidateBulkReviewRequest) -> str:
+    actor = _candidate_actor(request.actor, request.reviewer)
+    return request.reviewer if request.reviewer and request.reviewer != "api" else actor
+
+
+def _promotion_requester(request: WorkflowPromotionReviewRequest) -> str:
+    return _candidate_actor(request.actor, request.requester)
+
+
+def _promotion_reviewer(request: WorkflowPromotionReviewDecisionRequest) -> str:
+    actor = _candidate_actor(request.actor, request.reviewer)
+    return request.reviewer if request.reviewer and request.reviewer != "api" else actor
+
+
+def _require_candidate_govern(ctx: RouteContext, *, role: str, actor: str, action: str, target: str) -> None:
+    require_permission(
+        ctx.access_control,
+        ctx.audit_service,
+        role=role,
+        permission=CANDIDATE_GOVERN_PERMISSION,
+        action=action,
+        target=target,
+        actor=actor,
+    )
 
 
 def _paginate_records(records: list[dict[str, Any]], *, page: int, page_size: int) -> dict[str, Any]:
@@ -626,6 +903,132 @@ def _ci_gate_evaluation_summary(evaluations: list[dict[str, Any]]) -> dict[str, 
         "passed": sum(1 for item in evaluations if item.get("status") == "passed"),
         "latest_status": str(latest.get("status")) if latest else "暂无",
     }
+
+
+def _with_annotation_sla_status(task: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+    payload = deepcopy(task)
+    due_at = _parse_annotation_datetime(payload.get("due_at"))
+    if payload.get("status") == "reviewed":
+        payload["sla_status"] = "reviewed"
+        payload["overdue"] = False
+    elif not payload.get("assignee"):
+        payload["sla_status"] = "unassigned"
+        payload["overdue"] = False
+    elif due_at and due_at < now:
+        payload["sla_status"] = "overdue"
+        payload["overdue"] = True
+    else:
+        payload["sla_status"] = "within_sla"
+        payload["overdue"] = False
+    if "business_label" not in payload:
+        payload["business_label"] = _annotation_business_label(payload, "scene")
+    return payload
+
+
+def _annotation_queue_summary(tasks: list[dict[str, Any]], *, now: datetime) -> dict[str, Any]:
+    open_tasks = [task for task in tasks if task.get("status") != "reviewed"]
+    owners: dict[str, dict[str, Any]] = {}
+    for task in open_tasks:
+        owner = str(task.get("assignee") or "未分派")
+        entry = owners.setdefault(owner, {"assignee": owner, "backlog": 0, "overdue_count": 0, "next_due_at": None, "status_counts": {}})
+        entry["backlog"] += 1
+        status = str(task.get("status") or "pending")
+        entry["status_counts"][status] = entry["status_counts"].get(status, 0) + 1
+        if task.get("overdue"):
+            entry["overdue_count"] += 1
+        due_at = _parse_annotation_datetime(task.get("due_at"))
+        if due_at and due_at >= now:
+            current_due_at = _parse_annotation_datetime(entry.get("next_due_at"))
+            if current_due_at is None or due_at < current_due_at:
+                entry["next_due_at"] = due_at.isoformat()
+    return {
+        "total_open": len(open_tasks),
+        "total_assigned": sum(1 for task in open_tasks if task.get("assignee")),
+        "total_pending": sum(1 for task in open_tasks if task.get("status") == "pending"),
+        "total_overdue": sum(1 for task in open_tasks if task.get("overdue")),
+        "owners": sorted(owners.values(), key=lambda item: (item["assignee"] == "未分派", item["assignee"])),
+    }
+
+
+def _annotation_open_backlog_by_owner(tasks: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    backlog: dict[str, dict[str, int]] = {}
+    for task in tasks:
+        if task.get("status") == "reviewed" or not task.get("assignee"):
+            continue
+        owner = str(task.get("assignee"))
+        entry = backlog.setdefault(owner, {"open": 0, "overdue": 0})
+        entry["open"] += 1
+        if task.get("overdue"):
+            entry["overdue"] += 1
+    return backlog
+
+
+def _build_annotation_dispatch_owner_state(request: AnnotationDispatchRequest, open_by_owner: dict[str, dict[str, int]]) -> list[dict[str, Any]]:
+    state: list[dict[str, Any]] = []
+    for assignee in request.assignees:
+        backlog = open_by_owner.get(assignee.assignee, {"open": 0, "overdue": 0})
+        remaining = max(0, assignee.capacity - int(backlog.get("open", 0)))
+        state.append(
+            {
+                "assignee": assignee.assignee,
+                "capacity": assignee.capacity,
+                "labels": [str(label) for label in assignee.labels],
+                "backlog_before": int(backlog.get("open", 0)),
+                "backlog_after": int(backlog.get("open", 0)),
+                "overdue_count": int(backlog.get("overdue", 0)),
+                "remaining": remaining,
+                "assigned_count": 0,
+            }
+        )
+    return state
+
+
+def _sort_annotation_dispatch_tasks(tasks: list[dict[str, Any]], *, strategy: str) -> list[dict[str, Any]]:
+    if strategy == "priority_first":
+        priority_order = {"high": 0, "normal": 1, "low": 2}
+        return sorted(tasks, key=lambda task: (priority_order.get(str(task.get("priority") or "normal"), 1), str(task.get("created_at") or "")))
+    if strategy == "overdue_first":
+        return sorted(tasks, key=lambda task: (0 if task.get("overdue") else 1, str(task.get("due_at") or task.get("created_at") or "")))
+    return sorted(tasks, key=lambda task: str(task.get("created_at") or ""))
+
+
+def _select_annotation_owner(owner_state: list[dict[str, Any]], business_label: str | None) -> dict[str, Any] | None:
+    label = str(business_label or "")
+    label_matched = [
+        owner
+        for owner in owner_state
+        if owner["remaining"] > 0 and owner["labels"] and label in owner["labels"]
+    ]
+    fallback = [owner for owner in owner_state if owner["remaining"] > 0 and not owner["labels"]]
+    candidates = label_matched or fallback
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda owner: (owner["backlog_after"], owner["assigned_count"], owner["assignee"]))[0]
+
+
+def _annotation_business_label(task: dict[str, Any], label_field: str | None) -> str | None:
+    if not label_field:
+        return None
+    context = task.get("payload", {}).get("context_snapshot", {}) if isinstance(task.get("payload"), dict) else {}
+    row = context.get("row", {}) if isinstance(context, dict) else {}
+    value = row.get(label_field) if isinstance(row, dict) else None
+    return str(value) if value not in (None, "") else None
+
+
+def _parse_annotation_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _review_annotation_task(ctx: RouteContext, task_id: str, request: AnnotationReviewRequest, *, reviewer: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -775,6 +1178,8 @@ def _bulk_review_prompt_skill_candidates(ctx: RouteContext, request: PromptSkill
     if not request.candidate_ids:
         raise AegisQAError("PROMPT_SKILL_CANDIDATE_IDS_REQUIRED", "请至少选择一个候选资产。", status_code=400)
     now = _now()
+    actor = _candidate_actor(request.actor, request.reviewer)
+    reviewer = _candidate_reviewer(request)
     reviewed: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for candidate_id in request.candidate_ids:
@@ -784,14 +1189,15 @@ def _bulk_review_prompt_skill_candidates(ctx: RouteContext, request: PromptSkill
             skipped.append({"candidate_id": candidate_id, "reason": "not_found"})
             continue
         candidate["_bulk_reviewing"] = True
-        candidate = _review_prompt_skill_candidate_record(candidate, decision=request.decision, reviewer=request.reviewer, note=request.note, now=now)
+        candidate = _review_prompt_skill_candidate_record(candidate, decision=request.decision, reviewer=reviewer, note=request.note, now=now)
         _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
         reviewed.append(candidate)
     ctx.audit_service.record(
-        actor=request.reviewer or "api",
+        actor=actor,
+        role=request.role,
         action="prompt_skill_candidate.bulk_review",
         target="prompt_skill_candidates",
-        detail={"candidate_ids": request.candidate_ids, "decision": request.decision, "reviewed_count": len(reviewed), "skipped_count": len(skipped)},
+        detail={"role": request.role, "candidate_ids": request.candidate_ids, "decision": request.decision, "reviewed_count": len(reviewed), "skipped_count": len(skipped)},
     )
     return {"reviewed_count": len(reviewed), "skipped_count": len(skipped), "candidates": reviewed, "skipped": skipped}
 
@@ -841,7 +1247,7 @@ def _bulk_retest_prompt_skill_candidates(ctx: RouteContext, request: PromptSkill
             )
             continue
         try:
-            payload = _execute_prompt_skill_candidate_retest(ctx, candidate, actor=request.actor, history_action="bulk_retest")
+            payload = _execute_prompt_skill_candidate_retest(ctx, candidate, actor=request.actor, role=request.role, history_action="bulk_retest")
         except AegisQAError as exc:
             skipped.append(
                 {
@@ -867,9 +1273,10 @@ def _bulk_retest_prompt_skill_candidates(ctx: RouteContext, request: PromptSkill
 
     ctx.audit_service.record(
         actor=request.actor,
+        role=request.role,
         action="prompt_skill_candidate.bulk_retest",
         target="prompt_skill_candidates",
-        detail={"candidate_ids": candidate_ids, "retested_count": len(retested), "skipped_count": len(skipped), "max_count": max_count},
+        detail={"role": request.role, "candidate_ids": candidate_ids, "retested_count": len(retested), "skipped_count": len(skipped), "max_count": max_count},
     )
     return {
         "status": "completed",
@@ -939,9 +1346,11 @@ def _bulk_assign_prompt_skill_candidates(ctx: RouteContext, request: PromptSkill
             open_count += 1
     ctx.audit_service.record(
         actor=request.actor,
+        role=request.role,
         action="prompt_skill_candidate.bulk_assign",
         target="prompt_skill_candidates",
         detail={
+            "role": request.role,
             "candidate_ids": request.candidate_ids,
             "owner": owner,
             "assigned_count": len(assigned),
@@ -1009,9 +1418,11 @@ def _bulk_archive_prompt_skill_candidates(ctx: RouteContext, request: PromptSkil
 
     ctx.audit_service.record(
         actor=request.actor,
+        role=request.role,
         action="prompt_skill_candidate.bulk_archive",
         target="prompt_skill_candidates",
         detail={
+            "role": request.role,
             "candidate_ids": candidate_ids,
             "statuses": sorted(archive_statuses),
             "stale_before": request.stale_before,
@@ -1036,7 +1447,7 @@ def _escalate_overdue_prompt_skill_candidates(ctx: RouteContext, request: Prompt
         _append_candidate_action(candidate, action="escalate_overdue", actor=request.actor, note="候选资产超过 SLA 截止时间，已升级处理。", now=now)
         _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
         escalated.append(candidate)
-    ctx.audit_service.record(actor=request.actor, action="prompt_skill_candidate.escalate_overdue", target="prompt_skill_candidates", detail={"escalated_count": len(escalated)})
+    ctx.audit_service.record(actor=request.actor, role=request.role, action="prompt_skill_candidate.escalate_overdue", target="prompt_skill_candidates", detail={"role": request.role, "escalated_count": len(escalated)})
     return {"escalated_count": len(escalated), "candidates": escalated, "workload": _build_prompt_skill_candidate_workload(ctx, now=now)}
 
 
@@ -1200,7 +1611,7 @@ def _append_candidate_action(candidate: dict[str, Any], *, action: str, actor: s
     candidate["action_history"] = history
 
 
-def _execute_prompt_skill_candidate_retest(ctx: RouteContext, candidate: dict[str, Any], *, actor: str, history_action: str) -> dict[str, Any]:
+def _execute_prompt_skill_candidate_retest(ctx: RouteContext, candidate: dict[str, Any], *, actor: str, role: str, history_action: str) -> dict[str, Any]:
     """执行候选 Workflow 的同数据集复跑，并把结果写回候选资产。
 
     单条复跑和批量复跑必须共享这一条路径，否则后续指标、Experiment、晋升建议和
@@ -1298,9 +1709,10 @@ def _execute_prompt_skill_candidate_retest(ctx: RouteContext, candidate: dict[st
     _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
     ctx.audit_service.record(
         actor=actor,
+        role=role,
         action=f"prompt_skill_candidate.{history_action}",
         target=candidate_id,
-        detail={"task_id": task["task_id"], "run_id": executed_run.run_id, "candidate_experiment_id": candidate_experiment["experiment_id"]},
+        detail={"role": role, "task_id": task["task_id"], "run_id": executed_run.run_id, "candidate_experiment_id": candidate_experiment["experiment_id"]},
     )
     return {
         "status": "retested",
@@ -1535,11 +1947,12 @@ def _decide_workflow_promotion_review(
             "该 Workflow 晋升审批已经处理，不能重复变更结论。",
             status_code=400,
             details={"review_id": review_id, "status": review.get("status")},
-        )
+    )
     candidate = _get_record(ctx.store, "prompt_skill_candidates", str(review["candidate_id"]))
     now = _now()
+    actor = _promotion_reviewer(request)
     review["status"] = decision
-    review["reviewer"] = request.reviewer
+    review["reviewer"] = actor
     review["review_note"] = request.note
     review["reviewed_at"] = now
     review["updated_at"] = now
@@ -1547,7 +1960,7 @@ def _decide_workflow_promotion_review(
         candidate["status"] = "promoted"
         candidate["promoted_workflow_version_id"] = review.get("candidate_workflow_version_id")
         candidate["promoted_at"] = now
-        release_artifacts = _workflow_promotion_release_artifacts(ctx, review, candidate, now=now)
+        release_artifacts = _workflow_promotion_release_artifacts(ctx, review, candidate, actor=actor, role=request.role, now=now)
         baseline_suggestion = release_artifacts.get("baseline_suggestion")
         release_record = release_artifacts.get("release_record")
         if baseline_suggestion:
@@ -1564,10 +1977,11 @@ def _decide_workflow_promotion_review(
     _save_record(ctx.store, "workflow_promotion_reviews", "review_id", review)
     _save_record(ctx.store, "prompt_skill_candidates", "candidate_id", candidate)
     ctx.audit_service.record(
-        actor=request.reviewer or "api",
+        actor=actor,
+        role=request.role,
         action=f"workflow_promotion_review.{decision}",
         target=review_id,
-        detail={"candidate_id": candidate.get("candidate_id"), "workflow_version_id": review.get("candidate_workflow_version_id")},
+        detail={"role": request.role, "candidate_id": candidate.get("candidate_id"), "workflow_version_id": review.get("candidate_workflow_version_id")},
     )
     payload = {"status": decision, "candidate": candidate, "review": review, "target_url": review.get("target_url")}
     if release_artifacts:
@@ -1580,6 +1994,8 @@ def _workflow_promotion_release_artifacts(
     review: dict[str, Any],
     candidate: dict[str, Any],
     *,
+    actor: str,
+    role: str,
     now: str,
 ) -> dict[str, Any]:
     existing_baseline = _get_record(ctx.store, "experiment_baseline_suggestions", str(review["baseline_suggestion_id"])) if review.get("baseline_suggestion_id") else None
@@ -1593,14 +2009,34 @@ def _workflow_promotion_release_artifacts(
 
     baseline_suggestion = _build_experiment_baseline_suggestion(ctx, review, candidate, now=now)
     release_record, evaluations = _build_workflow_release_record(ctx, review, candidate, now=now)
+    if release_record.get("status") != "ready_to_release":
+        _save_record(ctx.store, "workflow_release_records", "record_id", release_record)
+        error_code = "WORKFLOW_PROMOTION_CI_GATE_REQUIRED" if release_record.get("status") in {"pending_ci_gate_config", "pending_ci_gate_target"} else "WORKFLOW_PROMOTION_CI_GATE_BLOCKED"
+        message = (
+            "Workflow 晋升审批必须绑定 active CI Gate，并且发布门禁通过后才能批准。"
+            if error_code == "WORKFLOW_PROMOTION_CI_GATE_REQUIRED"
+            else "候选 Workflow 未通过 CI Gate，不能批准为 ready_to_release。"
+        )
+        raise AegisQAError(
+            error_code,
+            message,
+            status_code=409,
+            details={"review_id": review["review_id"], "release_record": release_record, "ci_gate_evaluations": evaluations},
+        )
     if baseline_suggestion:
+        baseline_suggestion["release_record_id"] = release_record["record_id"]
+        baseline_suggestion["ci_gate_config_ids"] = release_record["ci_gate_config_ids"]
+        baseline_suggestion["ci_gate_evaluation_ids"] = release_record["ci_gate_evaluation_ids"]
+        baseline_suggestion["ci_gate_guard_status"] = release_record["status"]
         _save_record(ctx.store, "experiment_baseline_suggestions", "suggestion_id", baseline_suggestion)
     _save_record(ctx.store, "workflow_release_records", "record_id", release_record)
     ctx.audit_service.record(
-        actor="api",
+        actor=actor,
+        role=role,
         action="workflow_promotion_review.release_artifacts_created",
         target=review["review_id"],
         detail={
+            "role": role,
             "baseline_suggestion_id": baseline_suggestion.get("suggestion_id") if baseline_suggestion else None,
             "release_record_id": release_record.get("record_id"),
             "ci_gate_evaluation_ids": [item.get("evaluation_id") for item in evaluations],
@@ -1650,7 +2086,7 @@ def _build_workflow_release_record(
     now: str,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     record_id = f"workflow-release-{uuid4().hex[:12]}"
-    ci_gate_configs = [config for config in _list_records(ctx.store, "ci_gate_configs") if config.get("status", "active") in {"active", "enabled"}]
+    ci_gate_configs = _active_ci_gate_configs(ctx)
     evaluations: list[dict[str, Any]] = []
     retest_task_id = review.get("retest_task_id") or candidate.get("retest_task_id")
     if ci_gate_configs and retest_task_id:
@@ -1692,12 +2128,19 @@ def _build_workflow_release_record(
             "ci_gate_config_ids": [item["config_id"] for item in ci_gate_configs],
             "ci_gate_evaluation_ids": [item["evaluation_id"] for item in evaluations],
             "blocking_failures": blocking_failures,
+            "approved_by": review.get("reviewer"),
+            "approval_note": review.get("review_note"),
+            "approved_at": review.get("reviewed_at"),
             "target_url": f"/ci-gates?release_record_id={record_id}",
             "created_at": now,
             "updated_at": now,
         },
         evaluations,
     )
+
+
+def _active_ci_gate_configs(ctx: RouteContext) -> list[dict[str, Any]]:
+    return [config for config in _list_records(ctx.store, "ci_gate_configs") if config.get("status", "active") in {"active", "enabled"}]
 
 
 def _record_ci_gate_evaluation(
@@ -1746,7 +2189,7 @@ def _build_experiment_baseline_impact(ctx: RouteContext, suggestion_id: str) -> 
         for task in _list_records(ctx.store, "tasks")
         if _task_matches_baseline_scope(task, scope)
     ]
-    ci_gate_configs = [config for config in _list_records(ctx.store, "ci_gate_configs") if config.get("status", "active") in {"active", "enabled"}]
+    ci_gate_configs = _active_ci_gate_configs(ctx)
     return {
         "suggestion_id": suggestion_id,
         "status": suggestion.get("status"),
@@ -1863,7 +2306,7 @@ def _build_baseline_rollback_guard(ctx: RouteContext, suggestion: dict[str, Any]
     previous_run_id = previous_experiment.get("run_id")
     if not previous_run_id:
         return {"status": "pending_rollback_target", "ci_gate_evaluations": [], "blocking_failures": 0}
-    ci_gate_configs = [config for config in _list_records(ctx.store, "ci_gate_configs") if config.get("status", "active") in {"active", "enabled"}]
+    ci_gate_configs = _active_ci_gate_configs(ctx)
     if not ci_gate_configs:
         return {"status": "pending_ci_gate_config", "ci_gate_evaluations": [], "blocking_failures": 0}
 
@@ -1890,6 +2333,36 @@ def _build_baseline_rollback_guard(ctx: RouteContext, suggestion: dict[str, Any]
     }
 
 
+def _build_baseline_apply_guard(ctx: RouteContext, suggestion: dict[str, Any], *, now: str) -> dict[str, Any]:
+    suggested_run_id = suggestion.get("suggested_run_id")
+    if not suggested_run_id:
+        return {"status": "pending_ci_gate_target", "ci_gate_evaluations": [], "blocking_failures": 0}
+    ci_gate_configs = _active_ci_gate_configs(ctx)
+    if not ci_gate_configs:
+        return {"status": "pending_ci_gate_config", "ci_gate_evaluations": [], "blocking_failures": 0}
+
+    run = ctx.runner.get_run(str(suggested_run_id))
+    metrics = _ci_gate_metrics_from_run(run)
+    evaluations = [
+        _record_ci_gate_evaluation(
+            ctx,
+            config=config,
+            metrics=metrics,
+            target={"kind": "run", "id": str(suggested_run_id)},
+            source="experiment_baseline_apply",
+            review_id=str(suggestion["suggestion_id"]),
+            now=now,
+        )
+        for config in ci_gate_configs
+    ]
+    blocking_failures = sum(int(item.get("blocking_failures", 0)) for item in evaluations)
+    return {
+        "status": "blocked" if blocking_failures else "passed",
+        "ci_gate_evaluations": evaluations,
+        "blocking_failures": blocking_failures,
+    }
+
+
 def _apply_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: str, request: ExperimentBaselineActionRequest) -> dict[str, Any]:
     suggestion = _get_record(ctx.store, "experiment_baseline_suggestions", suggestion_id)
     if suggestion.get("status") not in {"pending_apply", "rolled_back", "applied"}:
@@ -1899,16 +2372,39 @@ def _apply_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: str,
             status_code=400,
             details={"suggestion_id": suggestion_id, "status": suggestion.get("status")},
         )
+    now = _now()
+    apply_guard = _build_baseline_apply_guard(ctx, suggestion, now=now)
+    if apply_guard.get("status") == "pending_ci_gate_config":
+        raise AegisQAError(
+            "BASELINE_APPLY_CI_GATE_REQUIRED",
+            "Baseline 应用前必须配置 active CI Gate。",
+            status_code=409,
+            details={"suggestion_id": suggestion_id, "ci_gate_guard": apply_guard},
+        )
+    if apply_guard.get("status") == "pending_ci_gate_target":
+        raise AegisQAError(
+            "BASELINE_APPLY_CI_GATE_TARGET_MISSING",
+            "Baseline 应用前必须有可执行 CI Gate 的候选 Run。",
+            status_code=409,
+            details={"suggestion_id": suggestion_id, "ci_gate_guard": apply_guard},
+        )
+    if apply_guard.get("status") == "blocked":
+        raise AegisQAError(
+            "BASELINE_APPLY_CI_GATE_BLOCKED",
+            "候选 baseline 未通过当前 CI Gate，不能应用为生产 baseline。",
+            status_code=409,
+            details={"suggestion_id": suggestion_id, "ci_gate_guard": apply_guard},
+        )
     suggested_experiment = _get_record(ctx.store, "experiments", str(suggestion["suggested_experiment_id"]))
-    baseline = _get_or_create_experiment_baseline(ctx, suggested_experiment, now=_now())
+    baseline = _get_or_create_experiment_baseline(ctx, suggested_experiment, now=now)
     if suggestion.get("status") == "applied" and baseline.get("current_experiment_id") == suggestion.get("suggested_experiment_id"):
         notifications = _list_baseline_change_notifications(ctx, suggestion_id=suggestion_id, baseline_id=str(baseline["baseline_id"]))
-        return {"status": "applied", "suggestion": suggestion, "baseline": baseline, "notifications": notifications}
-    now = _now()
+        return {"status": "applied", "suggestion": suggestion, "baseline": baseline, "notifications": notifications, "ci_gate_guard": apply_guard}
     previous_experiment_id = baseline.get("current_experiment_id") or suggestion.get("previous_baseline_experiment_id")
     baseline["current_experiment_id"] = suggestion["suggested_experiment_id"]
     baseline["previous_experiment_id"] = previous_experiment_id
     baseline["status"] = "active"
+    ci_gate_evaluation_ids = [item.get("evaluation_id") for item in apply_guard.get("ci_gate_evaluations", [])]
     baseline.setdefault("history", []).append(
         {
             "action": "apply",
@@ -1917,6 +2413,8 @@ def _apply_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: str,
             "to_experiment_id": suggestion["suggested_experiment_id"],
             "actor": request.actor,
             "note": request.note,
+            "ci_gate_guard_status": apply_guard.get("status"),
+            "ci_gate_evaluation_ids": ci_gate_evaluation_ids,
             "created_at": now,
         }
     )
@@ -1924,13 +2422,28 @@ def _apply_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: str,
     suggestion["status"] = "applied"
     suggestion["applied_by"] = request.actor
     suggestion["apply_note"] = request.note
+    suggestion["apply_ci_gate_guard_status"] = apply_guard.get("status")
+    suggestion["apply_ci_gate_evaluation_ids"] = ci_gate_evaluation_ids
     suggestion["applied_at"] = now
     suggestion["updated_at"] = now
+    impact = _build_experiment_baseline_impact(ctx, suggestion_id)
+    suggestion["apply_impact"] = impact
     _save_record(ctx.store, "experiment_baselines", "baseline_id", baseline)
     _save_record(ctx.store, "experiment_baseline_suggestions", "suggestion_id", suggestion)
-    notifications = _create_baseline_change_notification(ctx, baseline, suggestion, action="apply", actor=request.actor, note=request.note, now=now)
-    ctx.audit_service.record(actor=request.actor, action="experiment_baseline.apply", target=baseline["baseline_id"], detail={"suggestion_id": suggestion_id, "current_experiment_id": baseline["current_experiment_id"]})
-    return {"status": "applied", "suggestion": suggestion, "baseline": baseline, "notifications": notifications}
+    notifications = _create_baseline_change_notification(ctx, baseline, suggestion, action="apply", actor=request.actor, role=request.role, note=request.note, now=now)
+    ctx.audit_service.record(
+        actor=request.actor,
+        role=request.role,
+        action="experiment_baseline.apply",
+        target=baseline["baseline_id"],
+        detail={
+            "role": request.role,
+            "suggestion_id": suggestion_id,
+            "current_experiment_id": baseline["current_experiment_id"],
+            "ci_gate_guard_status": apply_guard.get("status"),
+        },
+    )
+    return {"status": "applied", "suggestion": suggestion, "baseline": baseline, "notifications": notifications, "ci_gate_guard": apply_guard, "impact": impact}
 
 
 def _rollback_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: str, request: ExperimentBaselineActionRequest) -> dict[str, Any]:
@@ -1989,11 +2502,23 @@ def _rollback_experiment_baseline_suggestion(ctx: RouteContext, suggestion_id: s
         suggestion,
         action="rollback",
         actor=request.actor,
+        role=request.role,
         note=request.note,
         now=now,
         rollback_guard=rollback_guard,
     )
-    ctx.audit_service.record(actor=request.actor, action="experiment_baseline.rollback", target=baseline["baseline_id"], detail={"suggestion_id": suggestion_id, "current_experiment_id": baseline["current_experiment_id"], "rollback_guard_status": rollback_guard.get("status")})
+    ctx.audit_service.record(
+        actor=request.actor,
+        role=request.role,
+        action="experiment_baseline.rollback",
+        target=baseline["baseline_id"],
+        detail={
+            "role": request.role,
+            "suggestion_id": suggestion_id,
+            "current_experiment_id": baseline["current_experiment_id"],
+            "rollback_guard_status": rollback_guard.get("status"),
+        },
+    )
     return {"status": "rolled_back", "suggestion": suggestion, "baseline": baseline, "rollback_guard": rollback_guard, "notifications": notifications}
 
 
@@ -2024,6 +2549,7 @@ def _create_baseline_change_notification(
     *,
     action: str,
     actor: str,
+    role: str,
     note: str,
     now: str,
     rollback_guard: dict[str, Any] | None = None,
@@ -2049,6 +2575,7 @@ def _create_baseline_change_notification(
         "action": action,
         "status": "unread",
         "actor": actor,
+        "role": role,
         "note": note,
         "scope": baseline.get("scope", {}),
         "from_experiment_id": from_experiment,
@@ -2063,9 +2590,10 @@ def _create_baseline_change_notification(
     _save_record(ctx.store, "baseline_change_notifications", "notification_id", notification)
     ctx.audit_service.record(
         actor=actor,
+        role=role,
         action=f"baseline_change_notification.create.{action}",
         target=notification["notification_id"],
-        detail={"suggestion_id": suggestion.get("suggestion_id"), "baseline_id": baseline.get("baseline_id"), "recipient_count": len(recipients)},
+        detail={"role": role, "suggestion_id": suggestion.get("suggestion_id"), "baseline_id": baseline.get("baseline_id"), "recipient_count": len(recipients)},
     )
     return [notification]
 

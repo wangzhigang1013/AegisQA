@@ -1,14 +1,16 @@
-import { ApartmentOutlined, BranchesOutlined, DatabaseOutlined } from '@ant-design/icons';
+import { ApartmentOutlined, ArrowLeftOutlined, BranchesOutlined, DatabaseOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Card, Col, Descriptions, Empty, List, Row, Space, Tabs, Tag, Timeline, Typography } from 'antd';
+import { Alert, Button, Card, Col, Descriptions, Empty, List, Row, Space, Tabs, Tag, Timeline, Typography } from 'antd';
 import { useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { api } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 
 export function TraceFlowPage() {
   const { taskId } = useParams();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [tracePage, setTracePage] = useState(1);
   const tracePageSize = 8;
   const traceQuery = useQuery({
@@ -18,6 +20,7 @@ export function TraceFlowPage() {
   });
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const traceFlow = traceQuery.data;
+  const returnTaskId = searchParams.get('return_task_id') || taskId;
   const selectedItem = useMemo(() => {
     if (!traceFlow?.items.length) return null;
     return traceFlow.items.find((item) => item.item_id === selectedItemId) ?? traceFlow.items[0];
@@ -29,6 +32,11 @@ export function TraceFlowPage() {
         eyebrow="样本级数据流"
         title="Trace Flow"
         description="查看一条样本如何从 Dataset Row 进入 Skill 输入、解析参数、产生输出与指标，并最终形成 Badcase。"
+        primaryAction={
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(returnTaskId ? `/runs?task_id=${encodeURIComponent(returnTaskId)}` : '/runs')}>
+            返回任务详情
+          </Button>
+        }
       />
 
       {traceQuery.isError ? <Alert type="error" showIcon message="Trace Flow 加载失败" /> : null}

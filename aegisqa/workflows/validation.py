@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from aegisqa.core.mapper import MappingPathError, TypeMismatchError, validate_json_schema
+from aegisqa.core.mapper import MappingPathError, TypeMismatchError, validate_json_schema, validate_mapping_expression
 from aegisqa.core.security import redact_secrets
 from aegisqa.skills.base import SkillManifest
 from aegisqa.skills.registry import SkillRegistry
@@ -49,6 +49,22 @@ def validate_workflow_step_contracts(
 
         input_mapping = getattr(step, "input_mapping", {}) or {}
         output_mapping = getattr(step, "output_mapping", {}) or {}
+        for field, source in input_mapping.items():
+            if not _mapping_path(source):
+                continue
+            try:
+                validate_mapping_expression(str(source))
+            except MappingPathError as exc:
+                issues.append(
+                    {
+                        "code": "INPUT_MAPPING_EXPRESSION_INVALID",
+                        "step_id": step_id,
+                        "skill_ref": skill_ref,
+                        "field_path": str(field),
+                        "expression": str(source),
+                        "message": str(exc),
+                    }
+                )
         required_inputs = _string_list(manifest.input_schema.get("required", []))
         missing_inputs = [field for field in required_inputs if not _mapping_path(input_mapping.get(field))]
         if missing_inputs:

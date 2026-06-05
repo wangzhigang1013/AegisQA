@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from aegisqa.api.routes.context import RouteContext
+from aegisqa.security.access import require_permission
 from aegisqa.skills.agent_skills import (
     discover_agent_skills,
     import_agent_skill,
@@ -19,6 +20,8 @@ class AgentSkillImportRequest(BaseModel):
     source_dir: str
     skill_id: str | None = None
     name: str | None = None
+    role: str = "Skill Developer"
+    actor: str = "api"
 
 
 def register_agent_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -37,6 +40,16 @@ def register_agent_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/agent-skills/import")
     def import_agent_skill_route(request: AgentSkillImportRequest) -> dict[str, Any]:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            permission="skill:register",
+            action="agent_skill.import",
+            target=request.skill_id or request.source_dir,
+            actor=request.actor,
+            detail={"source_dir": request.source_dir},
+        )
         record = import_agent_skill(
             ctx.store,
             ctx.registry,
@@ -44,5 +57,15 @@ def register_agent_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             skill_id=request.skill_id,
             name=request.name,
         )
-        ctx.audit_service.record(actor="api", action="agent_skill.import", target=record["manifest"]["skill_id"])
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="agent_skill.import",
+            target=record["manifest"]["skill_id"],
+            detail={
+                "role": request.role,
+                "source_dir": record.get("source_dir", request.source_dir),
+                "runtime_mode": record.get("runtime_mode"),
+            },
+        )
         return record

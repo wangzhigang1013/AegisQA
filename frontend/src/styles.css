@@ -33,6 +33,7 @@ pre {
 
 .app-shell {
   min-height: 100vh;
+  background: #f6f8fb;
 }
 
 .app-sider {
@@ -82,10 +83,13 @@ pre {
 }
 
 .app-main {
+  min-width: 0;
   background: #f6f8fb;
 }
 
 .app-content {
+  box-sizing: border-box;
+  min-width: 0;
   width: 100%;
   max-width: 1500px;
   margin: 0 auto;
@@ -118,6 +122,7 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  min-width: 0;
 }
 
 .page-header {
@@ -140,6 +145,28 @@ pre {
   color: #5a667a;
 }
 
+.page-header-actions {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.page-header-actions > * {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.report-header-actions {
+  justify-content: flex-end;
+  margin-bottom: 0;
+}
+
+.report-export-actions {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .eyebrow {
   color: #2563eb;
   font-weight: 700;
@@ -148,9 +175,73 @@ pre {
 .flat-card,
 .metric-tile,
 .skill-card {
+  min-width: 0;
   border-color: #d9e2ef;
   border-radius: 8px;
   box-shadow: 0 10px 24px rgba(17, 24, 39, 0.04);
+}
+
+.flat-card .ant-card-body {
+  min-width: 0;
+}
+
+.flat-card .ant-table-wrapper,
+.flat-card .ant-spin-nested-loading,
+.flat-card .ant-spin-container,
+.flat-card .ant-table,
+.flat-card .ant-table-container {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.flat-card .ant-table-content {
+  overflow-x: auto !important;
+}
+
+.page-section {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.page-section .ant-card-body {
+  overflow: hidden;
+}
+
+.action-toolbar {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin-bottom: 16px;
+}
+
+.action-toolbar .ant-space-item {
+  min-width: 0;
+}
+
+.data-table-shell {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.data-table-shell .ant-table-wrapper,
+.data-table-shell .ant-spin-nested-loading,
+.data-table-shell .ant-spin-container,
+.data-table-shell .ant-table,
+.data-table-shell .ant-table-container {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.data-table-shell .ant-table-content {
+  overflow-x: auto !important;
+}
+
+.runs-task-table {
+  max-width: 100%;
 }
 
 .metric-tile .ant-card-body {
@@ -316,6 +407,10 @@ pre {
 
   .app-content {
     padding: 18px;
+  }
+
+  .app-main {
+    width: 100% !important;
   }
 
   .page-header,

@@ -250,6 +250,149 @@ class DatasetService:
             "downstream_tasks": matched_tasks,
         }
 
+    def build_quality_diagnosis(self, dataset_id: str, version: int) -> dict[str, Any]:
+        """扫描 Dataset rows，计算字段覆盖率、缺失率和重复样本风险。"""
+
+        dataset = self.get_version(dataset_id, version)
+        field_names = set(dataset.field_schema)
+        present_counts: dict[str, int] = defaultdict(int)
+        distinct_values: dict[str, set[str]] = defaultdict(set)
+        duplicate_rows: dict[str, list[DatasetRow]] = defaultdict(list)
+        scanned_row_count = 0
+
+        for row in self.iter_rows(dataset_id, version):
+            scanned_row_count += 1
+            duplicate_rows[row.row_hash].append(row)
+            field_names.update(row.data)
+            for field, value in row.data.items():
+                if _is_missing_value(value):
+                    continue
+                present_counts[field] += 1
+                distinct_values[field].add(_stable_value_key(value))
+
+        row_count = scanned_row_count or dataset.row_count
+        fields: list[dict[str, Any]] = []
+        for field in sorted(field_names):
+            present_count = present_counts[field]
+            missing_count = max(row_count - present_count, 0)
+            coverage_rate = _safe_ratio(present_count, row_count)
+            missing_rate = _safe_ratio(missing_count, row_count)
+            field_type = dataset.field_schema.get(field, "unknown")
+            fields.append(
+                {
+                    "field": field,
+                    "path": f"row.{field}",
+                    "type": field_type,
+                    "present_count": present_count,
+                    "missing_count": missing_count,
+                    "coverage_rate": coverage_rate,
+                    "missing_rate": missing_rate,
+                    "distinct_count": len(distinct_values[field]),
+                    "recommendation": _field_quality_recommendation(field, field_type, missing_count, row_count),
+                }
+            )
+
+        duplicate_groups = [
+            {
+                "row_hash": row_hash,
+                "row_ids": [row.row_id for row in rows],
+                "row_indexes": [row.row_index for row in rows],
+                "count": len(rows),
+                "sample": rows[0].data,
+            }
+            for row_hash, rows in duplicate_rows.items()
+            if len(rows) > 1
+        ]
+        duplicate_row_count = sum(group["count"] - 1 for group in duplicate_groups)
+        return {
+            "dataset_id": dataset.dataset_id,
+            "dataset_version": dataset.version,
+            "dataset_version_id": dataset.version_id,
+            "name": dataset.name,
+            "summary": {
+                "row_count": row_count,
+                "field_count": len(fields),
+                "fields_with_missing": sum(1 for field in fields if field["missing_count"] > 0),
+                "duplicate_row_count": duplicate_row_count,
+                "duplicate_group_count": len(duplicate_groups),
+                "duplicate_rate": _safe_ratio(duplicate_row_count, row_count),
+            },
+            "fields": fields,
+            "duplicate_groups": duplicate_groups[:20],
+        }
+
+    def create_repaired_version(
+        self,
+        dataset_id: str,
+        version: int,
+        *,
+        drop_duplicate_rows: bool = True,
+        fill_missing: dict[str, Any] | None = None,
+        reason: str = "",
+    ) -> DatasetVersion:
+        """基于字段治理诊断生成新的 Dataset Version。
+
+        修复版保持同一个 dataset_id，便于旧任务继续追溯，新的任务可以显式选择 vNext；
+        source_ref 记录父版本、去重和补值策略，Lineage 可解释这版数据从哪里来。
+        """
+
+        parent = self.get_version(dataset_id, version)
+        new_version = self._next_version(parent.dataset_id)
+        row_store_parts = ["datasets", parent.dataset_id, f"v{new_version}", "rows.jsonl"]
+        fill_missing = fill_missing or {}
+        samples_by_field: dict[str, list[Any]] = defaultdict(list)
+        preview: list[dict[str, Any]] = []
+        seen_hashes: set[str] = set()
+        row_count = 0
+        dropped_duplicate_rows = 0
+
+        with self.store.path(*row_store_parts).open("w", encoding="utf-8") as handle:
+            for source_row in self.iter_rows(parent.dataset_id, parent.version):
+                if drop_duplicate_rows and source_row.row_hash in seen_hashes:
+                    dropped_duplicate_rows += 1
+                    continue
+                seen_hashes.add(source_row.row_hash)
+                row_data = dict(source_row.data)
+                for field, default_value in fill_missing.items():
+                    if _is_missing_value(row_data.get(field)):
+                        row_data[field] = default_value
+                row_count += 1
+                row = DatasetRow(row_id=str(row_count), row_index=row_count - 1, row_hash=_stable_hash(row_data), data=row_data)
+                handle.write(row.model_dump_json() + "\n")
+                if len(preview) < 20:
+                    preview.append(row_data)
+                for field, value in row_data.items():
+                    if len(samples_by_field[field]) < 50:
+                        samples_by_field[field].append(value)
+
+        dataset = DatasetVersion(
+            dataset_id=parent.dataset_id,
+            name=parent.name,
+            version=new_version,
+            version_id=f"{parent.dataset_id}:v{new_version}",
+            file_format=parent.file_format,
+            row_count=row_count,
+            field_schema={field: _infer_field_type(values) for field, values in samples_by_field.items()},
+            preview=preview,
+            golden=parent.golden,
+            label_field=parent.label_field,
+            answer_field=parent.answer_field,
+            row_store_path="/".join(row_store_parts),
+            created_at=_now(),
+            source_type="dataset_repair",
+            source_ref={
+                "parent_dataset_id": parent.dataset_id,
+                "parent_version": parent.version,
+                "parent_version_id": parent.version_id,
+                "drop_duplicate_rows": drop_duplicate_rows,
+                "dropped_duplicate_rows": dropped_duplicate_rows,
+                "fill_missing_fields": sorted(fill_missing),
+                "reason": reason,
+            },
+        )
+        self._save_version(dataset)
+        return dataset
+
     def iter_rows(self, dataset_id: str, version: int, chunk_size: int = 100) -> Iterator[DatasetRow]:
         """逐行读取数据集。
 
@@ -406,6 +549,40 @@ def _infer_field_type(values: list[Any]) -> str:
 def _stable_hash(payload: dict[str, Any]) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def _stable_value_key(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _is_missing_value(value: Any) -> bool:
+    return value is None or value == ""
+
+
+def _safe_ratio(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round(numerator / denominator, 4)
+
+
+def _field_quality_recommendation(field: str, field_type: str, missing_count: int, row_count: int) -> dict[str, Any]:
+    if missing_count <= 0:
+        return {"action": "none", "message": "字段覆盖完整。"}
+    return {
+        "action": "fill_missing",
+        "message": f"{field} 缺失 {missing_count}/{row_count} 行，建议补齐后生成修复版 Dataset Version。",
+        "default_value": _default_missing_value(field_type),
+    }
+
+
+def _default_missing_value(field_type: str) -> Any:
+    if field_type == "number":
+        return 0
+    if field_type == "boolean":
+        return False
+    if field_type == "json":
+        return {}
+    return "待补充"
 
 
 def _now() -> str:

@@ -1,5 +1,6 @@
 import type {
   AnnotationTask,
+  AnnotationDispatchResult,
   AgentSkillDiscoveryResult,
   AgentSkillRecord,
   AnnotationQueuePageResult,
@@ -14,6 +15,7 @@ import type {
   CIGateEvaluationResult,
   DashboardSummary,
   DatasetLineage,
+  DatasetQualityDiagnosis,
   DatasetSummary,
   DatasetVersion,
   BaselineChangeNotification,
@@ -39,14 +41,21 @@ import type {
   RepairTaskRecord,
   RepairTaskPageResult,
   RepairTaskTree,
+  ReportOfflinePackageDownload,
   ReportExportRequest,
+  RuntimeStatus,
+  RunPageResult,
   RunRecord,
   RunReport,
   ScoreAnalytics,
   SkillContractResult,
   SkillManifest,
   SkillPackageRecord,
+  SkillVersionHistory,
   ModelGatewayStatus,
+  ModelGatewayConfig,
+  ModelGatewayConnection,
+  ModelGatewayTestResult,
   StoredJudgeAudit,
   TaskRecord,
   TaskReport,
@@ -55,6 +64,7 @@ import type {
   TaskPageResult,
   TaskParameterGovernance,
   TaskPreflightResult,
+  TaskResultsExportDownload,
   TaskTraceFlow,
   TraceTree,
   WorkflowDraftRecord,
@@ -118,6 +128,67 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     });
   }
   return payload as T;
+}
+
+async function requestDownload(path: string, init?: RequestInit): Promise<TaskResultsExportDownload> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    cache: init?.cache ?? 'no-store',
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    const message = payload?.message ?? payload?.detail ?? `请求失败：${response.status}`;
+    throw new ApiError(message, {
+      code: payload?.code,
+      details: payload?.details,
+      trace_id: payload?.trace_id,
+      status: response.status,
+    });
+  }
+  const blob = await response.blob();
+  const fileFormat = (response.headers.get('X-AegisQA-File-Format') || 'csv') as TaskResultsExportDownload['file_format'];
+  const rowCount = Number(response.headers.get('X-AegisQA-Row-Count') ?? '');
+  return {
+    blob,
+    file_format: fileFormat,
+    filename: parseContentDispositionFilename(response.headers.get('Content-Disposition')),
+    row_count: Number.isFinite(rowCount) ? rowCount : undefined,
+    include_steps: response.headers.get('X-AegisQA-Include-Steps') === 'true',
+  };
+}
+
+async function requestOfflinePackageDownload(path: string, init?: RequestInit): Promise<ReportOfflinePackageDownload> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    cache: init?.cache ?? 'no-store',
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    const message = payload?.message ?? payload?.detail ?? `请求失败：${response.status}`;
+    throw new ApiError(message, {
+      code: payload?.code,
+      details: payload?.details,
+      trace_id: payload?.trace_id,
+      status: response.status,
+    });
+  }
+  const fileCount = Number(response.headers.get('X-AegisQA-Package-File-Count') ?? '');
+  return {
+    blob: await response.blob(),
+    file_format: 'offline_zip',
+    filename: parseContentDispositionFilename(response.headers.get('Content-Disposition')),
+    file_count: Number.isFinite(fileCount) ? fileCount : undefined,
+  };
+}
+
+function parseContentDispositionFilename(value: string | null): string | undefined {
+  if (!value) return undefined;
+  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+  const plainMatch = value.match(/filename="?([^";]+)"?/i);
+  return plainMatch?.[1];
 }
 
 export const api = {
@@ -205,6 +276,16 @@ export const api = {
   },
   seedAnnotationQueue: (body: { run_id: string; strategy?: string; limit?: number; assignee?: string | null }) =>
     request<{ run_id: string; created_count: number; tasks: AnnotationTask[] }>('/annotation-queue/seed-from-run', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  dispatchAnnotationQueue: (body: {
+    label_field?: string | null;
+    sla_hours?: number;
+    overdue_strategy?: string;
+    assignees: { assignee: string; capacity?: number; labels?: string[] }[];
+  }) =>
+    request<AnnotationDispatchResult>('/annotation-queue/dispatch', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -338,6 +419,7 @@ export const api = {
     }),
   skills: () => request<SkillManifest[]>('/skills'),
   skillPackages: () => request<SkillPackageRecord[]>('/skills/packages'),
+  skillVersionHistory: (skillId: string) => request<SkillVersionHistory>(`/skills/${skillId}/versions`),
   agentSkills: () => request<AgentSkillRecord[]>('/agent-skills'),
   discoverAgentSkills: () => request<AgentSkillDiscoveryResult>('/agent-skills/discover'),
   importAgentSkill: (body: { source_dir: string; skill_id?: string; name?: string }) =>
@@ -345,7 +427,70 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  runtimeStatus: () => request<RuntimeStatus>('/governance/runtime-status'),
   modelGatewayStatus: () => request<ModelGatewayStatus>('/model-gateway/status'),
+  modelGatewayConfig: () => request<ModelGatewayConfig>('/model-gateway/config'),
+  modelGatewayConnections: () => request<ModelGatewayConnection[]>('/model-gateway/connections'),
+  createModelGatewayConnection: (body: {
+    connection_id: string;
+    name?: string | null;
+    provider: string;
+    base_url?: string | null;
+    secret_ref?: string | null;
+    api_key?: string | null;
+    default_model: string;
+    timeout_seconds: number;
+    enabled?: boolean;
+  }) =>
+    request<ModelGatewayConnection>('/model-gateway/connections', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateModelGatewayConnection: (
+    connectionId: string,
+    body: {
+      name?: string | null;
+      provider?: string;
+      base_url?: string | null;
+      secret_ref?: string | null;
+      api_key?: string | null;
+      default_model?: string;
+      timeout_seconds?: number;
+      enabled?: boolean;
+      clear_api_key?: boolean;
+    },
+  ) =>
+    request<ModelGatewayConnection>(`/model-gateway/connections/${encodeURIComponent(connectionId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteModelGatewayConnection: (connectionId: string) =>
+    request<{ deleted: boolean; connection_id: string }>(`/model-gateway/connections/${encodeURIComponent(connectionId)}`, { method: 'DELETE' }),
+  updateModelGatewayConfig: (body: {
+    provider: string;
+    base_url?: string | null;
+    secret_ref?: string | null;
+    default_model: string;
+    timeout_seconds: number;
+    clear_api_key?: boolean;
+  }) =>
+    request<ModelGatewayConfig>('/model-gateway/config', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  testModelGateway: (body: {
+    prompt: string;
+    model_connection_id?: string | null;
+    model?: string | null;
+    temperature?: number | null;
+    max_tokens?: number | null;
+    api_key?: string | null;
+    secret_ref?: string | null;
+  }) =>
+    request<ModelGatewayTestResult>('/model-gateway/test', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   uploadSkillPackage: (body: { filename: string; content_base64: string }) =>
     request<SkillPackageRecord>('/skills/packages/upload', {
       method: 'POST',
@@ -357,8 +502,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reason }),
     }),
+  rollbackSkillVersion: (skillId: string, targetSkillId: string, reason = '') =>
+    request<SkillVersionHistory>(`/skills/${skillId}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ target_skill_id: targetSkillId, reason }),
+    }),
   datasets: () => request<DatasetSummary[]>('/datasets'),
   datasetLineage: (datasetId: string, version: number) => request<DatasetLineage>(`/datasets/${datasetId}/versions/${version}/lineage`),
+  datasetQuality: (datasetId: string, version: number) => request<DatasetQualityDiagnosis>(`/datasets/${datasetId}/versions/${version}/quality`),
+  repairDatasetVersion: (datasetId: string, version: number, body: { drop_duplicate_rows?: boolean; fill_missing?: Record<string, unknown>; reason?: string }) =>
+    request<DatasetVersion>(`/datasets/${datasetId}/versions/${version}/repair-version`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   uploadDataset: (body: { name: string; filename: string; content: string; golden?: boolean; label_field?: string; answer_field?: string }) =>
     request<DatasetVersion>('/datasets/upload', {
       method: 'POST',
@@ -422,6 +578,15 @@ export const api = {
       body: JSON.stringify(body),
     }),
   runs: () => request<RunRecord[]>('/runs'),
+  runsPage: (filters: { status?: string; dataset_id?: string; workflow_version_id?: string; page?: number; pageSize?: number } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (!value) return;
+      query.set(key === 'pageSize' ? 'page_size' : key, String(value));
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<RunPageResult>(`/runs${suffix}`);
+  },
   tasks: () => request<TaskRecord[]>('/tasks'),
   task: (taskId: string) => request<TaskRecord>(`/tasks/${encodeURIComponent(taskId)}`),
   tasksPage: (filters: { status?: string; dataset_id?: string; workflow_id?: string; q?: string; page?: number; pageSize?: number } = {}) => {
@@ -535,10 +700,38 @@ export const api = {
   resumeTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/resume`, { method: 'POST' }),
   cancelTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/cancel`, { method: 'POST' }),
   retryFailedTask: (taskId: string) => request<TaskRecord>(`/tasks/${taskId}/retry-failed`, { method: 'POST' }),
-  taskReport: (taskId: string, pagination: { badcasePage?: number; badcasePageSize?: number } = {}) => {
+  taskReport: (
+    taskId: string,
+    pagination: {
+      badcasePage?: number;
+      badcasePageSize?: number;
+      stepPage?: number;
+      stepPageSize?: number;
+      stepQuery?: string;
+      segmentPage?: number;
+      segmentPageSize?: number;
+      segmentQuery?: string;
+      rootCausePage?: number;
+      rootCausePageSize?: number;
+      rootCauseQuery?: string;
+      diagnosticStepPage?: number;
+      diagnosticStepPageSize?: number;
+    } = {},
+  ) => {
     const query = new URLSearchParams();
     if (pagination.badcasePage) query.set('badcase_page', String(pagination.badcasePage));
     if (pagination.badcasePageSize) query.set('badcase_page_size', String(pagination.badcasePageSize));
+    if (pagination.stepPage) query.set('step_page', String(pagination.stepPage));
+    if (pagination.stepPageSize) query.set('step_page_size', String(pagination.stepPageSize));
+    if (pagination.stepQuery) query.set('step_query', pagination.stepQuery);
+    if (pagination.segmentPage) query.set('segment_page', String(pagination.segmentPage));
+    if (pagination.segmentPageSize) query.set('segment_page_size', String(pagination.segmentPageSize));
+    if (pagination.segmentQuery) query.set('segment_query', pagination.segmentQuery);
+    if (pagination.rootCausePage) query.set('root_cause_page', String(pagination.rootCausePage));
+    if (pagination.rootCausePageSize) query.set('root_cause_page_size', String(pagination.rootCausePageSize));
+    if (pagination.rootCauseQuery) query.set('root_cause_query', pagination.rootCauseQuery);
+    if (pagination.diagnosticStepPage) query.set('diagnostic_step_page', String(pagination.diagnosticStepPage));
+    if (pagination.diagnosticStepPageSize) query.set('diagnostic_step_page_size', String(pagination.diagnosticStepPageSize));
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<TaskReport>(`/tasks/${taskId}/report${suffix}`);
   },
@@ -547,10 +740,15 @@ export const api = {
     if (approvalRequestId) query.set('approval_request_id', approvalRequestId);
     return request<Record<string, unknown>>(`/tasks/${taskId}/report/export?${query.toString()}`);
   },
+  exportTaskReportOfflinePackage: (taskId: string, role = 'Evaluator', approvalRequestId?: string) => {
+    const query = new URLSearchParams({ role });
+    if (approvalRequestId) query.set('approval_request_id', approvalRequestId);
+    return requestOfflinePackageDownload(`/tasks/${taskId}/report/offline-package?${query.toString()}`);
+  },
   exportTaskResults: (taskId: string, file_format: 'json' | 'jsonl' | 'csv', includeSteps = false) => {
     const query = new URLSearchParams({ file_format });
     if (includeSteps) query.set('include_steps', 'true');
-    return request<Record<string, unknown>>(`/tasks/${taskId}/results/export?${query.toString()}`);
+    return requestDownload(`/tasks/${taskId}/results/export?${query.toString()}`);
   },
   reportExportRequests: (filters: { task_id?: string; status?: string } = {}) => {
     const query = new URLSearchParams();
@@ -559,7 +757,7 @@ export const api = {
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<ReportExportRequest[]>(`/report-export-requests${suffix}`);
   },
-  createReportExportRequest: (taskId: string, body: { file_format: 'json' | 'csv' | 'html'; requester_role: string; reason?: string }) =>
+  createReportExportRequest: (taskId: string, body: { file_format: 'json' | 'csv' | 'html' | 'offline_zip'; requester_role: string; reason?: string }) =>
     request<ReportExportRequest>(`/tasks/${taskId}/report/export-requests`, {
       method: 'POST',
       body: JSON.stringify(body),

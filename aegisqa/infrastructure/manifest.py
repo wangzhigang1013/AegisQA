@@ -15,8 +15,8 @@ def production_readiness_manifest() -> dict[str, Any]:
         "database": {
             "default": "mysql8",
             "schema": "infra/mysql/schema.sql",
-            "runtime_adapter": "aegisqa.storage.json_store.JsonStore",
-            "production_adapter": "MySQL 8.0 schema + repository layer extension point",
+            "runtime_adapter": "aegisqa.storage.json_store.JsonStore / aegisqa.storage.sqlite_store.SQLiteStore",
+            "production_adapter": "aegisqa.storage.mysql_store.MySQLStore",
         },
         "queue": {
             "broker": "redis",
@@ -34,4 +34,3 @@ def production_readiness_manifest() -> dict[str, Any]:
             "secret_policy": "Secret 引用注入，日志和报告统一脱敏",
         },
     }
-

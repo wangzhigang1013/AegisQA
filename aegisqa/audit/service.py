@@ -14,8 +14,11 @@ from aegisqa.storage.json_store import JsonStore
 class AuditEvent(BaseModel):
     event_id: str
     actor: str
+    role: str = "System"
     action: str
     target: str
+    result: str = "success"
+    trace_id: str = Field(default_factory=lambda: f"trace_{uuid4().hex[:12]}")
     detail: dict[str, Any] = Field(default_factory=dict)
     created_at: str
 
@@ -23,23 +26,41 @@ class AuditEvent(BaseModel):
 class AuditService:
     """记录 Workflow 发布、Skill 审批、Run 启动、人工纠错等操作。"""
 
-    def __init__(self, store: JsonStore) -> None:
+    def __init__(self, store: JsonStore, audit_repository: Any | None = None) -> None:
         self.store = store
+        self.audit_repository = audit_repository
 
-    def record(self, *, actor: str, action: str, target: str, detail: dict[str, Any] | None = None) -> AuditEvent:
+    def record(
+        self,
+        *,
+        actor: str,
+        action: str,
+        target: str,
+        detail: dict[str, Any] | None = None,
+        role: str | None = None,
+        result: str = "success",
+        trace_id: str | None = None,
+    ) -> AuditEvent:
         event = AuditEvent(
             event_id=f"audit-{uuid4().hex[:12]}",
             actor=actor,
+            role=role or actor,
             action=action,
             target=target,
+            result=result,
+            trace_id=trace_id or f"trace_{uuid4().hex[:12]}",
             detail=detail or {},
             created_at=datetime.now(timezone.utc).isoformat(),
         )
-        self.store.append_jsonl(["audit", "events.jsonl"], event.model_dump(mode="json"))
+        if self.audit_repository:
+            self.audit_repository.append(event.model_dump(mode="json"))
+        else:
+            self.store.append_jsonl(["audit", "events.jsonl"], event.model_dump(mode="json"))
         return event
 
     def list_events(self, *, actor: str | None = None, action: str | None = None, target: str | None = None) -> list[AuditEvent]:
-        events = [AuditEvent(**payload) for payload in self.store.iter_jsonl(["audit", "events.jsonl"])]
+        payloads = self.audit_repository.list() if self.audit_repository else self.store.iter_jsonl(["audit", "events.jsonl"])
+        events = [AuditEvent(**payload) for payload in payloads]
         # 过滤能力放在审计服务层，避免多个 API 入口各自实现一份筛选逻辑。
         if actor is not None:
             events = [event for event in events if event.actor == actor]

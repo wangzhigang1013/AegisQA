@@ -279,6 +279,46 @@ export const demoDatasetLineage = {
   downstream_tasks: [{ task_id: 'task-demo', name: '可信评测任务', status: 'completed', workflow_version_id: 'wf-demo:v1', run_id: 'run-demo' }],
 };
 
+export const demoDatasetQuality = {
+  dataset_id: 'dataset-demo',
+  dataset_version: 1,
+  dataset_version_id: 'dataset-demo:v1',
+  name: '问答回归集',
+  summary: {
+    row_count: 100,
+    field_count: 3,
+    fields_with_missing: 0,
+    duplicate_row_count: 0,
+    duplicate_group_count: 0,
+    duplicate_rate: 0,
+  },
+  fields: [
+    {
+      field: 'question',
+      path: 'row.question',
+      type: 'text',
+      present_count: 100,
+      missing_count: 0,
+      coverage_rate: 1,
+      missing_rate: 0,
+      distinct_count: 100,
+      recommendation: { action: 'none', message: '字段覆盖完整。' },
+    },
+    {
+      field: 'reference',
+      path: 'row.reference',
+      type: 'text',
+      present_count: 100,
+      missing_count: 0,
+      coverage_rate: 1,
+      missing_rate: 0,
+      distinct_count: 90,
+      recommendation: { action: 'none', message: '字段覆盖完整。' },
+    },
+  ],
+  duplicate_groups: [],
+};
+
 export const demoParameterGovernance = {
   task_id: 'task-demo',
   run_id: 'run-demo',
@@ -639,6 +679,8 @@ export const demoBaselineApplyPayload = {
     ...demoWorkflowPromotionApprovedPayload.release_artifacts.baseline_suggestion,
     status: 'applied',
     applied_by: 'release_owner',
+    apply_ci_gate_guard_status: 'passed',
+    apply_ci_gate_evaluation_ids: ['gateeval-demo'],
     applied_at: '2026-05-31T04:00:00Z',
   },
   baseline: {
@@ -647,9 +689,24 @@ export const demoBaselineApplyPayload = {
     current_experiment_id: 'exp-candidate-demo',
     previous_experiment_id: 'exp-baseline',
     status: 'active',
-    history: [{ action: 'apply', suggestion_id: 'baseline-suggestion-demo', from_experiment_id: 'exp-baseline', to_experiment_id: 'exp-candidate-demo', actor: 'release_owner', note: '应用为新 baseline。' }],
+    history: [{ action: 'apply', suggestion_id: 'baseline-suggestion-demo', from_experiment_id: 'exp-baseline', to_experiment_id: 'exp-candidate-demo', actor: 'release_owner', note: '应用为新 baseline。', ci_gate_guard_status: 'passed', ci_gate_evaluation_ids: ['gateeval-demo'] }],
     created_at: '2026-05-31T04:00:00Z',
     updated_at: '2026-05-31T04:00:00Z',
+  },
+  ci_gate_guard: {
+    status: 'passed',
+    ci_gate_evaluations: [{ ...demoCIGateEvaluations[0], evaluation_id: 'gateeval-demo', source: 'experiment_baseline_apply' }],
+    blocking_failures: 0,
+  },
+  impact: {
+    suggestion_id: 'baseline-suggestion-demo',
+    scope: { dataset_id: 'dataset-demo', workflow_id: 'wf-demo' },
+    suggested_experiment_id: 'exp-candidate-demo',
+    previous_baseline_experiment_id: 'exp-baseline',
+    metric_delta: { pass_rate_delta: 0.05, badcase_delta: -2 },
+    summary: { affected_tasks: 1, affected_reports: 1, ci_gate_configs: 1 },
+    affected_tasks: [{ task_id: 'task-demo', name: 'RAG 任务', status: 'completed', pass_rate: 0.8 }],
+    recommendations: [{ action: 'apply_baseline', label: '可以应用 baseline' }],
   },
   notifications: [
     {
@@ -845,8 +902,42 @@ export const pendingSkillPackage = {
   approved_by: null,
   approved_at: null,
   approval_note: null,
+  contract_history: [],
+  approval_history: [],
+  base_skill_id: 'plugin.echo',
+  skill_version: '0.1.0',
   created_at: '2026-05-31T00:00:00Z',
   updated_at: '2026-05-31T00:00:00Z',
+};
+
+export const skillVersionHistory = {
+  base_skill_id: 'plugin.echo',
+  requested_skill_id: 'plugin.echo@0.2.0',
+  latest_approved_skill_id: 'plugin.echo@0.2.0',
+  versions: [
+    {
+      ...pendingSkillPackage,
+      status: 'approved',
+      manifest: { ...pendingPackageSkill, status: 'approved', enabled: true },
+      skill_id: 'plugin.echo@0.1.0',
+      version: '0.1.0',
+      contract_history: [{ ok: true, created_at: '2026-05-31T00:10:00Z', latency_ms: 1 }],
+      approval_history: [{ action: 'approve', actor: 'api', reason: 'v1 稳定', created_at: '2026-05-31T00:11:00Z' }],
+      diff_from_previous: [],
+    },
+    {
+      ...pendingSkillPackage,
+      package_id: 'pkg-demo-v2',
+      filename: 'echo-v2.zip',
+      status: 'approved',
+      manifest: { ...pendingPackageSkill, skill_id: 'plugin.echo@0.2.0', version: '0.2.0', description: 'Echo 插件 v2', status: 'approved', enabled: true },
+      skill_id: 'plugin.echo@0.2.0',
+      version: '0.2.0',
+      contract_history: [{ ok: true, created_at: '2026-05-31T01:10:00Z', latency_ms: 1 }],
+      approval_history: [{ action: 'approve', actor: 'api', reason: 'v2 升级', created_at: '2026-05-31T01:11:00Z' }],
+      diff_from_previous: [{ field: 'manifest.description', from: 'Echo 插件', to: 'Echo 插件 v2' }],
+    },
+  ],
 };
 
 export async function renderWorkbench(path: string) {
@@ -864,6 +955,17 @@ export function jsonResponse(payload: unknown) {
   return Promise.resolve({
     ok: true,
     json: () => Promise.resolve(payload),
+  } as Response);
+}
+
+export function fileResponse(content: string, headers: Record<string, string> = {}) {
+  const responseHeaders = new Headers(headers);
+  return Promise.resolve({
+    ok: true,
+    headers: responseHeaders,
+    blob: () => Promise.resolve(new Blob([content], { type: responseHeaders.get('content-type') ?? 'text/plain;charset=utf-8' })),
+    text: () => Promise.resolve(content),
+    json: () => Promise.reject(new Error('文件响应不是 JSON')),
   } as Response);
 }
 
@@ -898,6 +1000,51 @@ export function installDefaultWorkbenchMocks() {
       if (url.endsWith('/skills/packages')) {
         return jsonResponse([pendingSkillPackage]);
       }
+      if (url.includes('/skills/') && url.endsWith('/versions')) {
+        return jsonResponse(skillVersionHistory);
+      }
+      if (url.endsWith('/governance/runtime-status')) {
+        return jsonResponse({
+          storage: {
+            backend: 'json',
+            adapter: 'JsonStore',
+            status: 'available',
+            scope: 'local',
+            message: '当前使用本地 JSON 存储；MySQL adapter 尚未接入运行期。',
+          },
+          executor: {
+            backend: 'local_thread',
+            status: 'demo',
+            message: '当前使用本地线程执行器，适合本地试用和单进程评测。',
+          },
+          model_gateway: {
+            provider: 'mock',
+            ready: true,
+            mode: 'offline_mock',
+            default_model: 'mock-eval-model',
+            base_url_configured: false,
+            api_key_configured: false,
+            timeout_seconds: 60,
+            skill_ref: 'model.chat@0.1.0',
+            message: '离线 mock 模型可用。',
+            status: 'demo',
+          },
+          skill_sandbox: {
+            mode: 'subprocess',
+            status: 'available',
+            permissions_required: true,
+            network_default: 'denied',
+            file_scope: 'package_root_only',
+            limits: { max_files: 200, max_file_size_bytes: 1_000_000, max_total_size_bytes: 1_500_000 },
+            message: '上传脚本型 Skill 在短生命周期子进程中执行，默认禁止网络和包外文件访问。',
+          },
+          external_services: {
+            mysql: { status: 'not_connected', message: 'MySQL schema 是生产适配资产，当前运行未使用 MySQL repository。' },
+            redis: { status: 'not_connected', message: 'Redis 是 Celery/分布式限流生产依赖，当前运行未连接 Redis。' },
+            celery: { status: 'not_connected', message: '当前未使用 Celery worker 执行任务。' },
+          },
+        });
+      }
       if (url.endsWith('/model-gateway/status')) {
         return jsonResponse({
           provider: 'mock',
@@ -909,6 +1056,44 @@ export function installDefaultWorkbenchMocks() {
           timeout_seconds: 60,
           skill_ref: 'model.chat@0.1.0',
           message: '业务 Skill 不需要重复实现模型调用，可在 Workflow 中复用统一模型调用节点。',
+        });
+      }
+      if (url.endsWith('/model-gateway/config')) {
+        if (init?.method === 'PUT') {
+          const body = JSON.parse(String(init.body ?? '{}'));
+          return jsonResponse({
+            provider: body.provider ?? 'mock',
+            base_url: body.base_url ?? null,
+            secret_ref: body.secret_ref ?? null,
+            default_model: body.default_model ?? 'mock-eval-model',
+            timeout_seconds: body.timeout_seconds ?? 60,
+            api_key_configured: Boolean(body.secret_ref),
+            api_key_masked: body.secret_ref ? 'sk-t...7890' : null,
+            source: 'store',
+          });
+        }
+        return jsonResponse({
+          provider: 'mock',
+          base_url: null,
+          secret_ref: null,
+          default_model: 'mock-eval-model',
+          timeout_seconds: 60,
+          api_key_configured: false,
+          api_key_masked: null,
+          source: 'env',
+        });
+      }
+      if (url.endsWith('/model-gateway/test')) {
+        return jsonResponse({
+          ok: true,
+          response: {
+            text: '模型回答：连接测试通过。',
+            provider: 'mock',
+            model: 'mock-eval-model',
+            usage: { total_tokens: 12 },
+            latency_ms: 8,
+            raw: {},
+          },
         });
       }
       if (url.endsWith('/skills/packages/upload')) {
@@ -979,6 +1164,9 @@ export function installDefaultWorkbenchMocks() {
       }
       if (url.endsWith('/tasks/task-demo/execute')) {
         return jsonResponse({ ...demoTask, status: 'completed', completed_items: 100, pass_rate: 0.8, badcase_count: 20 });
+      }
+      if (url.endsWith('/tasks/task-demo')) {
+        return jsonResponse(demoTask);
       }
       if (url.endsWith('/tasks/task-demo/repair-tasks/from-diagnostics')) {
         return jsonResponse({ source_task_id: 'task-demo', created_count: 1, reused_count: 0, repair_tasks: [{ repair_task_id: 'repair-demo', source_task_id: 'task-demo', cause_type: 'weak_segment', status: 'open' }] });
@@ -1417,7 +1605,23 @@ export function installDefaultWorkbenchMocks() {
             next_actions: [{ action: 'add_to_annotation_queue', label: '将 Badcase 加入人工审核队列' }],
           },
           parameter_governance: demoParameterGovernance,
-          budget_status: { status: 'warning', cost_budget: 20, cost_used: 16.2, budget_remaining: 3.8, usage_ratio: 0.81, message: '估算成本已接近任务预算。' },
+          budget_status: {
+            status: 'warning',
+            cost_budget: 20,
+            cost_used: 16.2,
+            budget_remaining: 3.8,
+            usage_ratio: 0.81,
+            prompt_tokens: 1200,
+            completion_tokens: 420,
+            total_tokens: 1620,
+            cost_source: 'provider_usage.total_cost',
+            cost_currency: 'USD',
+            message: '模型网关 usage 成本已接近任务预算。',
+          },
+          release_context: {
+            baselines: [demoBaselineApplyPayload.baseline],
+            release_records: [demoWorkflowPromotionApprovedPayload.release_artifacts.release_record],
+          },
           diagnostics: {
             summary: { status: 'needs_attention', primary_cause: 'weak_segment', confidence: 0.82, evidence_count: 3 },
             root_causes: [
@@ -1456,11 +1660,31 @@ export function installDefaultWorkbenchMocks() {
       if (url.includes('/tasks/task-demo/report/export?file_format=json')) {
         return jsonResponse({ task_id: 'task-demo', file_format: 'json', content: { preflight_evidence: { preflight_id: 'preflight-demo' } } });
       }
+      if (url.includes('/tasks/task-demo/report/offline-package')) {
+        return fileResponse('offline-audit-zip', {
+          'content-type': 'application/zip',
+          'content-disposition': 'attachment; filename="task-demo_offline_audit.zip"',
+          'x-aegisqa-file-format': 'offline_zip',
+          'x-aegisqa-package-file-count': '7',
+        });
+      }
       if (url.includes('/tasks/task-demo/results/export?file_format=csv')) {
-        return jsonResponse({ task_id: 'task-demo', file_format: 'csv', row_count: 1, content: 'item_id,row.question,context.answer\nitem-demo,什么是 Trace?,模型回答' });
+        return fileResponse('item_id,row.question,context.answer\nitem-demo,什么是 Trace?,模型回答', {
+          'content-type': 'text/csv;charset=utf-8',
+          'content-disposition': 'attachment; filename="task-demo_results.csv"',
+          'x-aegisqa-file-format': 'csv',
+          'x-aegisqa-row-count': '1',
+          'x-aegisqa-include-steps': 'false',
+        });
       }
       if (url.includes('/tasks/task-demo/results/export?file_format=jsonl')) {
-        return jsonResponse({ task_id: 'task-demo', file_format: 'jsonl', row_count: 1, content: '{"item_id":"item-demo","row.question":"什么是 Trace?"}' });
+        return fileResponse('{"item_id":"item-demo","row.question":"什么是 Trace?"}\n', {
+          'content-type': 'application/x-ndjson;charset=utf-8',
+          'content-disposition': 'attachment; filename="task-demo_results.jsonl"',
+          'x-aegisqa-file-format': 'jsonl',
+          'x-aegisqa-row-count': '1',
+          'x-aegisqa-include-steps': 'false',
+        });
       }
       if (url.includes('/audit-events?action=task.report.export') && url.includes('target=task-demo')) {
         return jsonResponse(demoReportExportAuditEvents);
@@ -1491,6 +1715,9 @@ export function installDefaultWorkbenchMocks() {
       }
       if (url.endsWith('/datasets/dataset-demo/versions/1/lineage')) {
         return jsonResponse(demoDatasetLineage);
+      }
+      if (url.endsWith('/datasets/dataset-demo/versions/1/quality')) {
+        return jsonResponse(demoDatasetQuality);
       }
       if (url.endsWith('/judge-cross-validation')) {
         return jsonResponse(demoJudgeCrossValidation);
@@ -1528,6 +1755,15 @@ export function installDefaultWorkbenchMocks() {
       }
       if (url.endsWith('/datasets')) {
         return jsonResponse([demoDataset]);
+      }
+      if (url.includes('/runs?')) {
+        const parsed = new URL(url, 'http://localhost');
+        const page = Number(parsed.searchParams.get('page') ?? 1);
+        const pageSize = Number(parsed.searchParams.get('page_size') ?? 100);
+        return jsonResponse({
+          items: [{ run_id: demoTask.run_id, status: demoTask.status, total_items: demoTask.total_items, completed_items: demoTask.completed_items, failed_items: demoTask.failed_items, queue_message_count: demoTask.total_items }],
+          pagination: { page, page_size: pageSize, total_items: 1, total_pages: 1 },
+        });
       }
       if (url.endsWith('/runs') || url.endsWith('/judge-profiles') || url.endsWith('/judge-audits')) {
         return jsonResponse([]);

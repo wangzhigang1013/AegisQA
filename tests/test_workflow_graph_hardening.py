@@ -280,3 +280,131 @@ def test_publish_workflow_draft_returns_structured_validation_errors(tmp_path) -
     assert payload["code"] == "HTTP_ERROR"
     assert payload["message"] == "Workflow Graph 校验失败"
     assert "REQUIRED_INPUT_MAPPING_MISSING" in {error["code"] for error in payload["details"]["errors"]}
+
+
+def test_workflow_asset_write_routes_require_workflow_permission(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    denied_create = client.post(
+        "/workflow-drafts",
+        json={"name": "Viewer 草稿", "graph": _base_graph(), "role": "Viewer", "actor": "viewer"},
+    )
+    assert denied_create.status_code == 403
+    assert denied_create.json()["details"]["required_permission"] == "workflow:publish"
+
+    created = client.post("/workflow-drafts", json={"name": "权限草稿", "graph": _base_graph()}).json()
+    denied_update = client.put(
+        f"/workflow-drafts/{created['draft_id']}",
+        json={"name": "Viewer 改名", "role": "Viewer", "actor": "viewer"},
+    )
+    assert denied_update.status_code == 403
+    assert denied_update.json()["details"]["required_permission"] == "workflow:publish"
+
+    denied_delete = client.delete(f"/workflow-drafts/{created['draft_id']}", params={"role": "Viewer", "actor": "viewer"})
+    assert denied_delete.status_code == 403
+    assert denied_delete.json()["details"]["required_permission"] == "workflow:publish"
+
+    published = client.post(f"/workflow-drafts/{created['draft_id']}/publish").json()
+    denied_copy = client.post(
+        f"/workflows/{published['version_id']}/copy",
+        json={"name": "Viewer 复制", "role": "Viewer", "actor": "viewer"},
+    )
+    assert denied_copy.status_code == 403
+    assert denied_copy.json()["details"]["required_permission"] == "workflow:publish"
+
+    denied_archive = client.post(f"/workflows/{published['version_id']}/archive", params={"role": "Viewer", "actor": "viewer"})
+    assert denied_archive.status_code == 403
+    assert denied_archive.json()["details"]["required_permission"] == "workflow:publish"
+
+    events = client.get("/audit-events", params={"actor": "viewer"}).json()
+    forbidden_events = [event for event in events if event["result"] == "forbidden"]
+    assert {event["action"] for event in forbidden_events} >= {
+        "workflow_draft.create",
+        "workflow_draft.update",
+        "workflow_draft.delete",
+        "workflow.copy",
+        "workflow.archive",
+    }
+    assert all(event["role"] == "Viewer" for event in forbidden_events)
+
+
+def test_workflow_asset_success_audit_records_request_actor_and_role(tmp_path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    created = client.post(
+        "/workflow-drafts",
+        json={"name": "审计草稿", "graph": _base_graph(), "role": "Evaluator", "actor": "alice"},
+    ).json()
+    updated = client.put(
+        f"/workflow-drafts/{created['draft_id']}",
+        json={"name": "审计草稿 v2", "role": "Evaluator", "actor": "bob"},
+    ).json()
+    assert updated["name"] == "审计草稿 v2"
+    draft_version = client.post(
+        f"/workflow-drafts/{created['draft_id']}/publish",
+        params={"role": "Evaluator", "actor": "release_owner"},
+    ).json()
+    graph_version = client.post(
+        "/workflow-graphs/publish",
+        json={"graph": {**_base_graph(), "name": "图发布审计 Workflow"}, "role": "Evaluator", "actor": "graph_owner"},
+    ).json()
+    linear_version = client.post(
+        "/workflows/publish",
+        params={"role": "Evaluator", "actor": "linear_owner"},
+        json={
+            "name": "线性发布审计 Workflow",
+            "steps": [
+                {
+                    "step_id": "answer",
+                    "skill_ref": "llm.call@0.1.0",
+                    "input_mapping": {"prompt": "row.question"},
+                    "output_mapping": {"answer": "context.answer"},
+                    "config": {"model": "demo-model"},
+                }
+            ],
+        },
+    ).json()
+    copied = client.post(
+        f"/workflows/{draft_version['version_id']}/copy",
+        json={"name": "复制审计草稿", "role": "Evaluator", "actor": "cloner"},
+    ).json()
+    archived = client.post(
+        f"/workflows/{graph_version['version_id']}/archive",
+        params={"role": "Evaluator", "actor": "archiver"},
+    ).json()
+    deleted = client.delete(f"/workflow-drafts/{created['draft_id']}", params={"role": "Evaluator", "actor": "deleter"}).json()
+
+    assert copied["name"] == "复制审计草稿"
+    assert archived["status"] == "archived"
+    assert deleted["status"] == "deleted"
+    assert linear_version["version_id"].startswith("wf-")
+
+    events = client.get("/audit-events").json()
+
+    def event(action: str, target: str) -> dict:
+        return next(item for item in events if item["action"] == action and item["target"] == target)
+
+    assert event("workflow_draft.create", created["draft_id"])["actor"] == "alice"
+    assert event("workflow_draft.create", created["draft_id"])["role"] == "Evaluator"
+    assert event("workflow_draft.update", created["draft_id"])["actor"] == "bob"
+    assert event("workflow_draft.publish", created["draft_id"])["actor"] == "release_owner"
+    assert event("workflow_graph.publish", graph_version["version_id"])["actor"] == "graph_owner"
+    assert event("workflow.publish", linear_version["version_id"])["actor"] == "linear_owner"
+    assert event("workflow.copy", draft_version["version_id"])["actor"] == "cloner"
+    assert event("workflow.archive", graph_version["version_id"])["actor"] == "archiver"
+    assert event("workflow_draft.delete", created["draft_id"])["actor"] == "deleter"
+    assert all(
+        event(action, target)["role"] == "Evaluator"
+        for action, target in [
+            ("workflow_draft.create", created["draft_id"]),
+            ("workflow_draft.update", created["draft_id"]),
+            ("workflow_draft.publish", created["draft_id"]),
+            ("workflow_graph.publish", graph_version["version_id"]),
+            ("workflow.publish", linear_version["version_id"]),
+            ("workflow.copy", draft_version["version_id"]),
+            ("workflow.archive", graph_version["version_id"]),
+            ("workflow_draft.delete", created["draft_id"]),
+        ]
+    )

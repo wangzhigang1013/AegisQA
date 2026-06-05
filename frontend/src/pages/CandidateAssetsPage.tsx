@@ -4,6 +4,7 @@ import { Alert, Button, Card, Descriptions, Input, InputNumber, Select, Space, T
 import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
+import { ActionToolbar, DataTableShell, PageSection } from '../components/LayoutPrimitives';
 import { PageHeader } from '../components/PageHeader';
 import type { BaselineChangeNotification, ExperimentBaselineActionResult, ExperimentBaselineImpact, PromptSkillCandidate, PromptSkillCandidatePageResult, PromptSkillCandidateRetestPlanItem, PromptSkillCandidateRetestResult, PromptSkillMetricCard, PromptSkillPromotionRecommendation, WorkflowPromotionReleaseArtifacts, WorkflowPromotionReview } from '../types';
 
@@ -529,8 +530,8 @@ export function CandidateAssetsPage() {
         </Space>
       </Card>
 
-      <Card className="flat-card" title="Prompt/Skill 候选配置">
-        <Space className="toolbar-row" wrap>
+      <PageSection title="Prompt/Skill 候选配置" testId="candidate-assets-table-section">
+        <ActionToolbar className="toolbar-row" testId="candidate-assets-toolbar">
           <Select
             allowClear
             placeholder="按状态筛选"
@@ -551,106 +552,109 @@ export function CandidateAssetsPage() {
             ]}
           />
           <Tag color="blue">{candidatePagination?.total_items ?? candidates.length} 个候选资产</Tag>
-        </Space>
-        <Table
-          rowKey="candidate_id"
-          loading={candidatesQuery.isLoading}
-          dataSource={candidates}
-          pagination={{
-            current: candidatePagination?.page ?? candidatePage,
-            pageSize: candidatePagination?.page_size ?? candidatePageSize,
-            total: candidatePagination?.total_items ?? candidates.length,
-            showSizeChanger: false,
-            onChange: setCandidatePage,
-          }}
-          columns={[
-            {
-              title: '候选资产',
-              dataIndex: 'candidate_id',
-              render: (value: string, record) => (
-                <Space direction="vertical" size={0}>
-                  <Typography.Text strong>{value}</Typography.Text>
-                  <Typography.Text type="secondary">来源任务：{record.source_task_id ?? '-'}</Typography.Text>
-                </Space>
-              ),
-            },
-            { title: '状态', dataIndex: 'status', render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
-            { title: 'Baseline', dataIndex: 'baseline_experiment_id', render: (value: string) => <code>{value}</code> },
-            {
-              title: '负责人/SLA',
-              render: (_, record) => (
-                <Space direction="vertical" size={2}>
-                  <Typography.Text>{record.owner ?? '未指派'}</Typography.Text>
-                  <Typography.Text type="secondary">截止：{record.due_at ? formatDateTime(record.due_at) : '-'}</Typography.Text>
-                  <Space wrap size={4}>
-                    {record.overdue ? <Tag color="red">逾期</Tag> : null}
-                    {record.escalation_status === 'escalated' ? <Tag color="volcano">已升级</Tag> : null}
+        </ActionToolbar>
+        <DataTableShell testId="candidate-assets-table-shell">
+          <Table
+            rowKey="candidate_id"
+            loading={candidatesQuery.isLoading}
+            scroll={{ x: 'max-content' }}
+            dataSource={candidates}
+            pagination={{
+              current: candidatePagination?.page ?? candidatePage,
+              pageSize: candidatePagination?.page_size ?? candidatePageSize,
+              total: candidatePagination?.total_items ?? candidates.length,
+              showSizeChanger: false,
+              onChange: setCandidatePage,
+            }}
+            columns={[
+              {
+                title: '候选资产',
+                dataIndex: 'candidate_id',
+                render: (value: string, record) => (
+                  <Space direction="vertical" size={0}>
+                    <Typography.Text strong>{value}</Typography.Text>
+                    <Typography.Text type="secondary">来源任务：{record.source_task_id ?? '-'}</Typography.Text>
                   </Space>
-                </Space>
-              ),
-            },
-            {
-              title: '版本差异',
-              dataIndex: 'version_diffs',
-              render: (diffs: PromptSkillCandidate['version_diffs']) => (
-                <Space direction="vertical" size={4}>
-                  {diffs.map((diff, index) => (
-                    <Space key={`${diff.step_id}-${diff.field}-${index}`} wrap>
-                      <Tag>{diff.step_id}.{diff.field}</Tag>
-                      <Typography.Text>{formatUnknown(diff.baseline_value)}</Typography.Text>
-                      <Typography.Text type="secondary">{'->'}</Typography.Text>
-                      <Typography.Text>{formatUnknown(diff.current_value)}</Typography.Text>
+                ),
+              },
+              { title: '状态', dataIndex: 'status', render: (value: string) => <Tag color={statusColor(value)}>{statusLabel(value)}</Tag> },
+              { title: 'Baseline', dataIndex: 'baseline_experiment_id', render: (value: string) => <code>{value}</code> },
+              {
+                title: '负责人/SLA',
+                render: (_, record) => (
+                  <Space direction="vertical" size={2}>
+                    <Typography.Text>{record.owner ?? '未指派'}</Typography.Text>
+                    <Typography.Text type="secondary">截止：{record.due_at ? formatDateTime(record.due_at) : '-'}</Typography.Text>
+                    <Space wrap size={4}>
+                      {record.overdue ? <Tag color="red">逾期</Tag> : null}
+                      {record.escalation_status === 'escalated' ? <Tag color="volcano">已升级</Tag> : null}
                     </Space>
-                  ))}
-                </Space>
-              ),
-            },
-            {
-              title: '动作',
-              render: (_, record) => (
-                <Space wrap>
-                  <Button
-                    size="small"
-                    icon={<CheckCircleOutlined />}
-                    disabled={record.status !== 'candidate'}
-                    loading={approveMutation.isPending}
-                    onClick={() => approveMutation.mutate(record)}
-                  >
-                    审批通过
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<StopOutlined />}
-                    disabled={record.status !== 'candidate'}
-                    loading={rejectMutation.isPending}
-                    onClick={() => rejectMutation.mutate(record)}
-                  >
-                    拒绝
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<FileSearchOutlined />}
-                    disabled={record.status !== 'approved' && !record.workflow_draft_id}
-                    loading={draftMutation.isPending}
-                    onClick={() => draftMutation.mutate(record)}
-                  >
-                    生成草稿
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<PlayCircleOutlined />}
-                    disabled={!record.workflow_draft_id}
-                    loading={retestMutation.isPending}
-                    onClick={() => retestMutation.mutate(record)}
-                  >
-                    复跑对比
-                  </Button>
-                </Space>
-              ),
-            },
-          ]}
-        />
-      </Card>
+                  </Space>
+                ),
+              },
+              {
+                title: '版本差异',
+                dataIndex: 'version_diffs',
+                render: (diffs: PromptSkillCandidate['version_diffs']) => (
+                  <Space direction="vertical" size={4}>
+                    {diffs.map((diff, index) => (
+                      <Space key={`${diff.step_id}-${diff.field}-${index}`} wrap>
+                        <Tag>{diff.step_id}.{diff.field}</Tag>
+                        <Typography.Text>{formatUnknown(diff.baseline_value)}</Typography.Text>
+                        <Typography.Text type="secondary">{'->'}</Typography.Text>
+                        <Typography.Text>{formatUnknown(diff.current_value)}</Typography.Text>
+                      </Space>
+                    ))}
+                  </Space>
+                ),
+              },
+              {
+                title: '动作',
+                render: (_, record) => (
+                  <Space wrap>
+                    <Button
+                      size="small"
+                      icon={<CheckCircleOutlined />}
+                      disabled={record.status !== 'candidate'}
+                      loading={approveMutation.isPending}
+                      onClick={() => approveMutation.mutate(record)}
+                    >
+                      审批通过
+                    </Button>
+                    <Button
+                      size="small"
+                      icon={<StopOutlined />}
+                      disabled={record.status !== 'candidate'}
+                      loading={rejectMutation.isPending}
+                      onClick={() => rejectMutation.mutate(record)}
+                    >
+                      拒绝
+                    </Button>
+                    <Button
+                      size="small"
+                      icon={<FileSearchOutlined />}
+                      disabled={record.status !== 'approved' && !record.workflow_draft_id}
+                      loading={draftMutation.isPending}
+                      onClick={() => draftMutation.mutate(record)}
+                    >
+                      生成草稿
+                    </Button>
+                    <Button
+                      size="small"
+                      icon={<PlayCircleOutlined />}
+                      disabled={!record.workflow_draft_id}
+                      loading={retestMutation.isPending}
+                      onClick={() => retestMutation.mutate(record)}
+                    >
+                      复跑对比
+                    </Button>
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        </DataTableShell>
+      </PageSection>
 
       {lastRetest ? (
         <Card className="flat-card" title="三方指标对比">
@@ -714,6 +718,7 @@ export function CandidateAssetsPage() {
                 <Typography.Text type="secondary">原 baseline：{lastReleaseArtifacts.baseline_suggestion.previous_baseline_experiment_id ?? '-'}</Typography.Text>
                 <Typography.Text type="secondary">{lastReleaseArtifacts.baseline_suggestion.reason ?? '审批通过后生成的 baseline 候选。'}</Typography.Text>
                 {lastBaselineApplication ? <Typography.Text>当前 baseline：{lastBaselineApplication.baseline.current_experiment_id ?? '-'}</Typography.Text> : null}
+                {lastBaselineApplication?.ci_gate_guard ? <Typography.Text>应用门禁：{lastBaselineApplication.ci_gate_guard.status}</Typography.Text> : null}
                 {lastBaselineImpact ? (
                   <Descriptions size="small" column={1} bordered>
                     <Descriptions.Item label="影响范围">影响任务：{lastBaselineImpact.summary.affected_tasks}，报告：{lastBaselineImpact.summary.affected_reports}</Descriptions.Item>

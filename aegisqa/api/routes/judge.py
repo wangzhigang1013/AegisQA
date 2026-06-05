@@ -8,6 +8,7 @@ from aegisqa.api.app import JudgeAuditRequest, JudgeCrossValidationRequest, Judg
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.judge.audit import JudgeAuditResult, audit_judge_profile
 from aegisqa.judge.profiles import JudgeProfile, StoredJudgeAudit
+from aegisqa.security.access import require_permission
 
 
 def register_judge_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -15,6 +16,16 @@ def register_judge_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/judge-audits", response_model=JudgeAuditResult)
     def run_judge_audit(request: JudgeAuditRequest) -> JudgeAuditResult:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            actor=request.actor,
+            permission="judge:audit",
+            action="judge.audit",
+            target=request.judge_profile_id,
+            detail={"dataset_version_id": request.dataset_version_id},
+        )
         result = audit_judge_profile(
             judge_profile_id=request.judge_profile_id,
             dataset_version_id=request.dataset_version_id,
@@ -22,11 +33,27 @@ def register_judge_routes(app: FastAPI, ctx: RouteContext) -> None:
             judge_labels=request.judge_labels,
             positive_label=request.positive_label,
         )
-        ctx.audit_service.record(actor="api", action="judge.audit", target=result.judge_profile_id, detail=result.model_dump(mode="json"))
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="judge.audit",
+            target=result.judge_profile_id,
+            detail={**result.model_dump(mode="json"), "role": request.role},
+        )
         return result
 
     @app.post("/judge-profiles", response_model=JudgeProfile)
     def create_judge_profile(request: JudgeProfileCreateRequest) -> JudgeProfile:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            actor=request.actor,
+            permission="judge:audit",
+            action="judge_profile.create",
+            target=request.name,
+            detail={"model": request.model},
+        )
         profile = ctx.judge_profiles.create_profile(
             name=request.name,
             model=request.model,
@@ -35,7 +62,13 @@ def register_judge_routes(app: FastAPI, ctx: RouteContext) -> None:
             threshold=request.threshold,
             output_schema=request.output_schema,
         )
-        ctx.audit_service.record(actor="api", action="judge_profile.create", target=profile.profile_id)
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="judge_profile.create",
+            target=profile.profile_id,
+            detail={"model": profile.model, "role": request.role},
+        )
         return profile
 
     @app.get("/judge-profiles", response_model=list[JudgeProfile])
@@ -48,6 +81,16 @@ def register_judge_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/judge-profiles/{profile_id}/audits", response_model=StoredJudgeAudit)
     def run_profile_audit(profile_id: str, request: ProfileAuditRequest) -> StoredJudgeAudit:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            actor=request.actor,
+            permission="judge:audit",
+            action="judge_profile.audit",
+            target=profile_id,
+            detail={"dataset_version_id": request.dataset_version_id},
+        )
         audit = ctx.judge_profiles.audit_and_store(
             profile_id,
             dataset_version_id=request.dataset_version_id,
@@ -55,7 +98,13 @@ def register_judge_routes(app: FastAPI, ctx: RouteContext) -> None:
             judge_labels=request.judge_labels,
             positive_label=request.positive_label,
         )
-        ctx.audit_service.record(actor="api", action="judge_profile.audit", target=profile_id, detail={"audit_id": audit.audit_id})
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="judge_profile.audit",
+            target=profile_id,
+            detail={"audit_id": audit.audit_id, "dataset_version_id": request.dataset_version_id, "role": request.role},
+        )
         return audit
 
     @app.get("/judge-audits/{audit_id}/bias")

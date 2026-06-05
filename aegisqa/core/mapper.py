@@ -8,12 +8,33 @@ PRD 明确要求：字段映射不是简单路径搬运。解析出下游 Skill 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
 
 class MappingPathError(ValueError):
     """字段映射路径无法解析。"""
+
+
+_PATH_PATTERN = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+$")
+_ROOT_PATHS = {"row", "context", "metrics", "artifacts", "steps", "errors"}
+_TEMPLATE_PATTERN = re.compile(r"{{\s*(.*?)\s*}}")
+_NUMBER_PATTERN = re.compile(r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$")
+_ROW_PATH_PATTERN = re.compile(r"\brow\.([A-Za-z_]\w*)")
+_UNSAFE_TOKENS = {
+    "__",
+    ";",
+    "open(",
+    "compile(",
+    "globals(",
+    "locals(",
+    "getattr(",
+    "setattr(",
+    "delattr(",
+}
+_UNSAFE_WORDS = {"import", "eval", "exec", "lambda"}
+_COMPARISON_OPERATORS = ("==", "!=", ">=", "<=", ">", "<")
 
 
 @dataclass(slots=True)
@@ -42,6 +63,279 @@ def get_by_path(context: dict[str, Any], path: str) -> Any:
             continue
         raise MappingPathError(f"路径不存在：{path}")
     return current
+
+
+def evaluate_mapping_expression(expression: str, context: dict[str, Any]) -> Any:
+    """求值受控 input_mapping 表达式。
+
+    表达式语言只覆盖 Workflow 映射场景需要的最小能力：路径读取、默认值、三元
+    条件和字符串模板。这里显式拒绝任意 Python/JS 语法，避免把用户配置变成代码
+    执行入口。
+    """
+
+    return _evaluate_expression(expression, context, validate_only=False)
+
+
+def validate_mapping_expression(expression: str) -> None:
+    """静态校验 input_mapping 表达式语法，不要求实际数据路径存在。"""
+
+    _evaluate_expression(expression, {}, validate_only=True)
+
+
+def collect_mapping_row_fields(expression: Any) -> set[str]:
+    """收集表达式中确定依赖的 `row.xxx` 字段。
+
+    `row.scene ?? "general"` 左侧路径允许缺失，所以不会把 `scene` 计入必需字段；
+    模板和条件表达式中的路径仍会被 Preflight 用真实样本继续校验。
+    """
+
+    if not isinstance(expression, str) or not expression.strip():
+        return set()
+    try:
+        return _collect_row_fields(expression.strip(), required=True)
+    except MappingPathError:
+        return set()
+
+
+def _evaluate_expression(expression: str, context: dict[str, Any], *, validate_only: bool) -> Any:
+    expression = expression.strip()
+    if not expression:
+        raise MappingPathError("表达式不能为空")
+    if "{{" in expression or "}}" in expression:
+        if not _balanced_template(expression):
+            raise MappingPathError(f"不支持的表达式语法：{expression}")
+        return _evaluate_template(expression, context, validate_only=validate_only)
+    return _evaluate_atom(expression, context, validate_only=validate_only)
+
+
+def _evaluate_template(template: str, context: dict[str, Any], *, validate_only: bool) -> str:
+    rendered: list[str] = []
+    cursor = 0
+    matched = False
+    for match in _TEMPLATE_PATTERN.finditer(template):
+        matched = True
+        rendered.append(template[cursor : match.start()])
+        value = _evaluate_atom(match.group(1), context, validate_only=validate_only)
+        rendered.append("" if validate_only or value is None else str(value))
+        cursor = match.end()
+    if not matched or "{{" in template[cursor:] or "}}" in template[cursor:]:
+        raise MappingPathError(f"不支持的表达式语法：{template}")
+    rendered.append(template[cursor:])
+    return "".join(rendered)
+
+
+def _evaluate_atom(expression: str, context: dict[str, Any], *, validate_only: bool) -> Any:
+    expression = expression.strip()
+    _ensure_safe_expression_fragment(expression)
+
+    default_index = _find_top_level_operator(expression, "??")
+    if default_index >= 0:
+        left = expression[:default_index]
+        right = expression[default_index + 2 :]
+        try:
+            value = _evaluate_atom(left, context, validate_only=validate_only)
+        except MappingPathError as exc:
+            if not _is_missing_path_error(exc):
+                raise
+            value = None
+        if validate_only:
+            _evaluate_atom(right, context, validate_only=True)
+            return None
+        if value in (None, ""):
+            return _evaluate_atom(right, context, validate_only=False)
+        return value
+
+    if expression.startswith("if(") and expression.endswith(")"):
+        parts = _split_top_level(expression[3:-1], ",")
+        if len(parts) != 3:
+            raise MappingPathError(f"不支持的表达式语法：{expression}")
+        condition = _evaluate_condition(parts[0], context, validate_only=validate_only)
+        if validate_only:
+            _evaluate_atom(parts[1], context, validate_only=True)
+            _evaluate_atom(parts[2], context, validate_only=True)
+            return None
+        return _evaluate_atom(parts[1], context, validate_only=False) if condition else _evaluate_atom(parts[2], context, validate_only=False)
+
+    if any(expression.startswith(f"{name}(") for name in ("if",)) is False and "(" in expression:
+        raise MappingPathError(f"不支持的表达式语法：{expression}")
+
+    literal = _literal_value(expression)
+    if literal is not _NO_LITERAL:
+        return literal
+
+    if expression in _ROOT_PATHS or _PATH_PATTERN.match(expression):
+        return None if validate_only else get_by_path(context, expression)
+
+    raise MappingPathError(f"不支持的表达式语法：{expression}")
+
+
+def _evaluate_condition(expression: str, context: dict[str, Any], *, validate_only: bool) -> bool:
+    expression = expression.strip()
+    _ensure_safe_expression_fragment(expression)
+    for operator in _COMPARISON_OPERATORS:
+        operator_index = _find_top_level_operator(expression, operator)
+        if operator_index < 0:
+            continue
+        left = expression[:operator_index]
+        right = expression[operator_index + len(operator) :]
+        left_value = _evaluate_atom(left, context, validate_only=validate_only)
+        right_value = _evaluate_atom(right, context, validate_only=validate_only)
+        if validate_only:
+            return False
+        if operator == "==":
+            return left_value == right_value
+        if operator == "!=":
+            return left_value != right_value
+        try:
+            if operator == ">=":
+                return left_value >= right_value
+            if operator == "<=":
+                return left_value <= right_value
+            if operator == ">":
+                return left_value > right_value
+            if operator == "<":
+                return left_value < right_value
+        except TypeError as exc:
+            raise MappingPathError(f"条件表达式类型不可比较：{expression}") from exc
+    value = _evaluate_atom(expression, context, validate_only=validate_only)
+    return bool(value)
+
+
+class _NoLiteral:
+    pass
+
+
+_NO_LITERAL = _NoLiteral()
+
+
+def _literal_value(expression: str) -> Any:
+    if expression in {"true", "false"}:
+        return expression == "true"
+    if expression == "null":
+        return None
+    if _NUMBER_PATTERN.match(expression):
+        return float(expression) if "." in expression else int(expression)
+    if len(expression) >= 2 and expression[0] == expression[-1] and expression[0] in {'"', "'"}:
+        try:
+            return json.loads(expression) if expression[0] == '"' else expression[1:-1]
+        except json.JSONDecodeError as exc:
+            raise MappingPathError(f"不支持的表达式语法：{expression}") from exc
+    return _NO_LITERAL
+
+
+def _ensure_safe_expression_fragment(expression: str) -> None:
+    lowered = expression.lower()
+    if any(token in lowered for token in _UNSAFE_TOKENS):
+        raise MappingPathError(f"不支持的表达式语法：{expression}")
+    for word in _UNSAFE_WORDS:
+        if re.search(rf"\b{word}\b", lowered):
+            raise MappingPathError(f"不支持的表达式语法：{expression}")
+
+
+def _balanced_template(template: str) -> bool:
+    return template.count("{{") == template.count("}}")
+
+
+def _find_top_level_operator(expression: str, operator: str) -> int:
+    depth = 0
+    quote: str | None = None
+    index = 0
+    while index < len(expression):
+        char = expression[index]
+        if quote:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in {'"', "'"}:
+            quote = char
+            index += 1
+            continue
+        if char == "(":
+            depth += 1
+            index += 1
+            continue
+        if char == ")":
+            depth -= 1
+            if depth < 0:
+                raise MappingPathError(f"不支持的表达式语法：{expression}")
+            index += 1
+            continue
+        if depth == 0 and expression.startswith(operator, index):
+            return index
+        index += 1
+    if depth != 0 or quote:
+        raise MappingPathError(f"不支持的表达式语法：{expression}")
+    return -1
+
+
+def _split_top_level(expression: str, separator: str) -> list[str]:
+    parts: list[str] = []
+    depth = 0
+    quote: str | None = None
+    start = 0
+    index = 0
+    while index < len(expression):
+        char = expression[index]
+        if quote:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in {'"', "'"}:
+            quote = char
+            index += 1
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                raise MappingPathError(f"不支持的表达式语法：{expression}")
+        elif depth == 0 and expression.startswith(separator, index):
+            parts.append(expression[start:index].strip())
+            index += len(separator)
+            start = index
+            continue
+        index += 1
+    if depth != 0 or quote:
+        raise MappingPathError(f"不支持的表达式语法：{expression}")
+    parts.append(expression[start:].strip())
+    return parts
+
+
+def _is_missing_path_error(exc: MappingPathError) -> bool:
+    return "路径不存在：" in str(exc)
+
+
+def _collect_row_fields(expression: str, *, required: bool) -> set[str]:
+    if "{{" in expression or "}}" in expression:
+        fields: set[str] = set()
+        for match in _TEMPLATE_PATTERN.finditer(expression):
+            fields.update(_collect_row_fields(match.group(1), required=required))
+        return fields
+    default_index = _find_top_level_operator(expression, "??")
+    if default_index >= 0:
+        # 默认值表达式左侧允许缺字段，右侧如果引用 row 字段则仍是硬依赖。
+        return _collect_row_fields(expression[default_index + 2 :], required=required)
+    if expression.startswith("if(") and expression.endswith(")"):
+        fields: set[str] = set()
+        for part in _split_top_level(expression[3:-1], ","):
+            fields.update(_collect_row_fields(part, required=required))
+        return fields
+    for operator in _COMPARISON_OPERATORS:
+        operator_index = _find_top_level_operator(expression, operator)
+        if operator_index >= 0:
+            fields = _collect_row_fields(expression[:operator_index], required=required)
+            fields.update(_collect_row_fields(expression[operator_index + len(operator) :], required=required))
+            return fields
+    return {match.group(1) for match in _ROW_PATH_PATTERN.finditer(expression)}
 
 
 def set_by_path(context: dict[str, Any], path: str, value: Any) -> None:
@@ -208,7 +502,7 @@ def resolve_input_mapping(
     for field, source_path in input_mapping.items():
         if not _has_mapping_path(source_path):
             continue
-        value = get_by_path(context, source_path)
+        value = evaluate_mapping_expression(source_path, context)
         if _is_optional_blank_container_value(field, value, input_schema):
             continue
         resolved[field] = value

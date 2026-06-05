@@ -42,6 +42,10 @@ def test_api_runs_full_mvp_flow(tmp_path: Path) -> None:
 
     templates = client.get("/workflow-templates").json()
     assert "rag_regression" in {template["template_id"] for template in templates}
+    rag_template = next(template for template in templates if template["template_id"] == "rag_regression")
+    assert rag_template["graph"]["nodes"]
+    assert rag_template["graph"]["edges"]
+    assert any(node["skill_ref"] == "llm.call@0.1.0" for node in rag_template["graph"]["nodes"] if node["node_type"] == "skill")
 
     workflow_response = client.post(
         "/workflows/publish",
@@ -158,6 +162,39 @@ def test_audit_events_can_be_filtered_by_actor_and_action(tmp_path: Path) -> Non
     assert response.status_code == 200
     events = response.json()
     assert [event["target"] for event in events] == ["task-b"]
+
+
+def test_governance_runtime_status_reports_current_boundaries(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    response = client.get("/governance/runtime-status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["storage"]["backend"] == "json"
+    assert payload["storage"]["status"] == "available"
+    assert payload["executor"]["backend"] == "local_thread"
+    assert payload["executor"]["status"] in {"demo", "available"}
+    assert payload["model_gateway"]["provider"] == "mock"
+    assert payload["model_gateway"]["status"] == "demo"
+    assert payload["skill_sandbox"]["mode"] == "subprocess"
+    assert payload["skill_sandbox"]["permissions_required"] is True
+    assert payload["external_services"]["mysql"]["status"] == "not_connected"
+    assert payload["external_services"]["redis"]["status"] == "not_connected"
+    assert payload["external_services"]["celery"]["status"] in {"not_connected", "configured"}
+    components = {component["component_id"]: component for component in payload["components"]}
+    assert set(components) == {"storage", "executor", "model_gateway", "skill_sandbox", "mysql", "redis", "celery"}
+    for component in components.values():
+        assert component["status_label"] in {"可用", "演示", "未接入", "未配置", "已配置"}
+        assert component["doc_url"]
+        assert "config_url" in component
+    assert components["mysql"]["status"] == "not_connected"
+    assert components["mysql"]["status_label"] == "未接入"
+    assert components["redis"]["status"] == "not_connected"
+    assert components["redis"]["status_label"] == "未接入"
+    assert components["storage"]["config_url"] == "/governance#runtime-storage"
+    assert components["model_gateway"]["config_url"] == "/governance#model-gateway"
 
 
 def test_root_endpoint_points_user_to_frontend_and_docs(tmp_path: Path) -> None:

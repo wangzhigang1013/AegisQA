@@ -17,7 +17,7 @@ from typing import Any
 import yaml
 
 from aegisqa.core.errors import AegisQAError
-from aegisqa.models.gateway import ModelGateway
+from aegisqa.models.gateway import ModelGateway, model_response_usage_metrics
 from aegisqa.skills.base import BaseSkill, SkillManifest, SkillResult
 
 
@@ -87,6 +87,9 @@ class SubprocessPackageSkill(BaseSkill):
     def run(self, inputs: dict[str, Any], config: dict[str, Any] | None = None) -> SkillResult:
         payload = json.dumps({"inputs": inputs, "config": config or {}}, ensure_ascii=False)
         try:
+            env = os.environ.copy()
+            env["AEGISQA_SKILL_PACKAGE_ROOT"] = str(self.package_root)
+            env["AEGISQA_SKILL_PERMISSIONS"] = ",".join(self.manifest.permissions)
             completed = subprocess.run(
                 [
                     sys.executable,
@@ -99,6 +102,7 @@ class SubprocessPackageSkill(BaseSkill):
                 text=True,
                 capture_output=True,
                 cwd=str(self.package_root),
+                env=env,
                 timeout=self.timeout_seconds,
                 check=False,
             )
@@ -168,7 +172,7 @@ class InstructionPackageSkill(BaseSkill):
         max_reference_chars = _bounded_int(config.get("max_reference_chars"), DEFAULT_REFERENCE_CHAR_LIMIT, MAX_REFERENCE_CHAR_LIMIT)
         skill_md = _read_skill_md(self.package_root)
         references = _read_reference_bundle(self.package_root, max_chars=max_reference_chars)
-        response = ModelGateway.from_env().generate(
+        response = ModelGateway.from_env(connection_id=config.get("model_connection_id")).generate(
             messages=[
                 {
                     "role": "system",
@@ -192,6 +196,8 @@ class InstructionPackageSkill(BaseSkill):
             temperature=config.get("temperature"),
             max_tokens=config.get("max_tokens"),
         )
+        metrics = model_response_usage_metrics(response, connection_id=config.get("model_connection_id"))
+        metrics["latency_ms"] = response.latency_ms
         return SkillResult(
             output={
                 "answer": response.text,
@@ -199,10 +205,7 @@ class InstructionPackageSkill(BaseSkill):
                 "skill_id": self.manifest.skill_id,
                 "runtime_mode": self.runtime_mode,
             },
-            metrics={
-                "latency_ms": response.latency_ms,
-                "model_total_tokens": response.usage.get("total_tokens", 0),
-            },
+            metrics=metrics,
             artifacts={"model": response.model, "provider": response.provider, "usage": response.usage},
             logs=["Agent Skill 说明型运行时：已读取 SKILL.md/references，并通过统一模型网关生成输出。"],
         )
@@ -379,13 +382,82 @@ def _bounded_int(value: Any, default: int, maximum: int) -> int:
 
 
 _RUNNER_CODE = r"""
+import builtins
 import importlib.util
+import io
 import json
+import os
+import pathlib
+import socket
 import sys
 
 handler_path = sys.argv[1]
 function_name = sys.argv[2]
 payload = json.loads(sys.stdin.read() or "{}")
+package_root = pathlib.Path(os.environ.get("AEGISQA_SKILL_PACKAGE_ROOT") or ".").resolve()
+permissions = {
+    item.strip()
+    for item in os.environ.get("AEGISQA_SKILL_PERMISSIONS", "").split(",")
+    if item.strip()
+}
+
+
+def _has_permission(*names):
+    return any(name in permissions for name in names)
+
+
+def _ensure_path_allowed(path):
+    if isinstance(path, int):
+        return
+    try:
+        resolved = pathlib.Path(path).expanduser().resolve()
+    except TypeError:
+        return
+    except Exception as exc:
+        raise PermissionError("SKILL_PACKAGE_FILE_ACCESS_DENIED: 无法解析脚本访问的文件路径。") from exc
+    if resolved == package_root or package_root in resolved.parents:
+        return
+    raise PermissionError("SKILL_PACKAGE_FILE_ACCESS_DENIED: 脚本只能访问 Skill 包目录内文件。")
+
+
+_original_builtin_open = builtins.open
+_original_io_open = io.open
+_original_os_open = os.open
+_original_path_open = pathlib.Path.open
+
+
+def _guarded_builtin_open(file, *args, **kwargs):
+    _ensure_path_allowed(file)
+    return _original_builtin_open(file, *args, **kwargs)
+
+
+def _guarded_io_open(file, *args, **kwargs):
+    _ensure_path_allowed(file)
+    return _original_io_open(file, *args, **kwargs)
+
+
+def _guarded_os_open(file, *args, **kwargs):
+    _ensure_path_allowed(file)
+    return _original_os_open(file, *args, **kwargs)
+
+
+def _guarded_path_open(self, *args, **kwargs):
+    _ensure_path_allowed(self)
+    return _original_path_open(self, *args, **kwargs)
+
+
+builtins.open = _guarded_builtin_open
+io.open = _guarded_io_open
+os.open = _guarded_os_open
+pathlib.Path.open = _guarded_path_open
+
+if not _has_permission("network", "network:access", "http:request"):
+    def _deny_network_socket(*args, **kwargs):
+        raise PermissionError("SKILL_PACKAGE_NETWORK_DENIED: 脚本默认不能打开网络 socket。")
+
+    socket.socket = _deny_network_socket
+    socket.create_connection = _deny_network_socket
+
 spec = importlib.util.spec_from_file_location("aegisqa_uploaded_skill_handler", handler_path)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)

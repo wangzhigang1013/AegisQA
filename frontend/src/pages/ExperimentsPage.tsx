@@ -30,7 +30,7 @@ export function ExperimentsPage() {
     queryKey: ['experiments', datasetFilter, workflowFilter],
     queryFn: () => api.experiments({ dataset_id: datasetFilter, workflow_id: workflowFilter }),
   });
-  const runsQuery = useQuery({ queryKey: ['runs'], queryFn: api.runs });
+  const runsQuery = useQuery({ queryKey: ['runs', 'summary', 1, 100], queryFn: () => api.runsPage({ page: 1, pageSize: 100 }) });
   const experiments = experimentsQuery.data ?? [];
   const allExperiments = allExperimentsQuery.data ?? experiments;
   const activeExperiment = experiments.find((item) => item.experiment_id === selectedExperimentId) ?? experiments[0];
@@ -218,7 +218,7 @@ export function ExperimentsPage() {
               showSearch
               optionFilterProp="label"
               placeholder="选择已完成 Run"
-              options={(runsQuery.data ?? []).map((run) => ({ value: run.run_id, label: `${run.run_id} / ${run.status}` }))}
+              options={(runsQuery.data?.items ?? []).map((run) => ({ value: run.run_id, label: `${run.run_id} / ${run.status}` }))}
             />
           </Form.Item>
           <Form.Item name="baseline_run_id" label="Baseline Run">
@@ -227,7 +227,7 @@ export function ExperimentsPage() {
               showSearch
               optionFilterProp="label"
               placeholder="可选，用于生成 diff"
-              options={(runsQuery.data ?? []).map((run) => ({ value: run.run_id, label: `${run.run_id} / ${run.status}` }))}
+              options={(runsQuery.data?.items ?? []).map((run) => ({ value: run.run_id, label: `${run.run_id} / ${run.status}` }))}
             />
           </Form.Item>
         </Form>

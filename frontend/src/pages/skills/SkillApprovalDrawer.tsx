@@ -15,7 +15,8 @@ type SkillApprovalDrawerProps = {
 export function SkillApprovalDrawer({ open, skill, packageRecord, loading = false, onClose, onApprove }: SkillApprovalDrawerProps) {
   const isPackageSkill = Boolean(packageRecord);
   const canApprove = !isPackageSkill || Boolean(packageRecord?.last_contract_ok);
-  const contractText = packageRecord?.last_contract_ok ? '合约已通过' : '合约未通过';
+  const contractText = packageRecord ? (packageRecord.last_contract_ok ? '合约已通过' : '合约未通过') : '非上传包';
+  const packageSecurity = packageRecord?.package_security;
 
   return (
     <Drawer width={760} title="Skill 审批详情" open={open} onClose={onClose}>
@@ -26,7 +27,15 @@ export function SkillApprovalDrawer({ open, skill, packageRecord, loading = fals
           <Descriptions bordered column={1} size="small">
             <Descriptions.Item label="Skill ID"><code>{skill.skill_id}</code></Descriptions.Item>
             <Descriptions.Item label="状态"><Tag color={skill.status === 'approved' ? 'green' : 'orange'}>{formatSkillStatus(skill.status)}</Tag></Descriptions.Item>
-            <Descriptions.Item label="合约测试"><Tag color={packageRecord?.last_contract_ok ? 'green' : 'red'}>{contractText}</Tag></Descriptions.Item>
+            <Descriptions.Item label="运行方式">{packageRecord?.runtime_mode ?? '内置 Skill'}</Descriptions.Item>
+            <Descriptions.Item label="入口文件">{packageRecord?.entrypoint ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="权限声明">{renderPermissions(skill.permissions)}</Descriptions.Item>
+            <Descriptions.Item label="包大小">
+              {packageSecurity ? `${formatBytes(packageSecurity.total_size_bytes)} / ${packageSecurity.file_count} 个文件` : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="单文件峰值">{packageSecurity ? formatBytes(packageSecurity.max_file_size_bytes) : '-'}</Descriptions.Item>
+            <Descriptions.Item label="合约测试"><Tag color={packageRecord?.last_contract_ok ? 'green' : packageRecord ? 'red' : 'default'}>{contractText}</Tag></Descriptions.Item>
+            <Descriptions.Item label="合约测试时间">{packageRecord?.last_contract_at ?? '未执行'}</Descriptions.Item>
             <Descriptions.Item label="审批人">{packageRecord?.approved_by ?? '未审批'}</Descriptions.Item>
             <Descriptions.Item label="审批时间">{packageRecord?.approved_at ?? '未审批'}</Descriptions.Item>
           </Descriptions>
@@ -60,4 +69,21 @@ function formatSkillStatus(status: string): string {
     disabled: '已禁用',
     deprecated: '已废弃',
   }[status] ?? status;
+}
+
+function renderPermissions(permissions: string[]) {
+  if (!permissions.length) {
+    return <Tag color="green">无额外权限</Tag>;
+  }
+  return permissions.map((item) => <Tag color={item.includes('network') ? 'red' : 'orange'} key={item}>{item}</Tag>);
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  return `${(value / 1024 / 1024).toFixed(2)} MB`;
 }

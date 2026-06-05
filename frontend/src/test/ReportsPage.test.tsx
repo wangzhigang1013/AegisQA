@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -21,6 +21,9 @@ describe('报告中心', () => {
     expect((await screen.findAllByText('RAG 任务')).length).toBeGreaterThan(0);
     expect(screen.getByText('任务摘要与版本快照')).toBeInTheDocument();
     expect(screen.getByText('创建前 Preflight 证据')).toBeInTheDocument();
+    expect(screen.getByText('Baseline 与发布记录')).toBeInTheDocument();
+    expect(screen.getByText(/当前 baseline：exp-candidate-demo/)).toBeInTheDocument();
+    expect(screen.getByText('workflow-release-demo')).toBeInTheDocument();
     expect(screen.getAllByText('preflight-demo').length).toBeGreaterThan(0);
     expect(screen.getByText('Step 分布与耗时')).toBeInTheDocument();
     expect(screen.getByText('分层分析')).toBeInTheDocument();
@@ -69,6 +72,55 @@ describe('报告中心', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '生成分层门禁' }));
     expect(await screen.findByText(/CI Gate 即时评估完成：blocking/)).toBeInTheDocument();
+  });
+
+  it('报告中心支持从参数风险诊断规划 Workflow 参数变更', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      const parsed = new URL(url, 'http://localhost');
+      if (parsed.pathname.endsWith('/tasks/task-demo/report') && !parsed.pathname.endsWith('/export')) {
+        return jsonResponse({
+          task: { ...demoTask, status: 'completed' },
+          task_summary: { task_id: 'task-demo', task_name: 'RAG 任务', run_id: 'run-demo', status: 'completed', sample_count: 1 },
+          version_snapshot: { dataset: {}, workflow: {}, execution_config: {} },
+          report: { run_id: 'run-demo', pass_rate: 0.8, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [] },
+          badcases: [],
+          badcase_pagination: { page: 1, page_size: 5, total_items: 0, total_pages: 0 },
+          diagnostics: {
+            summary: { status: 'needs_attention', primary_cause: 'parameter_risk', confidence: 0.58, evidence_count: 1 },
+            root_causes: [
+              {
+                cause_type: 'parameter_risk',
+                severity: 'info',
+                confidence: 0.58,
+                affected_items: 1,
+                evidence: ['任务存在参数覆盖或运行时表达式。'],
+                recommendation: '检查任务冻结参数和参数来源。',
+                next_actions: ['plan_workflow_parameter_changes'],
+              },
+            ],
+            weak_segments: [],
+            step_health: [],
+            data_quality: { row_count: 1, duplicate_row_count: 0, field_coverage: [], warnings: [] },
+            parameter_risks: { override_count: 1, expression_count: 0, secret_ref_count: 0, redacted_count: 0, sources: { task_override: 1 }, warnings: ['检测到 1 个任务级参数覆盖。'] },
+          },
+          export_links: { html: '', csv: '', json: '' },
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/reports?task_id=task-demo');
+
+    expect((await screen.findAllByText('参数风险')).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: '规划 Workflow 参数变更' }));
+
+    expect(await screen.findByText(/参数变更计划已生成/)).toBeInTheDocument();
+    const actionRequest = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.find(([input, init]) => String(input).endsWith('/repair-tasks/repair-demo/actions') && init?.method === 'POST');
+    expect(actionRequest?.[1]?.body).toContain('"action":"plan_workflow_parameter_changes"');
   });
 
   it('报告中心支持任务报告 HTML/CSV/JSON 导出', async () => {
@@ -190,19 +242,125 @@ describe('报告中心', () => {
     expect(await screen.findByText('badcase-item-5')).toBeInTheDocument();
   });
 
+  it('报告中心 Step 分布使用服务端分页并支持按 Step 搜索', async () => {
+    const manySteps = Array.from({ length: 7 }, (_, index) => ({
+      step_id: `step-${index}`,
+      skill_ref: `skill.${index}@0.1.0`,
+      total_calls: 10 + index,
+      succeeded: 9,
+      failed: index % 2,
+      cache_hits: index,
+      average_latency_ms: 20 + index,
+    }));
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const reportRequests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      const parsed = new URL(url, 'http://localhost');
+      if (parsed.pathname.endsWith('/tasks/task-demo/report') && !parsed.pathname.endsWith('/export')) {
+        reportRequests.push(url);
+        const query = parsed.searchParams.get('step_query') ?? '';
+        const page = Number(parsed.searchParams.get('step_page') ?? 1);
+        const pageSize = Number(parsed.searchParams.get('step_page_size') ?? 3);
+        const filteredSteps = manySteps.filter((step) => `${step.step_id} ${step.skill_ref}`.includes(query));
+        const pageSteps = filteredSteps.slice((page - 1) * pageSize, page * pageSize);
+        return jsonResponse({
+          task: { ...demoTask, status: 'completed' },
+          task_summary: { task_id: 'task-demo', task_name: 'RAG 任务', run_id: 'run-demo', status: 'completed', sample_count: 20 },
+          version_snapshot: { dataset: {}, workflow: {}, execution_config: {} },
+          report: { run_id: 'run-demo', pass_rate: 0.8, error_rate: 0, p95_latency_ms: 12, metrics: {}, badcases: [] },
+          badcases: [],
+          badcase_pagination: { page: 1, page_size: 5, total_items: 0, total_pages: 0 },
+          step_distribution: pageSteps,
+          step_distribution_pagination: { page, page_size: pageSize, total_items: filteredSteps.length, total_pages: Math.ceil(filteredSteps.length / pageSize) },
+          export_links: { html: '', csv: '', json: '' },
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/reports?task_id=task-demo');
+
+    expect(await screen.findByText('step-0')).toBeInTheDocument();
+    expect(screen.getByText('step-2')).toBeInTheDocument();
+    expect(screen.queryByText('step-3')).not.toBeInTheDocument();
+    const stepCard = screen.getByText('Step 分布与耗时').closest('.ant-card');
+    expect(stepCard).toBeTruthy();
+    fireEvent.click(within(stepCard as HTMLElement).getByTitle('2'));
+    await waitFor(() => {
+      expect(reportRequests.some((request) => request.includes('step_page=2') && request.includes('step_page_size=3'))).toBe(true);
+    });
+    expect(await screen.findByText('step-3')).toBeInTheDocument();
+
+    fireEvent.change(within(stepCard as HTMLElement).getByPlaceholderText('搜索 Step 或 Skill'), { target: { value: 'step-6' } });
+    await waitFor(() => {
+      expect(reportRequests.some((request) => request.includes('step_query=step-6'))).toBe(true);
+    });
+    expect(await screen.findByText('step-6')).toBeInTheDocument();
+  });
+
   it('报告中心展示 Score Analytics、成本预算和红队扫描入口', async () => {
     await renderWorkbench('/reports');
 
     expect(await screen.findByText('跨任务 Score Analytics')).toBeInTheDocument();
     expect(screen.getByText('成本预算')).toBeInTheDocument();
     expect(screen.getAllByText('退化任务').length).toBeGreaterThan(0);
-    expect(screen.getByText(/估算成本已接近任务预算/)).toBeInTheDocument();
+    expect(screen.getByText(/模型网关 usage 成本已接近任务预算/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /运行红队扫描/ }));
 
     expect(await screen.findByText('prompt_injection')).toBeInTheDocument();
     expect(screen.getByText('pii_leakage')).toBeInTheDocument();
     expect(screen.getByText('添加 Prompt Injection 断言')).toBeInTheDocument();
+  });
+
+  it('报告中心展示模型 usage token 与成本来源', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      const parsed = new URL(url, 'http://localhost');
+      if (parsed.pathname.endsWith('/tasks/task-demo/report') && !parsed.pathname.endsWith('/export')) {
+        return jsonResponse({
+          task: { ...demoTask, status: 'completed' },
+          task_summary: { task_id: 'task-demo', task_name: 'RAG 任务', run_id: 'run-demo', status: 'completed', sample_count: 1 },
+          version_snapshot: { dataset: {}, workflow: {}, execution_config: {} },
+          report: {
+            run_id: 'run-demo',
+            pass_rate: 1,
+            error_rate: 0,
+            average_latency_ms: 80,
+            p95_latency_ms: 80,
+            metrics: { prompt_tokens: 17, completion_tokens: 5, total_tokens: 22, cost: 0.0012, cost_source: 'provider_usage.total_cost' },
+            badcases: [],
+          },
+          badcases: [],
+          badcase_pagination: { page: 1, page_size: 5, total_items: 0, total_pages: 0 },
+          budget_status: {
+            status: 'ok',
+            cost_budget: 0.01,
+            cost_used: 0.0012,
+            budget_remaining: 0.0088,
+            usage_ratio: 0.12,
+            prompt_tokens: 17,
+            completion_tokens: 5,
+            total_tokens: 22,
+            cost_source: 'provider_usage.total_cost',
+            message: '模型网关 usage 成本仍在任务预算内。',
+          },
+          export_links: { html: '', csv: '', json: '' },
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/reports?task_id=task-demo');
+
+    expect(await screen.findByText('成本预算')).toBeInTheDocument();
+    expect(screen.getByText('Prompt 17')).toBeInTheDocument();
+    expect(screen.getByText('Completion 5')).toBeInTheDocument();
+    expect(screen.getByText('Total 22')).toBeInTheDocument();
+    expect(screen.getByText('成本来源 provider_usage.total_cost')).toBeInTheDocument();
+    expect(screen.getByText('模型网关 usage 成本仍在任务预算内。')).toBeInTheDocument();
   });
 
   it('报告中心深链任务使用单任务接口而不是全量任务列表', async () => {

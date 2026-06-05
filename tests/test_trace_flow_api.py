@@ -114,3 +114,24 @@ def test_task_trace_flow_supports_server_side_pagination(tmp_path: Path) -> None
     assert trace_flow["pagination"] == {"page": 2, "page_size": 5, "total_items": 12, "total_pages": 3}
     assert [item["row_index"] for item in trace_flow["items"]] == [5, 6, 7, 8, 9]
     assert all(item["row_index"] < 10 for item in trace_flow["items"])
+
+
+def test_run_trace_supports_compatible_server_side_pagination(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "run_trace_many.jsonl"
+    _write_jsonl(data_path, count=12)
+
+    dataset = client.post("/datasets/from-path", json={"name": "run_trace_many", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    run = client.post("/runs", json={"workflow": workflow, "dataset_id": dataset["dataset_id"], "dataset_version": dataset["version"]}).json()
+    executed = client.post(f"/runs/{run['run_id']}/execute").json()
+
+    legacy_trace = client.get(f"/runs/{executed['run_id']}/trace").json()
+    paged_trace = client.get(f"/runs/{executed['run_id']}/trace?page=2&page_size=5").json()
+
+    assert "pagination" not in legacy_trace
+    assert len(legacy_trace["items"]) == 12
+    assert paged_trace["pagination"] == {"page": 2, "page_size": 5, "total_items": 12, "total_pages": 3}
+    assert [item["row_index"] for item in paged_trace["items"]] == [5, 6, 7, 8, 9]
+    assert all(len(item["steps"]) == 2 for item in paged_trace["items"])

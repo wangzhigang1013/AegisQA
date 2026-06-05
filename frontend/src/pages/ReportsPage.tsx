@@ -1,20 +1,22 @@
 import { DownloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Empty, Row, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Col, Empty, Input, Row, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useEffect, useMemo, useState, type Key } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSearchParams } from 'react-router-dom';
 
 import { api } from '../api/client';
 import { LazyECharts } from '../components/LazyECharts';
+import { ActionToolbar, DataTableShell, PageSection } from '../components/LayoutPrimitives';
 import { MetricTile } from '../components/MetricTile';
 import { PageHeader } from '../components/PageHeader';
-import type { AuditEvent, ReportExportRequest, TaskRecord } from '../types';
+import type { AuditEvent, RepairTaskRecord, ReportExportRequest, TaskRecord } from '../types';
 import { BadcaseTable } from './report/BadcaseTable';
 import { ReportSegmentAnalysis } from './report/ReportSegmentAnalysis';
 import { ReportSummary } from './report/ReportSummary';
 
-type ReportExportFormat = 'html' | 'csv' | 'json';
+type ReportInlineExportFormat = 'html' | 'csv' | 'json';
+type ReportExportFormat = ReportInlineExportFormat | 'offline_zip';
 type ReportExportRole = 'Evaluator' | 'Reviewer' | 'Admin' | 'Viewer';
 
 const reportExportMimeTypes: Record<string, string> = {
@@ -42,8 +44,19 @@ export function ReportsPage() {
   const [pendingDiagnosticAction, setPendingDiagnosticAction] = useState<string | null>(null);
   const [selectedBadcaseKeys, setSelectedBadcaseKeys] = useState<Key[]>([]);
   const [badcasePage, setBadcasePage] = useState(1);
+  const [stepPage, setStepPage] = useState(1);
+  const [stepSearch, setStepSearch] = useState('');
+  const [segmentPage, setSegmentPage] = useState(1);
+  const [segmentSearch, setSegmentSearch] = useState('');
+  const [rootCausePage, setRootCausePage] = useState(1);
+  const [rootCauseSearch, setRootCauseSearch] = useState('');
+  const [diagnosticStepPage, setDiagnosticStepPage] = useState(1);
   const [scorePage, setScorePage] = useState(1);
   const badcasePageSize = 5;
+  const stepPageSize = 3;
+  const segmentPageSize = 6;
+  const rootCausePageSize = 4;
+  const diagnosticStepPageSize = 4;
   const scorePageSize = 4;
   const reportTaskPageSize = 20;
   const normalizedTaskSearch = taskSearch.trim();
@@ -77,8 +90,39 @@ export function ReportsPage() {
     enabled: Boolean(selectedTask?.task_id),
   });
   const reportQuery = useQuery({
-    queryKey: ['task-report', selectedTask?.task_id, badcasePage, badcasePageSize],
-    queryFn: () => api.taskReport(selectedTask?.task_id ?? '', { badcasePage, badcasePageSize }),
+    queryKey: [
+      'task-report',
+      selectedTask?.task_id,
+      badcasePage,
+      badcasePageSize,
+      stepPage,
+      stepPageSize,
+      stepSearch.trim(),
+      segmentPage,
+      segmentPageSize,
+      segmentSearch.trim(),
+      rootCausePage,
+      rootCausePageSize,
+      rootCauseSearch.trim(),
+      diagnosticStepPage,
+      diagnosticStepPageSize,
+    ],
+    queryFn: () =>
+      api.taskReport(selectedTask?.task_id ?? '', {
+        badcasePage,
+        badcasePageSize,
+        stepPage,
+        stepPageSize,
+        stepQuery: stepSearch.trim() || undefined,
+        segmentPage,
+        segmentPageSize,
+        segmentQuery: segmentSearch.trim() || undefined,
+        rootCausePage,
+        rootCausePageSize,
+        rootCauseQuery: rootCauseSearch.trim() || undefined,
+        diagnosticStepPage,
+        diagnosticStepPageSize,
+      }),
     enabled: Boolean(selectedTask?.task_id),
   });
   const exportHistoryQuery = useQuery({
@@ -91,6 +135,7 @@ export function ReportsPage() {
     queryFn: () => api.reportExportRequests({ task_id: selectedTask?.task_id ?? '' }),
     enabled: Boolean(selectedTask?.task_id),
   });
+  const releaseContext = reportQuery.data?.release_context;
 
   useEffect(() => {
     if (taskIdFromUrl && taskIdFromUrl !== selectedTaskId) {
@@ -106,6 +151,13 @@ export function ReportsPage() {
     setSelectedTaskId(nextTaskId);
     setTaskSearch('');
     setBadcasePage(1);
+    setStepSearch('');
+    setStepPage(1);
+    setSegmentSearch('');
+    setSegmentPage(1);
+    setRootCauseSearch('');
+    setRootCausePage(1);
+    setDiagnosticStepPage(1);
     setScorePage(1);
     setSelectedBadcaseKeys([]);
     setSearchParams(nextTaskId ? { task_id: nextTaskId } : {});
@@ -134,7 +186,7 @@ export function ReportsPage() {
   }
 
   const exportMutation = useMutation({
-    mutationFn: async (format: ReportExportFormat) => {
+    mutationFn: async (format: ReportInlineExportFormat) => {
       if (!selectedTask) {
         throw new Error('请先选择任务，再导出报告。');
       }
@@ -153,15 +205,35 @@ export function ReportsPage() {
     onError: (error) => setNotice(error instanceof Error ? error.message : '报告导出失败'),
   });
 
+  const offlinePackageMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedTask) {
+        throw new Error('请先选择任务，再导出离线包。');
+      }
+      const approvalRequest = approvedExportRequestFor('offline_zip');
+      if (!canExportReport && !approvalRequest) {
+        throw new Error('当前角色需要先获得离线包导出审批。');
+      }
+      const download = await api.exportTaskReportOfflinePackage(selectedTask.task_id, exportRole, approvalRequest?.request_id);
+      return { download, task: selectedTask };
+    },
+    onSuccess: async ({ download, task }) => {
+      const filename = downloadBlob(download.blob, download.filename ?? `${safeReportFileName(task.name || task.task_id)}_offline_audit.zip`);
+      setNotice(`离线包导出成功：${filename} 已开始下载。`);
+      await queryClient.invalidateQueries({ queryKey: ['audit-events', 'task.report.export', task.task_id] });
+    },
+    onError: (error) => setNotice(error instanceof Error ? error.message : '离线包导出失败'),
+  });
+
   const exportRequestMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (format: ReportExportFormat = 'html') => {
       if (!selectedTask) {
         throw new Error('请先选择任务，再申请导出审批。');
       }
       return api.createReportExportRequest(selectedTask.task_id, {
-        file_format: 'html',
+        file_format: format,
         requester_role: exportRole,
-        reason: '只读角色需要导出 HTML 任务报告用于业务复盘。',
+        reason: format === 'offline_zip' ? '只读角色需要导出离线审计包用于外部归档。' : '只读角色需要导出 HTML 任务报告用于业务复盘。',
       });
     },
     onSuccess: async (request) => {
@@ -282,6 +354,23 @@ export function ReportsPage() {
       if (action === 'retry_failed_items') {
         return { action, result: await api.retryFailedTask(task.task_id) };
       }
+      if (action === 'plan_workflow_parameter_changes') {
+        const repairSeed = await api.createRepairTasksFromDiagnostics(task.task_id);
+        const repairTask = selectRepairTaskForAction(repairSeed.repair_tasks, action);
+        if (!repairTask) {
+          throw new Error('未找到可承载参数变更计划的修复任务，请先点击“生成修复任务”。');
+        }
+        const actionResult = await api.runRepairTaskAction(repairTask.repair_task_id, { action, assignee: 'qa_owner', limit: 20 });
+        return {
+          action,
+          result: {
+            ...actionResult.result,
+            repair_task_id: repairTask.repair_task_id,
+            created_count: repairSeed.created_count,
+            reused_count: repairSeed.reused_count,
+          },
+        };
+      }
       throw new Error(`当前诊断动作暂不支持：${actionLabel(action)}`);
     },
     onSuccess: async ({ action, result }) => {
@@ -291,6 +380,7 @@ export function ReportsPage() {
         queryClient.invalidateQueries({ queryKey: ['task-report', selectedTask?.task_id] }),
         queryClient.invalidateQueries({ queryKey: ['annotation-queue'] }),
         queryClient.invalidateQueries({ queryKey: ['ci-gate-evaluations'] }),
+        queryClient.invalidateQueries({ queryKey: ['repair-tasks', selectedTask?.task_id] }),
       ]);
     },
     onError: (error) => setNotice(error instanceof Error ? `诊断动作失败：${error.message}` : '诊断动作失败'),
@@ -323,6 +413,7 @@ export function ReportsPage() {
   const exportRequests: ReportExportRequest[] = exportRequestsQuery.data ?? [];
   const canExportReport = reportExportRoles.find((item) => item.value === exportRole)?.canExport ?? false;
   const hasHtmlExportApproval = Boolean(approvedExportRequestFor('html'));
+  const hasOfflinePackageApproval = Boolean(approvedExportRequestFor('offline_zip'));
   const latencyData = useMemo(() => {
     if (stepDistribution.length) {
       return Object.fromEntries(stepDistribution.map((step) => [step.step_id, step.average_latency_ms]));
@@ -370,7 +461,7 @@ export function ReportsPage() {
         title="任务报告"
         description="报告不再孤立展示指标，而是绑定具体任务，展示数据源、Workflow、执行结果、Badcase 和导出入口。"
         primaryAction={
-          <Space>
+          <ActionToolbar className="report-header-actions" testId="reports-header-actions">
             <Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace` : undefined}>查看 Trace Flow</Button>
             <Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace-tree` : undefined}>查看 Trace Tree</Button>
             <Button disabled={!selectedTask} loading={redTeamScanMutation.isPending} onClick={() => redTeamScanMutation.mutate()}>运行红队扫描</Button>
@@ -381,7 +472,7 @@ export function ReportsPage() {
               onChange={setExportRole}
               options={reportExportRoles.map((role) => ({ value: role.value, label: role.label }))}
             />
-            <Space.Compact>
+            <Space wrap size={4} className="report-export-actions">
               <Tooltip title={!canExportFormat('html') ? '当前角色没有 report:export 权限，请先申请并通过审批' : ''}>
                 <Button
                   type="primary"
@@ -409,28 +500,45 @@ export function ReportsPage() {
               >
                 导出 JSON
               </Button>
-            </Space.Compact>
-          </Space>
+              <Button
+                icon={<DownloadOutlined />}
+                disabled={!selectedTask || offlinePackageMutation.isPending || !canExportFormat('offline_zip')}
+                loading={offlinePackageMutation.isPending}
+                onClick={() => offlinePackageMutation.mutate()}
+              >
+                导出离线包
+              </Button>
+            </Space>
+          </ActionToolbar>
         }
       />
 
       {notice ? <Alert type={notice.includes('失败') || notice.includes('请先') ? 'warning' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
       {!canExportReport ? (
         <Alert
-          type={hasHtmlExportApproval ? 'info' : 'warning'}
+          type={hasHtmlExportApproval || hasOfflinePackageApproval ? 'info' : 'warning'}
           showIcon
-          message={hasHtmlExportApproval ? '当前角色已获得 HTML 导出审批，可导出已审批格式。' : '当前角色只有报告查看权限，不能导出或外发报告。'}
+          message={hasHtmlExportApproval || hasOfflinePackageApproval ? '当前角色已获得部分导出审批，可导出已审批格式。' : '当前角色只有报告查看权限，不能导出或外发报告。'}
           action={
-            !hasHtmlExportApproval ? (
-              <Button size="small" loading={exportRequestMutation.isPending} onClick={() => exportRequestMutation.mutate()}>
-                申请 HTML 导出审批
-              </Button>
+            !hasHtmlExportApproval || !hasOfflinePackageApproval ? (
+              <Space>
+                {!hasHtmlExportApproval ? (
+                  <Button size="small" loading={exportRequestMutation.isPending && exportRequestMutation.variables === 'html'} onClick={() => exportRequestMutation.mutate('html')}>
+                    申请 HTML 导出审批
+                  </Button>
+                ) : null}
+                {!hasOfflinePackageApproval ? (
+                  <Button size="small" loading={exportRequestMutation.isPending && exportRequestMutation.variables === 'offline_zip'} onClick={() => exportRequestMutation.mutate('offline_zip')}>
+                    申请离线包导出审批
+                  </Button>
+                ) : null}
+              </Space>
             ) : null
           }
         />
       ) : null}
 
-      <Card className="flat-card" title="报告列表">
+      <PageSection title="报告列表">
         <Row gutter={[12, 12]} align="middle">
           <Col xs={24} lg={8}>
             <Select
@@ -459,7 +567,7 @@ export function ReportsPage() {
             )}
           </Col>
         </Row>
-      </Card>
+      </PageSection>
 
       {task ? (
         <>
@@ -504,24 +612,59 @@ export function ReportsPage() {
 
           <ReportSummary task={task} summary={reportQuery.data?.task_summary} versionSnapshot={reportQuery.data?.version_snapshot} preflightEvidence={reportQuery.data?.preflight_evidence} />
 
-          <Card className="flat-card" title="报告导出历史">
-            <Table
-              size="small"
-              rowKey="event_id"
-              loading={exportHistoryQuery.isLoading}
-              pagination={{ pageSize: 4 }}
-              dataSource={exportHistory}
-              locale={{ emptyText: '当前任务还没有导出记录。导出后会记录格式、Preflight ID 和时间。' }}
-              columns={[
-                { title: '审计事件', dataIndex: 'event_id', render: (value) => <code>{value}</code> },
-                { title: '格式', render: (_, event) => <Tag color="blue">{String(asRecord(event.detail)?.file_format ?? '-')}</Tag> },
-                { title: 'Run', render: (_, event) => String(asRecord(event.detail)?.run_id ?? '-') },
-                { title: 'Preflight', render: (_, event) => String(asRecord(event.detail)?.preflight_id ?? '-') },
-                { title: '操作者', dataIndex: 'actor' },
-                { title: '时间', dataIndex: 'created_at', render: (value) => formatAuditTime(String(value ?? '')) },
-              ]}
-            />
-          </Card>
+          {releaseContext && (releaseContext.baselines.length || releaseContext.release_records.length) ? (
+            <Card className="flat-card" title="Baseline 与发布记录">
+              <Space direction="vertical" className="full-width-control" size="middle">
+                {releaseContext.baselines.length ? (
+                  <Space wrap>
+                    {releaseContext.baselines.map((baseline) => (
+                      <Tag key={baseline.baseline_id} color="blue">
+                        当前 baseline：{baseline.current_experiment_id ?? '-'}
+                      </Tag>
+                    ))}
+                  </Space>
+                ) : (
+                  <Typography.Text type="secondary">当前任务还没有匹配的 baseline。</Typography.Text>
+                )}
+                <Table
+                  size="small"
+                  rowKey="record_id"
+                  pagination={false}
+                  dataSource={releaseContext.release_records}
+                  locale={{ emptyText: '当前任务还没有匹配的 Workflow 发布记录。' }}
+                  columns={[
+                    { title: '发布记录', dataIndex: 'record_id', render: (value) => <code>{value}</code> },
+                    { title: '状态', dataIndex: 'status', render: (value) => <Tag color={releaseRecordStatusColor(String(value))}>{String(value)}</Tag> },
+                    { title: 'Workflow', dataIndex: 'workflow_version_id', render: (value) => String(value ?? '-') },
+                    { title: '门禁', render: (_, record) => `${record.ci_gate_config_ids.length} 个 / 阻断 ${record.blocking_failures}` },
+                    { title: '审批意见', dataIndex: 'approval_note', render: (value) => String(value ?? '-') },
+                  ]}
+                />
+              </Space>
+            </Card>
+          ) : null}
+
+          <PageSection title="报告导出历史" testId="reports-export-history-section">
+            <DataTableShell testId="reports-export-history-table-shell">
+              <Table
+                size="small"
+                rowKey="event_id"
+                loading={exportHistoryQuery.isLoading}
+                scroll={{ x: 'max-content' }}
+                pagination={{ pageSize: 4 }}
+                dataSource={exportHistory}
+                locale={{ emptyText: '当前任务还没有导出记录。导出后会记录格式、Preflight ID 和时间。' }}
+                columns={[
+                  { title: '审计事件', dataIndex: 'event_id', render: (value) => <code>{value}</code> },
+                  { title: '格式', render: (_, event) => <Tag color="blue">{String(asRecord(event.detail)?.file_format ?? '-')}</Tag> },
+                  { title: 'Run', render: (_, event) => String(asRecord(event.detail)?.run_id ?? '-') },
+                  { title: 'Preflight', render: (_, event) => String(asRecord(event.detail)?.preflight_id ?? '-') },
+                  { title: '操作者', dataIndex: 'actor' },
+                  { title: '时间', dataIndex: 'created_at', render: (value) => formatAuditTime(String(value ?? '')) },
+                ]}
+              />
+            </DataTableShell>
+          </PageSection>
 
           <Card className="flat-card" title="导出审批请求">
             <Table
@@ -612,7 +755,7 @@ export function ReportsPage() {
                     { title: '通过率', dataIndex: 'pass_rate', render: (value) => `${Math.round(Number(value ?? 0) * 100)}%` },
                     { title: 'Badcase', dataIndex: 'badcase_count' },
                     { title: 'P95', dataIndex: 'p95_latency_ms', render: (value) => `${Math.round(Number(value ?? 0))} ms` },
-                    { title: '估算成本', dataIndex: 'cost_used', render: (value) => Number(value ?? 0).toFixed(4) },
+                    { title: '成本', dataIndex: 'cost_used', render: (value) => Number(value ?? 0).toFixed(4) },
                   ]}
                 />
                 {scoreAnalytics?.regressions.length ? (
@@ -635,6 +778,10 @@ export function ReportsPage() {
                       <Tag>预算 {budgetStatus.cost_budget ?? '未设置'}</Tag>
                       <Tag>已用 {budgetStatus.cost_used.toFixed(4)}</Tag>
                       <Tag>剩余 {budgetStatus.budget_remaining == null ? '未设置' : budgetStatus.budget_remaining.toFixed(4)}</Tag>
+                      <Tag>Prompt {formatTokenCount(budgetStatus.prompt_tokens)}</Tag>
+                      <Tag>Completion {formatTokenCount(budgetStatus.completion_tokens)}</Tag>
+                      <Tag>Total {formatTokenCount(budgetStatus.total_tokens)}</Tag>
+                      <Tag>成本来源 {budgetStatus.cost_source ?? '-'}</Tag>
                     </Space>
                     <Typography.Text>{budgetStatus.message}</Typography.Text>
                   </Space>
@@ -747,11 +894,31 @@ export function ReportsPage() {
                   </Space>
                 </Col>
               </Row>
+              <Space wrap className="section-actions">
+                <Input
+                  allowClear
+                  placeholder="搜索根因、证据或建议"
+                  className="wide-search"
+                  value={rootCauseSearch}
+                  onChange={(event) => {
+                    setRootCausePage(1);
+                    setRootCauseSearch(event.target.value);
+                  }}
+                />
+              </Space>
               <Table
                 className="section-actions"
                 size="small"
                 rowKey="cause_type"
-                pagination={false}
+                pagination={reportQuery.data?.diagnostics_pagination?.root_causes
+                  ? {
+                      current: reportQuery.data.diagnostics_pagination.root_causes.page,
+                      pageSize: reportQuery.data.diagnostics_pagination.root_causes.page_size,
+                      total: reportQuery.data.diagnostics_pagination.root_causes.total_items,
+                      showSizeChanger: false,
+                      onChange: setRootCausePage,
+                    }
+                  : false}
                 dataSource={diagnostics.root_causes}
                 columns={[
                   { title: '根因', dataIndex: 'cause_type', render: (value) => causeLabel(String(value)) },
@@ -781,11 +948,31 @@ export function ReportsPage() {
               />
               <Row gutter={[16, 16]} className="section-actions">
                 <Col xs={24} xl={12}>
-                  <Typography.Title level={5}>Step 健康度</Typography.Title>
+                  <Space direction="vertical" className="full-width-control">
+                    <Typography.Title level={5}>Step 健康度</Typography.Title>
+                    <Input
+                      allowClear
+                      placeholder="搜索 Step 或 Skill"
+                      value={stepSearch}
+                      onChange={(event) => {
+                        setStepPage(1);
+                        setDiagnosticStepPage(1);
+                        setStepSearch(event.target.value);
+                      }}
+                    />
+                  </Space>
                   <Table
                     size="small"
                     rowKey="step_id"
-                    pagination={false}
+                    pagination={reportQuery.data?.diagnostics_pagination?.step_health
+                      ? {
+                          current: reportQuery.data.diagnostics_pagination.step_health.page,
+                          pageSize: reportQuery.data.diagnostics_pagination.step_health.page_size,
+                          total: reportQuery.data.diagnostics_pagination.step_health.total_items,
+                          showSizeChanger: false,
+                          onChange: setDiagnosticStepPage,
+                        }
+                      : false}
                     dataSource={diagnostics.step_health}
                     columns={[
                       { title: 'Step', dataIndex: 'step_id' },
@@ -827,11 +1014,38 @@ export function ReportsPage() {
           ) : null}
 
           <Card className="flat-card" title="Step 分布与耗时">
+            <Space wrap className="section-actions">
+              <Input
+                allowClear
+                placeholder="搜索 Step 或 Skill"
+                className="wide-search"
+                value={stepSearch}
+                onChange={(event) => {
+                  setStepPage(1);
+                  setDiagnosticStepPage(1);
+                  setStepSearch(event.target.value);
+                }}
+              />
+              {reportQuery.data?.step_distribution_pagination ? (
+                <Typography.Text type="secondary">
+                  共 {reportQuery.data.step_distribution_pagination.total_items} 个 Step，当前第 {reportQuery.data.step_distribution_pagination.page} 页。
+                </Typography.Text>
+              ) : null}
+            </Space>
             {stepDistribution.length ? (
               <Table
                 rowKey="step_id"
                 size="small"
-                pagination={false}
+                loading={reportQuery.isFetching}
+                pagination={reportQuery.data?.step_distribution_pagination
+                  ? {
+                      current: reportQuery.data.step_distribution_pagination.page,
+                      pageSize: reportQuery.data.step_distribution_pagination.page_size,
+                      total: reportQuery.data.step_distribution_pagination.total_items,
+                      showSizeChanger: false,
+                      onChange: setStepPage,
+                    }
+                  : false}
                 dataSource={stepDistribution}
                 columns={[
                   { title: 'Step', dataIndex: 'step_id' },
@@ -847,7 +1061,18 @@ export function ReportsPage() {
             <LazyECharts option={chartOption} style={{ height: 280 }} />
           </Card>
 
-          <ReportSegmentAnalysis segments={reportQuery.data?.segments} recommendations={reportQuery.data?.recommendations} />
+          <ReportSegmentAnalysis
+            segments={reportQuery.data?.segments}
+            recommendations={reportQuery.data?.recommendations}
+            pagination={reportQuery.data?.segments_pagination}
+            loading={reportQuery.isFetching}
+            searchValue={segmentSearch}
+            onSearchChange={(value) => {
+              setSegmentPage(1);
+              setSegmentSearch(value);
+            }}
+            onPageChange={setSegmentPage}
+          />
 
           <Card className="flat-card" title="Badcase 明细">
             <Space direction="vertical" className="full-width-control">
@@ -897,6 +1122,18 @@ function downloadReportExport(exported: Record<string, unknown>, task: TaskRecor
   return filename;
 }
 
+function downloadBlob(blob: Blob, filename: string) {
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = href;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+  return filename;
+}
+
 function normalizeExportContent(content: unknown, format: string) {
   if (typeof content === 'string') {
     return content;
@@ -914,6 +1151,20 @@ function formatAuditTime(value: string) {
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) return value;
   return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
+}
+
+function formatTokenCount(value: number | null | undefined): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return '-';
+  }
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function releaseRecordStatusColor(status: string): string {
+  if (status === 'ready_to_release') return 'green';
+  if (status === 'blocked') return 'red';
+  if (status.startsWith('pending')) return 'gold';
+  return 'default';
 }
 
 async function ensureBadcaseId(badcase: Record<string, unknown>, task: TaskRecord | null | undefined): Promise<string> {
@@ -961,6 +1212,7 @@ function actionLabel(value: string) {
     review_badcases: '复核 Badcase',
     audit_judge_profile: '审计 Judge',
     open_parameter_governance: '查看参数治理',
+    plan_workflow_parameter_changes: '规划 Workflow 参数变更',
   };
   return labels[value] ?? value;
 }
@@ -983,5 +1235,13 @@ function formatDiagnosticActionNotice(action: string, result: unknown) {
   if (action === 'retry_failed_items') {
     return '失败项已提交重试，任务列表和报告会刷新最新状态。';
   }
+  if (action === 'plan_workflow_parameter_changes') {
+    const parameterDiffs = Array.isArray(record?.parameter_diffs) ? record.parameter_diffs.length : 0;
+    return `参数变更计划已生成：${parameterDiffs} 条参数 diff，可进入修复任务查看回滚建议。`;
+  }
   return `诊断动作完成：${actionLabel(action)}。`;
+}
+
+function selectRepairTaskForAction(repairTasks: RepairTaskRecord[], action: string): RepairTaskRecord | null {
+  return repairTasks.find((task) => Array.isArray(task.next_actions) && task.next_actions.includes(action)) ?? repairTasks[0] ?? null;
 }

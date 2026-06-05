@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from aegisqa.core.mapper import MappingPathError, TypeMismatchError, resolve_input_mapping, set_by_path, validate_json_schema
 from aegisqa.core.security import redact_secrets
 from aegisqa.datasets.service import DatasetRow, DatasetService
-from aegisqa.engine.rate_limit import InMemoryRateLimiter
+from aegisqa.engine.rate_limit import RateLimiter, create_rate_limiter
 from aegisqa.skills.parameters import SkillParameterResolver
 from aegisqa.skills.registry import SkillRegistry
 from aegisqa.storage.json_store import JsonStore
@@ -110,10 +110,21 @@ class WorkflowRunner:
     - Step 轨迹记录输入、输出、耗时、限速、缓存和异常。
     """
 
-    def __init__(self, store: JsonStore, dataset_service: DatasetService, registry: SkillRegistry) -> None:
+    def __init__(
+        self,
+        store: JsonStore,
+        dataset_service: DatasetService,
+        registry: SkillRegistry,
+        run_repository: Any | None = None,
+        rate_limiter_factory: Callable[[dict[str, float]], RateLimiter] | None = None,
+        progress_save_interval_items: int = 25,
+    ) -> None:
         self.store = store
         self.dataset_service = dataset_service
         self.registry = registry
+        self.run_repository = run_repository
+        self.rate_limiter_factory = rate_limiter_factory or create_rate_limiter
+        self.progress_save_interval_items = max(1, int(progress_save_interval_items))
         self._cache: dict[str, dict[str, Any]] = {}
 
     def create_run(self, request: RunRequest) -> RunRecord:
@@ -189,25 +200,49 @@ class WorkflowRunner:
         self._save_run(run)
         if progress_callback:
             progress_callback(run)
-        limiter = InMemoryRateLimiter(qps_by_skill={key: float(value) for key, value in run.snapshot.get("runtime", {}).get("rate_limits", {}).items()})
+        limiter = self.rate_limiter_factory({key: float(value) for key, value in run.snapshot.get("runtime", {}).get("rate_limits", {}).items()})
 
         rows_by_id = self._rows_by_id(run.dataset_id, run.dataset_version)
+        processed_since_save = 0
         for item in run.items:
+            self._merge_control_flags(run)
+            if run.canceled or run.paused:
+                break
             if item.status == "succeeded":
                 continue
             row = rows_by_id[item.row_id]
             self._execute_item(run, item, row, limiter)
-            self._save_run(run)
+            self._merge_control_flags(run)
+            processed_since_save += 1
+            # RunRecord 里包含所有 item，逐条完整写 JSON 会在 1000+ 样本时退化成
+            # 近似平方级 I/O。进度回调仍逐条触发；本地快照按批次落盘，遇到失败、
+            # 暂停或取消立即刷盘，保证用户操作和错误状态不会被延迟。
+            should_flush_snapshot = (
+                processed_since_save >= self.progress_save_interval_items
+                or item.status == "failed"
+                or run.canceled
+                or run.paused
+            )
+            if should_flush_snapshot:
+                self._save_run(run)
+                processed_since_save = 0
             if progress_callback:
                 progress_callback(run)
+            if run.canceled or run.paused:
+                break
 
-        if all(item.status == "succeeded" for item in run.items):
-            run.status = "completed"
-        elif run.canceled:
+        all_succeeded = all(item.status == "succeeded" for item in run.items)
+        if run.canceled:
             run.status = "canceled"
+            run.finished_at = _now()
+        elif run.paused and not all_succeeded:
+            run.status = "paused"
+        elif all_succeeded:
+            run.status = "completed"
+            run.finished_at = _now()
         else:
             run.status = "failed"
-        run.finished_at = _now()
+            run.finished_at = _now()
         self._save_run(run)
         if progress_callback:
             progress_callback(run)
@@ -230,6 +265,7 @@ class WorkflowRunner:
         run = self.get_run(run_id)
         run.canceled = True
         run.status = "canceled"
+        self._save_control_flags(run)
         self._save_run(run)
         return run
 
@@ -237,6 +273,7 @@ class WorkflowRunner:
         run = self.get_run(run_id)
         run.paused = True
         run.status = "paused"
+        self._save_control_flags(run)
         self._save_run(run)
         return run
 
@@ -245,6 +282,7 @@ class WorkflowRunner:
         run.paused = False
         if run.status == "paused":
             run.status = "queued"
+        self._save_control_flags(run)
         self._save_run(run)
         return self.execute_run(run_id)
 
@@ -294,17 +332,35 @@ class WorkflowRunner:
         return self.execute_run(run.run_id)
 
     def get_run(self, run_id: str) -> RunRecord:
-        payload = self.store.read_json(["runs", f"{run_id}.json"])
-        if not payload:
-            raise KeyError(f"Run 不存在：{run_id}")
+        if self.run_repository:
+            try:
+                payload = self.run_repository.get(run_id)
+            except KeyError as exc:
+                raise KeyError(f"Run 不存在：{run_id}") from exc
+        else:
+            payload = self.store.read_json(["runs", f"{run_id}.json"])
+            if not payload:
+                raise KeyError(f"Run 不存在：{run_id}")
         return RunRecord(**payload)
 
     def list_runs(self) -> list[RunRecord]:
         """列出 Run 快照，供执行中心和概览页展示最近状态。"""
 
-        return [RunRecord(**payload) for payload in self.store.list_json(["runs"])]
+        payloads = self.run_repository.list() if self.run_repository else self.store.list_json(["runs"])
+        return [RunRecord(**payload) for payload in payloads]
 
-    def _execute_item(self, run: RunRecord, item: RunItem, row: DatasetRow, limiter: InMemoryRateLimiter) -> None:
+    def list_run_summaries(self) -> list[dict[str, Any]]:
+        """列出轻量 Run 摘要，避免列表接口序列化完整 item 轨迹。
+
+        `RunRecord.items` 里可能包含 context、step 输入输出和错误详情。执行中心列表、
+        Attempt 历史列表这类场景只需要状态和计数，因此直接从原始 JSON 计算摘要，
+        不构造完整 `RunItem` 对象，也不把明细回传给前端。
+        """
+
+        payloads = self.run_repository.list() if self.run_repository else self.store.list_json(["runs"])
+        return [_run_summary_from_payload(payload) for payload in payloads]
+
+    def _execute_item(self, run: RunRecord, item: RunItem, row: DatasetRow, limiter: RateLimiter) -> None:
         item.status = "running"
         item.started_at = _now()
         context: dict[str, Any] = {
@@ -428,7 +484,40 @@ class WorkflowRunner:
         return _stable_hash(payload)
 
     def _save_run(self, run: RunRecord) -> None:
+        if self.run_repository:
+            self.run_repository.save(run.model_dump(mode="json"))
+            return
         self.store.write_json(["runs", f"{run.run_id}.json"], run.model_dump(mode="json"))
+
+    def _save_control_flags(self, run: RunRecord) -> None:
+        """单独保存暂停/取消信号，避免执行循环频繁读取完整 Run 快照。"""
+
+        self.store.write_json(
+            ["run_controls", f"{run.run_id}.json"],
+            {
+                "run_id": run.run_id,
+                "canceled": run.canceled,
+                "paused": run.paused,
+                "updated_at": _now(),
+            },
+        )
+
+    def _merge_control_flags(self, run: RunRecord) -> None:
+        """合并外部控制信号，避免后台执行覆盖暂停/取消请求。
+
+        后台线程执行时会持有一份内存中的 Run；暂停/取消接口则会把控制信号写入
+        store。每个 item 边界都重新读取控制位，才能保证用户操作不会被下一次保存覆盖。
+        """
+
+        control = self.store.read_json(["run_controls", f"{run.run_id}.json"], default=None) or {}
+        if control.get("canceled"):
+            run.canceled = True
+            run.paused = False
+            run.status = "canceled"
+            return
+        if control.get("paused"):
+            run.paused = True
+            run.status = "paused"
 
 
 def _now() -> str:
@@ -438,3 +527,37 @@ def _now() -> str:
 def _stable_hash(payload: Any) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def _run_summary_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """从持久化 Run JSON 中生成列表摘要。
+
+    这里刻意只读取 item 的状态字段，不返回 item 明细。这样分页列表的 wire shape
+    保持轻量；需要 Step/Context 的页面继续通过 `/runs/{run_id}` 或 trace 接口读取。
+    """
+
+    items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    completed_items = sum(1 for item in items if isinstance(item, dict) and item.get("status") == "succeeded")
+    failed_items = sum(1 for item in items if isinstance(item, dict) and item.get("status") == "failed")
+    workflow = payload.get("workflow") if isinstance(payload.get("workflow"), dict) else {}
+    queue_messages = payload.get("queue_messages") if isinstance(payload.get("queue_messages"), list) else []
+    return {
+        "run_id": payload.get("run_id"),
+        "status": payload.get("status"),
+        "workflow_version_id": workflow.get("version_id"),
+        "workflow_name": workflow.get("name"),
+        "dataset_id": payload.get("dataset_id"),
+        "dataset_version": payload.get("dataset_version"),
+        "chunk_size": payload.get("chunk_size"),
+        "concurrency": payload.get("concurrency"),
+        "sample_repeat_times": payload.get("sample_repeat_times", 1),
+        "total_items": len(items),
+        "completed_items": completed_items,
+        "failed_items": failed_items,
+        "queue_message_count": len(queue_messages),
+        "created_at": payload.get("created_at"),
+        "started_at": payload.get("started_at"),
+        "finished_at": payload.get("finished_at"),
+        "canceled": bool(payload.get("canceled", False)),
+        "paused": bool(payload.get("paused", False)),
+    }

@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from threading import Thread
 
 from fastapi.testclient import TestClient
 
@@ -57,6 +58,29 @@ def test_sqlite_store_round_trips_json_jsonl_and_lists_records(tmp_path: Path) -
 
     assert [row["event_id"] for row in store.iter_jsonl(["audit", "events.jsonl"])] == ["e1", "e2"]
     assert (tmp_path / "store" / "aegisqa.sqlite3").exists()
+
+
+def test_sqlite_store_append_jsonl_preserves_concurrent_rows(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "store")
+    errors: list[BaseException] = []
+
+    def writer(offset: int) -> None:
+        try:
+            for index in range(20):
+                store.append_jsonl(["audit", "events.jsonl"], {"event_id": f"e-{offset + index}", "order": offset + index})
+        except BaseException as exc:  # pragma: no cover - 失败时由断言统一展示异常。
+            errors.append(exc)
+
+    threads = [Thread(target=writer, args=(worker_index * 20,)) for worker_index in range(20)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    rows = list(store.iter_jsonl(["audit", "events.jsonl"]))
+    assert len(rows) == 400
+    assert sorted(row["order"] for row in rows) == list(range(400))
 
 
 def test_sqlite_store_reads_legacy_file_json_for_gradual_migration(tmp_path: Path) -> None:

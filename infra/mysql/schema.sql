@@ -45,15 +45,32 @@ CREATE TABLE IF NOT EXISTS workflow_versions (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS tasks (
+  task_id VARCHAR(191) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  dataset_version_id VARCHAR(191) NOT NULL,
+  workflow_version_id VARCHAR(191) NOT NULL,
+  run_id VARCHAR(191),
+  task_json JSON NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_tasks_status (status),
+  KEY idx_tasks_dataset_workflow (dataset_version_id, workflow_version_id),
+  KEY idx_tasks_run (run_id)
+);
+
 CREATE TABLE IF NOT EXISTS runs (
   run_id VARCHAR(191) PRIMARY KEY,
   workflow_version_id VARCHAR(191) NOT NULL,
   dataset_version_id VARCHAR(191) NOT NULL,
   status VARCHAR(32) NOT NULL,
   snapshot_json JSON NOT NULL,
+  run_json JSON NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   started_at TIMESTAMP NULL,
-  finished_at TIMESTAMP NULL
+  finished_at TIMESTAMP NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS run_items (
@@ -149,9 +166,28 @@ CREATE TABLE IF NOT EXISTS prompt_candidates (
 CREATE TABLE IF NOT EXISTS audit_events (
   event_id VARCHAR(191) PRIMARY KEY,
   actor VARCHAR(191) NOT NULL,
+  role VARCHAR(191) NOT NULL DEFAULT 'System',
   action VARCHAR(191) NOT NULL,
   target VARCHAR(191) NOT NULL,
+  result VARCHAR(32) NOT NULL DEFAULT 'success',
+  trace_id VARCHAR(191) NOT NULL DEFAULT '',
   detail_json JSON NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS json_documents (
+  document_key VARCHAR(512) PRIMARY KEY,
+  collection VARCHAR(191) NOT NULL,
+  payload_json JSON NOT NULL,
+  updated_at TIMESTAMP NOT NULL,
+  KEY idx_json_documents_collection (collection),
+  KEY idx_json_documents_updated_at (updated_at)
+);
+
+CREATE TABLE IF NOT EXISTS jsonl_rows (
+  stream_key VARCHAR(512) NOT NULL,
+  row_index INT NOT NULL,
+  payload_json JSON NOT NULL,
+  created_at TIMESTAMP NOT NULL,
+  PRIMARY KEY (stream_key, row_index)
+);

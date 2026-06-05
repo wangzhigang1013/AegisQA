@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
   Button,
-  Card,
   Empty,
   Input,
   Progress,
@@ -13,8 +12,10 @@ import {
   Tag,
 } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import { api, formatApiError } from '../api/client';
+import { ActionToolbar, DataTableShell, PageSection } from '../components/LayoutPrimitives';
 import { PageHeader } from '../components/PageHeader';
 import type { DatasetVersion, TaskPreflightResult, TaskRecord } from '../types';
 import { TaskCreateWizard, type TaskCreateFormValues } from './task/TaskCreateWizard';
@@ -23,6 +24,7 @@ import { taskProgress } from './task/TaskSnapshotPanel';
 
 export function RunsPage() {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [createOpen, setCreateOpen] = useState(false);
   const [detailTask, setDetailTask] = useState<TaskRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -32,6 +34,7 @@ export function RunsPage() {
   const [taskSearch, setTaskSearch] = useState('');
   const taskPageSize = 8;
   const normalizedTaskSearch = taskSearch.trim();
+  const detailTaskIdFromQuery = searchParams.get('task_id');
 
   const tasksQuery = useQuery({
     queryKey: ['tasks', 'page', taskPage, taskStatusFilter, normalizedTaskSearch],
@@ -40,6 +43,11 @@ export function RunsPage() {
   });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
   const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets, refetchOnMount: 'always' });
+  const taskDetailQuery = useQuery({
+    queryKey: ['task', detailTaskIdFromQuery],
+    queryFn: () => api.task(detailTaskIdFromQuery ?? ''),
+    enabled: Boolean(detailTaskIdFromQuery),
+  });
 
   const datasetVersions = useMemo(
     () => datasetsQuery.data?.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))) ?? [],
@@ -64,6 +72,12 @@ export function RunsPage() {
       setDetailTask(freshTask);
     }
   }, [detailTask, tasks]);
+
+  useEffect(() => {
+    if (!taskDetailQuery.data) return;
+    if (detailTask?.task_id === taskDetailQuery.data.task_id) return;
+    setDetailTask(taskDetailQuery.data);
+  }, [detailTask?.task_id, taskDetailQuery.data]);
 
   function resolveDatasetVersion(values: TaskCreateFormValues): DatasetVersion {
     const datasetVersion = datasetVersions.find((item) => item.version.version_id === values.dataset_version_id)?.version;
@@ -144,8 +158,8 @@ export function RunsPage() {
 
       {notice ? <Alert type={notice.includes('失败') ? 'error' : 'info'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
 
-      <Card className="flat-card" title="任务列表">
-        <Space wrap className="section-actions">
+      <PageSection title="任务列表" testId="runs-task-table-section">
+        <ActionToolbar className="section-actions" testId="runs-filter-toolbar">
           <Input.Search
             allowClear
             aria-label="搜索任务"
@@ -179,59 +193,65 @@ export function RunsPage() {
               { value: 'canceled', label: 'canceled' },
             ]}
           />
-        </Space>
-        <Table
-          rowKey="task_id"
-          loading={tasksQuery.isLoading}
-          pagination={{
-            current: taskPagination?.page ?? taskPage,
-            pageSize: taskPagination?.page_size ?? taskPageSize,
-            total: taskPagination?.total_items ?? tasks.length,
-            showSizeChanger: false,
-            onChange: (page) => setTaskPage(page),
-          }}
-          dataSource={tasks}
-          locale={{ emptyText: <Empty description="暂无任务。请先上传数据、发布 Workflow，然后创建任务。" /> }}
-          columns={[
-            {
-              title: '任务名',
-              dataIndex: 'name',
-              render: (value, record) => (
-                <Button type="link" onClick={() => setDetailTask(record)}>
-                  {value}
-                </Button>
-              ),
-            },
-            { title: '数据源', dataIndex: 'dataset_name' },
-            { title: 'Workflow', dataIndex: 'workflow_name' },
-            { title: '总数据量', dataIndex: 'total_items' },
-            {
-              title: '已执行',
-              render: (_, record) => (
-                <Space direction="vertical" size={2} className="task-progress-cell">
-                  <span>{record.completed_items} / {record.total_items}</span>
-                  <Progress percent={taskProgress(record)} size="small" showInfo={false} />
-                </Space>
-              ),
-            },
-            { title: '失败数', dataIndex: 'failed_items' },
-            { title: '通过率', dataIndex: 'pass_rate', render: (value) => `${Math.round(Number(value ?? 0) * 100)}%` },
-            { title: '状态', dataIndex: 'status', render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
-            { title: '创建时间', dataIndex: 'created_at', render: (value) => formatTime(value) },
-            {
-              title: '操作',
-              fixed: 'right',
-              render: (_, record) => (
-                <Space>
-                  <TaskActionButton task={record} action="execute" loading={taskActionMutation.isPending} onClick={triggerTaskAction} icon={<PlayCircleOutlined />} label="执行" />
-                  <TaskActionButton task={record} action="retry" loading={taskActionMutation.isPending} onClick={triggerTaskAction} icon={<ReloadOutlined />} label="重试失败" />
-                  <Button icon={<DownloadOutlined />} onClick={() => setDetailTask(record)}>详情</Button>
-                </Space>
-              ),
-            },
-          ]}
-        />
-      </Card>
+        </ActionToolbar>
+        <DataTableShell testId="runs-task-table-shell">
+          <Table
+            className="runs-task-table"
+            rowKey="task_id"
+            loading={tasksQuery.isLoading}
+            scroll={{ x: 1580 }}
+            pagination={{
+              current: taskPagination?.page ?? taskPage,
+              pageSize: taskPagination?.page_size ?? taskPageSize,
+              total: taskPagination?.total_items ?? tasks.length,
+              showSizeChanger: false,
+              onChange: (page) => setTaskPage(page),
+            }}
+            dataSource={tasks}
+            locale={{ emptyText: <Empty description="暂无任务。请先上传数据、发布 Workflow，然后创建任务。" /> }}
+            columns={[
+              {
+                title: '任务名',
+                dataIndex: 'name',
+                width: 220,
+                render: (value, record) => (
+                  <Button type="link" onClick={() => setDetailTask(record)}>
+                    {value}
+                  </Button>
+                ),
+              },
+              { title: '数据源', dataIndex: 'dataset_name', width: 180 },
+              { title: 'Workflow', dataIndex: 'workflow_name', width: 220 },
+              { title: '总数据量', dataIndex: 'total_items', width: 100 },
+              {
+                title: '已执行',
+                width: 160,
+                render: (_, record) => (
+                  <Space direction="vertical" size={2} className="task-progress-cell">
+                    <span>{record.completed_items} / {record.total_items}</span>
+                    <Progress percent={taskProgress(record)} size="small" showInfo={false} />
+                  </Space>
+                ),
+              },
+              { title: '失败数', dataIndex: 'failed_items', width: 90 },
+              { title: '通过率', dataIndex: 'pass_rate', width: 90, render: (value) => `${Math.round(Number(value ?? 0) * 100)}%` },
+              { title: '状态', dataIndex: 'status', width: 110, render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
+              { title: '创建时间', dataIndex: 'created_at', width: 190, render: (value) => formatTime(value) },
+              {
+                title: '操作',
+                width: 220,
+                render: (_, record) => (
+                  <Space>
+                    <TaskActionButton task={record} action="execute" loading={taskActionMutation.isPending} onClick={triggerTaskAction} icon={<PlayCircleOutlined />} label="执行" />
+                    <TaskActionButton task={record} action="retry" loading={taskActionMutation.isPending} onClick={triggerTaskAction} icon={<ReloadOutlined />} label="重试失败" />
+                    <Button icon={<DownloadOutlined />} onClick={() => setDetailTask(record)}>详情</Button>
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        </DataTableShell>
+      </PageSection>
 
       <TaskCreateWizard
         open={createOpen}
@@ -251,7 +271,14 @@ export function RunsPage() {
       <TaskOperationsDrawer
         task={detailTask}
         loading={taskActionMutation.isPending}
-        onClose={() => setDetailTask(null)}
+        onClose={() => {
+          setDetailTask(null);
+          if (searchParams.has('task_id')) {
+            const nextParams = new URLSearchParams(searchParams);
+            nextParams.delete('task_id');
+            setSearchParams(nextParams, { replace: true });
+          }
+        }}
         onAction={triggerTaskAction}
       />
     </section>

@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import csv
 import io
-from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from html import escape
 from math import ceil
-from typing import Any
+from typing import Any, Iterable, Iterator
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
@@ -53,19 +52,24 @@ from aegisqa.api.app import (
 )
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
-from aegisqa.core.mapper import MappingPathError, TypeMismatchError
+from aegisqa.core.mapper import MappingPathError, TypeMismatchError, collect_mapping_row_fields, resolve_input_mapping, set_by_path
 from aegisqa.core.security import redact_secrets
 from aegisqa.engine.runner import RunRecord, RunRequest
 from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments, compare_reports
 from aegisqa.reports.diagnostics import build_task_diagnostics
 from aegisqa.reports.trace_flow import build_task_trace_flow
+from aegisqa.security.access import require_permission
 from aegisqa.skills.parameters import SkillParameterResolver
 from aegisqa.workflows.validation import config_issue_from_exception, validate_workflow_step_contracts
 
 
-REPORT_EXPORT_FORMATS = {"json", "csv", "html"}
+REPORT_EXPORT_FORMATS = {"json", "csv", "html", "offline_zip"}
 TASK_RESULT_EXPORT_FORMATS = {"json", "jsonl", "csv"}
-TASK_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="aegisqa-task")
+TASK_RESULT_EXPORT_MEDIA_TYPES = {
+    "csv": "text/csv; charset=utf-8",
+    "jsonl": "application/x-ndjson; charset=utf-8",
+    "json": "application/json; charset=utf-8",
+}
 
 
 def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -99,494 +103,9 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
             return tasks
         return _paginate_records(tasks, page=page, page_size=page_size)
 
-    @app.get("/task-preflights/{preflight_id}")
-    def get_task_preflight(preflight_id: str) -> dict[str, Any]:
-        return _get_record(ctx.store, "task_preflights", preflight_id)
-
-    @app.get("/task-execution-templates")
-    def list_task_execution_templates() -> list[dict[str, Any]]:
-        return _list_task_execution_templates(ctx)
-
-    @app.post("/task-execution-templates")
-    def create_task_execution_template(request: TaskExecutionTemplateCreateRequest) -> dict[str, Any]:
-        template = _build_task_execution_template(request)
-        _save_record(ctx.store, "task_execution_templates", "template_id", template)
-        ctx.audit_service.record(
-            actor="api",
-            action="task_execution_template.create",
-            target=template["template_id"],
-            detail={"name": template["name"], "evaluation_goal": template.get("evaluation_goal")},
-        )
-        return template
-
-    @app.post("/tasks")
-    def create_task(request: TaskCreateRequest) -> dict[str, Any]:
-        workflow = ctx.workflow_service.get(request.workflow_version_id)
-        dataset = ctx.dataset_service.get_version(request.dataset_id, request.dataset_version)
-        preflight_request = TaskPreflightRequest(
-            dataset_id=request.dataset_id,
-            dataset_version=request.dataset_version,
-            workflow_version_id=request.workflow_version_id,
-            execution_template_id=request.execution_template_id,
-            evaluation_goal=request.evaluation_goal,
-            quality_gate=request.quality_gate,
-            cost_budget=request.cost_budget,
-            sample_repeat_times=request.sample_repeat_times,
-            skill_overrides=request.skill_overrides,
-        )
-        # 客户端传来的 Preflight 只能证明用户看过哪组参数，不能作为安全事实源。
-        # 创建任务前始终重算一次，防止伪造 passed 结果绕过字段、Skill、预算等阻断检查。
-        preflight_result = _build_task_preflight(ctx, preflight_request)
-        client_preflight_id = (request.preflight_result or {}).get("preflight_id")
-        if request.preflight_id and client_preflight_id and request.preflight_id != client_preflight_id:
-            raise AegisQAError(
-                "TASK_PREFLIGHT_STALE",
-                "Preflight ID 不一致，请基于当前参数重新运行预检。",
-                status_code=409,
-                details={"mismatches": [{"field": "preflight_id", "expected": request.preflight_id, "actual": client_preflight_id}]},
-            )
-        preflight_id = request.preflight_id or client_preflight_id
-        if preflight_id:
-            stored_preflight = _get_record(ctx.store, "task_preflights", str(preflight_id))
-            _ensure_preflight_matches_task_request(stored_preflight, request)
-            preflight_result["preflight_id"] = stored_preflight["preflight_id"]
-        if request.preflight_result is not None:
-            _ensure_preflight_matches_task_request(request.preflight_result, request)
-            if client_preflight_id and not preflight_result.get("preflight_id"):
-                preflight_result["preflight_id"] = client_preflight_id
-        if preflight_result.get("status") == "blocked" and not request.allow_blocked_preflight:
-            blocked_checks = [check for check in preflight_result.get("checks", []) if check.get("status") == "blocked"]
-            raise AegisQAError(
-                "TASK_PREFLIGHT_BLOCKED",
-                "Preflight 存在阻断项，必须修复后再创建任务；如确需创建，请显式开启强制创建并保留审计证据。",
-                status_code=409,
-                details={"preflight_result": preflight_result, "blocked_checks": blocked_checks},
-            )
-        run = ctx.runner.create_run(
-            RunRequest(
-                workflow=workflow,
-                dataset_id=dataset.dataset_id,
-                dataset_version=dataset.version,
-                chunk_size=request.chunk_size,
-                concurrency=request.concurrency,
-                sample_repeat_times=request.sample_repeat_times,
-                task_config_snapshot={
-                    "evaluation_goal": request.evaluation_goal,
-                    "execution_template_id": request.execution_template_id,
-                    "quality_gate": request.quality_gate,
-                    "skill_overrides": request.skill_overrides,
-                    # 强制创建属于风险接受动作，必须进入 Run 快照，后续报告才能解释来源。
-                    "allow_blocked_preflight": request.allow_blocked_preflight,
-                },
-            )
-        )
-        execution_config = {
-            "preflight_id": preflight_result.get("preflight_id"),
-            "execution_template_id": request.execution_template_id,
-            "evaluation_goal": request.evaluation_goal,
-            "quality_gate": request.quality_gate,
-            "chunk_size": request.chunk_size,
-            "concurrency": request.concurrency,
-            "sample_repeat_times": request.sample_repeat_times,
-            "retry": {
-                "max_retries": request.max_retries,
-                "backoff_seconds": request.retry_backoff_seconds,
-            },
-            "cost_budget": request.cost_budget,
-            "skill_overrides": request.skill_overrides,
-            "allow_blocked_preflight": request.allow_blocked_preflight,
-        }
-        task = _build_task_record(
-            request.name,
-            dataset.model_dump(mode="json"),
-            workflow,
-            run,
-            execution_config=execution_config,
-            evaluation_goal=request.evaluation_goal,
-            quality_gate=request.quality_gate,
-            preflight_result=preflight_result,
-        )
-        _save_record(ctx.store, "tasks", "task_id", task)
-        ctx.audit_service.record(
-            actor="api",
-            action="task.create",
-            target=task["task_id"],
-            detail={"run_id": run.run_id, "allow_blocked_preflight": request.allow_blocked_preflight},
-        )
-        return task
-
-    @app.post("/tasks/preflight")
-    def task_preflight(request: TaskPreflightRequest) -> dict[str, Any]:
-        preflight = _build_task_preflight(ctx, request)
-        return _save_task_preflight(ctx, preflight)
-
-    @app.get("/repair-tasks")
-    def list_repair_tasks(
-        source_task_id: str | None = Query(default=None),
-        status: str | None = Query(default=None),
-        page: int | None = Query(default=None, ge=1),
-        page_size: int = Query(default=20, ge=1, le=100),
-    ) -> list[dict[str, Any]] | dict[str, Any]:
-        records = _list_records(ctx.store, "repair_tasks")
-        if source_task_id:
-            records = [record for record in records if record.get("source_task_id") == source_task_id]
-        if status:
-            records = [record for record in records if record.get("status") == status]
-        records = sorted(records, key=lambda item: str(item.get("created_at", "")), reverse=True)
-        if page is not None:
-            return _paginate_records(records, page=page, page_size=page_size)
-        return records
-
-    @app.get("/repair-tasks/{repair_task_id}/tree")
-    def get_repair_task_tree(repair_task_id: str) -> dict[str, Any]:
-        record = _get_record(ctx.store, "repair_tasks", repair_task_id)
-        return _build_repair_task_tree(ctx, record)
-
-    @app.post("/repair-tasks/{repair_task_id}/start")
-    def start_repair_task(repair_task_id: str, request: RepairTaskStartRequest) -> dict[str, Any]:
-        record = _transition_repair_task(
-            ctx,
-            repair_task_id,
-            allowed_statuses={"open"},
-            updates={
-                "status": "in_progress",
-                "owner": request.owner,
-                "started_at": _now(),
-                "updated_at": _now(),
-            },
-            audit_action="repair_task.start",
-        )
-        return record
-
-    @app.post("/repair-tasks/{repair_task_id}/assign")
-    def assign_repair_task(repair_task_id: str, request: RepairTaskAssignRequest) -> dict[str, Any]:
-        record = _get_record(ctx.store, "repair_tasks", repair_task_id)
-        if record.get("status") == "resolved":
-            raise AegisQAError(
-                "REPAIR_TASK_ASSIGN_RESOLVED",
-                "已完成的修复任务不能重新指派，请先重开任务。",
-                status_code=409,
-                details={"repair_task_id": repair_task_id, "status": record.get("status")},
-            )
-        record.update(
-            {
-                "owner": request.owner,
-                "due_at": request.due_at,
-                "assigned_at": _now(),
-                "overdue": _repair_task_is_overdue(request.due_at, str(record.get("status") or "open")),
-                "updated_at": _now(),
-            }
-        )
-        _save_record(ctx.store, "repair_tasks", "repair_task_id", record)
-        ctx.audit_service.record(
-            actor="api",
-            action="repair_task.assign",
-            target=repair_task_id,
-            detail={"owner": request.owner, "due_at": request.due_at, "overdue": record.get("overdue")},
-        )
-        return record
-
-    @app.post("/repair-tasks/{repair_task_id}/resolve")
-    def resolve_repair_task(repair_task_id: str, request: RepairTaskResolveRequest) -> dict[str, Any]:
-        record = _transition_repair_task(
-            ctx,
-            repair_task_id,
-            allowed_statuses={"open", "in_progress"},
-            updates={
-                "status": "resolved",
-                "resolution_note": request.resolution_note,
-                "overdue": False,
-                "resolved_at": _now(),
-                "updated_at": _now(),
-            },
-            audit_action="repair_task.resolve",
-        )
-        return record
-
-    @app.post("/repair-tasks/{repair_task_id}/reopen")
-    def reopen_repair_task(repair_task_id: str, request: RepairTaskReopenRequest) -> dict[str, Any]:
-        record = _transition_repair_task(
-            ctx,
-            repair_task_id,
-            allowed_statuses={"resolved"},
-            updates={
-                "status": "open",
-                "reopen_reason": request.reason,
-                "reopened_at": _now(),
-                "updated_at": _now(),
-            },
-            audit_action="repair_task.reopen",
-        )
-        return record
-
-    @app.post("/repair-tasks/{repair_task_id}/actions")
-    def run_repair_task_action(repair_task_id: str, request: RepairTaskActionRequest) -> dict[str, Any]:
-        record = _get_record(ctx.store, "repair_tasks", repair_task_id)
-        action = request.action
-        if action == "seed_annotation_queue":
-            result = _repair_action_seed_annotation_queue(ctx, record, request)
-        elif action == "evaluate_ci_gate":
-            result = _repair_action_evaluate_ci_gate(ctx, record)
-        elif action == "retest_and_compare":
-            result = _repair_action_retest_and_compare(ctx, record)
-        elif action == "generate_remediation_plan":
-            result = _repair_action_generate_remediation_plan(ctx, record)
-        elif action == "create_followup_repair_tasks":
-            result = _repair_action_create_followup_tasks(ctx, record)
-        elif action == "fix_dataset_fields":
-            result = _repair_action_fix_dataset_fields(ctx, record)
-        elif action == "plan_workflow_parameter_changes":
-            result = _repair_action_plan_workflow_parameter_changes(ctx, record)
-        elif action == "compare_prompt_skill_versions":
-            result = _repair_action_compare_prompt_skill_versions(ctx, record)
-        elif action == "create_prompt_skill_candidate":
-            result = _repair_action_create_prompt_skill_candidate(ctx, record)
-        elif action == "create_workflow_draft_from_version_diff":
-            result = _repair_action_create_workflow_draft_from_version_diff(ctx, record)
-        elif action in {"open_trace_flow", "open_parameter_governance", "open_dataset_lineage"}:
-            result = _repair_action_link_target(record, action)
-        else:
-            raise AegisQAError(
-                "REPAIR_TASK_ACTION_UNSUPPORTED",
-                "当前修复任务动作暂不支持。",
-                status_code=400,
-                details={
-                    "action": action,
-                    "supported_actions": [
-                        "seed_annotation_queue",
-                        "evaluate_ci_gate",
-                        "retest_and_compare",
-                        "generate_remediation_plan",
-                        "create_followup_repair_tasks",
-                        "fix_dataset_fields",
-                        "plan_workflow_parameter_changes",
-                        "compare_prompt_skill_versions",
-                        "create_prompt_skill_candidate",
-                        "create_workflow_draft_from_version_diff",
-                        "open_trace_flow",
-                        "open_parameter_governance",
-                        "open_dataset_lineage",
-                    ],
-                },
-            )
-        updated_record = _append_repair_task_action(ctx, record, action, result)
-        return {"action": action, "result": result, "repair_task": updated_record}
-
     @app.get("/tasks/{task_id}")
     def get_task(task_id: str) -> dict[str, Any]:
         return _get_record(ctx.store, "tasks", task_id)
-
-    @app.post("/tasks/{task_id}/execute")
-    def execute_task(task_id: str, background: bool = Query(default=False)) -> dict[str, Any]:
-        task = _get_record(ctx.store, "tasks", task_id)
-        _ensure_task_action_allowed(task, "execute")
-        if background:
-            run = ctx.runner.get_run(task["run_id"])
-            run.status = "running"
-            run.started_at = run.started_at or _now()
-            # 后台执行必须先持久化 running 状态，否则前端轮询只能看到 queued 到 completed 的跳变。
-            ctx.runner._save_run(run)
-            task = _refresh_task_from_run(ctx.store, task, run)
-
-            def refresh_progress(current_run: RunRecord) -> None:
-                latest_task = _get_record(ctx.store, "tasks", task_id)
-                _refresh_task_from_run(ctx.store, latest_task, current_run)
-
-            def execute_in_background() -> None:
-                try:
-                    ctx.runner.execute_run(task["run_id"], progress_callback=refresh_progress)
-                except Exception as exc:  # noqa: BLE001 - 后台任务不能把异常丢到线程外导致前端永远停在 running。
-                    failed_run = ctx.runner.get_run(task["run_id"])
-                    failed_run.status = "failed"
-                    failed_run.finished_at = _now()
-                    ctx.runner._save_run(failed_run)
-                    latest_task = _get_record(ctx.store, "tasks", task_id)
-                    refreshed = _refresh_task_from_run(ctx.store, latest_task, failed_run)
-                    refreshed["last_error"] = str(exc)
-                    _save_record(ctx.store, "tasks", "task_id", refreshed)
-                    ctx.audit_service.record(actor="api", action="task.execute.failed", target=task_id, detail={"error": str(exc)})
-
-            TASK_EXECUTOR.submit(execute_in_background)
-            ctx.audit_service.record(actor="api", action="task.execute.start", target=task_id, detail={"run_id": run.run_id, "background": True})
-            return task
-        run = ctx.runner.execute_run(task["run_id"])
-        return _refresh_task_from_run(ctx.store, task, run)
-
-    @app.post("/tasks/{task_id}/attempts")
-    def create_task_attempt(task_id: str) -> dict[str, Any]:
-        task = _get_record(ctx.store, "tasks", task_id)
-        _ensure_task_can_create_attempt(task)
-        workflow = ctx.workflow_service.get(task["workflow_version_id"])
-        execution_config = task.get("execution_config", {})
-        run = ctx.runner.create_run(
-            RunRequest(
-                workflow=workflow,
-                dataset_id=task["dataset_id"],
-                dataset_version=task["dataset_version"],
-                chunk_size=execution_config.get("chunk_size"),
-                concurrency=execution_config.get("concurrency"),
-                sample_repeat_times=execution_config.get("sample_repeat_times"),
-                task_config_snapshot={"skill_overrides": execution_config.get("skill_overrides", {})},
-            )
-        )
-        attempts = _task_attempts(task)
-        attempt_index = len(attempts) + 1
-        task.update(
-            {
-                "run_id": run.run_id,
-                "status": run.status,
-                "total_items": run.total_items,
-                "completed_items": 0,
-                "failed_items": 0,
-                "pass_rate": 0.0,
-                "badcase_count": 0,
-                "current_attempt": attempt_index,
-                "attempts": attempts + [_build_attempt_record(run, attempt_index)],
-                "updated_at": _now(),
-            }
-        )
-        _save_record(ctx.store, "tasks", "task_id", task)
-        ctx.audit_service.record(actor="api", action="task.attempt.create", target=task["task_id"], detail={"run_id": run.run_id, "attempt": attempt_index})
-        return task
-
-    @app.post("/tasks/{task_id}/pause")
-    def pause_task(task_id: str) -> dict[str, Any]:
-        task = _get_record(ctx.store, "tasks", task_id)
-        _ensure_task_action_allowed(task, "pause")
-        run = ctx.runner.pause_run(task["run_id"])
-        return _refresh_task_from_run(ctx.store, task, run)
-
-    @app.post("/tasks/{task_id}/resume")
-    def resume_task(task_id: str) -> dict[str, Any]:
-        task = _get_record(ctx.store, "tasks", task_id)
-        _ensure_task_action_allowed(task, "resume")
-        run = ctx.runner.resume_run(task["run_id"])
-        return _refresh_task_from_run(ctx.store, task, run)
-
-    @app.post("/tasks/{task_id}/cancel")
-    def cancel_task(task_id: str) -> dict[str, Any]:
-        task = _get_record(ctx.store, "tasks", task_id)
-        _ensure_task_action_allowed(task, "cancel")
-        run = ctx.runner.cancel_run(task["run_id"])
-        return _refresh_task_from_run(ctx.store, task, run)
-
-    @app.post("/tasks/{task_id}/retry-failed")
-    def retry_failed_task(task_id: str) -> dict[str, Any]:
-        task = _get_record(ctx.store, "tasks", task_id)
-        _ensure_task_action_allowed(task, "retry")
-        run = ctx.runner.retry_failed_items(task["run_id"])
-        return _refresh_task_from_run(ctx.store, task, run)
-
-    @app.get("/tasks/{task_id}/report")
-    def get_task_report(
-        task_id: str,
-        badcase_page: int = Query(1, ge=1),
-        badcase_page_size: int = Query(20, ge=1, le=100),
-    ) -> dict[str, Any]:
-        return _build_task_report_payload(ctx, task_id, badcase_page=badcase_page, badcase_page_size=badcase_page_size)
-
-    @app.post("/tasks/{task_id}/report/export-requests")
-    def create_report_export_request(task_id: str, request: ReportExportRequestCreate) -> dict[str, Any]:
-        return _create_report_export_request(ctx, task_id, request)
-
-    @app.get("/report-export-requests")
-    def list_report_export_requests(task_id: str | None = None, status: str | None = None) -> list[dict[str, Any]]:
-        records = [_refresh_report_export_request_status(ctx, record) for record in _list_records(ctx.store, "report_export_requests")]
-        if task_id:
-            records = [record for record in records if record.get("task_id") == task_id]
-        if status:
-            records = [record for record in records if record.get("status") == status]
-        return sorted(records, key=lambda record: str(record.get("created_at", "")), reverse=True)
-
-    @app.post("/report-export-requests/{request_id}/approve")
-    def approve_report_export_request(request_id: str, request: ReportExportApprovalRequest) -> dict[str, Any]:
-        return _approve_report_export_request(ctx, request_id, request)
-
-    @app.post("/report-export-requests/{request_id}/reject")
-    def reject_report_export_request(request_id: str, request: ReportExportApprovalRequest) -> dict[str, Any]:
-        return _reject_report_export_request(ctx, request_id, request)
-
-    @app.post("/report-export-requests/{request_id}/revoke")
-    def revoke_report_export_request(request_id: str, request: ReportExportRevokeRequest) -> dict[str, Any]:
-        return _revoke_report_export_request(ctx, request_id, request)
-
-    @app.get("/tasks/{task_id}/report/export")
-    def export_task_report(task_id: str, file_format: str = "json", role: str = "Evaluator", approval_request_id: str | None = None) -> dict[str, Any]:
-        _ensure_report_export_format(file_format)
-        approval_request: dict[str, Any] | None = None
-        if not ctx.access_control.can(role, "report:export"):
-            approval_request = _ensure_report_export_approval(ctx, task_id, file_format, role, approval_request_id)
-        payload = _build_task_report_payload(ctx, task_id, include_all_badcases=True)
-        task = payload["task"]
-        preflight = payload.get("preflight_evidence") or {}
-        if file_format == "json":
-            content = payload
-        elif file_format == "csv":
-            content = _build_task_report_export_csv(payload)
-        elif file_format == "html":
-            content = _build_task_report_export_html(payload)
-        else:
-            raise HTTPException(status_code=400, detail={"message": "file_format 仅支持 json/csv/html"})
-        ctx.audit_service.record(
-            actor=role,
-            action="task.report.export",
-            target=task_id,
-            detail={
-                "run_id": task.get("run_id"),
-                "file_format": file_format,
-                "preflight_id": preflight.get("preflight_id"),
-                "role": role,
-                "approval_request_id": approval_request.get("request_id") if approval_request else None,
-            },
-        )
-        return {
-            "task_id": task_id,
-            "run_id": task.get("run_id"),
-            "file_format": file_format,
-            "approval_request_id": approval_request.get("request_id") if approval_request else None,
-            "content": content,
-        }
-
-    @app.get("/tasks/{task_id}/results/export")
-    def export_task_results(task_id: str, file_format: str = "csv", include_steps: bool = Query(default=False)) -> dict[str, Any]:
-        """导出任务的样本级执行结果。
-
-        报告导出面向复盘指标，结果导出面向用户拿到“每条数据跑完后生成了什么”。因此这里
-        不复用报告 CSV，而是按 item 扁平化 row/context/metrics 和节点输出，方便 Excel、
-        BI 或后续人工处理继续消费。
-        """
-
-        _ensure_task_result_export_format(file_format)
-        task = _get_record(ctx.store, "tasks", task_id)
-        run = ctx.runner.get_run(task["run_id"])
-        rows = _build_task_result_export_rows(run, include_steps=include_steps)
-        if file_format == "json":
-            content: Any = rows
-        elif file_format == "jsonl":
-            content = "\n".join(json_dumps(row) for row in rows)
-        elif file_format == "csv":
-            content = _build_task_result_export_csv(rows)
-        else:
-            raise HTTPException(status_code=400, detail={"message": "file_format 仅支持 json/jsonl/csv"})
-        ctx.audit_service.record(
-            actor="api",
-            action="task.results.export",
-            target=task_id,
-            detail={
-                "run_id": task.get("run_id"),
-                "file_format": file_format,
-                "include_steps": include_steps,
-                "row_count": len(rows),
-            },
-        )
-        return {
-            "task_id": task_id,
-            "run_id": task.get("run_id"),
-            "file_format": file_format,
-            "include_steps": include_steps,
-            "row_count": len(rows),
-            "content": content,
-        }
 
     @app.get("/tasks/{task_id}/diagnostics")
     def get_task_diagnostics(task_id: str) -> dict[str, Any]:
@@ -596,16 +115,6 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         segments = build_report_segments(run)
         parameter_governance = _build_parameter_governance(task, run)
         return build_task_diagnostics(task, run, report, segments, parameter_governance)
-
-    @app.post("/tasks/{task_id}/repair-tasks/from-diagnostics")
-    def create_repair_tasks_from_diagnostics(task_id: str) -> dict[str, Any]:
-        task = _get_record(ctx.store, "tasks", task_id)
-        run = ctx.runner.get_run(task["run_id"])
-        report = aggregate_run_report(run)
-        segments = build_report_segments(run)
-        parameter_governance = _build_parameter_governance(task, run)
-        diagnostics = build_task_diagnostics(task, run, report, segments, parameter_governance)
-        return _create_repair_tasks_from_diagnostics(ctx, task, diagnostics)
 
     @app.get("/tasks/{task_id}/parameter-governance")
     def get_task_parameter_governance(task_id: str) -> dict[str, Any]:
@@ -633,7 +142,16 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/runs", response_model=RunRecord)
     def create_run(request: RunCreateRequest) -> RunRecord:
-        return ctx.runner.create_run(
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            permission="run:create",
+            action="run.create",
+            target=f"{request.dataset_id}:v{request.dataset_version}",
+            actor=request.actor,
+        )
+        run = ctx.runner.create_run(
             RunRequest(
                 workflow=request.workflow,
                 dataset_id=request.dataset_id,
@@ -644,35 +162,113 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 rate_limits=request.rate_limits,
             )
         )
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="run.create",
+            target=run.run_id,
+            result="success",
+            detail={"dataset_id": request.dataset_id, "dataset_version": request.dataset_version, "workflow_version_id": request.workflow.version_id, "role": request.role},
+        )
+        return run
 
-    @app.get("/runs", response_model=list[RunRecord])
-    def list_runs() -> list[RunRecord]:
-        return ctx.runner.list_runs()
+    @app.get("/runs")
+    def list_runs(
+        status: str | None = Query(default=None),
+        dataset_id: str | None = Query(default=None),
+        workflow_version_id: str | None = Query(default=None),
+        page: int | None = Query(default=None, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+    ) -> list[RunRecord] | dict[str, Any]:
+        if page is None:
+            # 旧接口保持完整 RunRecord[]，兼容仍依赖 item 明细的测试和外部脚本。
+            return ctx.runner.list_runs()
+        summaries = ctx.runner.list_run_summaries()
+        if status:
+            summaries = [run for run in summaries if run.get("status") == status]
+        if dataset_id:
+            summaries = [run for run in summaries if run.get("dataset_id") == dataset_id]
+        if workflow_version_id:
+            summaries = [run for run in summaries if run.get("workflow_version_id") == workflow_version_id]
+        return _paginate_records(summaries, page=page, page_size=page_size)
 
     @app.post("/runs/{run_id}/execute", response_model=RunRecord)
-    def execute_run(run_id: str) -> RunRecord:
+    def execute_run(run_id: str, role: str = Query(default="Evaluator"), actor: str = Query(default="api")) -> RunRecord:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=role,
+            permission="run:control",
+            action="run.execute",
+            target=run_id,
+            actor=actor,
+        )
         try:
-            return ctx.runner.execute_run(run_id)
+            run = ctx.runner.execute_run(run_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        ctx.audit_service.record(actor=actor, role=role, action="run.execute", target=run_id, result="success", detail={"status": run.status, "role": role})
+        return run
 
     @app.post("/runs/{run_id}/retry-failed", response_model=RunRecord)
-    def retry_failed(run_id: str) -> RunRecord:
-        return ctx.runner.retry_failed_items(run_id)
+    def retry_failed(run_id: str, role: str = Query(default="Evaluator"), actor: str = Query(default="api")) -> RunRecord:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=role,
+            permission="run:control",
+            action="run.retry_failed",
+            target=run_id,
+            actor=actor,
+        )
+        run = ctx.runner.retry_failed_items(run_id)
+        ctx.audit_service.record(actor=actor, role=role, action="run.retry_failed", target=run_id, result="success", detail={"status": run.status, "role": role})
+        return run
 
     @app.post("/runs/{run_id}/cancel", response_model=RunRecord)
-    def cancel_run(run_id: str) -> RunRecord:
-        return ctx.runner.cancel_run(run_id)
+    def cancel_run(run_id: str, role: str = Query(default="Evaluator"), actor: str = Query(default="api")) -> RunRecord:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=role,
+            permission="run:control",
+            action="run.cancel",
+            target=run_id,
+            actor=actor,
+        )
+        run = ctx.runner.cancel_run(run_id)
+        ctx.audit_service.record(actor=actor, role=role, action="run.cancel", target=run_id, result="success", detail={"status": run.status, "role": role})
+        return run
 
     @app.post("/runs/{run_id}/pause", response_model=RunRecord)
-    def pause_run(run_id: str) -> RunRecord:
-        ctx.audit_service.record(actor="api", action="run.pause", target=run_id)
-        return ctx.runner.pause_run(run_id)
+    def pause_run(run_id: str, role: str = Query(default="Evaluator"), actor: str = Query(default="api")) -> RunRecord:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=role,
+            permission="run:control",
+            action="run.pause",
+            target=run_id,
+            actor=actor,
+        )
+        run = ctx.runner.pause_run(run_id)
+        ctx.audit_service.record(actor=actor, role=role, action="run.pause", target=run_id, result="success", detail={"status": run.status, "role": role})
+        return run
 
     @app.post("/runs/{run_id}/resume", response_model=RunRecord)
-    def resume_run(run_id: str) -> RunRecord:
-        ctx.audit_service.record(actor="api", action="run.resume", target=run_id)
-        return ctx.runner.resume_run(run_id)
+    def resume_run(run_id: str, role: str = Query(default="Evaluator"), actor: str = Query(default="api")) -> RunRecord:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=role,
+            permission="run:control",
+            action="run.resume",
+            target=run_id,
+            actor=actor,
+        )
+        run = ctx.runner.resume_run(run_id)
+        ctx.audit_service.record(actor=actor, role=role, action="run.resume", target=run_id, result="success", detail={"status": run.status, "role": role})
+        return run
 
     @app.get("/runs/{run_id}", response_model=RunRecord)
     def get_run(run_id: str) -> RunRecord:
@@ -713,6 +309,7 @@ def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> d
             "请修正数据集字段，或在 Workflow 画布中调整 input_mapping。",
         ),
         _workflow_schema_mapping_check(ctx, workflow),
+        _workflow_input_expression_check(ctx, workflow, dataset.preview, dataset_fields),
         _workflow_skill_config_check(ctx, workflow, request, dataset.preview),
         _golden_coverage_check(request.evaluation_goal, dataset.model_dump(mode="json")),
         _skill_approval_check(ctx, workflow),
@@ -749,6 +346,7 @@ def _create_report_export_request(ctx: RouteContext, task_id: str, request: Repo
         "run_id": task.get("run_id"),
         "file_format": request.file_format,
         "requester_role": request.requester_role,
+        "requester_actor": request.actor,
         "requested_permission": "report:export",
         "reason": request.reason,
         "status": "pending",
@@ -758,16 +356,24 @@ def _create_report_export_request(ctx: RouteContext, task_id: str, request: Repo
     }
     _save_record(ctx.store, "report_export_requests", "request_id", record)
     ctx.audit_service.record(
-        actor=request.requester_role,
+        actor=request.actor,
+        role=request.requester_role,
         action="task.report.export.request",
         target=task_id,
-        detail={"request_id": record["request_id"], "file_format": request.file_format, "reason": request.reason, "expires_at": expires_at},
+        detail={
+            "role": request.requester_role,
+            "request_id": record["request_id"],
+            "file_format": request.file_format,
+            "reason": request.reason,
+            "expires_at": expires_at,
+        },
     )
     return record
 
 
 def _approve_report_export_request(ctx: RouteContext, request_id: str, request: ReportExportApprovalRequest) -> dict[str, Any]:
     if not ctx.access_control.can(request.approver_role, "report:export:approve"):
+        _record_report_export_approval_forbidden(ctx, request_id, action="task.report.export.approve", role=request.approver_role, actor=request.actor)
         raise AegisQAError(
             "REPORT_EXPORT_APPROVAL_FORBIDDEN",
             "当前角色没有审批报告导出的权限。",
@@ -795,6 +401,7 @@ def _approve_report_export_request(ctx: RouteContext, request_id: str, request: 
         {
             "status": "approved",
             "approved_by": request.approver_role,
+            "approved_by_actor": request.actor,
             "approval_note": request.note,
             "approved_at": now,
             "updated_at": now,
@@ -802,13 +409,16 @@ def _approve_report_export_request(ctx: RouteContext, request_id: str, request: 
     )
     _save_record(ctx.store, "report_export_requests", "request_id", record)
     ctx.audit_service.record(
-        actor=request.approver_role,
+        actor=request.actor,
+        role=request.approver_role,
         action="task.report.export.approve",
         target=str(record.get("task_id")),
         detail={
+            "role": request.approver_role,
             "request_id": request_id,
             "file_format": record.get("file_format"),
             "requester_role": record.get("requester_role"),
+            "requester_actor": record.get("requester_actor"),
             "expires_at": record.get("expires_at"),
         },
     )
@@ -817,6 +427,7 @@ def _approve_report_export_request(ctx: RouteContext, request_id: str, request: 
 
 def _reject_report_export_request(ctx: RouteContext, request_id: str, request: ReportExportApprovalRequest) -> dict[str, Any]:
     if not ctx.access_control.can(request.approver_role, "report:export:approve"):
+        _record_report_export_approval_forbidden(ctx, request_id, action="task.report.export.reject", role=request.approver_role, actor=request.actor)
         raise AegisQAError(
             "REPORT_EXPORT_APPROVAL_FORBIDDEN",
             "当前角色没有审批报告导出的权限。",
@@ -843,6 +454,7 @@ def _reject_report_export_request(ctx: RouteContext, request_id: str, request: R
         {
             "status": "rejected",
             "rejected_by": request.approver_role,
+            "rejected_by_actor": request.actor,
             "rejection_note": request.note,
             "rejected_at": now,
             "updated_at": now,
@@ -850,10 +462,18 @@ def _reject_report_export_request(ctx: RouteContext, request_id: str, request: R
     )
     _save_record(ctx.store, "report_export_requests", "request_id", record)
     ctx.audit_service.record(
-        actor=request.approver_role,
+        actor=request.actor,
+        role=request.approver_role,
         action="task.report.export.reject",
         target=str(record.get("task_id")),
-        detail={"request_id": request_id, "file_format": record.get("file_format"), "requester_role": record.get("requester_role"), "note": request.note},
+        detail={
+            "role": request.approver_role,
+            "request_id": request_id,
+            "file_format": record.get("file_format"),
+            "requester_role": record.get("requester_role"),
+            "requester_actor": record.get("requester_actor"),
+            "note": request.note,
+        },
     )
     return record
 
@@ -879,6 +499,7 @@ def _revoke_report_export_request(ctx: RouteContext, request_id: str, request: R
         {
             "status": "revoked",
             "revoked_by": request.requester_role,
+            "revoked_by_actor": request.actor,
             "revoke_reason": request.reason,
             "revoked_at": now,
             "updated_at": now,
@@ -886,10 +507,11 @@ def _revoke_report_export_request(ctx: RouteContext, request_id: str, request: R
     )
     _save_record(ctx.store, "report_export_requests", "request_id", record)
     ctx.audit_service.record(
-        actor=request.requester_role,
+        actor=request.actor,
+        role=request.requester_role,
         action="task.report.export.revoke",
         target=str(record.get("task_id")),
-        detail={"request_id": request_id, "file_format": record.get("file_format"), "reason": request.reason},
+        detail={"role": request.requester_role, "request_id": request_id, "file_format": record.get("file_format"), "reason": request.reason},
     )
     return record
 
@@ -900,9 +522,10 @@ def _ensure_report_export_approval(
     file_format: str,
     role: str,
     approval_request_id: str | None,
+    actor: str = "api",
 ) -> dict[str, Any]:
     if not approval_request_id:
-        _record_report_export_denied(ctx, task_id, file_format, role, approval_request_id)
+        _record_report_export_denied(ctx, task_id, file_format, role, approval_request_id, actor=actor)
         raise HTTPException(
             status_code=403,
             detail={
@@ -914,7 +537,7 @@ def _ensure_report_export_approval(
     try:
         record = _get_record(ctx.store, "report_export_requests", approval_request_id)
     except KeyError as exc:
-        _record_report_export_denied(ctx, task_id, file_format, role, approval_request_id)
+        _record_report_export_denied(ctx, task_id, file_format, role, approval_request_id, actor=actor)
         raise AegisQAError(
             "REPORT_EXPORT_APPROVAL_INVALID",
             "报告导出审批不存在或无法用于本次导出。",
@@ -923,7 +546,7 @@ def _ensure_report_export_approval(
         ) from exc
     record = _refresh_report_export_request_status(ctx, record)
     if record.get("status") == "expired":
-        _record_report_export_denied(ctx, task_id, file_format, role, approval_request_id)
+        _record_report_export_denied(ctx, task_id, file_format, role, approval_request_id, actor=actor)
         raise AegisQAError(
             "REPORT_EXPORT_APPROVAL_EXPIRED",
             "报告导出审批已过期，不能继续用于导出。",
@@ -938,7 +561,7 @@ def _ensure_report_export_approval(
     }
     failed_fields = [field for field, failed in mismatch.items() if failed]
     if failed_fields:
-        _record_report_export_denied(ctx, task_id, file_format, role, approval_request_id)
+        _record_report_export_denied(ctx, task_id, file_format, role, approval_request_id, actor=actor)
         raise AegisQAError(
             "REPORT_EXPORT_APPROVAL_INVALID",
             "报告导出审批与当前导出请求不匹配，或尚未审批通过。",
@@ -991,16 +614,31 @@ def _parse_report_export_datetime(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _record_report_export_denied(ctx: RouteContext, task_id: str, file_format: str, role: str, approval_request_id: str | None) -> None:
+def _record_report_export_denied(ctx: RouteContext, task_id: str, file_format: str, role: str, approval_request_id: str | None, *, actor: str = "api") -> None:
     ctx.audit_service.record(
-        actor=role,
+        actor=actor,
+        role=role,
         action="task.report.export.denied",
         target=task_id,
         detail={
+            "role": role,
             "file_format": file_format,
             "required_permission": "report:export",
             "approval_request_id": approval_request_id,
         },
+    )
+
+
+def _record_report_export_approval_forbidden(ctx: RouteContext, request_id: str, *, action: str, role: str, actor: str) -> None:
+    trace_id = f"trace_{uuid4().hex[:12]}"
+    ctx.audit_service.record(
+        actor=actor,
+        role=role,
+        action=action,
+        target=request_id,
+        result="forbidden",
+        trace_id=trace_id,
+        detail={"role": role, "required_permission": "report:export:approve", "request_id": request_id, "trace_id": trace_id},
     )
 
 
@@ -1019,6 +657,17 @@ def _build_task_report_payload(
     *,
     badcase_page: int = 1,
     badcase_page_size: int = 20,
+    step_page: int = 1,
+    step_page_size: int = 20,
+    step_query: str | None = None,
+    segment_page: int = 1,
+    segment_page_size: int = 20,
+    segment_query: str | None = None,
+    root_cause_page: int = 1,
+    root_cause_page_size: int = 20,
+    root_cause_query: str | None = None,
+    diagnostic_step_page: int = 1,
+    diagnostic_step_page_size: int = 20,
     include_all_badcases: bool = False,
 ) -> dict[str, Any]:
     task = _get_record(ctx.store, "tasks", task_id)
@@ -1027,6 +676,7 @@ def _build_task_report_payload(
     segments = build_report_segments(run)
     parameter_governance = _build_parameter_governance(task, run)
     diagnostics = build_task_diagnostics(task, run, report, segments, parameter_governance)
+    include_all_details = include_all_badcases
     all_badcases = [badcase.model_dump(mode="json") for badcase in report.badcases]
     page_badcases, badcase_pagination = _paginate_badcases(
         all_badcases,
@@ -1034,6 +684,45 @@ def _build_task_report_payload(
         page_size=badcase_page_size,
         include_all=include_all_badcases,
     )
+    step_distribution = _filter_report_detail_rows(_build_step_distribution(run), step_query)
+    page_step_distribution, step_distribution_pagination = _paginate_report_detail_rows(
+        step_distribution,
+        page=step_page,
+        page_size=step_page_size,
+        include_all=include_all_details,
+    )
+    segment_rows = _filter_report_detail_rows([segment.model_dump(mode="json") for segment in segments], segment_query)
+    page_segments, segments_pagination = _paginate_report_detail_rows(
+        segment_rows,
+        page=segment_page,
+        page_size=segment_page_size,
+        include_all=include_all_details,
+    )
+    diagnostics_payload = deepcopy(diagnostics)
+    root_causes = _filter_report_detail_rows(list(diagnostics_payload.get("root_causes") or []), root_cause_query)
+    page_root_causes, root_causes_pagination = _paginate_report_detail_rows(
+        root_causes,
+        page=root_cause_page,
+        page_size=root_cause_page_size,
+        include_all=include_all_details,
+    )
+    step_health = _filter_report_detail_rows(list(diagnostics_payload.get("step_health") or []), step_query)
+    page_step_health, step_health_pagination = _paginate_report_detail_rows(
+        step_health,
+        page=diagnostic_step_page,
+        page_size=diagnostic_step_page_size,
+        include_all=include_all_details,
+    )
+    weak_segments = _filter_report_detail_rows(list(diagnostics_payload.get("weak_segments") or []), segment_query)
+    page_weak_segments, weak_segments_pagination = _paginate_report_detail_rows(
+        weak_segments,
+        page=segment_page,
+        page_size=segment_page_size,
+        include_all=include_all_details,
+    )
+    diagnostics_payload["root_causes"] = page_root_causes
+    diagnostics_payload["step_health"] = page_step_health
+    diagnostics_payload["weak_segments"] = page_weak_segments
     report_payload = report.model_dump(mode="json")
     # 页面报告只需要当前页坏例明细；聚合指标仍来自完整 RunReport。
     # 导出报告会显式 include_all_badcases=True，确保离线报告不被分页截断。
@@ -1043,14 +732,22 @@ def _build_task_report_payload(
         "task_summary": _build_task_report_summary(task, run),
         "version_snapshot": _build_task_report_version_snapshot(task, run),
         "preflight_evidence": task.get("preflight_result"),
-        "step_distribution": _build_step_distribution(run),
+        "step_distribution": page_step_distribution,
+        "step_distribution_pagination": step_distribution_pagination,
         "judge_score_distribution": _build_judge_score_distribution(run),
-        "segments": [segment.model_dump(mode="json") for segment in segments],
+        "segments": page_segments,
+        "segments_pagination": segments_pagination,
         "recommendations": [recommendation.model_dump(mode="json") for recommendation in build_report_recommendations(segments)],
         "quality_decision": _build_quality_decision(task, run, report, segments),
         "parameter_governance": parameter_governance,
         "budget_status": _build_budget_status(task, report),
-        "diagnostics": diagnostics,
+        "release_context": _build_task_release_context(ctx, task),
+        "diagnostics": diagnostics_payload,
+        "diagnostics_pagination": {
+            "root_causes": root_causes_pagination,
+            "step_health": step_health_pagination,
+            "weak_segments": weak_segments_pagination,
+        },
         "report": report_payload,
         "badcases": page_badcases,
         "badcase_pagination": badcase_pagination,
@@ -1058,8 +755,49 @@ def _build_task_report_payload(
             "json": f"/tasks/{task['task_id']}/report/export?file_format=json",
             "csv": f"/tasks/{task['task_id']}/report/export?file_format=csv",
             "html": f"/tasks/{task['task_id']}/report/export?file_format=html",
+            "offline_package": f"/tasks/{task['task_id']}/report/offline-package",
         },
     }
+
+
+def _build_task_release_context(ctx: RouteContext, task: dict[str, Any]) -> dict[str, Any]:
+    baselines = [
+        baseline
+        for baseline in _list_records(ctx.store, "experiment_baselines")
+        if _baseline_matches_task(baseline, task)
+    ]
+    release_records = [
+        record
+        for record in _list_records(ctx.store, "workflow_release_records")
+        if _release_record_matches_task(record, task)
+    ]
+    return {
+        "baselines": sorted(baselines, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)[:5],
+        "release_records": sorted(release_records, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)[:5],
+    }
+
+
+def _baseline_matches_task(baseline: dict[str, Any], task: dict[str, Any]) -> bool:
+    scope = baseline.get("scope") if isinstance(baseline.get("scope"), dict) else {}
+    if scope.get("dataset_id") != task.get("dataset_id"):
+        return False
+    workflow_id = scope.get("workflow_id")
+    if not workflow_id:
+        return True
+    return _task_workflow_matches_scope(task, str(workflow_id))
+
+
+def _release_record_matches_task(record: dict[str, Any], task: dict[str, Any]) -> bool:
+    task_id = str(task.get("task_id"))
+    if record.get("source_task_id") == task_id or record.get("retest_task_id") == task_id:
+        return True
+    workflow_version_id = str(record.get("workflow_version_id") or "")
+    return bool(workflow_version_id and workflow_version_id == str(task.get("workflow_version_id") or ""))
+
+
+def _task_workflow_matches_scope(task: dict[str, Any], workflow_scope: str) -> bool:
+    workflow_version_id = str(task.get("workflow_version_id") or "")
+    return task.get("workflow_id") == workflow_scope or workflow_version_id == workflow_scope or workflow_version_id.startswith(f"{workflow_scope}:")
 
 
 def _paginate_badcases(
@@ -1088,6 +826,49 @@ def _paginate_badcases(
     }
 
 
+def _paginate_report_detail_rows(
+    rows: list[dict[str, Any]],
+    *,
+    page: int,
+    page_size: int,
+    include_all: bool,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    total_items = len(rows)
+    if include_all:
+        return rows, {
+            "page": 1,
+            "page_size": total_items,
+            "total_items": total_items,
+            "total_pages": 1 if total_items else 0,
+        }
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 1), 100)
+    start = (safe_page - 1) * safe_page_size
+    return rows[start : start + safe_page_size], {
+        "page": safe_page,
+        "page_size": safe_page_size,
+        "total_items": total_items,
+        "total_pages": ceil(total_items / safe_page_size) if total_items else 0,
+    }
+
+
+def _filter_report_detail_rows(rows: list[dict[str, Any]], query: str | None) -> list[dict[str, Any]]:
+    keyword = str(query or "").strip().lower()
+    if not keyword:
+        return rows
+    return [row for row in rows if _report_detail_row_matches(row, keyword)]
+
+
+def _report_detail_row_matches(value: Any, keyword: str) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, dict):
+        return any(_report_detail_row_matches(item, keyword) for item in value.values())
+    if isinstance(value, list):
+        return any(_report_detail_row_matches(item, keyword) for item in value)
+    return keyword in str(value).lower()
+
+
 def _paginate_records(records: list[dict[str, Any]], *, page: int, page_size: int) -> dict[str, Any]:
     total_items = len(records)
     safe_page = max(page, 1)
@@ -1110,7 +891,10 @@ def _ensure_task_result_export_format(file_format: str) -> None:
 
 
 def _build_task_result_export_rows(run: RunRecord, *, include_steps: bool) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+    return list(_iter_task_result_export_rows(run, include_steps=include_steps))
+
+
+def _iter_task_result_export_rows(run: RunRecord, *, include_steps: bool) -> Iterator[dict[str, Any]]:
     for item in run.items:
         context_snapshot = item.context_snapshot or {}
         row: dict[str, Any] = {
@@ -1141,8 +925,54 @@ def _build_task_result_export_rows(run: RunRecord, *, include_steps: bool) -> li
                 _flatten_value(f"step.{step.step_id}.output", step.output_snapshot, row)
                 _flatten_value(f"step.{step.step_id}.metrics", step.metrics, row)
                 _flatten_value(f"step.{step.step_id}.error", step.error or {}, row)
-        rows.append(row)
-    return rows
+        yield row
+
+
+def _task_result_export_shape(run: RunRecord, *, include_steps: bool) -> tuple[int, list[str]]:
+    base_columns = _task_result_export_base_columns()
+    seen = set(base_columns)
+    dynamic_columns: set[str] = set()
+    row_count = 0
+    for row in _iter_task_result_export_rows(run, include_steps=include_steps):
+        row_count += 1
+        dynamic_columns.update(key for key in row if key not in seen)
+    return row_count, base_columns + sorted(dynamic_columns)
+
+
+def _iter_task_result_export_content(
+    run: RunRecord,
+    *,
+    file_format: str,
+    include_steps: bool,
+    columns: list[str],
+) -> Iterable[str]:
+    if file_format == "csv":
+        yield _task_result_export_csv_line(columns)
+        for row in _iter_task_result_export_rows(run, include_steps=include_steps):
+            yield _task_result_export_csv_line(columns, row)
+        return
+    if file_format == "jsonl":
+        for row in _iter_task_result_export_rows(run, include_steps=include_steps):
+            yield json_dumps(row) + "\n"
+        return
+    yield "["
+    first = True
+    for row in _iter_task_result_export_rows(run, include_steps=include_steps):
+        if not first:
+            yield ","
+        yield json_dumps(row)
+        first = False
+    yield "]"
+
+
+def _task_result_export_csv_line(columns: list[str], row: dict[str, Any] | None = None) -> str:
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=columns, lineterminator="\n")
+    if row is None:
+        writer.writeheader()
+    else:
+        writer.writerow({column: _csv_scalar(row.get(column)) for column in columns})
+    return output.getvalue()
 
 
 def _build_task_result_export_csv(rows: list[dict[str, Any]]) -> str:
@@ -1156,7 +986,14 @@ def _build_task_result_export_csv(rows: list[dict[str, Any]]) -> str:
 
 
 def _task_result_export_columns(rows: list[dict[str, Any]]) -> list[str]:
-    base_columns = [
+    base_columns = _task_result_export_base_columns()
+    seen = set(base_columns)
+    dynamic_columns = sorted({key for row in rows for key in row if key not in seen})
+    return base_columns + dynamic_columns
+
+
+def _task_result_export_base_columns() -> list[str]:
+    return [
         "run_id",
         "item_id",
         "row_id",
@@ -1167,9 +1004,6 @@ def _task_result_export_columns(rows: list[dict[str, Any]]) -> list[str]:
         "started_at",
         "finished_at",
     ]
-    seen = set(base_columns)
-    dynamic_columns = sorted({key for row in rows for key in row if key not in seen})
-    return base_columns + dynamic_columns
 
 
 def _flatten_value(prefix: str, value: Any, target: dict[str, Any]) -> None:
@@ -1187,12 +1021,26 @@ def _csv_scalar(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
-        return value
+        return _csv_formula_safe_text(value)
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (int, float)):
         return str(value)
-    return json_dumps(value)
+    return _csv_formula_safe_text(json_dumps(value))
+
+
+def _csv_formula_safe_text(value: str) -> str:
+    """阻止 CSV 被 Excel/WPS 打开时把用户文本当公式执行。
+
+    csv.writer 只会处理逗号、引号和换行，不会阻止 `=HYPERLINK(...)`、
+    `+SUM(...)` 这类内容被表格软件解释。这里保留原始文本，只在危险前缀前
+    增加单引号；同时检查左侧空白后的首字符，覆盖 ` \t@cmd` 这类绕过。
+    """
+
+    stripped = value.lstrip()
+    if stripped[:1] in {"=", "+", "-", "@"}:
+        return f"'{value}"
+    return value
 
 
 def _build_task_report_export_csv(payload: dict[str, Any]) -> str:
@@ -1202,16 +1050,20 @@ def _build_task_report_export_csv(payload: dict[str, Any]) -> str:
     quality_decision = payload.get("quality_decision") or {}
     output = io.StringIO(newline="")
     writer = csv.writer(output)
-    writer.writerow(["section", "field", "value", "details"])
-    writer.writerow(["metric", "task_id", task.get("task_id"), ""])
-    writer.writerow(["metric", "run_id", task.get("run_id"), ""])
-    writer.writerow(["metric", "pass_rate", report.get("pass_rate"), ""])
-    writer.writerow(["metric", "badcase_count", len(payload.get("badcases") or []), ""])
-    writer.writerow(["preflight", "preflight_id", preflight.get("preflight_id") or "", preflight.get("summary") or ""])
-    writer.writerow(["preflight", "preflight_status", preflight.get("status") or "", ""])
+
+    def write_row(values: list[Any]) -> None:
+        writer.writerow([_csv_scalar(value) for value in values])
+
+    write_row(["section", "field", "value", "details"])
+    write_row(["metric", "task_id", task.get("task_id"), ""])
+    write_row(["metric", "run_id", task.get("run_id"), ""])
+    write_row(["metric", "pass_rate", report.get("pass_rate"), ""])
+    write_row(["metric", "badcase_count", len(payload.get("badcases") or []), ""])
+    write_row(["preflight", "preflight_id", preflight.get("preflight_id") or "", preflight.get("summary") or ""])
+    write_row(["preflight", "preflight_status", preflight.get("status") or "", ""])
     for check in preflight.get("checks") or []:
-        writer.writerow(["preflight_check", check.get("check_id"), check.get("status"), check.get("message")])
-    writer.writerow([
+        write_row(["preflight_check", check.get("check_id"), check.get("status"), check.get("message")])
+    write_row([
         "quality_decision",
         "status",
         quality_decision.get("status") or quality_decision.get("decision") or "",
@@ -1222,11 +1074,11 @@ def _build_task_report_export_csv(payload: dict[str, Any]) -> str:
         for segment in segments:
             segment_name = f"{segment.get('segment_key', 'segment')}={segment.get('segment_value', '')}"
             details = f"sample_count={segment.get('sample_count', 0)};badcase_count={segment.get('badcase_count', 0)}"
-            writer.writerow(["segment", segment_name, segment.get("pass_rate"), details])
+            write_row(["segment", segment_name, segment.get("pass_rate"), details])
     else:
-        writer.writerow(["segment", "all", report.get("pass_rate"), "sample_count=all"])
+        write_row(["segment", "all", report.get("pass_rate"), "sample_count=all"])
     for badcase in payload.get("badcases") or []:
-        writer.writerow(["badcase", badcase.get("item_id") or badcase.get("badcase_id"), badcase.get("status"), badcase.get("reason")])
+        write_row(["badcase", badcase.get("item_id") or badcase.get("badcase_id"), badcase.get("status"), badcase.get("reason")])
     return output.getvalue().strip()
 
 
@@ -1250,7 +1102,7 @@ def _html_json_section(title: str, content: Any) -> str:
     return f"<h2>{escape(title)}</h2><pre>{escape(json_dumps(content))}</pre>"
 
 
-def _save_task_preflight(ctx: RouteContext, preflight: dict[str, Any]) -> dict[str, Any]:
+def _save_task_preflight(ctx: RouteContext, preflight: dict[str, Any], *, actor: str = "api", role: str = "Evaluator") -> dict[str, Any]:
     record = {
         **deepcopy(preflight),
         "preflight_id": f"preflight-{uuid4().hex[:12]}",
@@ -1258,10 +1110,11 @@ def _save_task_preflight(ctx: RouteContext, preflight: dict[str, Any]) -> dict[s
     }
     _save_record(ctx.store, "task_preflights", "preflight_id", record)
     ctx.audit_service.record(
-        actor="api",
+        actor=actor,
+        role=role,
         action="task.preflight",
         target=record["preflight_id"],
-        detail={"status": record.get("status"), "workflow_version_id": record.get("workflow_version_id")},
+        detail={"status": record.get("status"), "workflow_version_id": record.get("workflow_version_id"), "role": role},
     )
     return record
 
@@ -1423,25 +1276,178 @@ def _collect_required_row_fields(workflow: Any) -> set[str]:
     fields: set[str] = set()
     for step in workflow.steps:
         for source in step.input_mapping.values():
-            if not isinstance(source, str) or not source.startswith("row."):
-                continue
-            field = source.removeprefix("row.").split(".")[0]
-            if field:
-                fields.add(field)
+            fields.update(collect_mapping_row_fields(source))
     return fields
 
 
 def _workflow_schema_mapping_check(ctx: RouteContext, workflow: Any) -> dict[str, Any]:
     issues = validate_workflow_step_contracts(ctx.registry, list(workflow.steps), include_skill_availability=False)
-    mapping_issues = [issue for issue in issues if issue.get("code") in {"REQUIRED_INPUT_MAPPING_MISSING", "INPUT_MAPPING_PATH_EMPTY", "OUTPUT_MAPPING_PATH_EMPTY"}]
+    mapping_issues = [
+        issue
+        for issue in issues
+        if issue.get("code") in {"REQUIRED_INPUT_MAPPING_MISSING", "INPUT_MAPPING_PATH_EMPTY", "OUTPUT_MAPPING_PATH_EMPTY", "INPUT_MAPPING_EXPRESSION_INVALID"}
+    ]
     return _preflight_check(
         "workflow_schema_mapping",
         "Skill 入参映射",
         "blocked" if mapping_issues else "passed",
-        "Workflow 的 Skill 必填入参和输出写入路径均完整。" if not mapping_issues else "Workflow 存在未配置或为空的 Skill 字段映射。",
+        "Workflow 的 Skill 必填入参和输出写入路径均完整。" if not mapping_issues else "Workflow 存在未配置、为空或语法不安全的 Skill 字段映射。",
         {"issues": mapping_issues},
         "请在 Workflow 画布中选中对应节点，补齐字段映射或输出写入路径后重新发布。",
     )
+
+
+def _workflow_input_expression_check(
+    ctx: RouteContext,
+    workflow: Any,
+    preview_rows: list[dict[str, Any]],
+    dataset_fields: set[str],
+) -> dict[str, Any]:
+    issues: list[dict[str, Any]] = []
+    seen_issue_keys: set[tuple[str, str, str, str]] = set()
+    has_blocking_issue = False
+    rows_to_check = preview_rows or [{}]
+    for row_index, sample_row in enumerate(rows_to_check):
+        runtime_context: dict[str, Any] = {"row": sample_row, "context": {}, "metrics": {}, "artifacts": {}, "errors": [], "steps": {}}
+        for step in workflow.steps:
+            try:
+                skill = ctx.registry.get(step.skill_ref)
+            except KeyError:
+                continue
+            for field, expression in (step.input_mapping or {}).items():
+                if not isinstance(expression, str) or not expression.strip():
+                    continue
+                try:
+                    resolve_input_mapping({str(field): expression}, runtime_context, _single_input_schema(skill.manifest.input_schema, str(field)))
+                except MappingPathError as exc:
+                    missing_path = _missing_path_from_error(str(exc))
+                    severity = _input_expression_issue_severity(missing_path, dataset_fields)
+                    has_blocking_issue = has_blocking_issue or severity == "blocked"
+                    _append_unique_input_expression_issue(
+                        issues,
+                        seen_issue_keys,
+                        {
+                            "code": "INPUT_MAPPING_EXPRESSION_PATH_MISSING" if _missing_path_from_error(str(exc)) else "INPUT_MAPPING_EXPRESSION_INVALID",
+                            "step_id": step.step_id,
+                            "skill_ref": step.skill_ref,
+                            "field_path": str(field),
+                            "expression": expression,
+                            "message": str(exc),
+                            "missing_path": missing_path,
+                            "severity": severity,
+                        },
+                        row_index,
+                    )
+                except TypeMismatchError as exc:
+                    has_blocking_issue = True
+                    _append_unique_input_expression_issue(
+                        issues,
+                        seen_issue_keys,
+                        {
+                            "code": "INPUT_MAPPING_EXPRESSION_TYPE_MISMATCH",
+                            "step_id": step.step_id,
+                            "skill_ref": step.skill_ref,
+                            "field_path": str(field),
+                            "expression": expression,
+                            "message": str(exc),
+                            "expected_type": exc.expected_type,
+                            "actual_type": exc.actual_type,
+                        },
+                        row_index,
+                    )
+            output = {field: _placeholder_for_schema(schema) for field, schema in _schema_properties(skill.manifest.output_schema).items()}
+            runtime_context[step.step_id] = deepcopy(output)
+            runtime_context["steps"][step.step_id] = {"input": {}, "output": output}
+            for output_field, target_path in (step.output_mapping or {}).items():
+                if output_field in output and isinstance(target_path, str) and target_path.strip():
+                    try:
+                        set_by_path(runtime_context, target_path, output[output_field])
+                    except MappingPathError:
+                        # 输出路径结构问题由 schema mapping check 报告；这里专注 input 表达式。
+                        continue
+    return _preflight_check(
+        "workflow_input_expressions",
+        "输入表达式",
+        "blocked" if has_blocking_issue else "warning" if issues else "passed",
+        "Workflow 输入表达式可被当前数据样本解析。" if not issues else "Workflow 输入表达式在当前数据样本上存在缺失路径或类型问题。",
+        {"issues": issues},
+        "请在 Workflow 画布中修正对应节点 input_mapping，或使用 `??` 为可缺失字段设置默认值。",
+    )
+
+
+def _single_input_schema(input_schema: dict[str, Any], field: str) -> dict[str, Any]:
+    properties = _schema_properties(input_schema)
+    required = input_schema.get("required", [])
+    field_schema = properties.get(field, {})
+    return {
+        "type": "object",
+        "properties": {field: field_schema if isinstance(field_schema, dict) else {}},
+        "required": [field] if isinstance(required, list) and field in required else [],
+    }
+
+
+def _schema_properties(schema: dict[str, Any]) -> dict[str, Any]:
+    properties = schema.get("properties", {})
+    return properties if isinstance(properties, dict) else {}
+
+
+def _missing_path_from_error(message: str) -> str | None:
+    prefix = "路径不存在："
+    if prefix not in message:
+        return None
+    return message.split(prefix, 1)[1].strip() or None
+
+
+def _input_expression_issue_severity(missing_path: str | None, dataset_fields: set[str]) -> str:
+    """区分字段整体缺失和行级缺值。
+
+    字段整体不存在已经会被 `field_mapping` 阻断；字段存在但某些样本缺值时，
+    任务仍应允许执行，让报告诊断把问题归因到数据质量。
+    """
+
+    if missing_path and missing_path.startswith("row."):
+        field = missing_path.split(".", 1)[1]
+        return "warning" if field in dataset_fields else "blocked"
+    return "blocked"
+
+
+def _append_unique_input_expression_issue(issues: list[dict[str, Any]], seen_issue_keys: set[tuple[str, str, str, str]], issue: dict[str, Any], row_index: int) -> None:
+    key = (
+        str(issue.get("code") or ""),
+        str(issue.get("step_id") or ""),
+        str(issue.get("field_path") or ""),
+        str(issue.get("message") or ""),
+    )
+    if key in seen_issue_keys:
+        return
+    seen_issue_keys.add(key)
+    issue["row_index"] = row_index
+    if issue.get("missing_path") is None:
+        issue.pop("missing_path", None)
+    issues.append(issue)
+
+
+def _placeholder_for_schema(schema: dict[str, Any]) -> Any:
+    expected = schema.get("type")
+    if isinstance(expected, list):
+        expected = expected[0] if expected else None
+    if schema.get("enum"):
+        enum_values = schema["enum"]
+        if isinstance(enum_values, list) and enum_values:
+            return enum_values[0]
+    if expected == "string":
+        return "__schema_string__"
+    if expected == "number":
+        return 1.0
+    if expected == "integer":
+        return 1
+    if expected == "boolean":
+        return True
+    if expected == "array":
+        return []
+    if expected == "object":
+        return {}
+    return None
 
 
 def _workflow_skill_config_check(ctx: RouteContext, workflow: Any, request: TaskPreflightRequest, preview_rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1717,6 +1723,8 @@ def _transition_repair_task(
     allowed_statuses: set[str],
     updates: dict[str, Any],
     audit_action: str,
+    actor: str = "api",
+    role: str | None = None,
 ) -> dict[str, Any]:
     """更新修复任务状态，并在非法状态时返回稳定错误。
 
@@ -1739,7 +1747,10 @@ def _transition_repair_task(
         )
     record.update(updates)
     _save_record(ctx.store, "repair_tasks", "repair_task_id", record)
-    ctx.audit_service.record(actor="api", action=audit_action, target=repair_task_id, detail={"status": record.get("status")})
+    detail = {"status": record.get("status")}
+    if role:
+        detail["role"] = role
+    ctx.audit_service.record(actor=actor, role=role, action=audit_action, target=repair_task_id, detail=detail)
     return record
 
 
@@ -1804,7 +1815,7 @@ def _repair_action_evaluate_ci_gate(ctx: RouteContext, repair_task: dict[str, An
     return evaluation
 
 
-def _repair_action_retest_and_compare(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+def _repair_action_retest_and_compare(ctx: RouteContext, repair_task: dict[str, Any], *, actor: str = "api", role: str | None = "Evaluator") -> dict[str, Any]:
     """从修复任务发起一次复跑，并把复跑前后指标差异写成可解释结果。"""
 
     task = _get_record(ctx.store, "tasks", str(repair_task.get("source_task_id")))
@@ -1847,10 +1858,11 @@ def _repair_action_retest_and_compare(ctx: RouteContext, repair_task: dict[str, 
     )
     _save_record(ctx.store, "tasks", "task_id", task)
     ctx.audit_service.record(
-        actor="api",
+        actor=actor,
+        role=role,
         action="task.attempt.create_from_repair",
         target=task["task_id"],
-        detail={"run_id": new_run.run_id, "attempt": attempt_index, "repair_task_id": repair_task["repair_task_id"]},
+        detail={"role": role, "run_id": new_run.run_id, "attempt": attempt_index, "repair_task_id": repair_task["repair_task_id"]},
     )
 
     executed_run = ctx.runner.execute_run(new_run.run_id)
@@ -2329,7 +2341,13 @@ def _repair_action_create_prompt_skill_candidate(ctx: RouteContext, repair_task:
     }
 
 
-def _repair_action_create_workflow_draft_from_version_diff(ctx: RouteContext, repair_task: dict[str, Any]) -> dict[str, Any]:
+def _repair_action_create_workflow_draft_from_version_diff(
+    ctx: RouteContext,
+    repair_task: dict[str, Any],
+    *,
+    actor: str = "api",
+    role: str | None = "Evaluator",
+) -> dict[str, Any]:
     """从版本差异生成可编辑 Workflow 草稿。
 
     草稿默认把 baseline 的 Prompt/模型/Skill 引用值应用到当前图上，但不发布。
@@ -2357,7 +2375,13 @@ def _repair_action_create_workflow_draft_from_version_diff(ctx: RouteContext, re
         "updated_at": now,
     }
     _save_workflow_draft(ctx.store, draft)
-    ctx.audit_service.record(actor="api", action="workflow_draft.create_from_version_diff", target=draft["draft_id"], detail={"repair_task_id": repair_task.get("repair_task_id")})
+    ctx.audit_service.record(
+        actor=actor,
+        role=role,
+        action="workflow_draft.create_from_version_diff",
+        target=draft["draft_id"],
+        detail={"role": role, "repair_task_id": repair_task.get("repair_task_id")},
+    )
     return {
         "status": "created",
         "draft": draft,
@@ -2643,7 +2667,15 @@ def _repair_action_link_target(repair_task: dict[str, Any], action: str) -> dict
     return {"status": "linked", "url": link_map[action], "source_task_id": task_id}
 
 
-def _append_repair_task_action(ctx: RouteContext, repair_task: dict[str, Any], action: str, result: dict[str, Any]) -> dict[str, Any]:
+def _append_repair_task_action(
+    ctx: RouteContext,
+    repair_task: dict[str, Any],
+    action: str,
+    result: dict[str, Any],
+    *,
+    actor: str = "api",
+    role: str | None = None,
+) -> dict[str, Any]:
     # action_history 是修复闭环的审计骨架，只保存摘要，完整结果仍由对应业务表承载。
     action_time = _now()
     history = list(repair_task.get("action_history") or [])
@@ -2663,7 +2695,10 @@ def _append_repair_task_action(ctx: RouteContext, repair_task: dict[str, Any], a
     repair_task["last_action_result"] = {"action": action, "result": result, "created_at": action_time}
     repair_task["updated_at"] = action_time
     _save_record(ctx.store, "repair_tasks", "repair_task_id", repair_task)
-    ctx.audit_service.record(actor="api", action=f"repair_task.action.{action}", target=repair_task["repair_task_id"], detail={"status": result.get("status")})
+    detail = {"status": result.get("status")}
+    if role:
+        detail["role"] = role
+    ctx.audit_service.record(actor=actor, role=role, action=f"repair_task.action.{action}", target=repair_task["repair_task_id"], detail=detail)
     return repair_task
 
 

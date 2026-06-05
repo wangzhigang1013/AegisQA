@@ -1,41 +1,24 @@
 import {
-  ApiOutlined,
-  BranchesOutlined,
-  CheckCircleOutlined,
-  CodeOutlined,
-  DeleteOutlined,
   DeploymentUnitOutlined,
-  InfoCircleOutlined,
-  PlayCircleOutlined,
-  PlusOutlined,
-  RedoOutlined,
   SaveOutlined,
-  SearchOutlined,
-  UndoOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   addEdge,
-  Background,
-  Controls,
   MarkerType,
-  MiniMap,
-  ReactFlow,
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
   type Connection,
   type Edge,
 } from '@xyflow/react';
-import { Alert, Button, Card, Col, Collapse, Descriptions, Divider, Drawer, Form, Input, InputNumber, Row, Segmented, Select, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Col, Row, Space, Tag, Typography } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { ApiError, api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import { demoSkills, demoWorkflowGraph } from '../data/demo';
-import type { DatasetVersion, GraphIssue, GraphValidationResult, SkillManifest, WorkflowGraph, WorkflowGraphNode } from '../types';
-import { FieldMappingEditor } from './workflowDesigner/FieldMappingEditor';
+import type { DatasetVersion, GraphValidationResult, SkillManifest, WorkflowGraph, WorkflowGraphNode } from '../types';
 import {
   buildAvailableFieldPaths,
   buildWorkflowGraph,
@@ -45,13 +28,16 @@ import {
   graphToEdges,
   graphToNodes,
   nodeTypeLabel,
-  paletteNodeTypes,
-  parseJsonObjectField,
   validateWorkflowGraphDraft,
   type FlowNode,
 } from './workflowDesigner/graphModel';
-import { ParameterPreviewPanel } from './workflowDesigner/ParameterPreviewPanel';
-import { SkillConfigEditor } from './workflowDesigner/SkillConfigEditor';
+import { SkillDetailDrawer } from './workflowDesigner/SkillDetailDrawer';
+import { SkillPalettePanel } from './workflowDesigner/SkillPalettePanel';
+import { WorkflowCanvasPanel } from './workflowDesigner/WorkflowCanvasPanel';
+import { WorkflowConsolePanel } from './workflowDesigner/WorkflowConsolePanel';
+import { WorkflowDraftLoaderPanel } from './workflowDesigner/WorkflowDraftLoaderPanel';
+import { WorkflowInspectorPanel } from './workflowDesigner/WorkflowInspectorPanel';
+import { InlineIssueSummary, validationErrorsFromResult } from './workflowDesigner/WorkflowIssuePanels';
 
 export function WorkflowDesignerPage() {
   return (
@@ -62,18 +48,19 @@ export function WorkflowDesignerPage() {
 }
 
 function WorkflowDesignerContent() {
+  const defaultGraph = createBlankWorkflowGraph('未命名 Workflow');
   const navigate = useNavigate();
   const { draftId: routeDraftId } = useParams();
   const queryClient = useQueryClient();
   const loadedRouteDraftId = useRef<string | null>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(graphToNodes(demoWorkflowGraph));
-  const [edges, setEdges, onEdgesChange] = useEdgesState(graphToEdges(demoWorkflowGraph));
-  const [workflowName, setWorkflowName] = useState(demoWorkflowGraph.name);
-  const workflowNameRef = useRef(demoWorkflowGraph.name);
+  const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(graphToNodes(defaultGraph));
+  const [edges, setEdges, onEdgesChange] = useEdgesState(graphToEdges(defaultGraph));
+  const [workflowName, setWorkflowName] = useState(defaultGraph.name);
+  const workflowNameRef = useRef(defaultGraph.name);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const [draftId, setDraftId] = useState<string | null>(null);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(demoWorkflowGraph.nodes[0]?.node_id ?? null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(defaultGraph.nodes[0]?.node_id ?? null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedDatasetVersion, setSelectedDatasetVersion] = useState<string | null>(null);
   const [sampleSize, setSampleSize] = useState(1);
@@ -101,10 +88,12 @@ function WorkflowDesignerContent() {
   });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows });
   const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets });
+  const modelConnectionsQuery = useQuery({ queryKey: ['model-gateway-connections'], queryFn: api.modelGatewayConnections });
   const workflowDrafts = Array.isArray(draftsQuery.data) ? draftsQuery.data : [];
   const workflowVersions = Array.isArray(workflowsQuery.data) ? workflowsQuery.data : [];
   const workflowTemplates = Array.isArray(templatesQuery.data) ? templatesQuery.data : [];
   const datasets = Array.isArray(datasetsQuery.data) ? datasetsQuery.data : [];
+  const modelConnections = Array.isArray(modelConnectionsQuery.data) ? modelConnectionsQuery.data : [];
 
   useEffect(() => {
     workflowNameRef.current = workflowName;
@@ -151,7 +140,7 @@ function WorkflowDesignerContent() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedNodeId, selectedEdgeId, nodes, edges, workflowName]);
 
-  const skills = skillsQuery.data?.length ? skillsQuery.data : demoSkills;
+  const skills = Array.isArray(skillsQuery.data) ? skillsQuery.data : [];
   const datasetVersions = useMemo(
     () => datasets.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))),
     [datasets],
@@ -355,7 +344,9 @@ function WorkflowDesignerContent() {
       const workflow = workflowVersions.find((item) => item.version_id === id);
       if (workflow?.graph) loadGraph({ ...(workflow.graph as WorkflowGraph), name: workflow.name }, null);
     } else if (kind === 'template') {
-      loadGraph({ ...demoWorkflowGraph, name: `${id}_template` }, null);
+      const template = workflowTemplates.find((item) => String(item.template_id) === id);
+      const templateGraph = isWorkflowGraph(template?.graph) ? { ...template.graph, name: String(template?.name ?? `${id}_template`) } : createBlankWorkflowGraph(String(template?.name ?? `${id}_template`));
+      loadGraph(templateGraph, null);
     }
   }
 
@@ -566,476 +557,129 @@ function WorkflowDesignerContent() {
         description="每条连线表示数据依赖；一个节点可以点对多连接多个下游；多个上游进入同一节点时，必须先通过 Join 或 Aggregator，避免隐式覆盖 context。"
       />
 
-      <Card className="flat-card" title="流程加载与数据集映射">
-        <Row gutter={[12, 12]} align="middle">
-          <Col xs={24} lg={8}>
-            <Space size={4}>
-              <Typography.Text type="secondary">加载已有流程</Typography.Text>
-              <Tooltip title="用于把草稿、已发布版本或模板加载到当前画布。加载会替换当前未保存画布。">
-                <InfoCircleOutlined />
-              </Tooltip>
-            </Space>
-            <Select
-              aria-label="加载已有流程"
-              placeholder="选择草稿、已发布版本或模板"
-              className="full-width-control"
-              onChange={loadSelectedWorkflow}
-              options={[
-                ...workflowDrafts.map((draft) => ({ value: `draft:${draft.draft_id}`, label: `草稿：${draft.name}` })),
-                ...workflowVersions.map((workflow) => ({ value: `workflow:${workflow.version_id}`, label: `已发布：${workflow.name} v${workflow.version}` })),
-                ...workflowTemplates.map((template) => ({ value: `template:${String(template.template_id)}`, label: `模板：${String(template.name)}` })),
-              ]}
-            />
-          </Col>
-          <Col xs={24} lg={8}>
-            <Space direction="vertical" size={0} className="full-width-control">
-              <Typography.Text type="secondary">映射预览数据集 / 试运行数据集</Typography.Text>
-              <Typography.Text type="secondary">选择后会驱动输入绑定候选、参数预览和试运行抽样。</Typography.Text>
-            </Space>
-            <Select
-              aria-label="映射预览数据集 / 试运行数据集"
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择 Dataset Version"
-              className="full-width-control"
-              value={selectedDatasetVersion}
-              onChange={setSelectedDatasetVersion}
-              options={datasetVersions.map(({ version }) => ({ value: version.version_id, label: `${version.name} v${version.version}` }))}
-            />
-          </Col>
-          <Col xs={12} lg={4}>
-            <Typography.Text type="secondary">样本数</Typography.Text>
-            <InputNumber className="full-width-control" min={1} max={10} value={sampleSize} onChange={(value) => setSampleSize(value ?? 1)} />
-          </Col>
-          <Col xs={12} lg={4}>
-            <Typography.Text type="secondary">流程名称</Typography.Text>
-            <Input aria-label="流程名称" value={workflowName} onChange={(event) => changeWorkflowName(event.target.value)} />
-          </Col>
-        </Row>
-        {selectedDataset ? (
-          <Card size="small" className="flat-card" title="数据集字段预览">
-            <Space direction="vertical" className="drawer-stack">
-              <Space wrap>
-                <Typography.Text type="secondary">
-                  共 {datasetFieldRows.length} 个字段，已开启搜索和分页；输入绑定里也会按关键词筛选候选路径。
-                </Typography.Text>
-                <Input
-                  allowClear
-                  placeholder="搜索字段路径、类型或示例值"
-                  value={datasetFieldSearch}
-                  onChange={(event) => setDatasetFieldSearch(event.target.value)}
-                  className="wide-search"
-                />
-              </Space>
-            <Table
-              size="small"
-              pagination={filteredDatasetFieldRows.length > 8 ? { pageSize: 8, size: 'small', showSizeChanger: false } : false}
-              rowKey="path"
-              dataSource={filteredDatasetFieldRows}
-              columns={[
-                { title: '可用路径', dataIndex: 'path' },
-                { title: '字段类型', dataIndex: 'type' },
-                { title: '示例值', dataIndex: 'example', render: (value) => <Typography.Text>{String(value ?? '')}</Typography.Text> },
-              ]}
-            />
-            </Space>
-          </Card>
-        ) : null}
-      </Card>
+      <WorkflowDraftLoaderPanel
+        workflowDrafts={workflowDrafts}
+        workflowVersions={workflowVersions}
+        workflowTemplates={workflowTemplates}
+        datasetVersions={datasetVersions}
+        selectedDatasetVersion={selectedDatasetVersion}
+        selectedDataset={selectedDataset}
+        sampleSize={sampleSize}
+        workflowName={workflowName}
+        datasetFieldSearch={datasetFieldSearch}
+        datasetFieldRows={datasetFieldRows}
+        filteredDatasetFieldRows={filteredDatasetFieldRows}
+        onLoadWorkflow={loadSelectedWorkflow}
+        onDatasetVersionChange={setSelectedDatasetVersion}
+        onSampleSizeChange={setSampleSize}
+        onWorkflowNameChange={changeWorkflowName}
+        onDatasetFieldSearchChange={setDatasetFieldSearch}
+      />
 
       <Row gutter={[16, 16]} className="designer-grid">
         <Col xs={24} xl={5}>
-          <Card className="flat-card full-height" title="Skill Palette">
-            <Space direction="vertical" className="drawer-stack">
-              <Input
-                prefix={<SearchOutlined />}
-                placeholder="搜索 Skill 名称、描述、标签或 schema"
-                value={skillSearch}
-                onChange={(event) => setSkillSearch(event.target.value)}
-                allowClear
-              />
-              {paletteSkills.map((skill) => {
-                const disabled = !skill.enabled || skill.status !== 'approved';
-                return (
-                  <Card size="small" key={skill.skill_id}>
-                    <Space direction="vertical" className="drawer-stack">
-                      <Space wrap>
-                        <Typography.Text strong>{skill.name}</Typography.Text>
-                        <Tag color={disabled ? 'orange' : 'green'}>{skill.status}</Tag>
-                      </Space>
-                      <Typography.Text type="secondary">{skill.description}</Typography.Text>
-                      <Typography.Text type="secondary">输入 {schemaFieldCount(skill.input_schema)} / 输出 {schemaFieldCount(skill.output_schema)}</Typography.Text>
-                      {disabled ? <Typography.Text type="secondary">请先在 Skill 市场运行合约测试并审批启用</Typography.Text> : null}
-                      <Space wrap>
-                        <Button icon={<PlusOutlined />} disabled={disabled} onClick={() => addSkillNode(skill)}>
-                          添加 {skill.name}
-                        </Button>
-                        <Button onClick={() => setActivePaletteSkill(skill)}>查看详情</Button>
-                      </Space>
-                    </Space>
-                  </Card>
-                );
-              })}
-            </Space>
-            <Divider />
-            <Typography.Text strong>结构节点</Typography.Text>
-            <Space direction="vertical" className="drawer-stack node-help">
-              {paletteNodeTypes.map((nodeType) => (
-                <Button key={nodeType} icon={<BranchesOutlined />} onClick={() => addStructureNode(nodeType)} block>
-                  新增 {nodeTypeLabel[nodeType]}
-                </Button>
-              ))}
-            </Space>
-          </Card>
+          <SkillPalettePanel
+            skills={paletteSkills}
+            skillSearch={skillSearch}
+            onSkillSearchChange={setSkillSearch}
+            onAddSkill={addSkillNode}
+            onShowSkill={setActivePaletteSkill}
+            onAddStructureNode={addStructureNode}
+          />
         </Col>
 
         <Col xs={24} xl={13}>
-          <Card
-            className="flat-card canvas-card"
-            title="DAG 画布"
-            extra={
-              <Space>
-                <Button icon={<UndoOutlined />} disabled={!historyPast.length} onClick={undoGraph}>撤销</Button>
-                <Button icon={<RedoOutlined />} disabled={!historyFuture.length} onClick={redoGraph}>重做</Button>
-                <Button icon={<ApiOutlined />} onClick={autoLayout}>自动布局</Button>
-                <Button icon={<DeleteOutlined />} danger onClick={deleteSelected}>删除选中</Button>
-              </Space>
-            }
-          >
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={(connection: Connection) => {
-                rememberGraph();
-                updateEdges((current) => addEdge({ ...connection, markerEnd: { type: MarkerType.ArrowClosed } }, current));
-              }}
-              onNodeClick={(_, node) => {
-                setSelectedNodeId(node.id);
-                setSelectedEdgeId(null);
-              }}
-              onEdgeClick={(_, edge) => {
-                setSelectedEdgeId(edge.id);
-                setSelectedNodeId(null);
-              }}
-              fitView
-            >
-              <MiniMap pannable zoomable />
-              <Controls />
-              <Background />
-            </ReactFlow>
-          </Card>
+          <WorkflowCanvasPanel
+            nodes={nodes}
+            edges={edges}
+            canUndo={Boolean(historyPast.length)}
+            canRedo={Boolean(historyFuture.length)}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={(connection: Connection) => {
+              rememberGraph();
+              updateEdges((current) => addEdge({ ...connection, markerEnd: { type: MarkerType.ArrowClosed } }, current));
+            }}
+            onNodeSelect={(nodeId) => {
+              setSelectedNodeId(nodeId);
+              setSelectedEdgeId(null);
+            }}
+            onEdgeSelect={(edgeIdValue) => {
+              setSelectedEdgeId(edgeIdValue);
+              setSelectedNodeId(null);
+            }}
+            onUndo={undoGraph}
+            onRedo={redoGraph}
+            onAutoLayout={autoLayout}
+            onDeleteSelected={deleteSelected}
+          />
         </Col>
 
         <Col xs={24} xl={6}>
-          <Card className="flat-card full-height" title="节点 Inspector">
-            {selectedGraphNode ? (
-              <Space direction="vertical" className="drawer-stack">
-                <NodeIssuePanel issues={selectedNodeIssues} />
-                <Tabs
-                  items={[
-                  {
-                    key: 'basic',
-                    label: '基础配置',
-                    children: (
-                      <Space direction="vertical" className="drawer-stack">
-                        <Typography.Text strong>节点工具栏</Typography.Text>
-                        <Space wrap>
-                          <Button danger icon={<DeleteOutlined />} onClick={deleteSelected}>
-                            删除当前节点
-                          </Button>
-                          <Button icon={<ApiOutlined />} onClick={autoLayout}>
-                            自动布局
-                          </Button>
-                        </Space>
-                        <Divider />
-                        <div>
-                          <Typography.Text type="secondary">节点 ID</Typography.Text>
-                          <Input value={selectedGraphNode.node_id} onChange={(event) => updateSelectedNode({ node_id: event.target.value })} />
-                        </div>
-                        <div>
-                          <Typography.Text type="secondary">名称</Typography.Text>
-                          <Input value={selectedGraphNode.label} onChange={(event) => updateSelectedNode({ label: event.target.value })} />
-                        </div>
-                        <div>
-                          <Typography.Text type="secondary">类型</Typography.Text>
-                          <Select
-                            value={selectedGraphNode.node_type}
-                            className="full-width-control"
-                            onChange={(node_type) => updateSelectedNode({ node_type })}
-                            options={['source', 'skill', 'branch', 'join', 'aggregator', 'output'].map((value) => ({ value, label: nodeTypeLabel[value as WorkflowGraphNode['node_type']] }))}
-                          />
-                        </div>
-                        <div>
-                          <Typography.Text type="secondary">Skill</Typography.Text>
-                          <Select
-                            allowClear
-                            disabled={selectedGraphNode.node_type !== 'skill'}
-                            value={selectedGraphNode.skill_ref}
-                            className="full-width-control"
-                            onChange={(skill_ref) => updateSelectedNode({ skill_ref })}
-                            options={skills.map((skill) => ({ value: skill.skill_id, label: skill.name }))}
-                          />
-                        </div>
-                        <div>
-                          <Typography.Text type="secondary">条件表达式</Typography.Text>
-                          <Input value={selectedGraphNode.condition} onChange={(event) => updateSelectedNode({ condition: event.target.value })} placeholder="例如 metrics.score > 0.6" />
-                        </div>
-                        {selectedGraphNode.node_type === 'aggregator' ? (
-                          <div>
-                            <Typography.Text type="secondary">聚合策略</Typography.Text>
-                            <Segmented
-                              block
-                              value={String(selectedGraphNode.config?.strategy ?? 'majority_vote')}
-                              onChange={(value) => updateAggregatorStrategy(String(value))}
-                              options={[
-                                { label: '多数投票', value: 'majority_vote' },
-                                { label: '均值', value: 'mean' },
-                                { label: '一致性', value: 'agreement' },
-                              ]}
-                            />
-                          </div>
-                        ) : null}
-                        {selectedGraphNode.node_type === 'skill' ? (
-                          <>
-                            <Divider />
-                            <Typography.Text strong>运行参数</Typography.Text>
-                            <SkillConfigEditor
-                              skill={selectedSkill}
-                              value={selectedGraphNode.config ?? {}}
-                              onChange={(config) => updateSelectedNode({ config })}
-                            />
-                          </>
-                        ) : null}
-                        <Divider />
-                        <FieldMappingEditor
-                          title="输入绑定"
-                          value={selectedGraphNode.input_mapping ?? {}}
-                          pathOptions={fieldPathOptions}
-                          schema={selectedSkill?.input_schema}
-                          description="把 Skill manifest 固定输入字段绑定到数据集字段或上游节点输出。"
-                          onChange={(input_mapping) => updateSelectedNode({ input_mapping })}
-                          addButtonLabel="新增输入映射"
-                        />
-                        <FieldMappingEditor
-                          title="输出写入"
-                          value={selectedGraphNode.output_mapping ?? {}}
-                          pathOptions={fieldPathOptions}
-                          schema={selectedSkill?.output_schema}
-                          description="Skill 输出字段名由 manifest 固定，下游直接引用“当前节点 ID.字段”。"
-                          mode="output"
-                          nodeId={selectedGraphNode.node_id}
-                          onChange={(output_mapping) => updateSelectedNode({ output_mapping })}
-                          addButtonLabel="新增输出映射"
-                        />
-                        <Collapse
-                          items={[
-                            {
-                              key: 'advanced-json',
-                              label: '高级 JSON 模式',
-                              children: (
-                                <Form layout="vertical">
-                                  <Form.Item label="输入映射 JSON">
-                                    <Input.TextArea
-                                      aria-label="输入映射 JSON"
-                                      key={`${selectedGraphNode.node_id}-input-${JSON.stringify(selectedGraphNode.input_mapping ?? {})}`}
-                                      rows={4}
-                                      defaultValue={JSON.stringify(selectedGraphNode.input_mapping ?? {}, null, 2)}
-                                      onBlur={(event) => updateJsonPatch('input_mapping', event.target.value, updateSelectedNode, setConsoleText)}
-                                    />
-                                  </Form.Item>
-                                  <Form.Item label="输出别名 JSON（高级兼容）">
-                                    <Input.TextArea
-                                      aria-label="输出映射 JSON"
-                                      key={`${selectedGraphNode.node_id}-output-${JSON.stringify(selectedGraphNode.output_mapping ?? {})}`}
-                                      rows={4}
-                                      defaultValue={JSON.stringify(selectedGraphNode.output_mapping ?? {}, null, 2)}
-                                      onBlur={(event) => updateJsonPatch('output_mapping', event.target.value, updateSelectedNode, setConsoleText)}
-                                    />
-                                  </Form.Item>
-                                  <Form.Item label="配置 JSON">
-                                    <Input.TextArea
-                                      key={`${selectedGraphNode.node_id}-config`}
-                                      rows={4}
-                                      defaultValue={JSON.stringify(selectedGraphNode.config ?? {}, null, 2)}
-                                      onBlur={(event) => updateJsonPatch('config', event.target.value, updateSelectedNode, setConsoleText)}
-                                    />
-                                  </Form.Item>
-                                </Form>
-                              ),
-                            },
-                          ]}
-                        />
-                        <Divider />
-                        <Typography.Text strong>下游连线</Typography.Text>
-                        {selectedOutgoingEdges.length ? (
-                          <Space direction="vertical" className="drawer-stack">
-                            {selectedOutgoingEdges.map((edge) => {
-                              const id = edge.id || edgeId(edge.source, edge.target);
-                              return (
-                                <Button key={id} danger icon={<DeleteOutlined />} onClick={() => deleteEdgeById(id)}>
-                                  删除连线 {edge.source} -&gt; {edge.target}
-                                </Button>
-                              );
-                            })}
-                          </Space>
-                        ) : (
-                          <Typography.Text type="secondary">当前节点暂无下游连线。</Typography.Text>
-                        )}
-                        <Divider />
-                        <Typography.Text strong>可连接目标</Typography.Text>
-                        {connectableTargets.length ? (
-                          <Space direction="vertical" className="drawer-stack">
-                            {connectableTargets.map((node) => (
-                              <Button key={node.id} icon={<PlusOutlined />} onClick={() => connectSelectedNodeTo(node.id)}>
-                                连接到 {node.id}
-                              </Button>
-                            ))}
-                          </Space>
-                        ) : (
-                          <Typography.Text type="secondary">没有更多可连接目标。</Typography.Text>
-                        )}
-                      </Space>
-                    ),
-                  },
-                  {
-                    key: 'edges',
-                    label: '连线',
-                    children: (
-                      <Space direction="vertical" className="drawer-stack">
-                        <Typography.Text strong>下游连线</Typography.Text>
-                        {selectedOutgoingEdges.length ? (
-                          <Space direction="vertical" className="drawer-stack">
-                            {selectedOutgoingEdges.map((edge) => {
-                              const id = edge.id || edgeId(edge.source, edge.target);
-                              return (
-                                <Button key={id} danger icon={<DeleteOutlined />} onClick={() => deleteEdgeById(id)}>
-                                  删除连线 {edge.source} -&gt; {edge.target}
-                                </Button>
-                              );
-                            })}
-                          </Space>
-                        ) : (
-                          <Typography.Text type="secondary">当前节点暂无下游连线。</Typography.Text>
-                        )}
-                        <Divider />
-                        <Typography.Text strong>可连接目标</Typography.Text>
-                        {connectableTargets.length ? (
-                          <Space direction="vertical" className="drawer-stack">
-                            {connectableTargets.map((node) => (
-                              <Button key={node.id} icon={<PlusOutlined />} onClick={() => connectSelectedNodeTo(node.id)}>
-                                连接到 {node.id}
-                              </Button>
-                            ))}
-                          </Space>
-                        ) : (
-                          <Typography.Text type="secondary">没有更多可连接目标。</Typography.Text>
-                        )}
-                      </Space>
-                    ),
-                  },
-                  {
-                    key: 'parameters',
-                    label: '参数预览',
-                    children: (
-                      <ParameterPreviewPanel
-                        graph={graph}
-                        datasetVersions={datasetVersions}
-                        selectedDatasetVersion={selectedDatasetVersion}
-                        onDatasetVersionChange={setSelectedDatasetVersion}
-                      />
-                    ),
-                  },
-                  ]}
-                />
-              </Space>
-            ) : (
-              <Alert type="info" showIcon message={selectedEdgeId ? `当前选中连线：${selectedEdgeId}` : '请选择节点后编辑配置。'} />
-            )}
-          </Card>
+          <WorkflowInspectorPanel
+            selectedGraphNode={selectedGraphNode}
+            selectedEdgeId={selectedEdgeId}
+            selectedNodeIssues={selectedNodeIssues}
+            selectedSkill={selectedSkill}
+            skills={skills}
+            modelConnections={modelConnections}
+            fieldPathOptions={fieldPathOptions}
+            selectedOutgoingEdges={selectedOutgoingEdges}
+            connectableTargets={connectableTargets}
+            graph={graph}
+            datasetVersions={datasetVersions}
+            selectedDatasetVersion={selectedDatasetVersion}
+            onDatasetVersionChange={setSelectedDatasetVersion}
+            onDeleteSelected={deleteSelected}
+            onAutoLayout={autoLayout}
+            onDeleteEdge={deleteEdgeById}
+            onConnectToNode={connectSelectedNodeTo}
+            onUpdateNode={updateSelectedNode}
+            onUpdateAggregatorStrategy={updateAggregatorStrategy}
+            onConsoleTextChange={setConsoleText}
+          />
         </Col>
       </Row>
 
-      <Drawer
-        title={activePaletteSkill ? `Skill 详情：${activePaletteSkill.name}` : 'Skill 详情'}
-        open={Boolean(activePaletteSkill)}
-        onClose={() => setActivePaletteSkill(null)}
-        width={560}
-      >
-        {activePaletteSkill ? (
-          <Space direction="vertical" size="large" className="drawer-stack">
-            <Descriptions bordered size="small" column={1}>
-              <Descriptions.Item label="Skill ID">{activePaletteSkill.skill_id}</Descriptions.Item>
-              <Descriptions.Item label="版本">{activePaletteSkill.version}</Descriptions.Item>
-              <Descriptions.Item label="状态">
-                <Space wrap>
-                  <Tag color={activePaletteSkill.enabled && activePaletteSkill.status === 'approved' ? 'green' : 'orange'}>{activePaletteSkill.status}</Tag>
-                  <Tag>{activePaletteSkill.enabled ? '已启用' : '未启用'}</Tag>
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label="描述">{activePaletteSkill.description}</Descriptions.Item>
-              <Descriptions.Item label="标签">{activePaletteSkill.tags.join('、') || '-'}</Descriptions.Item>
-              <Descriptions.Item label="场景">{activePaletteSkill.scenarios.join('、') || '-'}</Descriptions.Item>
-            </Descriptions>
-            <Card size="small" title="输入字段">
-              <Typography.Text type="secondary">{Object.keys(schemaProperties(activePaletteSkill.input_schema)).join('、') || '无'}</Typography.Text>
-            </Card>
-            <Card size="small" title="输出字段">
-              <Typography.Text type="secondary">{Object.keys(schemaProperties(activePaletteSkill.output_schema)).join('、') || '无'}</Typography.Text>
-            </Card>
-            <Card size="small" title="输入 Schema"><pre>{JSON.stringify(activePaletteSkill.input_schema, null, 2)}</pre></Card>
-            <Card size="small" title="输出 Schema"><pre>{JSON.stringify(activePaletteSkill.output_schema, null, 2)}</pre></Card>
-            <Card size="small" title="配置 Schema"><pre>{JSON.stringify(activePaletteSkill.config_schema, null, 2)}</pre></Card>
-          </Space>
-        ) : null}
-      </Drawer>
+      <SkillDetailDrawer skill={activePaletteSkill} onClose={() => setActivePaletteSkill(null)} />
 
-      <Card
-        className="flat-card"
-        title="校验、试运行与输出结果"
-        extra={
-          <Space wrap>
-            <Button icon={<CheckCircleOutlined />} onClick={() => validateMutation.mutate()} loading={validateMutation.isPending}>校验当前画布</Button>
-            <Tooltip title={!selectedDataset ? '请选择映射预览数据集' : '试运行完成后会直接切到 JSON 结果'}>
-              <Button icon={<PlayCircleOutlined />} disabled={!selectedDataset} onClick={() => dryRunMutation.mutate()} loading={dryRunMutation.isPending}>试运行并查看结果</Button>
-            </Tooltip>
-          </Space>
-        }
-      >
-        <Tabs
-          activeKey={consoleTab}
-          onChange={setConsoleTab}
-          items={[
-            {
-              key: 'summary',
-              label: '结果',
-              children: (
-                <Space direction="vertical" className="drawer-stack">
-                  <Typography.Text>{consoleText}</Typography.Text>
-                  <Space wrap>
-                    <Tag color="blue">点对多</Tag>
-                    <Tag color="purple">多对一</Tag>
-                    <Tag color="green">队列消息：仅 item_id</Tag>
-                  </Space>
-                </Space>
-              ),
-            },
-            {
-              key: 'issues',
-              label: '错误与建议',
-              children: <IssueList result={consoleResult} />,
-            },
-            {
-              key: 'json',
-              label: 'JSON',
-              children: <pre><CodeOutlined /> {JSON.stringify(consoleResult ?? graph, null, 2)}</pre>,
-            },
-          ]}
-        />
-      </Card>
+      <WorkflowConsolePanel
+        graph={graph}
+        selectedDataset={selectedDataset}
+        consoleTab={consoleTab}
+        consoleText={consoleText}
+        consoleResult={consoleResult}
+        validateLoading={validateMutation.isPending}
+        dryRunLoading={dryRunMutation.isPending}
+        onConsoleTabChange={setConsoleTab}
+        onValidate={() => validateMutation.mutate()}
+        onDryRun={() => dryRunMutation.mutate()}
+      />
     </section>
   );
+}
+
+function createBlankWorkflowGraph(name: string): WorkflowGraph {
+  return {
+    name,
+    nodes: [
+      {
+        node_id: 'source',
+        node_type: 'source',
+        label: 'Source：数据集样本',
+        input_mapping: {},
+        output_mapping: {},
+      },
+      {
+        node_id: 'output',
+        node_type: 'output',
+        label: 'Output：报告结果',
+        input_mapping: {},
+        output_mapping: {},
+      },
+    ],
+    edges: [{ source: 'source', target: 'output' }],
+  };
 }
 
 function uniqueNodeId(base: string, nodes: FlowNode[]): string {
@@ -1137,28 +781,6 @@ function skillSearchScore(skill: SkillManifest, terms: string[]): number {
   }, 0);
 }
 
-function schemaProperties(schema: Record<string, unknown> | null | undefined): Record<string, unknown> {
-  return schema && typeof schema.properties === 'object' && schema.properties ? schema.properties as Record<string, unknown> : {};
-}
-
-function schemaFieldCount(schema: Record<string, unknown> | null | undefined): number {
-  return Object.keys(schemaProperties(schema)).length;
-}
-
-function updateJsonPatch(
-  field: 'input_mapping' | 'output_mapping' | 'config',
-  value: string,
-  updateSelectedNode: (patch: Partial<WorkflowGraphNode>) => void,
-  setConsoleText: (text: string) => void,
-) {
-  const parsed = parseJsonObjectField(value, field);
-  if (parsed.ok) {
-    updateSelectedNode({ [field]: parsed.value });
-  } else {
-    setConsoleText(`JSON 解析失败：${parsed.issue.message}`);
-  }
-}
-
 function validationResultFromApiError(error: unknown, graph: WorkflowGraph): GraphValidationResult | null {
   if (!(error instanceof ApiError) || !Array.isArray(error.details.errors)) {
     return null;
@@ -1180,166 +802,4 @@ function validationResultFromApiError(error: unknown, graph: WorkflowGraph): Gra
     node_count: graph.nodes.length,
     edge_count: graph.edges.length,
   };
-}
-
-function validationErrorsFromResult(result: GraphValidationResult | Record<string, unknown> | null): GraphIssue[] {
-  if (!result || !('errors' in result) || !Array.isArray(result.errors)) {
-    return [];
-  }
-  return result.errors as GraphIssue[];
-}
-
-function InlineIssueSummary({ issues, onSelectNode }: { issues: GraphIssue[]; onSelectNode: (issue: GraphIssue) => void }) {
-  if (!issues.length) return null;
-  return (
-    <Alert
-      type="error"
-      showIcon
-      message="当前校验问题"
-      description={
-        <Space direction="vertical" className="drawer-stack">
-          {issues.slice(0, 3).map((issue) => (
-            <Space key={`${issue.code}-${issue.node_id ?? issue.message}`} wrap align="start">
-              <Tag color="red">{issue.code}</Tag>
-              <Typography.Text>{issue.message}</Typography.Text>
-              {issue.node_id ? (
-                <Button size="small" onClick={() => onSelectNode(issue)}>
-                  定位节点 {issue.node_id}
-                </Button>
-              ) : null}
-            </Space>
-          ))}
-          {issues.length > 3 ? <Typography.Text type="secondary">还有 {issues.length - 3} 个问题，完整列表在页面底部 Console 的“错误与建议”。</Typography.Text> : null}
-        </Space>
-      }
-    />
-  );
-}
-
-function NodeIssuePanel({ issues }: { issues: GraphIssue[] }) {
-  if (!issues.length) return null;
-  return (
-    <Alert
-      type="error"
-      showIcon
-      message="当前节点问题"
-      description={
-        <Space direction="vertical" size={4}>
-          {issues.map((issue) => (
-            <Space key={`${issue.code}-${issue.message}`} direction="vertical" size={2}>
-              <Typography.Text>{issue.message}</Typography.Text>
-              {issueRepairSuggestion(issue) ? <Typography.Text type="secondary">{issueRepairSuggestion(issue)}</Typography.Text> : null}
-            </Space>
-          ))}
-        </Space>
-      }
-    />
-  );
-}
-
-function IssueList({ result }: { result: GraphValidationResult | Record<string, unknown> | null }) {
-  if (!result || !('errors' in result)) {
-    return <Typography.Text type="secondary">暂无校验结果。</Typography.Text>;
-  }
-  const validation = result as GraphValidationResult;
-  if (validation.ok) {
-    return <Alert type="success" showIcon message="没有阻断问题" description="可以继续试运行或发布。" />;
-  }
-  return (
-    <Space direction="vertical" className="drawer-stack">
-      {validation.errors.map((error) => {
-        const suggestion = issueRepairSuggestion(error);
-        return (
-          <Alert
-            key={`${error.code}-${error.node_id ?? error.message}`}
-            type="error"
-            showIcon
-            message={error.code}
-            description={
-              <Space direction="vertical" size={4}>
-                <Typography.Text>{error.message}</Typography.Text>
-                {suggestion ? <Typography.Text type="secondary">{suggestion}</Typography.Text> : null}
-              </Space>
-            }
-          />
-        );
-      })}
-    </Space>
-  );
-}
-
-function issueRepairSuggestion(error: { code: string; details?: Record<string, unknown> }) {
-  if (error.code === 'UPSTREAM_OUTPUT_NOT_CONNECTED') {
-    const referencedNode = stringValue(error.details?.referenced_node_id, '被引用节点');
-    const currentNode = stringValue(error.details?.current_node_id, '当前节点');
-    const missingPath = stringValue(error.details?.missing_path, '节点ID.字段');
-    return `修复建议：先从 ${referencedNode} 连接到 ${currentNode}，让画布形成明确数据依赖，再在输入绑定中使用 ${missingPath}；没有连线时执行器不会保证上游先运行。`;
-  }
-  if (error.code === 'MAPPING_PATH_MISSING') {
-    const missingPath = stringValue(error.details?.missing_path, '当前路径');
-    return `修复建议：确认 ${missingPath} 存在于数据集字段、上游节点输出或 context/metrics 中；如果它是节点输出，请先画出对应上游连线。`;
-  }
-  if (error.code === 'REQUIRED_INPUT_MAPPING_MISSING') {
-    const missingFields = Array.isArray(error.details?.missing_fields) ? error.details.missing_fields.filter((field): field is string => typeof field === 'string') : [];
-    const fieldText = missingFields.length ? `（${missingFields.join('、')}）` : '';
-    return `修复建议：在右侧 Inspector 的输入绑定中为缺失字段配置 row/context/metrics 路径${fieldText}，例如 row.question。`;
-  }
-  if (error.code === 'INPUT_MAPPING_PATH_EMPTY') {
-    return '修复建议：清空的输入映射不会参与执行，请补充字段路径或删除该映射行。';
-  }
-  if (error.code === 'OUTPUT_MAPPING_PATH_EMPTY') {
-    return '修复建议：输出写入路径必须指向 context、metrics、artifacts 或 steps，请补充写入位置。';
-  }
-  if (error.code === 'BRANCH_CONDITION_REQUIRED') {
-    return '修复建议：选中 Branch 节点，在条件表达式中填写判断规则，或为每条分支连线配置 condition。';
-  }
-  if (error.code === 'JOIN_REQUIRED') {
-    return '修复建议：多条上游线汇入同一节点前，请先增加 Join 或 Aggregator 节点，避免结果互相覆盖。';
-  }
-  if (error.code === 'SKILL_NOT_AVAILABLE') {
-    return '修复建议：到 Skill 市场或治理页运行合约测试并审批启用该 Skill，或替换为已启用版本。';
-  }
-  if (error.code === 'SKILL_NOT_FOUND') {
-    return '修复建议：到 Skill 市场上传或选择已注册的 Skill；如果是旧草稿，请替换为当前可用的 Skill 版本后再发布。';
-  }
-  if (error.code === 'CONFIG_REQUIRED_MISSING') {
-    const fields = stringList(error.details?.missing_fields);
-    const fieldText = fields.length ? `（${fields.join('、')}）` : '';
-    return `修复建议：在右侧 Inspector 的运行参数中补齐必填参数${fieldText}；如果该参数来自任务级覆盖，请重新运行任务 Preflight 确认覆盖值。`;
-  }
-  if (error.code === 'CONFIG_VALUE_INVALID') {
-    const fieldPath = stringValue(error.details?.field_path, '对应字段');
-    const expectedType = stringValue(error.details?.expected_type, '声明类型');
-    const actualType = stringValue(error.details?.actual_type, '当前类型');
-    return `修复建议：将参数 ${fieldPath} 改为 ${expectedType} 类型；当前检测到 ${actualType}，请在 Skill 参数表单或任务级覆盖中修正。`;
-  }
-  if (error.code === 'CONFIG_EXPRESSION_PATH_MISSING') {
-    const rowHint = rowIndexHint(error.details?.row_index);
-    return `修复建议：检查 Dataset 预览样本${rowHint}是否存在该表达式路径，或把参数改为固定值/有效 row、context、metrics 路径后重新预检。`;
-  }
-  if (error.code === 'CONFIG_EXPRESSION_PATH_EMPTY') {
-    return '修复建议：表达式参数必须填写 path，例如 row.temperature；不需要动态取值时请改为固定参数值。';
-  }
-  if (error.code === 'CONFIG_SECRET_REF_EMPTY') {
-    return '修复建议：填写 Secret 引用名称，例如 LLM_API_KEY；不要把密钥明文写进 Workflow config。';
-  }
-  if (error.code === 'CONFIG_DYNAMIC_VALUE_INVALID' || error.code === 'CONFIG_SCHEMA_INVALID') {
-    return '修复建议：检查 Skill 参数 JSON，动态参数必须使用 { type: "expression", path: "row.xxx" } 或 { type: "secret", name: "SECRET_NAME" } 结构。';
-  }
-  return null;
-}
-
-function stringList(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-}
-
-function stringValue(value: unknown, fallback: string): string {
-  return typeof value === 'string' && value ? value : fallback;
-}
-
-function rowIndexHint(value: unknown): string {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return `第 ${value + 1} 行`;
-  }
-  return '';
 }

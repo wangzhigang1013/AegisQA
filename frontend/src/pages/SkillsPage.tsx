@@ -1,13 +1,12 @@
 import { CheckCircleOutlined, InboxOutlined, InfoCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Descriptions, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd';
+import { Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd';
 import type { UploadFile } from 'antd';
 import { useMemo, useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import { demoSkills } from '../data/demo';
-import type { SkillContractResult, SkillManifest, SkillPackageRecord } from '../types';
+import type { SkillContractResult, SkillManifest, SkillPackageRecord, SkillVersionHistory, SkillVersionHistoryItem } from '../types';
 
 type UploadFormValues = {
   filename: string;
@@ -27,7 +26,12 @@ export function SkillsPage() {
 
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
   const packagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
-  const skills = skillsQuery.data?.length ? skillsQuery.data : demoSkills;
+  const versionHistoryQuery = useQuery({
+    queryKey: ['skill-version-history', activeSkill?.skill_id],
+    queryFn: () => api.skillVersionHistory(activeSkill?.skill_id ?? ''),
+    enabled: Boolean(activeSkill),
+  });
+  const skills = Array.isArray(skillsQuery.data) ? skillsQuery.data : [];
   const packageBySkillId = useMemo(() => indexPackagesBySkillId(packagesQuery.data ?? []), [packagesQuery.data]);
   const filteredSkills = useMemo(() => {
     const query = skillQuery.trim().toLowerCase();
@@ -73,6 +77,18 @@ export function SkillsPage() {
     },
   });
 
+  const rollbackMutation = useMutation({
+    mutationFn: (payload: { sourceSkillId: string; targetSkillId: string }) =>
+      api.rollbackSkillVersion(payload.sourceSkillId, payload.targetSkillId, '从 Skill 市场回滚到历史版本'),
+    onSuccess: async (history) => {
+      setNotice(`已回滚到 ${history.latest_approved_skill_id ?? '目标版本'}`);
+      await queryClient.invalidateQueries({ queryKey: ['skills'] });
+      await queryClient.invalidateQueries({ queryKey: ['skill-packages'] });
+      await queryClient.invalidateQueries({ queryKey: ['skill-version-history'] });
+    },
+    onError: (error) => setNotice(`回滚失败：${formatApiError(error)}`),
+  });
+
   return (
     <section className="page-stack">
       <PageHeader
@@ -87,6 +103,7 @@ export function SkillsPage() {
       />
 
       {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
+      {skillsQuery.isError ? <Alert type="error" showIcon message={`Skill 列表加载失败：${formatApiError(skillsQuery.error)}`} /> : null}
 
       <Card className="flat-card" title="筛选">
         <Space wrap>
@@ -117,6 +134,7 @@ export function SkillsPage() {
           loading={skillsQuery.isLoading}
           dataSource={filteredSkills}
           pagination={{ pageSize: 8 }}
+          locale={{ emptyText: <Empty description="暂无 Skill，请上传 Agent Skill 包并完成合约测试和审批。" /> }}
           columns={[
             { title: 'Skill', dataIndex: 'skill_id', render: (value, record) => <Space direction="vertical" size={0}><Typography.Text strong>{record.name}</Typography.Text><code>{value}</code></Space> },
             {
@@ -216,6 +234,13 @@ export function SkillsPage() {
                     <Typography.Text>审批时间：{packageBySkillId[activeSkill.skill_id].approved_at ?? '未审批'}</Typography.Text>
                   </Space>
                 </Card>
+                <SkillVersionHistoryCard
+                  activeSkill={activeSkill}
+                  history={versionHistoryQuery.data}
+                  loading={versionHistoryQuery.isLoading}
+                  rollbackLoading={rollbackMutation.isPending}
+                  onRollback={(targetSkillId) => rollbackMutation.mutate({ sourceSkillId: activeSkill.skill_id, targetSkillId })}
+                />
               </>
             ) : null}
             <Card size="small" title="输入 Schema"><pre>{JSON.stringify(activeSkill.input_schema, null, 2)}</pre></Card>
@@ -270,6 +295,84 @@ export function SkillsPage() {
           </Upload.Dragger>
         </Form>
       </Modal>
+    </section>
+  );
+}
+
+function SkillVersionHistoryCard({
+  activeSkill,
+  history,
+  loading,
+  rollbackLoading,
+  onRollback,
+}: {
+  activeSkill: SkillManifest;
+  history?: SkillVersionHistory;
+  loading: boolean;
+  rollbackLoading: boolean;
+  onRollback: (targetSkillId: string) => void;
+}) {
+  const versions = history?.versions ?? [];
+  const activeVersion = versions.find((item) => item.skill_id === activeSkill.skill_id);
+  return (
+    <Card size="small" title="版本历史">
+      <Space direction="vertical" className="drawer-stack">
+        <Descriptions size="small" column={1}>
+          <Descriptions.Item label="版本族">{history?.base_skill_id ?? activeSkill.skill_id.split('@')[0]}</Descriptions.Item>
+          <Descriptions.Item label="当前启用版本">{history?.latest_approved_skill_id ?? '-'}</Descriptions.Item>
+        </Descriptions>
+        <Table<SkillVersionHistoryItem>
+          size="small"
+          rowKey="skill_id"
+          loading={loading}
+          dataSource={versions}
+          pagination={false}
+          scroll={{ x: 760 }}
+          columns={[
+            { title: 'Skill ID', dataIndex: 'skill_id', render: (value) => <code>{value}</code> },
+            { title: '状态', dataIndex: 'status', render: (value, record) => <Tag color={record.enabled ? 'green' : 'orange'}>{formatSkillStatus(String(value))}</Tag> },
+            {
+              title: '差异',
+              render: (_, record) => (
+                <Space wrap>
+                  {record.diff_from_previous.length ? record.diff_from_previous.map((diff) => <Tag key={diff.field}>{diff.field}</Tag>) : <Tag>初始版本</Tag>}
+                </Space>
+              ),
+            },
+            {
+              title: '操作',
+              render: (_, record) => (
+                record.skill_id === activeSkill.skill_id ? <Tag>当前</Tag> : (
+                  <Button size="small" loading={rollbackLoading} onClick={() => onRollback(record.skill_id)}>
+                    回滚到此版本
+                  </Button>
+                )
+              ),
+            },
+          ]}
+        />
+        <LifecycleHistory title="合约测试历史" items={activeVersion?.contract_history ?? []} />
+        <LifecycleHistory title="审批历史" items={activeVersion?.approval_history ?? []} />
+      </Space>
+    </Card>
+  );
+}
+
+function LifecycleHistory({ title, items }: { title: string; items: Record<string, unknown>[] }) {
+  return (
+    <section>
+      <Typography.Title level={5}>{title}</Typography.Title>
+      {items.length ? (
+        <Space direction="vertical" size="small">
+          {items.map((item, index) => (
+            <Typography.Text key={`${title}-${index}`}>
+              {String(item.created_at ?? '-')} / {String(item.action ?? (item.ok ? 'contract_passed' : 'contract_failed'))} / {String(item.actor ?? 'api')}
+            </Typography.Text>
+          ))}
+        </Space>
+      ) : (
+        <Typography.Text type="secondary">暂无记录</Typography.Text>
+      )}
     </section>
   );
 }

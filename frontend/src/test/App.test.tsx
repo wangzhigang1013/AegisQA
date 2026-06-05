@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -27,6 +27,7 @@ import {
   pendingPackageSkill,
   pendingSkillPackage,
   renderWorkbench,
+  skillVersionHistory,
 } from './workbenchTestHarness';
 
 describe('AegisQA 前端工作台', () => {
@@ -70,6 +71,22 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getAllByRole('link', { name: /查看报告/ }).length).toBeGreaterThan(0);
   });
 
+  it('概览页不再请求底层 Run 完整列表', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const requests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push(url);
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/');
+
+    expect(await screen.findByText('任务工作台')).toBeInTheDocument();
+    expect(await screen.findByText('RAG 任务')).toBeInTheDocument();
+    expect(requests.some((url) => url.endsWith('/runs'))).toBe(false);
+  });
+
   it('Workflow 市场展示草稿、已发布版本、模板和新建入口', async () => {
     await renderWorkbench('/workflows');
 
@@ -108,6 +125,46 @@ describe('AegisQA 前端工作台', () => {
       const body = JSON.parse(createRequest?.body ?? '{}');
       expect(body.name).toBe('AP ASR 评测流程');
       expect(body.graph.name).toBe('AP ASR 评测流程');
+      expect(JSON.stringify(body.graph)).not.toContain('llm.call@0.1.0');
+      expect(JSON.stringify(body.graph)).not.toContain('llm.judge@0.1.0');
+      expect(body.graph.nodes.map((node: { node_id: string }) => node.node_id)).toEqual(['source', 'output']);
+    });
+  });
+
+  it('Workflow 市场从模板创建时使用模板 graph，不回退到 RAG demo graph', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const requests: { url: string; method?: string; body?: string }[] = [];
+    const templateGraph = {
+      name: '自定义模板流程',
+      nodes: [
+        { node_id: 'template_source', node_type: 'source', label: '模板 Source', input_mapping: {}, output_mapping: {} },
+        { node_id: 'template_output', node_type: 'output', label: '模板 Output', input_mapping: {}, output_mapping: {} },
+      ],
+      edges: [{ source: 'template_source', target: 'template_output' }],
+    };
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push({ url, method: init?.method, body: String(init?.body ?? '') });
+      if (url.endsWith('/workflow-templates')) {
+        return jsonResponse([{ template_id: 'custom_template', name: '自定义模板', description: '真实模板 graph', scenario: 'custom', graph: templateGraph }]);
+      }
+      if (url.endsWith('/workflow-drafts') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        return jsonResponse({ draft_id: 'draft-template', status: 'draft', name: body.name, graph: body.graph, created_at: '', updated_at: '' });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/workflows');
+
+    fireEvent.click(await screen.findByRole('button', { name: /从样例创建/ }));
+
+    await waitFor(() => {
+      const createRequest = requests.find((request) => request.url.endsWith('/workflow-drafts') && request.method === 'POST');
+      expect(createRequest).toBeTruthy();
+      const body = JSON.parse(createRequest?.body ?? '{}');
+      expect(body.graph.nodes.map((node: { node_id: string }) => node.node_id)).toEqual(['template_source', 'template_output']);
+      expect(JSON.stringify(body.graph)).not.toContain('llm.call@0.1.0');
     });
   });
 
@@ -125,11 +182,15 @@ describe('AegisQA 前端工作台', () => {
 
     await renderWorkbench('/workflows');
 
-    const editButtons = await screen.findAllByRole('button', { name: /编辑/ });
-    fireEvent.click(editButtons[editButtons.length - 1]);
+    const publishedWorkflowName = await screen.findByText('RAG 回归评测');
+    const publishedWorkflowRow = publishedWorkflowName.closest('tr');
+    expect(publishedWorkflowRow).toBeTruthy();
+    const editPublishedButton = within(publishedWorkflowRow!).getByRole('button', { name: /编辑/ });
+    await waitFor(() => expect(editPublishedButton).toBeEnabled());
+    fireEvent.click(editPublishedButton);
 
-    expect(await screen.findByText('Workflow 设计器')).toBeInTheDocument();
-    expect(await screen.findByText('当前草稿：draft-test')).toBeInTheDocument();
+    expect(await screen.findByText('Workflow 设计器', {}, { timeout: 8_000 })).toBeInTheDocument();
+    expect(await screen.findByText('当前草稿：draft-test', {}, { timeout: 8_000 })).toBeInTheDocument();
     expect(requests.some((request) => request.url.endsWith('/workflow-drafts') && request.method === 'POST')).toBe(false);
   });
 
@@ -182,6 +243,16 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('校验、试运行与输出结果')).toBeInTheDocument();
   });
 
+  it('Workflow 设计器直接入口使用空白画布，不默认注入 RAG demo graph', async () => {
+    await renderWorkbench('/workflows/designer');
+
+    expect(await screen.findByText('Skill Palette')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('未命名 Workflow')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('RAG 回归评测：生成、多裁判、汇总报告')).not.toBeInTheDocument();
+    expect(screen.queryByText('llm.call@0.1.0')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('字段路径 prompt')).not.toBeInTheDocument();
+  });
+
   it('Workflow Skill Palette 通过语义搜索添加 Skill，并阻止未启用 Skill', async () => {
     vi.mocked(globalThis.fetch).mockImplementation((input) => {
       const url = String(input);
@@ -232,6 +303,22 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText('可信评测任务')).toBeInTheDocument();
   });
 
+  it('Skill 市场接口为空时不展示 demo Skill 兜底', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/skills')) return jsonResponse([]);
+      if (url.endsWith('/skills/packages')) return jsonResponse([]);
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/skills');
+
+    expect((await screen.findAllByText('Skill 市场')).length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.queryAllByText('Deterministic LLM Call')).toHaveLength(0));
+    expect(screen.getByText(/暂无 Skill/)).toBeInTheDocument();
+  });
+
   it('Workflow 设计器支持选择流程、删除节点和保存草稿入口', async () => {
     await renderWorkbench('/workflows/designer/draft-test');
 
@@ -245,6 +332,21 @@ describe('AegisQA 前端工作台', () => {
     const joinCountBefore = screen.getAllByText(/Join/).length;
     fireEvent.click(screen.getByRole('button', { name: /新增 Join/ }));
     await waitFor(() => expect(screen.getAllByText(/Join/).length).toBeGreaterThan(joinCountBefore));
+  });
+
+  it('Workflow Skill Palette 在真实 Skill 为空时不展示 demo Skill 兜底', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/skills')) return jsonResponse([]);
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/workflows/designer/draft-test');
+
+    expect(await screen.findByText('Skill Palette')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByText('Deterministic LLM Call')).toHaveLength(0));
+    expect(screen.getByText(/暂无可用 Skill/)).toBeInTheDocument();
   });
 
   it('Workflow 设计器支持撤销和重做节点操作', async () => {
@@ -506,6 +608,58 @@ describe('AegisQA 前端工作台', () => {
     }
   });
 
+  it('执行中心任务列表使用内部横向滚动，避免表格撑破页面背景', async () => {
+    await renderWorkbench('/runs');
+
+    expect(await screen.findByText('任务列表')).toBeInTheDocument();
+    expect(screen.getByTestId('runs-task-table-section')).toHaveClass('page-section');
+    expect(screen.getByTestId('runs-filter-toolbar')).toHaveClass('action-toolbar');
+    expect(screen.getByTestId('runs-task-table-shell')).toHaveClass('data-table-shell');
+    const tableContent = document.querySelector<HTMLElement>('.runs-task-table .ant-table-content');
+
+    expect(tableContent).toBeTruthy();
+    expect(tableContent?.style.overflowX).toBe('auto');
+    expect(document.querySelector('.runs-task-table .ant-table-cell-fix-right')).toBeNull();
+  });
+
+  it('报告页宽表使用统一滚动容器，避免窄屏撑破页面背景', async () => {
+    await renderWorkbench('/reports');
+
+    expect(await screen.findByText('报告导出历史')).toBeInTheDocument();
+    expect(screen.getByTestId('reports-header-actions')).toHaveClass('action-toolbar');
+    expect(screen.getByTestId('reports-export-history-section')).toHaveClass('page-section');
+    expect(screen.getByTestId('reports-export-history-table-shell')).toHaveClass('data-table-shell');
+    const tableContent = screen.getByTestId('reports-export-history-table-shell').querySelector<HTMLElement>('.ant-table-content');
+
+    expect(tableContent).toBeTruthy();
+    expect(tableContent?.style.overflowX).toBe('auto');
+  });
+
+  it('候选资产中心宽表使用统一滚动容器，避免窄屏撑破页面背景', async () => {
+    await renderWorkbench('/candidate-assets');
+
+    expect(await screen.findByText('Prompt/Skill 候选配置')).toBeInTheDocument();
+    expect(screen.getByTestId('candidate-assets-table-section')).toHaveClass('page-section');
+    expect(screen.getByTestId('candidate-assets-toolbar')).toHaveClass('action-toolbar');
+    expect(screen.getByTestId('candidate-assets-table-shell')).toHaveClass('data-table-shell');
+    const tableContent = screen.getByTestId('candidate-assets-table-shell').querySelector<HTMLElement>('.ant-table-content');
+
+    expect(tableContent).toBeTruthy();
+    expect(tableContent?.style.overflowX).toBe('auto');
+  });
+
+  it('Annotation Queue 审核表使用统一滚动容器，避免窄屏撑破页面背景', async () => {
+    await renderWorkbench('/annotation-queue');
+
+    expect(await screen.findByText('审核队列')).toBeInTheDocument();
+    expect(screen.getByTestId('annotation-queue-table-section')).toHaveClass('page-section');
+    expect(screen.getByTestId('annotation-queue-table-shell')).toHaveClass('data-table-shell');
+    const tableContent = screen.getByTestId('annotation-queue-table-shell').querySelector<HTMLElement>('.ant-table-content');
+
+    expect(tableContent).toBeTruthy();
+    expect(tableContent?.style.overflowX).toBe('auto');
+  });
+
   it('执行中心任务列表使用服务端分页和状态筛选', async () => {
     const manyTasks = Array.from({ length: 12 }, (_, index) => ({
       ...demoTask,
@@ -568,13 +722,13 @@ describe('AegisQA 前端工作台', () => {
     expect(await screen.findByText(/任务详情：RAG 任务/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /导出结果 CSV/ }));
-    expect(await screen.findByText(/结果导出成功：RAG_任务_results.csv 已开始下载/)).toBeInTheDocument();
-    expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
-    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/results/export?file_format=csv'), expect.anything());
+    await waitFor(() => expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/results/export?file_format=csv'), expect.anything()));
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob)));
+    expect(await screen.findByText(/结果导出成功：.*results\.csv 已开始下载/)).toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByRole('button', { name: /导出结果 JSONL/ })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: /导出结果 JSONL/ }));
-    expect(await screen.findByText(/结果导出成功：RAG_任务_results.jsonl 已开始下载/)).toBeInTheDocument();
+    expect(await screen.findByText(/结果导出成功：.*results\.jsonl 已开始下载/)).toBeInTheDocument();
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/tasks/task-demo/results/export?file_format=jsonl'), expect.anything());
   });
 
@@ -622,6 +776,14 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Steps' }));
     fireEvent.click(await screen.findByRole('tab', { name: '参数' }));
     expect(screen.getByText(/workflow_config/)).toBeInTheDocument();
+  });
+
+  it('Trace Flow 可返回执行中心并重新打开来源任务详情', async () => {
+    await renderWorkbench('/tasks/task-demo/trace?return_task_id=task-demo');
+
+    fireEvent.click(await screen.findByRole('button', { name: /返回任务详情/ }));
+
+    expect(await screen.findByText(/任务详情：RAG 任务/)).toBeInTheDocument();
   });
 
   it('Trace Flow 样本列表使用服务端分页，避免大任务一次性传输全部样本', async () => {
@@ -676,6 +838,14 @@ describe('AegisQA 前端工作台', () => {
 
     expect(screen.getAllByText('answer').length).toBeGreaterThan(0);
     expect(screen.getByText('llm.call@0.1.0')).toBeInTheDocument();
+  });
+
+  it('Trace Tree 可返回执行中心并重新打开来源任务详情', async () => {
+    await renderWorkbench('/tasks/task-demo/trace-tree?return_task_id=task-demo');
+
+    fireEvent.click(await screen.findByRole('button', { name: /返回任务详情/ }));
+
+    expect(await screen.findByText(/任务详情：RAG 任务/)).toBeInTheDocument();
   });
 
   it('Trace Tree 调用树使用服务端分页，避免一次性传输全部调用明细', async () => {
@@ -822,6 +992,23 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.queryByText('item-8')).not.toBeInTheDocument();
   });
 
+  it('报告页支持导出离线审计包', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    const requests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push(url);
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/reports');
+
+    fireEvent.click(await screen.findByRole('button', { name: /导出离线包/ }));
+
+    expect(await screen.findByText(/离线包导出成功：task-demo_offline_audit\.zip 已开始下载/)).toBeInTheDocument();
+    expect(requests.some((url) => url.includes('/tasks/task-demo/report/offline-package'))).toBe(true);
+  });
+
   it('完成态任务不能重复执行', async () => {
     vi.mocked(globalThis.fetch).mockImplementation((input) => {
       const url = String(input);
@@ -912,6 +1099,40 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/检查 runtime.entrypoint/)).toBeInTheDocument();
   });
 
+  it('Skill 市场详情展示版本历史、合约测试历史和审批历史', async () => {
+    const versionTwoSkill = { ...pendingPackageSkill, skill_id: 'plugin.echo@0.2.0', version: '0.2.0', name: 'Echo 插件 v2', status: 'approved', enabled: true };
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/skills')) {
+        return jsonResponse([{ ...pendingPackageSkill, status: 'approved', enabled: true }, versionTwoSkill]);
+      }
+      if (url.endsWith('/skills/packages')) {
+        return jsonResponse(skillVersionHistory.versions);
+      }
+      if (url.includes('/skills/plugin.echo@0.2.0/versions')) {
+        return jsonResponse(skillVersionHistory);
+      }
+      if (url.includes('/rollback') && init?.method === 'POST') {
+        return jsonResponse({ ...skillVersionHistory, latest_approved_skill_id: 'plugin.echo@0.1.0' });
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/skills');
+
+    const versionTwoRow = (await screen.findByText('Echo 插件 v2')).closest('tr');
+    expect(versionTwoRow).toBeTruthy();
+    fireEvent.click(within(versionTwoRow!).getByRole('button', { name: /查看详情/ }));
+
+    expect(await screen.findByText('版本历史')).toBeInTheDocument();
+    expect(screen.getByText('plugin.echo@0.1.0')).toBeInTheDocument();
+    expect(await screen.findByText('manifest.description')).toBeInTheDocument();
+    expect(screen.getByText('合约测试历史')).toBeInTheDocument();
+    expect(screen.getByText('审批历史')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /回滚到此版本/ }));
+    expect(await screen.findByText(/已回滚到 plugin.echo@0.1.0/)).toBeInTheDocument();
+  });
+
   it('Skill 市场展示插件包审批状态、合约测试状态和审批信息', async () => {
     vi.mocked(globalThis.fetch).mockImplementation((input) => {
       const url = String(input);
@@ -991,14 +1212,395 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText(/业务 Skill 可以直接复用模型调用节点/)).toBeInTheDocument();
   });
 
-  it('Experiment 页面展示实验快照、baseline 对比和创建入口', async () => {
+  it('治理页运行态驾驶舱展示组件状态并提供文档和配置入口', async () => {
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
     vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
       const url = String(input);
+      if (url.endsWith('/governance/runtime-status')) {
+        return jsonResponse({
+          storage: {
+            backend: 'json',
+            adapter: 'JsonStore',
+            status: 'available',
+            scope: 'local',
+            message: '当前使用本地 JSON 存储。',
+          },
+          executor: {
+            backend: 'local_thread',
+            status: 'demo',
+            message: '当前使用本地线程执行器。',
+          },
+          model_gateway: {
+            provider: 'mock',
+            ready: true,
+            mode: 'offline_mock',
+            default_model: 'mock-eval-model',
+            base_url_configured: false,
+            api_key_configured: false,
+            timeout_seconds: 60,
+            skill_ref: 'model.chat@0.1.0',
+            message: '离线 mock 模型可用。',
+            status: 'demo',
+          },
+          skill_sandbox: {
+            mode: 'subprocess',
+            status: 'available',
+            permissions_required: true,
+            network_default: 'denied',
+            file_scope: 'package_root_only',
+            limits: { max_files: 200, max_file_size_bytes: 1_000_000, max_total_size_bytes: 1_500_000 },
+            message: '脚本型 Skill 在子进程中执行。',
+          },
+          external_services: {
+            mysql: { status: 'not_connected', message: '当前运行未使用 MySQL repository。' },
+            redis: { status: 'not_connected', message: '当前运行未连接 Redis。' },
+            celery: { status: 'not_connected', message: '当前未使用 Celery worker 执行任务。' },
+          },
+          components: [
+            { component_id: 'storage', name: '存储后端', backend: 'json', status: 'available', status_label: '可用', message: '当前使用本地 JSON 存储。', doc_url: '/docs/runtime/storage', config_url: '/governance#runtime-storage', risk_level: 'low' },
+            { component_id: 'executor', name: '执行器后端', backend: 'local_thread', status: 'demo', status_label: '演示', message: '当前使用本地线程执行器。', doc_url: '/docs/runtime/executor', config_url: '/governance#runtime-executor', risk_level: 'medium' },
+            { component_id: 'model_gateway', name: '模型网关', backend: 'mock', status: 'demo', status_label: '演示', message: '离线 mock 模型可用。', doc_url: '/docs/model-gateway', config_url: '/governance#model-gateway', risk_level: 'medium' },
+            { component_id: 'skill_sandbox', name: 'Skill 沙箱', backend: 'subprocess', status: 'available', status_label: '可用', message: '脚本型 Skill 在子进程中执行。', doc_url: '/docs/skills/sandbox', config_url: '/governance#skill-sandbox', risk_level: 'medium' },
+            { component_id: 'mysql', name: 'MySQL', backend: 'mysql', status: 'not_connected', status_label: '未接入', message: '当前运行未使用 MySQL repository。', doc_url: '/docs/runtime/mysql', config_url: '/governance#runtime-storage', risk_level: 'info' },
+            { component_id: 'redis', name: 'Redis', backend: 'redis', status: 'not_connected', status_label: '未接入', message: '当前运行未连接 Redis。', doc_url: '/docs/runtime/redis', config_url: '/governance#runtime-executor', risk_level: 'info' },
+            { component_id: 'celery', name: 'Celery', backend: 'celery', status: 'not_connected', status_label: '未接入', message: '当前未使用 Celery worker 执行任务。', doc_url: '/docs/runtime/celery', config_url: '/governance#runtime-executor', risk_level: 'info' },
+          ],
+        });
+      }
+      return defaultFetch?.(input, init) ?? jsonResponse([]);
+    });
+
+    await renderWorkbench('/governance');
+
+    expect(await screen.findByText('运行态驾驶舱')).toBeInTheDocument();
+    expect(screen.getByText('执行器后端')).toBeInTheDocument();
+    expect(screen.getAllByText('Skill 沙箱').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('未接入').length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByRole('link', { name: '存储后端文档' })).toHaveAttribute('href', '/docs/runtime/storage');
+    expect(screen.getByRole('link', { name: '模型网关配置' })).toHaveAttribute('href', '/governance#model-gateway');
+    expect(screen.getByRole('link', { name: 'Redis文档' })).toHaveAttribute('href', '/docs/runtime/redis');
+  });
+
+  it('治理页可以在前端保存模型网关配置并测试连接', async () => {
+    const requests: { url: string; method: string; body?: string }[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push({ url, method: init?.method ?? 'GET', body: String(init?.body ?? '') });
+      if (url.endsWith('/model-gateway/config') && init?.method === 'PUT') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        return jsonResponse({
+          provider: body.provider,
+          base_url: body.base_url,
+          secret_ref: body.secret_ref,
+          default_model: body.default_model,
+          timeout_seconds: body.timeout_seconds,
+          api_key_configured: Boolean(body.secret_ref),
+          api_key_masked: body.secret_ref ? 'sk-l...9999' : null,
+          source: 'store',
+        });
+      }
+      if (url.endsWith('/model-gateway/config')) {
+        return jsonResponse({
+          provider: 'mock',
+          base_url: null,
+          secret_ref: null,
+          default_model: 'mock-eval-model',
+          timeout_seconds: 60,
+          api_key_configured: false,
+          api_key_masked: null,
+          source: 'env',
+        });
+      }
+      if (url.endsWith('/model-gateway/status')) {
+        return jsonResponse({
+          provider: 'mock',
+          ready: true,
+          mode: 'offline_mock',
+          default_model: 'mock-eval-model',
+          base_url_configured: false,
+          api_key_configured: false,
+          timeout_seconds: 60,
+          skill_ref: 'model.chat@0.1.0',
+          message: '业务 Skill 不需要重复实现模型调用，可在 Workflow 中复用统一模型调用节点。',
+        });
+      }
+      if (url.endsWith('/model-gateway/test')) {
+        return jsonResponse({
+          ok: true,
+          response: {
+            text: '模型回答：连接测试通过。',
+            provider: 'openai_compatible',
+            model: 'qwen-plus',
+            usage: { total_tokens: 12 },
+            latency_ms: 18,
+            raw: {},
+          },
+        });
+      }
+      if (url.endsWith('/skills')) return jsonResponse(demoSkills);
+      if (url.endsWith('/skills/packages')) return jsonResponse([pendingSkillPackage]);
+      if (url.endsWith('/audit-events')) return jsonResponse([]);
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/governance');
+
+    fireEvent.click(await screen.findByRole('button', { name: /配置模型网关/ }));
+    expect(screen.getByText(/Provider 是调用协议类型/)).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Provider' }));
+    expect(await screen.findByRole('option', { name: '离线 Mock（不调用真实模型）' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '真实模型服务（OpenAI-compatible）' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'OpenAI 兼容别名' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '兼容协议别名' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '离线别名' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Demo 别名' })).not.toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: /模型服务模板/ }));
+    fireEvent.click(await screen.findByText('DeepSeek（OpenAI-compatible）'));
+    expect(screen.getByLabelText('Base URL')).toHaveValue('https://api.deepseek.com/v1');
+    expect(screen.getByLabelText('Secret 引用')).toHaveValue('env:DEEPSEEK_API_KEY');
+    const defaultModelSelect = screen.getByRole('combobox', { name: '默认模型' });
+    expect(defaultModelSelect).toBeInTheDocument();
+    fireEvent.mouseDown(defaultModelSelect);
+    fireEvent.click(await screen.findByRole('option', { name: 'deepseek-chat' }));
+    fireEvent.change(screen.getByLabelText('临时测试 API Key'), { target: { value: 'sk-local-9999' } });
+    fireEvent.change(screen.getByLabelText('超时秒数'), { target: { value: '120' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存配置' }));
+
+    await waitFor(() => expect(requests.some((request) => request.url.endsWith('/model-gateway/config') && request.method === 'PUT')).toBe(true));
+    const saveRequest = requests.find((request) => request.url.endsWith('/model-gateway/config') && request.method === 'PUT');
+    expect(saveRequest?.body).toContain('"provider":"openai_compatible"');
+    expect(saveRequest?.body).toContain('"secret_ref":"env:DEEPSEEK_API_KEY"');
+    expect(saveRequest?.body).toContain('"default_model":"deepseek-chat"');
+    expect(saveRequest?.body).not.toContain('"api_key":"sk-local-9999"');
+    expect(await screen.findByText(/模型网关配置已保存/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+    expect(await screen.findByText(/模型回答：连接测试通过/)).toBeInTheDocument();
+    const testRequest = requests.find((request) => request.url.endsWith('/model-gateway/test') && request.method === 'POST');
+    expect(testRequest?.body).toContain('"api_key":"sk-local-9999"');
+  });
+
+  it('治理页会把历史误填的模型名 Provider 迁移成模型下拉值', async () => {
+    const requests: { url: string; method: string; body?: string }[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push({ url, method: init?.method ?? 'GET', body: String(init?.body ?? '') });
+      if (url.endsWith('/model-gateway/config') && init?.method === 'PUT') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        return jsonResponse({
+          provider: body.provider,
+          base_url: body.base_url,
+          secret_ref: body.secret_ref,
+          default_model: body.default_model,
+          timeout_seconds: body.timeout_seconds,
+          api_key_configured: Boolean(body.secret_ref),
+          api_key_masked: body.secret_ref ? 'sk-l...9999' : null,
+          source: 'store',
+        });
+      }
+      if (url.endsWith('/model-gateway/config')) {
+        return jsonResponse({
+          provider: 'deepseek-v4-flash',
+          base_url: 'https://api.deepseek.com/v1',
+          secret_ref: 'env:DEEPSEEK_API_KEY',
+          default_model: 'deepseek-v4-flash',
+          timeout_seconds: 60,
+          api_key_configured: true,
+          api_key_masked: 'sk-d...9999',
+          source: 'store',
+        });
+      }
+      if (url.endsWith('/model-gateway/status')) {
+        return jsonResponse({
+          provider: 'deepseek-v4-flash',
+          ready: false,
+          mode: 'misconfigured',
+          default_model: 'deepseek-v4-flash',
+          base_url_configured: true,
+          api_key_configured: true,
+          timeout_seconds: 60,
+          skill_ref: 'model.chat@0.1.0',
+          message: 'Provider 历史误填为模型名。',
+        });
+      }
+      if (url.endsWith('/model-gateway/connections')) return jsonResponse([]);
+      if (url.endsWith('/skills')) return jsonResponse(demoSkills);
+      if (url.endsWith('/skills/packages')) return jsonResponse([pendingSkillPackage]);
+      if (url.endsWith('/audit-events')) return jsonResponse([]);
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/governance');
+
+    fireEvent.click(await screen.findByRole('button', { name: /配置模型网关/ }));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Provider' }));
+    expect(await screen.findByRole('option', { name: '真实模型服务（OpenAI-compatible）' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'deepseek-v4-flash' })).not.toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '默认模型' }));
+    expect(await screen.findByRole('option', { name: 'deepseek-v4-flash' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '保存配置' }));
+
+    await waitFor(() => expect(requests.some((request) => request.url.endsWith('/model-gateway/config') && request.method === 'PUT')).toBe(true));
+    const saveRequest = requests.find((request) => request.url.endsWith('/model-gateway/config') && request.method === 'PUT');
+    expect(saveRequest?.body).toContain('"provider":"openai_compatible"');
+    expect(saveRequest?.body).toContain('"default_model":"deepseek-v4-flash"');
+    expect(saveRequest?.body).not.toContain('"provider":"deepseek-v4-flash"');
+  });
+
+  it('治理页可以管理多模型连接别名并按别名测试连接', async () => {
+    const requests: { url: string; method: string; body?: string }[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push({ url, method: init?.method ?? 'GET', body: String(init?.body ?? '') });
+      if (url.endsWith('/model-gateway/connections') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        return jsonResponse({
+          connection_id: body.connection_id,
+          name: body.name,
+          provider: body.provider,
+          base_url: body.base_url,
+          secret_ref: body.secret_ref,
+          default_model: body.default_model,
+          timeout_seconds: body.timeout_seconds,
+          enabled: body.enabled ?? true,
+          api_key_configured: Boolean(body.secret_ref),
+          api_key_masked: body.secret_ref ? 'sk-d...0000' : null,
+        });
+      }
+      if (url.endsWith('/model-gateway/connections/qwen-prod') && init?.method === 'PUT') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        return jsonResponse({
+          connection_id: 'qwen-prod',
+          name: body.name ?? 'Qwen 生产',
+          provider: body.provider ?? 'openai_compatible',
+          base_url: body.base_url ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+          secret_ref: body.secret_ref ?? 'env:QWEN_API_KEY',
+          default_model: body.default_model ?? 'qwen-plus',
+          timeout_seconds: body.timeout_seconds ?? 60,
+          enabled: body.enabled ?? true,
+          api_key_configured: Boolean(body.secret_ref ?? 'env:QWEN_API_KEY'),
+          api_key_masked: 'sk-q...1234',
+        });
+      }
+      if (url.endsWith('/model-gateway/connections/qwen-prod') && init?.method === 'DELETE') {
+        return jsonResponse({ deleted: true, connection_id: 'qwen-prod' });
+      }
+      if (url.endsWith('/model-gateway/connections')) {
+        return jsonResponse([
+          {
+            connection_id: 'qwen-prod',
+            name: 'Qwen 生产',
+            provider: 'openai_compatible',
+            base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+            secret_ref: 'env:QWEN_API_KEY',
+            default_model: 'qwen-plus',
+            timeout_seconds: 60,
+            enabled: true,
+            api_key_configured: true,
+            api_key_masked: 'sk-q...1234',
+          },
+        ]);
+      }
+      if (url.endsWith('/model-gateway/test')) {
+        return jsonResponse({
+          ok: true,
+          response: {
+            text: '模型回答：别名连接测试通过。',
+            provider: 'openai_compatible',
+            model: 'qwen-plus',
+            usage: { total_tokens: 12 },
+            latency_ms: 16,
+            raw: {},
+          },
+        });
+      }
+      if (url.endsWith('/model-gateway/status')) {
+        return jsonResponse({
+          provider: 'mock',
+          ready: true,
+          mode: 'offline_mock',
+          default_model: 'mock-eval-model',
+          base_url_configured: false,
+          api_key_configured: false,
+          timeout_seconds: 60,
+          skill_ref: 'model.chat@0.1.0',
+          message: '业务 Skill 不需要重复实现模型调用，可在 Workflow 中复用统一模型调用节点。',
+        });
+      }
+      if (url.endsWith('/model-gateway/config')) {
+        return jsonResponse({
+          provider: 'mock',
+          base_url: null,
+          secret_ref: null,
+          default_model: 'mock-eval-model',
+          timeout_seconds: 60,
+          api_key_configured: false,
+          api_key_masked: null,
+          source: 'env',
+        });
+      }
+      if (url.endsWith('/skills')) return jsonResponse(demoSkills);
+      if (url.endsWith('/skills/packages')) return jsonResponse([pendingSkillPackage]);
+      if (url.endsWith('/audit-events')) return jsonResponse([]);
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/governance');
+
+    expect(await screen.findByText('模型连接别名')).toBeInTheDocument();
+    const qwenRow = screen.getByRole('row', { name: /qwen-prod/ });
+    expect(within(qwenRow).getByText('Qwen 生产')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /新增模型连接/ }));
+    fireEvent.change(screen.getByLabelText('连接 ID'), { target: { value: 'deepseek-test' } });
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'DeepSeek 测试' } });
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: /连接模型服务模板/ }));
+    fireEvent.click(await screen.findByText('DeepSeek（OpenAI-compatible）'));
+    expect(screen.getByLabelText('连接 Base URL')).toHaveValue('https://api.deepseek.com/v1');
+    expect(screen.getByLabelText('连接 Secret 引用')).toHaveValue('env:DEEPSEEK_API_KEY');
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '连接 Provider' }));
+    expect(await screen.findByRole('option', { name: '离线 Mock（不调用真实模型）' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '真实模型服务（OpenAI-compatible）' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'OpenAI 兼容别名' })).not.toBeInTheDocument();
+    const connectionDefaultModelSelect = screen.getByRole('combobox', { name: '连接默认模型' });
+    expect(connectionDefaultModelSelect).toBeInTheDocument();
+    fireEvent.mouseDown(connectionDefaultModelSelect);
+    fireEvent.click(await screen.findByRole('option', { name: 'deepseek-chat' }));
+    fireEvent.change(screen.getByLabelText('连接临时测试 API Key'), { target: { value: 'sk-should-not-save' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存连接' }));
+
+    await waitFor(() => expect(requests.some((request) => request.url.endsWith('/model-gateway/connections') && request.method === 'POST')).toBe(true));
+    const createRequest = requests.find((request) => request.url.endsWith('/model-gateway/connections') && request.method === 'POST');
+    expect(createRequest?.body).toContain('"connection_id":"deepseek-test"');
+    expect(createRequest?.body).toContain('"provider":"openai_compatible"');
+    expect(createRequest?.body).toContain('"secret_ref":"env:DEEPSEEK_API_KEY"');
+    expect(createRequest?.body).toContain('"default_model":"deepseek-chat"');
+    expect(createRequest?.body).not.toContain('sk-should-not-save');
+    expect(await screen.findByText(/模型连接已保存：deepseek-test/)).toBeInTheDocument();
+
+    fireEvent.click(within(qwenRow).getByRole('button', { name: /测试/ }));
+    expect(await screen.findByText('模型回答：别名连接测试通过。')).toBeInTheDocument();
+    const testRequest = requests.find((request) => request.url.endsWith('/model-gateway/test') && request.method === 'POST');
+    expect(testRequest?.body).toContain('"model_connection_id":"qwen-prod"');
+
+    fireEvent.click(within(qwenRow).getByRole('button', { name: /删除/ }));
+    await waitFor(() => expect(requests.some((request) => request.url.endsWith('/model-gateway/connections/qwen-prod') && request.method === 'DELETE')).toBe(true));
+  });
+
+  it('Experiment 页面展示实验快照、baseline 对比和创建入口', async () => {
+    const requests: string[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push(url);
       if (url.endsWith('/experiments/from-run') && init?.method === 'POST') {
         return jsonResponse({ ...demoExperiments[0], experiment_id: 'exp-created', name: '新实验快照' });
       }
       if (url.includes('/experiments')) {
         return jsonResponse(demoExperiments);
+      }
+      if (url.includes('/runs?')) {
+        return jsonResponse({ items: [{ run_id: 'run-demo', status: 'completed', total_items: 2, completed_items: 2, failed_items: 0, queue_message_count: 2 }], pagination: { page: 1, page_size: 100, total_items: 1, total_pages: 1 } });
       }
       if (url.endsWith('/runs')) {
         return jsonResponse([{ ...demoTask, run_id: 'run-demo', status: 'completed' }]);
@@ -1023,11 +1625,15 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /生成实验快照/ }));
     expect(await screen.findByText('从 Run 生成实验快照')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '确认生成' })).toBeDisabled();
+    expect(requests.some((url) => url.includes('/runs?page=1') && url.includes('page_size=100'))).toBe(true);
+    expect(requests.some((url) => url.endsWith('/runs'))).toBe(false);
   });
 
   it('CI Gate 页面支持创建配置并对任务执行阻断评估', async () => {
+    const requests: string[] = [];
     vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
       const url = String(input);
+      requests.push(url);
       if (url.endsWith('/ci-gates') && init?.method === 'POST') {
         return jsonResponse({ ...demoCIGates[0], config_id: 'gatecfg-created', name: '新质量门禁' });
       }
@@ -1047,6 +1653,9 @@ describe('AegisQA 前端工作台', () => {
       }
       if (url.endsWith('/tasks')) {
         return jsonResponse([demoTask]);
+      }
+      if (url.includes('/runs?')) {
+        return jsonResponse({ items: [{ run_id: 'run-demo', status: 'completed', total_items: 2, completed_items: 2, failed_items: 0, queue_message_count: 2 }], pagination: { page: 1, page_size: 100, total_items: 1, total_pages: 1 } });
       }
       if (url.endsWith('/runs')) {
         return jsonResponse([]);
@@ -1070,6 +1679,8 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /执行 Gate 评估/ }));
     expect(await screen.findByText('阻断原因')).toBeInTheDocument();
     expect(screen.getAllByText(/质量门禁未通过/).length).toBeGreaterThan(0);
+    expect(requests.some((url) => url.includes('/runs?page=1') && url.includes('page_size=100'))).toBe(true);
+    expect(requests.some((url) => url.endsWith('/runs'))).toBe(false);
   });
 
   it('CI Gate 评估历史使用服务端分页并保留全量摘要', async () => {
@@ -1182,6 +1793,65 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByLabelText('批量回流 Golden Dataset'));
     fireEvent.click(screen.getByRole('button', { name: /确认批量审核/ }));
     expect(await screen.findByText(/批量审核完成/)).toBeInTheDocument();
+  });
+
+  it('Annotation Queue 页面展示负责人 backlog 和 SLA 并支持自动分派', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/annotation-queue/dispatch')) {
+        return jsonResponse({
+          assigned_count: 2,
+          skipped_count: 1,
+          tasks: [
+            { ...demoAnnotationTasks[0], task_id: 'anno-billing', assignee: 'billing_reviewer', status: 'assigned', due_at: '2026-06-04T16:00:00Z', business_label: 'billing' },
+            { ...demoAnnotationTasks[0], task_id: 'anno-policy', assignee: 'policy_reviewer', status: 'assigned', due_at: '2026-06-04T16:00:00Z', business_label: 'policy' },
+          ],
+          skipped: [{ task_id: 'anno-left', reason: 'capacity_exhausted' }],
+          owners: [
+            { assignee: 'billing_reviewer', backlog_before: 0, backlog_after: 1, assigned_count: 1, capacity: 2, overdue_count: 0 },
+            { assignee: 'policy_reviewer', backlog_before: 0, backlog_after: 1, assigned_count: 1, capacity: 2, overdue_count: 0 },
+          ],
+        });
+      }
+      if (url.includes('/annotation-candidates')) {
+        return jsonResponse(demoAnnotationCandidates);
+      }
+      if (url.includes('/annotation-queue')) {
+        return jsonResponse({
+          items: [
+            { ...demoAnnotationTasks[0], assignee: 'billing_reviewer', status: 'assigned', due_at: '2026-06-04T16:00:00Z', business_label: 'billing', sla_status: 'within_sla' },
+            { ...demoAnnotationTasks[0], task_id: 'anno-policy', item_id: 'item-policy', assignee: 'policy_reviewer', status: 'assigned', due_at: '2026-06-04T16:00:00Z', business_label: 'policy', sla_status: 'within_sla' },
+            { ...demoAnnotationTasks[0], task_id: 'anno-open', item_id: 'item-open', assignee: null, status: 'pending', business_label: 'billing', sla_status: 'unassigned' },
+          ],
+          pagination: { page: 1, page_size: 8, total_items: 3, total_pages: 1 },
+          summary: {
+            total_open: 3,
+            total_assigned: 2,
+            total_overdue: 0,
+            owners: [
+              { assignee: 'billing_reviewer', backlog: 1, overdue_count: 0, next_due_at: '2026-06-04T16:00:00Z' },
+              { assignee: 'policy_reviewer', backlog: 1, overdue_count: 0, next_due_at: '2026-06-04T16:00:00Z' },
+              { assignee: '未分派', backlog: 1, overdue_count: 0, next_due_at: null },
+            ],
+          },
+        });
+      }
+      if (url.endsWith('/tasks')) {
+        return jsonResponse([demoTask]);
+      }
+      return jsonResponse([]);
+    });
+
+    await renderWorkbench('/annotation-queue');
+
+    expect(await screen.findByText('负责人负载与 SLA')).toBeInTheDocument();
+    expect(screen.getByText(/billing_reviewer：1/)).toBeInTheDocument();
+    expect(screen.getByText(/policy_reviewer：1/)).toBeInTheDocument();
+    expect(screen.getAllByText('SLA').length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /自动分派/ }));
+    expect(await screen.findByText(/自动分派完成：已分派 2 条，跳过 1 条/)).toBeInTheDocument();
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(expect.stringContaining('/annotation-queue/dispatch'), expect.objectContaining({ method: 'POST' }));
   });
 
   it('Annotation Queue 审核队列使用服务端分页', async () => {
@@ -1331,6 +2001,7 @@ describe('AegisQA 前端工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: /应用 baseline/ }));
     expect(await screen.findByText(/Baseline 已应用：exp-candidate-demo/)).toBeInTheDocument();
     expect(screen.getByText(/当前 baseline：exp-candidate-demo/)).toBeInTheDocument();
+    expect(screen.getByText('应用门禁：passed')).toBeInTheDocument();
     expect(screen.getByText('Baseline 变更提醒')).toBeInTheDocument();
     expect(screen.getByText(/Baseline 已从 exp-baseline 切换到 exp-candidate-demo/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /确认已读/ }));
@@ -1434,7 +2105,9 @@ describe('AegisQA 前端工作台', () => {
   it('治理页面权限矩阵按钮打开矩阵弹窗', async () => {
     await renderWorkbench('/governance');
 
-    expect(screen.getByText('生产适配边界已移至文档')).toBeInTheDocument();
+    expect(await screen.findByText('运行状态与生产边界')).toBeInTheDocument();
+    expect(screen.getAllByText('local_thread').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('未接入').length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText('schema 已准备')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /查看权限矩阵/ }));

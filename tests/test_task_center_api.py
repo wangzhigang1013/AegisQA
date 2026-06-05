@@ -1,4 +1,5 @@
 import base64
+import csv
 import io
 import json
 import time
@@ -8,6 +9,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from aegisqa.api.app import create_app
+from aegisqa.api.routes.tasks import _build_task_report_export_csv
 from aegisqa.workflows.models import WorkflowDraft, WorkflowStep
 
 
@@ -45,6 +47,25 @@ def _write_jsonl(path: Path) -> None:
     rows = [
         {"question": "什么是 AegisQA?", "reference": "AegisQA", "expected_label": "pass"},
         {"question": "什么是坏例?", "reference": "Badcase", "expected_label": "fail"},
+    ]
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _write_xss_jsonl(path: Path) -> None:
+    rows = [
+        {"question": "<script>alert(1)</script>", "reference": "不会命中", "expected_label": "fail"},
+    ]
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _write_formula_jsonl(path: Path) -> None:
+    rows = [
+        {"question": '=HYPERLINK("http://evil.local","click")', "reference": "+SUM(1,1)", "expected_label": "fail"},
+        {"question": "普通问题", "reference": " \t@cmd", "expected_label": "pass"},
     ]
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
@@ -165,6 +186,14 @@ def test_task_lifecycle_report_and_trace_tree(tmp_path: Path) -> None:
     assert report["version_snapshot"]["workflow"]["version_id"] == workflow["version_id"]
     assert report["step_distribution"][0]["step_id"] == "answer"
     assert report["step_distribution"][0]["total_calls"] == 4
+    paged_report = client.get(
+        f"/tasks/{task['task_id']}/report",
+        params={"step_page": 2, "step_page_size": 1, "diagnostic_step_page": 2, "diagnostic_step_page_size": 1},
+    ).json()
+    assert paged_report["step_distribution"][0]["step_id"] == "judge"
+    assert paged_report["step_distribution_pagination"] == {"page": 2, "page_size": 1, "total_items": 2, "total_pages": 2}
+    assert paged_report["diagnostics"]["step_health"][0]["step_id"] == "judge"
+    assert paged_report["diagnostics_pagination"]["step_health"] == {"page": 2, "page_size": 1, "total_items": 2, "total_pages": 2}
     assert report["report"]["run_id"] == executed["run_id"]
     assert report["export_links"]["html"].endswith("file_format=html")
     html_export = client.get(f"/runs/{executed['run_id']}/report/export", params={"file_format": "html"}).json()
@@ -193,6 +222,31 @@ def test_task_lifecycle_report_and_trace_tree(tmp_path: Path) -> None:
     assert trace_tree["items"][0]["children"][0]["skill_ref"] == "llm.call@0.1.0"
 
 
+def test_legacy_run_report_html_export_escapes_badcase_payload(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "xss_dataset.jsonl"
+    _write_xss_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "xss_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "HTML 导出转义任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+        },
+    ).json()
+    executed = client.post(f"/tasks/{task['task_id']}/execute").json()
+
+    html_export = client.get(f"/runs/{executed['run_id']}/report/export", params={"file_format": "html"}).json()
+
+    assert "<script>alert(1)</script>" not in html_export["content"]
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html_export["content"]
+
+
 def test_task_result_export_includes_each_item_row_context_metrics_and_step_outputs(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)
@@ -212,24 +266,133 @@ def test_task_result_export_includes_each_item_row_context_metrics_and_step_outp
     ).json()
     client.post(f"/tasks/{task['task_id']}/execute")
 
-    csv_export = client.get(f"/tasks/{task['task_id']}/results/export", params={"file_format": "csv"}).json()
-    assert csv_export["file_format"] == "csv"
-    assert csv_export["row_count"] == 2
-    assert "row.question" in csv_export["content"]
-    assert "context.answer" in csv_export["content"]
-    assert "metrics.tokens" in csv_export["content"]
-    assert "step.answer.output.answer" not in csv_export["content"]
+    csv_export = client.get(f"/tasks/{task['task_id']}/results/export", params={"file_format": "csv"})
+    assert csv_export.status_code == 200
+    assert csv_export.headers["content-type"].startswith("text/csv")
+    assert csv_export.headers["x-aegisqa-row-count"] == "2"
+    assert csv_export.headers["x-aegisqa-streaming"] == "true"
+    assert "attachment;" in csv_export.headers["content-disposition"]
+    assert "row.question" in csv_export.text
+    assert "context.answer" in csv_export.text
+    assert "metrics.tokens" in csv_export.text
+    assert "step.answer.output.answer" not in csv_export.text
 
-    csv_with_steps = client.get(f"/tasks/{task['task_id']}/results/export", params={"file_format": "csv", "include_steps": True}).json()
-    assert "step.answer.output.answer" in csv_with_steps["content"]
-    assert "step.judge.output.label" in csv_with_steps["content"]
+    csv_with_steps = client.get(f"/tasks/{task['task_id']}/results/export", params={"file_format": "csv", "include_steps": True})
+    assert "step.answer.output.answer" in csv_with_steps.text
+    assert "step.judge.output.label" in csv_with_steps.text
 
-    jsonl_export = client.get(f"/tasks/{task['task_id']}/results/export", params={"file_format": "jsonl"}).json()
-    rows = [json.loads(line) for line in jsonl_export["content"].splitlines()]
+    jsonl_export = client.get(f"/tasks/{task['task_id']}/results/export", params={"file_format": "jsonl"})
+    assert jsonl_export.headers["content-type"].startswith("application/x-ndjson")
+    rows = [json.loads(line) for line in jsonl_export.text.splitlines()]
     assert len(rows) == 2
     assert rows[0]["row.question"] == "什么是 AegisQA?"
     assert rows[0]["context.answer"].startswith("模型回答：")
     assert rows[0]["metrics.tokens"] > 0
+
+    json_export = client.get(f"/tasks/{task['task_id']}/results/export", params={"file_format": "json"})
+    assert json_export.headers["content-type"].startswith("application/json")
+    assert json_export.json()[0]["item_id"].startswith("item-")
+
+    export_events = client.get("/audit-events", params={"action": "task.results.export", "target": task["task_id"]}).json()
+    assert export_events[-1]["detail"]["streaming"] is True
+    assert export_events[-1]["detail"]["row_count"] == 2
+
+
+def test_task_result_csv_export_escapes_formula_like_cells(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "formula_result_export_dataset.jsonl"
+    _write_formula_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "formula_result_export_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "公式注入结果导出任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+        },
+    ).json()
+    client.post(f"/tasks/{task['task_id']}/execute")
+
+    csv_export = client.get(f"/tasks/{task['task_id']}/results/export", params={"file_format": "csv"})
+
+    assert csv_export.status_code == 200
+    rows = list(csv.DictReader(io.StringIO(csv_export.text)))
+    assert rows[0]["row.question"].startswith("'=HYPERLINK")
+    assert rows[0]["row.reference"] == "'+SUM(1,1)"
+    assert rows[1]["row.reference"].startswith("' \t@cmd")
+    assert not rows[0]["row.question"].startswith("=")
+    assert not rows[0]["row.reference"].startswith("+")
+
+
+def test_task_result_export_records_request_actor_and_role_for_audit(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "audited_result_export_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "audited_result_export_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "原始结果导出审计任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+        },
+    ).json()
+    client.post(f"/tasks/{task['task_id']}/execute")
+
+    export_response = client.get(
+        f"/tasks/{task['task_id']}/results/export",
+        params={"file_format": "jsonl", "role": "Reviewer", "actor": "alice"},
+    )
+
+    assert export_response.status_code == 200
+    export_events = client.get("/audit-events", params={"action": "task.results.export", "target": task["task_id"]}).json()
+    event = export_events[-1]
+    assert event["actor"] == "alice"
+    assert event["role"] == "Reviewer"
+    assert event["detail"]["role"] == "Reviewer"
+    assert event["detail"]["file_format"] == "jsonl"
+
+
+def test_task_report_csv_export_escapes_formula_like_cells() -> None:
+    payload = {
+        "task": {"task_id": "task-formula", "run_id": "run-formula"},
+        "report": {"pass_rate": 0.1},
+        "preflight_evidence": {
+            "preflight_id": "preflight-formula",
+            "summary": '=HYPERLINK("http://evil.local","summary")',
+            "status": "+SUM(1,1)",
+            "checks": [
+                {"check_id": "dataset_non_empty", "status": "passed", "message": "@cmd"},
+            ],
+        },
+        "quality_decision": {"status": "warning", "summary": "-1+2"},
+        "segments": [
+            {"segment_key": "=scene", "segment_value": "bad", "pass_rate": 0.1, "sample_count": 2, "badcase_count": 1},
+        ],
+        "badcases": [
+            {"item_id": "item-formula", "status": "pending", "reason": '=HYPERLINK("http://evil.local","badcase")'},
+        ],
+    }
+
+    content = _build_task_report_export_csv(payload)
+    rows = list(csv.DictReader(io.StringIO(content)))
+    by_section_field = {(row["section"], row["field"]): row for row in rows}
+
+    assert by_section_field[("preflight", "preflight_id")]["details"].startswith("'=HYPERLINK")
+    assert by_section_field[("preflight", "preflight_status")]["value"] == "'+SUM(1,1)"
+    assert by_section_field[("preflight_check", "dataset_non_empty")]["details"] == "'@cmd"
+    assert by_section_field[("quality_decision", "status")]["details"] == "'-1+2"
+    segment_row = next(row for row in rows if row["section"] == "segment")
+    assert segment_row["field"] == "'=scene=bad"
+    assert by_section_field[("badcase", "item-formula")]["details"].startswith("'=HYPERLINK")
 
 
 def test_task_background_execute_returns_running_and_updates_progress(tmp_path: Path) -> None:
@@ -264,6 +427,84 @@ def test_task_background_execute_returns_running_and_updates_progress(tmp_path: 
 
     assert latest["status"] == "completed"
     assert latest["completed_items"] == 2
+
+
+def test_background_execute_uses_injected_executor_and_running_state_survives_app_reload(tmp_path: Path) -> None:
+    class CapturingTaskExecutor:
+        backend = "capturing"
+
+        def __init__(self) -> None:
+            self.submissions: list[dict[str, str]] = []
+
+        def submit(self, *, task_id: str, run_id: str, execute) -> dict[str, str]:  # noqa: ANN001 - 测试替身只关心提交边界。
+            self.submissions.append({"task_id": task_id, "run_id": run_id})
+            return {"backend": self.backend, "job_id": f"captured-{task_id}"}
+
+    store_root = tmp_path / "store"
+    executor = CapturingTaskExecutor()
+    app = create_app(store_root=store_root, task_executor=executor)
+    client = TestClient(app)
+    data_path = tmp_path / "executor_reload_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "executor_reload_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "后台执行器持久化任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+        },
+    ).json()
+
+    started = client.post(f"/tasks/{task['task_id']}/execute", params={"background": True}).json()
+
+    assert executor.submissions == [{"task_id": task["task_id"], "run_id": task["run_id"]}]
+    assert started["status"] == "running"
+    assert started["execution_state"]["executor_backend"] == "capturing"
+    assert started["execution_state"]["executor_job_id"] == f"captured-{task['task_id']}"
+
+    reloaded = TestClient(create_app(store_root=store_root, task_executor=CapturingTaskExecutor())).get(f"/tasks/{task['task_id']}").json()
+    assert reloaded["status"] == "running"
+    assert reloaded["execution_state"]["executor_backend"] == "capturing"
+    assert reloaded["run_id"] == task["run_id"]
+
+
+def test_background_execute_rolls_back_running_state_when_executor_submit_fails(tmp_path: Path) -> None:
+    class FailingTaskExecutor:
+        backend = "failing"
+
+        def submit(self, *, task_id: str, run_id: str, execute) -> dict[str, str]:  # noqa: ANN001 - 测试替身只关心失败提交边界。
+            raise RuntimeError("broker down")
+
+    store_root = tmp_path / "store"
+    app = create_app(store_root=store_root, task_executor=FailingTaskExecutor())
+    client = TestClient(app, raise_server_exceptions=False)
+    data_path = tmp_path / "executor_failure_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "executor_failure_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    workflow = client.post("/workflow-graphs/publish", json={"graph": _graph_payload()}).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "后台执行器失败任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+        },
+    ).json()
+
+    response = client.post(f"/tasks/{task['task_id']}/execute", params={"background": True})
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "TASK_EXECUTOR_SUBMIT_FAILED"
+    stored = TestClient(create_app(store_root=store_root, task_executor=FailingTaskExecutor())).get(f"/tasks/{task['task_id']}").json()
+    assert stored["status"] == "queued"
+    assert stored["execution_state"]["executor_backend"] == "failing"
+    assert stored["execution_state"]["submit_error"] == "broker down"
 
 
 def test_tasks_support_server_side_pagination_and_status_filter(tmp_path: Path) -> None:
@@ -504,6 +745,55 @@ def test_task_preflight_checks_skill_expression_config_against_preview_rows(tmp_
     assert "row.temperature" in config_check["details"]["issues"][0]["message"]
 
 
+def test_workflow_publish_rejects_unsafe_input_mapping_expression(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    graph = _graph_payload()
+    graph["nodes"][0]["input_mapping"]["prompt"] = '__import__("os").system("calc")'
+
+    response = client.post("/workflow-graphs/publish", json={"graph": graph})
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["message"] == "Workflow Graph 校验失败"
+    assert payload["details"]["errors"][0]["code"] == "INPUT_MAPPING_EXPRESSION_INVALID"
+    assert payload["details"]["errors"][0]["details"]["field_path"] == "prompt"
+    assert "不支持的表达式语法" in payload["details"]["errors"][0]["message"]
+
+
+def test_task_preflight_reports_input_template_expression_error_position(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "task_dataset.jsonl"
+    _write_jsonl(data_path)
+    dataset = client.post("/datasets/from-path", json={"name": "task_dataset", "path": str(data_path)}).json()
+    graph = _graph_payload()
+    graph["nodes"][0]["input_mapping"]["prompt"] = "Q={{ row.question }} / scene={{ row.scene }}"
+    workflow = client.post("/workflow-graphs/publish", json={"graph": graph}).json()
+
+    preflight = client.post(
+        "/tasks/preflight",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+        },
+    ).json()
+    expression_check = next(check for check in preflight["checks"] if check["check_id"] == "workflow_input_expressions")
+
+    assert preflight["status"] == "blocked"
+    assert expression_check["status"] == "blocked"
+    issue = expression_check["details"]["issues"][0]
+    assert issue["code"] == "INPUT_MAPPING_EXPRESSION_PATH_MISSING"
+    assert issue["step_id"] == "answer"
+    assert issue["field_path"] == "prompt"
+    assert issue["row_index"] == 0
+    assert issue["expression"] == "Q={{ row.question }} / scene={{ row.scene }}"
+    assert issue["missing_path"] == "row.scene"
+
+
 def test_task_creation_rejects_stale_preflight_signature(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)
@@ -686,13 +976,13 @@ def test_viewer_can_export_task_report_after_admin_approval(tmp_path: Path) -> N
     ).json()
     client.post(f"/tasks/{task['task_id']}/execute")
 
-    denied_export = client.get(f"/tasks/{task['task_id']}/report/export", params={"file_format": "json", "role": "Viewer"})
+    denied_export = client.get(f"/tasks/{task['task_id']}/report/export", params={"file_format": "json", "role": "Viewer", "actor": "viewer_denied"})
     assert denied_export.status_code == 403
     assert denied_export.json()["code"] == "REPORT_EXPORT_FORBIDDEN"
 
     export_request = client.post(
         f"/tasks/{task['task_id']}/report/export-requests",
-        json={"file_format": "json", "requester_role": "Viewer", "reason": "业务复盘需要离线报告。"},
+        json={"file_format": "json", "requester_role": "Viewer", "actor": "business_viewer", "reason": "业务复盘需要离线报告。"},
     ).json()
     assert export_request["request_id"].startswith("rex-")
     assert export_request["status"] == "pending"
@@ -704,28 +994,113 @@ def test_viewer_can_export_task_report_after_admin_approval(tmp_path: Path) -> N
 
     reviewer_approval = client.post(
         f"/report-export-requests/{export_request['request_id']}/approve",
-        json={"approver_role": "Reviewer", "note": "Reviewer 不能批准外发。"},
+        json={"approver_role": "Reviewer", "actor": "reviewer_user", "note": "Reviewer 不能批准外发。"},
     )
     assert reviewer_approval.status_code == 403
     assert reviewer_approval.json()["code"] == "REPORT_EXPORT_APPROVAL_FORBIDDEN"
 
     approved = client.post(
         f"/report-export-requests/{export_request['request_id']}/approve",
-        json={"approver_role": "Admin", "note": "允许本次离线复盘。"},
+        json={"approver_role": "Admin", "actor": "export_admin", "note": "允许本次离线复盘。"},
     ).json()
     assert approved["status"] == "approved"
     assert approved["approved_by"] == "Admin"
+    assert approved["approved_by_actor"] == "export_admin"
     assert approved["approval_note"] == "允许本次离线复盘。"
 
     approved_export = client.get(
         f"/tasks/{task['task_id']}/report/export",
-        params={"file_format": "json", "role": "Viewer", "approval_request_id": export_request["request_id"]},
+        params={"file_format": "json", "role": "Viewer", "actor": "business_viewer", "approval_request_id": export_request["request_id"]},
     ).json()
     assert approved_export["content"]["task"]["task_id"] == task["task_id"]
 
+    forbidden_events = client.get("/audit-events", params={"actor": "reviewer_user"}).json()
+    assert forbidden_events[-1]["action"] == "task.report.export.approve"
+    assert forbidden_events[-1]["result"] == "forbidden"
+    assert forbidden_events[-1]["role"] == "Reviewer"
+
+    request_events = client.get("/audit-events", params={"action": "task.report.export.request", "target": task["task_id"]}).json()
+    assert request_events[-1]["actor"] == "business_viewer"
+    assert request_events[-1]["role"] == "Viewer"
+    approve_events = client.get("/audit-events", params={"action": "task.report.export.approve", "target": task["task_id"]}).json()
+    assert approve_events[-1]["actor"] == "export_admin"
+    assert approve_events[-1]["role"] == "Admin"
     export_events = client.get("/audit-events", params={"action": "task.report.export", "target": task["task_id"]}).json()
+    assert export_events[-1]["actor"] == "business_viewer"
+    assert export_events[-1]["role"] == "Viewer"
     assert export_events[-1]["detail"]["approval_request_id"] == export_request["request_id"]
     assert export_events[-1]["detail"]["role"] == "Viewer"
+
+
+def test_task_report_offline_package_contains_audit_bundle_and_uses_export_approval(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+    data_path = tmp_path / "task_dataset.jsonl"
+    _write_jsonl(data_path)
+
+    dataset = client.post("/datasets/from-path", json={"name": "task_dataset", "path": str(data_path), "golden": True, "label_field": "expected_label"}).json()
+    graph = _graph_payload()
+    graph["nodes"][0]["config"]["api_key"] = "sk-secret-offline-package"
+    workflow = client.post("/workflow-graphs/publish", json={"graph": graph}).json()
+    preflight = client.post(
+        "/tasks/preflight",
+        json={
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+        },
+    ).json()
+    task = client.post(
+        "/tasks",
+        json={
+            "name": "离线审计包任务",
+            "dataset_id": dataset["dataset_id"],
+            "dataset_version": dataset["version"],
+            "workflow_version_id": workflow["version_id"],
+            "preflight_id": preflight["preflight_id"],
+            "evaluation_goal": "release_gate",
+            "quality_gate": {"pass_rate": 0.9, "max_badcase_count": 0},
+        },
+    ).json()
+    client.post(f"/tasks/{task['task_id']}/execute")
+
+    denied = client.get(f"/tasks/{task['task_id']}/report/offline-package", params={"role": "Viewer"})
+    assert denied.status_code == 403
+    assert denied.json()["code"] == "REPORT_EXPORT_FORBIDDEN"
+
+    export_request = client.post(
+        f"/tasks/{task['task_id']}/report/export-requests",
+        json={"file_format": "offline_zip", "requester_role": "Viewer", "reason": "离线审计归档。"},
+    ).json()
+    client.post(f"/report-export-requests/{export_request['request_id']}/approve", json={"approver_role": "Admin", "note": "允许导出离线包。"})
+    exported = client.get(
+        f"/tasks/{task['task_id']}/report/offline-package",
+        params={"role": "Viewer", "approval_request_id": export_request["request_id"]},
+    )
+
+    assert exported.status_code == 200
+    assert exported.headers["content-type"].startswith("application/zip")
+    assert exported.headers["x-aegisqa-file-format"] == "offline_zip"
+    archive = zipfile.ZipFile(io.BytesIO(exported.content))
+    assert set(archive.namelist()) >= {
+        "manifest.json",
+        "report.html",
+        "report.csv",
+        "preflight.json",
+        "workflow_snapshot.json",
+        "skill_manifests.json",
+        "dataset_schema.json",
+    }
+    manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+    assert manifest["task_id"] == task["task_id"]
+    assert manifest["preflight_id"] == preflight["preflight_id"]
+    assert "sk-secret-offline-package" not in exported.content.decode("utf-8", errors="ignore")
+    assert "***REDACTED***" in archive.read("workflow_snapshot.json").decode("utf-8")
+    export_events = client.get("/audit-events", params={"action": "task.report.export", "target": task["task_id"]}).json()
+    assert export_events[-1]["detail"]["file_format"] == "offline_zip"
+    assert export_events[-1]["detail"]["approval_request_id"] == export_request["request_id"]
 
 
 def test_report_export_request_lifecycle_reject_revoke_and_expire(tmp_path: Path) -> None:
@@ -749,14 +1124,15 @@ def test_report_export_request_lifecycle_reject_revoke_and_expire(tmp_path: Path
 
     rejected_request = client.post(
         f"/tasks/{task['task_id']}/report/export-requests",
-        json={"file_format": "csv", "requester_role": "Viewer", "reason": "需要给业务方离线分析。"},
+        json={"file_format": "csv", "requester_role": "Viewer", "actor": "csv_requester", "reason": "需要给业务方离线分析。"},
     ).json()
     rejected = client.post(
         f"/report-export-requests/{rejected_request['request_id']}/reject",
-        json={"approver_role": "Admin", "note": "CSV 明细包含敏感样本，暂不外发。"},
+        json={"approver_role": "Admin", "actor": "security_admin", "note": "CSV 明细包含敏感样本，暂不外发。"},
     ).json()
     assert rejected["status"] == "rejected"
     assert rejected["rejected_by"] == "Admin"
+    assert rejected["rejected_by_actor"] == "security_admin"
     assert rejected["rejection_note"] == "CSV 明细包含敏感样本，暂不外发。"
 
     rejected_export = client.get(
@@ -769,14 +1145,15 @@ def test_report_export_request_lifecycle_reject_revoke_and_expire(tmp_path: Path
 
     revoked_request = client.post(
         f"/tasks/{task['task_id']}/report/export-requests",
-        json={"file_format": "html", "requester_role": "Viewer", "reason": "临时排查。"},
+        json={"file_format": "html", "requester_role": "Viewer", "actor": "html_requester", "reason": "临时排查。"},
     ).json()
     revoked = client.post(
         f"/report-export-requests/{revoked_request['request_id']}/revoke",
-        json={"requester_role": "Viewer", "reason": "已改用在线报告，不再需要外发。"},
+        json={"requester_role": "Viewer", "actor": "html_requester", "reason": "已改用在线报告，不再需要外发。"},
     ).json()
     assert revoked["status"] == "revoked"
     assert revoked["revoked_by"] == "Viewer"
+    assert revoked["revoked_by_actor"] == "html_requester"
 
     approve_revoked = client.post(
         f"/report-export-requests/{revoked_request['request_id']}/approve",
@@ -808,6 +1185,11 @@ def test_report_export_request_lifecycle_reject_revoke_and_expire(tmp_path: Path
     assert "task.report.export.reject" in lifecycle_actions
     assert "task.report.export.revoke" in lifecycle_actions
     assert "task.report.export.expire" in lifecycle_actions
+    events_by_action = {event["action"]: event for event in lifecycle_events if event["action"] in {"task.report.export.reject", "task.report.export.revoke"}}
+    assert events_by_action["task.report.export.reject"]["actor"] == "security_admin"
+    assert events_by_action["task.report.export.reject"]["role"] == "Admin"
+    assert events_by_action["task.report.export.revoke"]["actor"] == "html_requester"
+    assert events_by_action["task.report.export.revoke"]["role"] == "Viewer"
 
 
 def test_task_creation_rejects_conflicting_preflight_ids(tmp_path: Path) -> None:

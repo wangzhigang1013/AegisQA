@@ -78,7 +78,13 @@ class JsonStore:
         for path in paths:
             if path.name.endswith(".lock"):
                 continue
-            records.append(json.loads(path.read_text(encoding="utf-8")))
+            with FileLock(self._lock_path(path)):
+                if not path.exists():
+                    continue
+                # list_json 会被前端轮询、E2E 并发请求和后台执行器频繁调用。
+                # 读列表时也必须拿到同一份文档锁，否则 Windows 下读句柄可能阻塞
+                # writer 的 os.replace，导致本地 JSON Store 偶发 500。
+                records.append(json.loads(path.read_text(encoding="utf-8")))
         return records
 
     def _lock_path(self, path: Path) -> Path:

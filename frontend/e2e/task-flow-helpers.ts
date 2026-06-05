@@ -1,46 +1,36 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 
-test('上传数据、审批 Skill、发布 Workflow、执行任务并沉淀 Badcase', async ({ page, request }, testInfo) => {
+export type TaskFlowFixture = {
+  stamp: number;
+  workspace: string;
+  datasetName: string;
+  skillId: string;
+  workflowName: string;
+  taskName: string;
+  datasetPath: string;
+  skillPackagePath: string;
+};
+
+export function createTaskFlowFixture(testInfo: TestInfo, label: string): TaskFlowFixture {
   const stamp = Date.now();
-  const workspace = testInfo.outputPath('fixtures');
+  const workspace = testInfo.outputPath(`${label}-${stamp}`);
   mkdirSync(workspace, { recursive: true });
-
-  const datasetName = `e2e_dataset_${stamp}`;
-  const skillId = `plugin.e2e_echo_${stamp}@0.1.0`;
-  const workflowName = `E2E 插件评测 Workflow ${stamp}`;
-  const taskName = `E2E 任务 ${stamp}`;
   const datasetPath = path.join(workspace, 'samples.jsonl');
   const skillPackagePath = path.join(workspace, 'echo_skill.zip');
-
+  const datasetName = `e2e_${label}_dataset_${stamp}`;
+  const skillId = `plugin.e2e_${label}_${stamp}@0.1.0`;
+  const workflowName = `E2E ${label} Workflow ${stamp}`;
+  const taskName = `E2E ${label} 任务 ${stamp}`;
   writeJsonlFixture(datasetPath);
   writeSkillPackage(skillPackagePath, skillId);
+  return { stamp, workspace, datasetName, skillId, workflowName, taskName, datasetPath, skillPackagePath };
+}
 
-  await uploadDataset(page, datasetPath, datasetName);
-  await uploadAndApproveSkill(page, skillPackagePath, skillId);
-
-  await page.goto('/workflows');
-  await page.getByRole('button', { name: /新建 Workflow/ }).click();
-  await page.getByLabel('新建 Workflow 名称').fill(workflowName);
-  await page.getByRole('button', { name: '确认创建' }).click();
-  await expect(page.getByText('Skill Palette')).toBeVisible();
-
-  const workflow = await publishPluginWorkflow(request, workflowName, skillId);
-  await page.goto('/workflows');
-  await page.getByPlaceholder('搜索 Workflow 名称').fill(workflowName);
-  await expect(page.locator('tr').filter({ hasText: workflowName }).filter({ hasText: '已发布' })).toBeVisible();
-
-  await createAndExecuteTask(page, datasetName, workflowName, taskName);
-  await verifyTaskSearch(page, taskName);
-  await verifyReportAndCorrectBadcase(page, taskName);
-
-  expect(workflow.version_id).toContain(':v');
-});
-
-async function uploadDataset(page: Page, datasetPath: string, datasetName: string) {
+export async function uploadDataset(page: Page, datasetPath: string, datasetName: string) {
   await page.goto('/datasets');
   await page.getByRole('button', { name: /上传 CSV \/ JSONL/ }).click();
   await page.locator('.ant-modal input[type="file"]').setInputFiles(datasetPath);
@@ -51,7 +41,7 @@ async function uploadDataset(page: Page, datasetPath: string, datasetName: strin
   await expect(page.getByText(new RegExp(`上传成功：${datasetName}`))).toBeVisible();
 }
 
-async function uploadAndApproveSkill(page: Page, skillPackagePath: string, skillId: string) {
+export async function uploadAndApproveSkill(page: Page, skillPackagePath: string, skillId: string) {
   await page.goto('/skills');
   await page.getByRole('button', { name: /上传 Agent Skill 包/ }).click();
   await page.locator('.ant-modal input[type="file"]').setInputFiles(skillPackagePath);
@@ -72,7 +62,36 @@ async function uploadAndApproveSkill(page: Page, skillPackagePath: string, skill
   await expect(page.getByText(new RegExp(`Skill 状态已更新：${escapeRegExp(skillId)} / approved`))).toBeVisible();
 }
 
-async function publishPluginWorkflow(request: import('@playwright/test').APIRequestContext, workflowName: string, skillId: string) {
+export async function materializeDataset(request: APIRequestContext, datasetName: string) {
+  const response = await request.post(apiPath('/datasets/source-materialize'), {
+    data: {
+      name: datasetName,
+      rows: [
+        { question: 'AegisQA 如何保障质量?', reference: 'AegisQA', expected_label: 'pass' },
+        { question: '这个样本应该形成坏例', reference: 'Badcase', expected_label: 'fail' },
+      ],
+      golden: true,
+      label_field: 'expected_label',
+    },
+  });
+  expect(response.ok()).toBeTruthy();
+  return response.json();
+}
+
+export async function uploadAndApproveSkillByApi(request: APIRequestContext, skillPackagePath: string, skillId: string) {
+  const upload = await request.post(apiPath('/skills/packages/upload'), {
+    data: { filename: 'echo_skill.zip', content_base64: readFileSync(skillPackagePath).toString('base64') },
+  });
+  expect(upload.ok()).toBeTruthy();
+  const contract = await request.post(apiPath(`/skills/${skillId}/contract-test`));
+  expect(contract.ok()).toBeTruthy();
+  expect((await contract.json()).ok).toBe(true);
+  const approve = await request.post(apiPath(`/skills/${skillId}/approve`), { data: { reason: 'E2E fixture approval' } });
+  expect(approve.ok()).toBeTruthy();
+  return approve.json();
+}
+
+export async function publishPluginWorkflow(request: APIRequestContext, workflowName: string, skillId: string) {
   const response = await request.post(apiPath('/workflow-graphs/publish'), {
     data: {
       graph: {
@@ -110,7 +129,26 @@ async function publishPluginWorkflow(request: import('@playwright/test').APIRequ
   return response.json();
 }
 
-async function createAndExecuteTask(page: Page, datasetName: string, workflowName: string, taskName: string) {
+export async function createTaskByApi(request: APIRequestContext, taskName: string, datasetId: string, datasetVersion: number, workflowVersionId: string) {
+  const response = await request.post(apiPath('/tasks'), {
+    data: {
+      name: taskName,
+      dataset_id: datasetId,
+      dataset_version: datasetVersion,
+      workflow_version_id: workflowVersionId,
+    },
+  });
+  expect(response.ok()).toBeTruthy();
+  return response.json();
+}
+
+export async function executeTaskByApi(request: APIRequestContext, taskId: string) {
+  const response = await request.post(apiPath(`/tasks/${taskId}/execute`));
+  expect(response.ok()).toBeTruthy();
+  return response.json();
+}
+
+export async function createAndExecuteTask(page: Page, datasetName: string, workflowName: string, taskName: string) {
   await page.goto('/runs');
   await page.getByRole('button', { name: /创建任务/ }).click();
   await page.getByPlaceholder('例如：RAG 回归评测 2026-05-31').fill(taskName);
@@ -133,7 +171,18 @@ async function createAndExecuteTask(page: Page, datasetName: string, workflowNam
   await expect(page.getByText('创建前 Preflight 证据')).toBeVisible();
 }
 
-async function verifyReportAndCorrectBadcase(page: Page, taskName: string) {
+export async function verifyTaskSearch(page: Page, taskName: string) {
+  await page.goto('/runs');
+  const taskSearchRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname.endsWith('/api/tasks') && url.searchParams.get('q') === taskName && url.searchParams.get('page') === '1' && url.searchParams.get('page_size') === '8';
+  });
+  await page.getByPlaceholder('搜索任务名 / 数据源 / Workflow').fill(taskName);
+  await taskSearchRequest;
+  await expect(page.locator('tr').filter({ hasText: taskName })).toBeVisible();
+}
+
+export async function verifyReportAndCorrectBadcase(page: Page, taskName: string) {
   await page.goto('/reports');
   await openSelectByLabel(page, '选择报告任务');
   const reportSearchRequest = page.waitForRequest((request) => {
@@ -166,15 +215,26 @@ async function verifyReportAndCorrectBadcase(page: Page, taskName: string) {
   await expect(page.getByText(/parameter_trace|workflow_config|schema_default/)).toBeVisible();
 }
 
-async function verifyTaskSearch(page: Page, taskName: string) {
-  await page.goto('/runs');
-  const taskSearchRequest = page.waitForRequest((request) => {
-    const url = new URL(request.url());
-    return url.pathname.endsWith('/api/tasks') && url.searchParams.get('q') === taskName && url.searchParams.get('page') === '1' && url.searchParams.get('page_size') === '8';
-  });
-  await page.getByPlaceholder('搜索任务名 / 数据源 / Workflow').fill(taskName);
-  await taskSearchRequest;
-  await expect(page.locator('tr').filter({ hasText: taskName })).toBeVisible();
+export async function openWorkflowDraft(page: Page, workflowName: string) {
+  await page.goto('/workflows');
+  await page.getByRole('button', { name: /新建 Workflow/ }).click();
+  await page.getByLabel('新建 Workflow 名称').fill(workflowName);
+  await page.getByRole('button', { name: '确认创建' }).click();
+  await expect(page.getByText('Skill Palette')).toBeVisible();
+}
+
+export async function verifyPublishedWorkflowVisible(page: Page, workflowName: string) {
+  await page.goto('/workflows');
+  await page.getByPlaceholder('搜索 Workflow 名称').fill(workflowName);
+  await expect(page.locator('tr').filter({ hasText: workflowName }).filter({ hasText: '已发布' })).toBeVisible();
+}
+
+export function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function apiPath(pathname: string) {
+  return `/api${pathname}`;
 }
 
 async function selectModalOption(page: Page, label: string, searchText: string) {
@@ -238,12 +298,4 @@ with zipfile.ZipFile(file_path, "w") as archive:
     archive.writestr("handler.py", handler)
 `;
   execFileSync('python', ['-c', script, filePath, skillId], { stdio: 'pipe' });
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function apiPath(pathname: string) {
-  return `/api${pathname}`;
 }

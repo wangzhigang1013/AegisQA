@@ -1,0 +1,45 @@
+skill_id: demo.answer_compare_rule.doc@0.1.0
+name: Answer Compare Rule
+version: 0.1.0
+description: 文档教程用 QA 规则评测 Skill。
+author: AegisQA Demo
+tags: [demo, qa, judge, script]
+scenarios: [qa, tutorial]
+runtime:
+  mode: script
+  entrypoint: scripts/run.py:run
+permissions: []
+input_schema:
+  type: object
+  required: [question, answer, reference]
+  properties:
+    question:
+      type: string
+    answer:
+      type: string
+    reference:
+      type: string
+output_schema:
+  type: object
+  required: [score, label, reason]
+  properties:
+    score:
+      type: number
+    label:
+      type: string
+    reason:
+      type: string
+config_schema:
+  type: object
+  properties:
+    threshold:
+      type: number
+      default: 0.5
+      minimum: 0
+      maximum: 1
+example_input:
+  question: AegisQA 可以做什么？
+  answer: AegisQA 可以执行 AI 评测任务并生成报告。
+  reference: AI 评测 任务 报告
+example_config:
+  threshold: 0.5

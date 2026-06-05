@@ -16,15 +16,51 @@ services:
     ports:
       - "6379:6379"
 
+  api:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment:
+      AEGISQA_STORAGE_BACKEND: mysql
+      AEGISQA_MYSQL_HOST: mysql
+      AEGISQA_MYSQL_PORT: "3306"
+      AEGISQA_MYSQL_DATABASE: aegisqa
+      AEGISQA_MYSQL_USER: aegisqa
+      AEGISQA_MYSQL_PASSWORD: aegisqa_password
+      AEGISQA_TASK_EXECUTOR: celery
+      AEGISQA_RATE_LIMIT_BACKEND: redis
+      AEGISQA_REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    command: >
+      sh -c "pip install -e . &&
+             python -m uvicorn aegisqa.api.app:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mysql
+      - redis
+
   worker:
     image: python:3.12-slim
     working_dir: /app
     volumes:
       - ./:/app
+    environment:
+      AEGISQA_STORAGE_BACKEND: mysql
+      AEGISQA_MYSQL_HOST: mysql
+      AEGISQA_MYSQL_PORT: "3306"
+      AEGISQA_MYSQL_DATABASE: aegisqa
+      AEGISQA_MYSQL_USER: aegisqa
+      AEGISQA_MYSQL_PASSWORD: aegisqa_password
+      AEGISQA_RATE_LIMIT_BACKEND: redis
+      AEGISQA_REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
     command: >
-      sh -c "pip install -e . celery redis pymysql &&
+      sh -c "pip install -e . celery redis &&
              celery -A aegisqa.workers.celery_app worker --loglevel=INFO"
     depends_on:
       - redis
       - mysql
-

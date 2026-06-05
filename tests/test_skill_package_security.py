@@ -62,14 +62,21 @@ def test_skill_package_records_contract_and_approval_metadata(tmp_path) -> None:
     assert after_contract["last_contract_ok"] is True
     assert after_contract["last_contract_at"]
 
-    approved = client.post("/skills/plugin.echo@0.1.0/approve", json={"reason": "测试审批通过"}).json()
+    approved = client.post(
+        "/skills/plugin.echo@0.1.0/approve",
+        json={"actor": "dora", "role": "Skill Developer", "reason": "测试审批通过"},
+    ).json()
     assert approved["status"] == "approved"
 
     after_approval = client.get("/skills/packages").json()[0]
     assert after_approval["status"] == "approved"
-    assert after_approval["approved_by"] == "api"
+    assert after_approval["approved_by"] == "dora"
+    assert after_approval["approved_by_role"] == "Skill Developer"
     assert after_approval["approved_at"]
     assert after_approval["approval_note"] == "测试审批通过"
+    assert after_approval["approval_history"][-1]["action"] == "approve"
+    assert after_approval["approval_history"][-1]["actor"] == "dora"
+    assert after_approval["approval_history"][-1]["role"] == "Skill Developer"
 
 
 def test_skill_package_rejects_oversized_return_payload(tmp_path) -> None:
@@ -138,7 +145,133 @@ def run(inputs, config):
     assert "C:/Users/17343/secret" not in payload_text
 
 
-def _plugin_zip(skill_id: str = "plugin.echo@0.1.0", handler: str | None = None) -> str:
+def test_skill_package_upload_enforces_zip_size_and_file_count_limits(tmp_path) -> None:
+    client = TestClient(create_app(store_root=tmp_path / "store"))
+
+    too_many_files = client.post(
+        "/skills/packages/upload",
+        json={"filename": "too_many.zip", "content_base64": _raw_zip({f"files/{index}.txt": "x" for index in range(260)})},
+    )
+    assert too_many_files.status_code == 400
+    assert too_many_files.json()["code"] == "SKILL_PACKAGE_TOO_MANY_FILES"
+
+    single_too_large = client.post(
+        "/skills/packages/upload",
+        json={"filename": "single_large.zip", "content_base64": _raw_zip({"big.txt": "x" * 1_100_000})},
+    )
+    assert single_too_large.status_code == 400
+    assert single_too_large.json()["code"] == "SKILL_PACKAGE_FILE_TOO_LARGE"
+
+    total_too_large = client.post(
+        "/skills/packages/upload",
+        json={"filename": "total_large.zip", "content_base64": _raw_zip({"a.txt": "x" * 800_000, "b.txt": "x" * 800_000})},
+    )
+    assert total_too_large.status_code == 400
+    assert total_too_large.json()["code"] == "SKILL_PACKAGE_TOO_LARGE"
+
+
+def test_skill_package_manifest_must_declare_permissions(tmp_path) -> None:
+    client = TestClient(create_app(store_root=tmp_path / "store"))
+
+    response = client.post(
+        "/skills/packages/upload",
+        json={"filename": "missing_permissions.zip", "content_base64": _plugin_zip(include_permissions=False)},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "SKILL_PACKAGE_PERMISSIONS_REQUIRED"
+
+
+def test_skill_package_rejects_dependency_declarations_in_local_runtime(tmp_path) -> None:
+    client = TestClient(create_app(store_root=tmp_path / "store"))
+
+    runtime_dependencies = client.post(
+        "/skills/packages/upload",
+        json={
+            "filename": "runtime_deps.zip",
+            "content_base64": _plugin_zip(
+                skill_id="plugin.runtime_deps@0.1.0",
+                runtime={"mode": "script", "entrypoint": "handler.py:run", "dependencies": ["requests==2.32.0"]},
+            ),
+        },
+    )
+    assert runtime_dependencies.status_code == 400
+    assert runtime_dependencies.json()["code"] == "SKILL_PACKAGE_DEPENDENCIES_UNSUPPORTED"
+
+    requirements_file = client.post(
+        "/skills/packages/upload",
+        json={
+            "filename": "requirements.zip",
+            "content_base64": _plugin_zip(
+                skill_id="plugin.requirements@0.1.0",
+                extra_files={"requirements.txt": "requests==2.32.0\n"},
+            ),
+        },
+    )
+    assert requirements_file.status_code == 400
+    assert requirements_file.json()["code"] == "SKILL_PACKAGE_DEPENDENCIES_UNSUPPORTED"
+
+
+def test_script_skill_cannot_read_files_outside_package_root(tmp_path) -> None:
+    outside_file = tmp_path / "outside-secret.txt"
+    outside_file.write_text("secret", encoding="utf-8")
+    client = TestClient(create_app(store_root=tmp_path / "store"))
+    handler = """
+from pathlib import Path
+
+def run(inputs, config):
+    return {"output": {"echo": Path(config["path"]).read_text(encoding="utf-8")}}
+"""
+    client.post(
+        "/skills/packages/upload",
+        json={
+            "filename": "outside_read.zip",
+            "content_base64": _plugin_zip(
+                skill_id="plugin.outside_read@0.1.0",
+                handler=handler,
+                example_config={"path": str(outside_file)},
+            ),
+        },
+    )
+
+    contract = client.post("/skills/plugin.outside_read@0.1.0/contract-test").json()
+
+    assert contract["ok"] is False
+    assert contract["code"] == "SKILL_PACKAGE_RUNTIME_ERROR"
+    assert "SKILL_PACKAGE_FILE_ACCESS_DENIED" in contract["details"]["stderr"]
+    assert str(outside_file) not in json.dumps(contract, ensure_ascii=False)
+
+
+def test_script_skill_cannot_open_network_socket_by_default(tmp_path) -> None:
+    client = TestClient(create_app(store_root=tmp_path / "store"))
+    handler = """
+import socket
+
+def run(inputs, config):
+    socket.socket()
+    return {"output": {"echo": inputs["text"]}}
+"""
+    client.post(
+        "/skills/packages/upload",
+        json={"filename": "network.zip", "content_base64": _plugin_zip(skill_id="plugin.network@0.1.0", handler=handler)},
+    )
+
+    contract = client.post("/skills/plugin.network@0.1.0/contract-test").json()
+
+    assert contract["ok"] is False
+    assert contract["code"] == "SKILL_PACKAGE_RUNTIME_ERROR"
+    assert "SKILL_PACKAGE_NETWORK_DENIED" in contract["details"]["stderr"]
+
+
+def _plugin_zip(
+    skill_id: str = "plugin.echo@0.1.0",
+    handler: str | None = None,
+    *,
+    include_permissions: bool = True,
+    runtime: dict | None = None,
+    example_config: dict | None = None,
+    extra_files: dict[str, str] | None = None,
+) -> str:
     manifest = {
         "skill_id": skill_id,
         "name": "Echo Plugin",
@@ -150,16 +283,29 @@ def _plugin_zip(skill_id: str = "plugin.echo@0.1.0", handler: str | None = None)
         "output_schema": {"type": "object", "properties": {"echo": {"type": "string"}}, "required": ["echo"]},
         "config_schema": {"type": "object"},
         "cacheable": False,
-        "permissions": [],
         "enabled": False,
         "status": "pending_review",
         "example_input": {"text": "hello"},
-        "example_config": {},
+        "example_config": example_config or {},
     }
+    if include_permissions:
+        manifest["permissions"] = []
+    if runtime is not None:
+        manifest["runtime"] = runtime
     handler_body = handler or "def run(inputs, config):\n    return {'output': {'echo': inputs['text']}, 'metrics': {}}\n"
 
     buffer = BytesIO()
     with ZipFile(buffer, "w") as archive:
         archive.writestr("skill.json", json.dumps(manifest, ensure_ascii=False))
         archive.writestr("handler.py", handler_body)
+        for name, content in (extra_files or {}).items():
+            archive.writestr(name, content)
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _raw_zip(files: dict[str, str]) -> str:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        for name, content in files.items():
+            archive.writestr(name, content)
     return base64.b64encode(buffer.getvalue()).decode("ascii")

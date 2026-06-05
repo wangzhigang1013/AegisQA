@@ -1,0 +1,39 @@
+skill_id: demo.ap_asr_lookup_small@0.1.0
+name: AP ASR Lookup Small
+version: 0.1.0
+description: 根据 ap_code 从包内 CSV 查询 ASR 文本的小样本示例。
+author: AegisQA Demo
+tags: [demo, asr, script, csv]
+scenarios: [asr, tutorial]
+runtime:
+  mode: script
+  entrypoint: scripts/run.py:run
+permissions: [filesystem:skill_package_read]
+input_schema:
+  type: object
+  required: [ap_code]
+  properties:
+    ap_code:
+      type: string
+      description: AP 代码。
+output_schema:
+  type: object
+  required: [text, found]
+  properties:
+    text:
+      type: string
+    found:
+      type: boolean
+    ap_code:
+      type: string
+config_schema:
+  type: object
+  properties:
+    fallback_text:
+      type: string
+      default: ""
+      description: 未命中时返回的文本。
+example_input:
+  ap_code: AP001
+example_config:
+  fallback_text: ""

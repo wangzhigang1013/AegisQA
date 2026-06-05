@@ -6,8 +6,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { api } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
-import { demoWorkflowGraph } from '../data/demo';
-import type { WorkflowDraftRecord, WorkflowGraph, WorkflowVersion } from '../types';
+import type { WorkflowDraftRecord, WorkflowGraph, WorkflowGraphEdge, WorkflowGraphNode, WorkflowVersion } from '../types';
 
 type WorkflowMarketRow = {
   key: string;
@@ -71,7 +70,7 @@ export function WorkflowMarketPage() {
   const createDraftMutation = useMutation({
     mutationFn: (name: string) => {
       const finalName = name.trim() || '未命名 Workflow';
-      return api.createWorkflowDraft({ name: finalName, graph: { ...demoWorkflowGraph, name: finalName } });
+      return api.createWorkflowDraft({ name: finalName, graph: createBlankWorkflowGraph(finalName) });
     },
     onSuccess: async (draft) => {
       setIsCreateModalOpen(false);
@@ -90,7 +89,10 @@ export function WorkflowMarketPage() {
     },
   });
   const copyPublishedMutation = useMutation({
-    mutationFn: (workflow: WorkflowVersion) => api.createWorkflowDraft({ name: `${workflow.name} 副本`, graph: (workflow.graph as WorkflowGraph | undefined) ?? { ...demoWorkflowGraph, name: `${workflow.name} 副本` } }),
+    mutationFn: (workflow: WorkflowVersion) => {
+      const name = `${workflow.name} 副本`;
+      return api.createWorkflowDraft({ name, graph: graphFromWorkflowVersion(workflow, name) });
+    },
     onSuccess: async (draft) => {
       setNotice(`已从发布版本复制为草稿：${draft.name}`);
       queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
@@ -217,7 +219,14 @@ export function WorkflowMarketPage() {
                       ) : null}
                       {record.workflow ? (
                         <>
-                          <Button icon={<EditOutlined />} disabled={!linkedDraftForWorkflow(record.workflow)} onClick={() => openPublished(record.workflow!)}>编辑</Button>
+                          <Button
+                            icon={<EditOutlined />}
+                            loading={draftsQuery.isLoading}
+                            disabled={draftsQuery.isLoading || !linkedDraftForWorkflow(record.workflow)}
+                            onClick={() => openPublished(record.workflow!)}
+                          >
+                            编辑
+                          </Button>
                           <Button icon={<CopyOutlined />} loading={copyPublishedMutation.isPending} onClick={() => copyPublishedMutation.mutate(record.workflow!)}>复制为草稿</Button>
                           <Button danger icon={<StopOutlined />} disabled={record.status === 'archived'} loading={archiveWorkflowMutation.isPending} onClick={() => archiveWorkflowMutation.mutate(record.workflow!.version_id)}>归档</Button>
                         </>
@@ -241,7 +250,8 @@ export function WorkflowMarketPage() {
                     <Button
                       icon={<PlusOutlined />}
                       onClick={() => {
-                        api.createWorkflowDraft({ name: String(template.name), graph: { ...demoWorkflowGraph, name: String(template.name) } }).then((draft) => {
+                        const name = String(template.name);
+                        api.createWorkflowDraft({ name, graph: graphFromTemplate(template, name) }).then((draft) => {
                           queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
                           navigate(`/workflows/designer/${draft.draft_id}`);
                         });
@@ -258,4 +268,82 @@ export function WorkflowMarketPage() {
       </Row>
     </section>
   );
+}
+
+function createBlankWorkflowGraph(name: string): WorkflowGraph {
+  return {
+    name,
+    nodes: [
+      {
+        node_id: 'source',
+        node_type: 'source',
+        label: 'Source：数据集样本',
+        input_mapping: {},
+        output_mapping: {},
+      },
+      {
+        node_id: 'output',
+        node_type: 'output',
+        label: 'Output：报告结果',
+        input_mapping: {},
+        output_mapping: {},
+      },
+    ],
+    edges: [{ source: 'source', target: 'output' }],
+  };
+}
+
+function graphFromTemplate(template: Record<string, unknown>, name: string): WorkflowGraph {
+  if (isWorkflowGraph(template.graph)) {
+    return { ...template.graph, name };
+  }
+  return createBlankWorkflowGraph(name);
+}
+
+function graphFromWorkflowVersion(workflow: WorkflowVersion, name: string): WorkflowGraph {
+  if (isWorkflowGraph(workflow.graph)) {
+    return { ...workflow.graph, name };
+  }
+  const stepNodes = (workflow.steps ?? []).map<WorkflowGraphNode>((step) => ({
+    node_id: step.step_id,
+    node_type: 'skill',
+    label: step.step_id,
+    skill_ref: step.skill_ref,
+    input_mapping: step.input_mapping ?? {},
+    output_mapping: step.output_mapping ?? {},
+    config: step.config ?? {},
+    cacheable: step.cacheable ?? false,
+  }));
+  if (!stepNodes.length) {
+    return createBlankWorkflowGraph(name);
+  }
+  const nodes: WorkflowGraphNode[] = [
+    {
+      node_id: 'source',
+      node_type: 'source',
+      label: 'Source：数据集样本',
+      input_mapping: {},
+      output_mapping: {},
+    },
+    ...stepNodes,
+    {
+      node_id: 'output',
+      node_type: 'output',
+      label: 'Output：报告结果',
+      input_mapping: {},
+      output_mapping: {},
+    },
+  ];
+  const edges: WorkflowGraphEdge[] = [
+    { source: 'source', target: stepNodes[0].node_id },
+    ...stepNodes.slice(0, -1).map((node, index) => ({ source: node.node_id, target: stepNodes[index + 1].node_id })),
+    { source: stepNodes[stepNodes.length - 1].node_id, target: 'output' },
+  ];
+  return { name, nodes, edges };
+}
+
+function isWorkflowGraph(value: unknown): value is WorkflowGraph {
+  if (!value || typeof value !== 'object') return false;
+  const graph = value as Partial<WorkflowGraph>;
+  return typeof graph.name === 'string' && Array.isArray(graph.nodes) && Array.isArray(graph.edges);
 }

@@ -1,16 +1,20 @@
 import csv
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
+from threading import Event
 
 import pytest
 
 from aegisqa.badcases.service import BadcaseService
-from aegisqa.core.mapper import TypeMismatchError, resolve_input_mapping
+from aegisqa.core.mapper import MappingPathError, TypeMismatchError, resolve_input_mapping
 from aegisqa.core.security import redact_secrets
 from aegisqa.datasets.service import DatasetService
 from aegisqa.engine.runner import RunRequest, WorkflowRunner
 from aegisqa.judge.audit import audit_judge_profile
 from aegisqa.reports.aggregator import aggregate_run_report
+from aegisqa.skills.base import BaseSkill, SkillManifest, SkillResult
 from aegisqa.skills.registry import SkillRegistry
 from aegisqa.storage.json_store import JsonStore
 from aegisqa.workflows.models import WorkflowDraft, WorkflowStep
@@ -28,6 +32,42 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+class CountingJsonStore(JsonStore):
+    """测试用仓储，统计 Run 快照写入次数以防批量执行退化成逐条全量写盘。"""
+
+    def __init__(self, root: Path | str) -> None:
+        super().__init__(root)
+        self.run_write_count = 0
+        self.run_read_count = 0
+
+    def write_json(self, parts, payload):  # noqa: ANN001 - 测试替身保持与 JsonStore 兼容的宽松签名。
+        parts_list = list(parts)
+        if len(parts_list) == 2 and parts_list[0] == "runs" and str(parts_list[1]).endswith(".json"):
+            self.run_write_count += 1
+        return super().write_json(parts_list, payload)
+
+    def read_json(self, parts, default=None):  # noqa: ANN001 - 测试替身保持与 JsonStore 兼容的宽松签名。
+        parts_list = list(parts)
+        if len(parts_list) == 2 and parts_list[0] == "runs" and str(parts_list[1]).endswith(".json"):
+            self.run_read_count += 1
+        return super().read_json(parts_list, default=default)
+
+
+class CountingItems:
+    """统计 RunReport 聚合遍历次数，避免报告接口随样本量放大重复扫明细。"""
+
+    def __init__(self, items: list[object]) -> None:
+        self.items = items
+        self.iteration_count = 0
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __iter__(self):
+        self.iteration_count += 1
+        return iter(self.items)
 
 
 def test_skill_registry_loads_example_manifests_and_contracts() -> None:
@@ -113,6 +153,53 @@ def test_resolve_input_mapping_ignores_blank_optional_object_field() -> None:
     assert blank_cell == {"prompt": "生成回答"}
 
 
+def test_resolve_input_mapping_supports_controlled_expressions() -> None:
+    context = {
+        "row": {
+            "question": "什么是 AegisQA?",
+            "locale": "zh",
+            "zh_question": "中文问题",
+            "en_question": "English question",
+        },
+        "context": {},
+        "metrics": {},
+        "steps": {},
+    }
+    input_schema = {
+        "type": "object",
+        "required": ["prompt", "scene", "template"],
+        "properties": {
+            "prompt": {"type": "string"},
+            "scene": {"type": "string"},
+            "template": {"type": "string"},
+        },
+    }
+
+    resolved = resolve_input_mapping(
+        {
+            "prompt": 'if(row.locale == "zh", row.zh_question, row.en_question)',
+            "scene": 'row.scene ?? "general"',
+            "template": "Q={{ row.question }} / scene={{ row.scene ?? \"general\" }}",
+        },
+        context,
+        input_schema,
+    )
+
+    assert resolved == {
+        "prompt": "中文问题",
+        "scene": "general",
+        "template": "Q=什么是 AegisQA? / scene=general",
+    }
+
+
+def test_resolve_input_mapping_rejects_arbitrary_code_expressions() -> None:
+    context = {"row": {"question": "安全测试"}, "context": {}, "metrics": {}, "steps": {}}
+    input_schema = {"type": "object", "required": ["prompt"], "properties": {"prompt": {"type": "string"}}}
+
+    with pytest.raises(MappingPathError, match="不支持的表达式语法"):
+        resolve_input_mapping({"prompt": '__import__("os").system("calc")'}, context, input_schema)
+
+
 def test_workflow_runner_executes_chunked_items_and_generates_report(tmp_path: Path) -> None:
     store = JsonStore(tmp_path / "store")
     dataset_service = DatasetService(store)
@@ -165,6 +252,54 @@ def test_workflow_runner_executes_chunked_items_and_generates_report(tmp_path: P
     assert "cache_hit" in completed.items[0].steps[0].model_dump()
 
 
+def test_aggregate_run_report_scans_items_once() -> None:
+    items = CountingItems(
+        [
+            SimpleNamespace(
+                item_id="item-pass",
+                row_id="row-1",
+                status="succeeded",
+                error=None,
+                metrics={"judge_score": 0.9, "tokens": 10},
+                context_snapshot={"context": {"judge_label": "pass"}, "metrics": {"judge_score": 0.9}},
+                steps=[
+                    SimpleNamespace(
+                        status="succeeded",
+                        latency_ms=12.0,
+                        metrics={"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7, "cost": 0.01, "cost_source": "provider_usage"},
+                    )
+                ],
+            ),
+            SimpleNamespace(
+                item_id="item-fail",
+                row_id="row-2",
+                status="succeeded",
+                error=None,
+                metrics={"judge_score": 0.2, "tokens": 20},
+                context_snapshot={"context": {"judge_label": "fail"}, "metrics": {"judge_score": 0.2}},
+                steps=[
+                    SimpleNamespace(
+                        status="succeeded",
+                        latency_ms=18.0,
+                        metrics={"prompt_tokens": 5, "completion_tokens": 6, "total_tokens": 11, "cost": 0.02, "cost_source": "provider_usage"},
+                    )
+                ],
+            ),
+        ]
+    )
+    run = SimpleNamespace(run_id="run-counting", items=items)
+
+    report = aggregate_run_report(run)
+
+    assert items.iteration_count == 1
+    assert report.total_items == 2
+    assert report.completed_items == 2
+    assert report.pass_rate == 0.5
+    assert len(report.badcases) == 1
+    assert report.metrics["total_tokens"] == 18
+    assert report.metrics["cost"] == 0.03
+
+
 def test_workflow_runner_reports_progress_after_each_item(tmp_path: Path) -> None:
     store = JsonStore(tmp_path / "store")
     dataset_service = DatasetService(store)
@@ -207,6 +342,89 @@ def test_workflow_runner_reports_progress_after_each_item(tmp_path: Path) -> Non
     assert [completed for _, completed in progress if completed] == [1, 2, 3, 3]
 
 
+def test_workflow_runner_batches_full_run_snapshot_writes(tmp_path: Path) -> None:
+    store = CountingJsonStore(tmp_path / "store")
+    dataset_service = DatasetService(store)
+    registry = SkillRegistry.with_builtin_skills()
+    data_path = tmp_path / "batched-progress.jsonl"
+    _write_jsonl(data_path, [{"question": f"Q{index}", "reference": "A"} for index in range(25)])
+    dataset = dataset_service.upload_dataset("batched_progress", data_path)
+    workflow = WorkflowDraft(
+        name="batched_progress_workflow",
+        steps=[
+            WorkflowStep(
+                step_id="answer",
+                skill_ref="llm.call@0.1.0",
+                input_mapping={"prompt": "row.question"},
+                output_mapping={},
+                config={"model": "demo-model"},
+            )
+        ],
+    ).publish()
+    runner = WorkflowRunner(store, dataset_service, registry)
+    run = runner.create_run(RunRequest(workflow=workflow, dataset_id=dataset.dataset_id, dataset_version=dataset.version))
+    progress: list[int] = []
+
+    completed = runner.execute_run(
+        run.run_id,
+        progress_callback=lambda current_run: progress.append(len([item for item in current_run.items if item.status in {"succeeded", "failed"}])),
+    )
+
+    assert completed.status == "completed"
+    assert progress[-1] == 25
+    assert store.run_write_count <= 6
+    assert store.run_read_count <= 6
+    assert runner.get_run(run.run_id).items[-1].status == "succeeded"
+
+
+def test_workflow_runner_honors_pause_requested_during_active_execution(tmp_path: Path) -> None:
+    store = JsonStore(tmp_path / "store")
+    dataset_service = DatasetService(store)
+    started = Event()
+    release = Event()
+    registry = SkillRegistry()
+    registry.register(_BlockingEchoSkill(started, release))
+    data_path = tmp_path / "pause.jsonl"
+    _write_jsonl(
+        data_path,
+        [
+            {"text": "第一条"},
+            {"text": "第二条"},
+            {"text": "第三条"},
+        ],
+    )
+    dataset = dataset_service.upload_dataset("pause", data_path)
+    workflow = WorkflowDraft(
+        name="pause_workflow",
+        steps=[
+            WorkflowStep(
+                step_id="echo",
+                skill_ref="test.blocking_echo@0.1.0",
+                input_mapping={"text": "row.text"},
+                output_mapping={},
+            )
+        ],
+    ).publish()
+    runner = WorkflowRunner(store, dataset_service, registry)
+    run = runner.create_run(RunRequest(workflow=workflow, dataset_id=dataset.dataset_id, dataset_version=dataset.version))
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(runner.execute_run, run.run_id)
+        assert started.wait(timeout=2)
+        paused = runner.pause_run(run.run_id)
+        release.set()
+        executed = future.result(timeout=3)
+
+    latest = runner.get_run(run.run_id)
+    item_statuses = [item.status for item in latest.items]
+
+    assert paused.status == "paused"
+    assert executed.status == "paused"
+    assert latest.status == "paused"
+    assert item_statuses.count("succeeded") == 1
+    assert item_statuses.count("pending") == 2
+
+
 def test_workflow_runner_exposes_outputs_by_step_id_without_output_mapping(tmp_path: Path) -> None:
     store = JsonStore(tmp_path / "store")
     dataset_service = DatasetService(store)
@@ -240,6 +458,27 @@ def test_workflow_runner_exposes_outputs_by_step_id_without_output_mapping(tmp_p
 
     assert completed.status == "completed"
     assert completed.items[0].steps[1].input_snapshot["answer"].startswith("模型回答：什么是 AegisQA?")
+
+
+class _BlockingEchoSkill(BaseSkill):
+    manifest = SkillManifest(
+        skill_id="test.blocking_echo@0.1.0",
+        name="Blocking Echo",
+        version="0.1.0",
+        description="测试暂停控制信号的阻塞 Echo Skill。",
+        input_schema={"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}},
+        output_schema={"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}},
+    )
+
+    def __init__(self, started: Event, release: Event) -> None:
+        self.started = started
+        self.release = release
+        super().__init__()
+
+    def run(self, inputs: dict[str, object], config: dict[str, object] | None = None) -> SkillResult:
+        self.started.set()
+        assert self.release.wait(timeout=2)
+        return SkillResult(output={"text": str(inputs["text"])})
 
 
 def test_failed_type_validation_records_step_log_and_retry_keeps_success_items(tmp_path: Path) -> None:

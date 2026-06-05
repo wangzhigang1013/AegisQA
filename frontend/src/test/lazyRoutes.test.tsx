@@ -15,6 +15,10 @@ vi.mock('../pages/JudgeAuditPage', () => {
   return { JudgeAuditPage: () => <div>Judge 审计懒加载页面</div> };
 });
 
+vi.mock('../pages/OverviewPage', () => ({
+  OverviewPage: () => <div>概览懒加载页面</div>,
+}));
+
 function jsonResponse(body: unknown) {
   return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 }
@@ -37,7 +41,7 @@ describe('App 路由懒加载', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('概览')).toBeInTheDocument();
+    expect(await screen.findByText('概览懒加载页面')).toBeInTheDocument();
     expect(reportsPageLoaded).not.toHaveBeenCalled();
     expect(judgePageLoaded).not.toHaveBeenCalled();
   });
