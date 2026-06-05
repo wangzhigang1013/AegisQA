@@ -127,6 +127,43 @@ def test_trace_flow_steps_include_diagnostics_and_detail_actions(tmp_path: Path)
     assert all(action["id"] == action["action"] for action in first_step["available_actions"])
 
 
+def test_step_replay_prompt_debug_and_repro_bundle_are_callable(tmp_path: Path) -> None:
+    client, task = _seed_executed_task(tmp_path)
+    trace_flow = client.get(f"/tasks/{task['task_id']}/trace-flow").json()
+    item = trace_flow["items"][0]
+    step = item["steps"][0]
+    base_path = f"/runs/{task['run_id']}/items/{item['item_id']}/steps/{step['step_id']}"
+
+    replay = client.post(f"{base_path}/replay", json={}).json()
+    assert replay["mode"] == "replay"
+    assert replay["status"] == "skipped"
+    assert replay["mock_llm_calls"] is True
+    assert replay["resolved_input"]["prompt"] == item["row"]["question"]
+    assert replay["raw_output"]
+    assert replay["step"]["skill_ref"] == step["skill_ref"]
+
+    live_replay = client.post(f"{base_path}/replay", json={"mock_llm_calls": False}).json()
+    assert live_replay["status"] == "succeeded"
+    assert live_replay["validated_output"]
+    assert live_replay["cache"]["disabled"] is True
+
+    prompt_debug = client.post(f"{base_path}/prompt-debug", json={}).json()
+    assert prompt_debug["mode"] == "prompt_debug"
+    assert prompt_debug["rendered_prompt"] == item["row"]["question"]
+    assert prompt_debug["token_usage"]["total_tokens"] >= 1
+    assert prompt_debug["mock_llm_calls"] is True
+
+    bundle = client.get(f"{base_path}/repro-bundle").json()
+    assert bundle["bundle_type"] == "step_repro_bundle"
+    assert bundle["schema_version"] == "aegisqa.step_repro_bundle.v1"
+    assert bundle["workflow"]["version_id"] == task["workflow_version_id"]
+    assert bundle["skill_manifest"]["skill_id"] == step["skill_ref"]
+    assert bundle["resolved_input"]["prompt"] == item["row"]["question"]
+    assert bundle["raw_output"]
+    assert bundle["replay_endpoint"] == f"{base_path}/replay"
+    assert bundle["prompt_debug_endpoint"] == f"{base_path}/prompt-debug"
+
+
 def test_task_report_promotes_findings_and_action_targets(tmp_path: Path) -> None:
     client, task = _seed_executed_task(tmp_path)
 

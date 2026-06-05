@@ -19,10 +19,25 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - 新增分层发布验证脚本，默认走 docs/targeted 轻量验证，只有发布候选前才跑 full release 回归。
 - 新增 production-like smoke 脚本骨架，显式 `-StartCompose` 时才启动 Docker 验证 MySQL、Redis、Celery 和 API/Worker。
 - 新增真实模型 Provider smoke 脚本，默认只验证连接别名和密钥不回显，显式 `-LiveCall` 时才发真实模型请求。
+- 新增 Step Replay、Prompt Debug 和 Repro Bundle 后端 API，Trace Flow 动作入口不再只是空链接。
 - `docker-compose.yml` 已补 MySQL/Redis healthcheck，并确保 API 容器安装 Celery 后再启用 Celery executor。
 - 历史 `tmp-report-debug*` 与 `tmp-report-gate-debug/` 调试目录已加入忽略规则，避免污染 `git status`。
 
 ## 最近改动
+
+### 2026-06-05 Step Replay / Debug / Repro 后端闭环
+
+- 改动摘要：继续落实优化计划 P3，把 Trace Flow 中已经展示的 Replay、Prompt Debug、Repro Bundle 动作接成真实后端接口，默认不隐式调用外部模型。
+- 主要变更：
+  - 新增 `POST /runs/{run_id}/items/{item_id}/steps/{step_id}/replay`，支持 original/override input、override config、disable cache 和 `mock_llm_calls`。默认 `mock_llm_calls=true` 时只返回可复现输入与历史输出，不重新执行 Skill；显式设为 false 时才重新执行 Skill。
+  - 新增 `POST /runs/{run_id}/items/{item_id}/steps/{step_id}/prompt-debug`，基于 Step 快照返回 rendered prompt、prompt_calls、schema_validation 和 token usage；不会隐式调用外部模型。
+  - 新增 `GET /runs/{run_id}/items/{item_id}/steps/{step_id}/repro-bundle`，导出 workflow、skill manifest、resolved input、raw/validated output、schema errors、prompt/LLM calls、错误和后续 debug endpoint。
+  - 更新 `tests/test_experience_efficiency.py`，覆盖三类接口可调用并返回真实 Run/Step 证据。
+- 验证：
+  - `python -m pytest tests/test_experience_efficiency.py -q`：5 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - `.\scripts\verify_release_candidate.ps1 -Scope docs`：passed。
+  - `git diff --check`：passed；仅 Git 提示工作区文件后续可能按 CRLF 写入。
+  - 本批只改后端调试接口和定向测试，没有运行前端全量、E2E 或后端全量；后续触碰前端抽屉交互时再跑对应前端定向测试。
 
 ### 2026-06-05 优化计划 P0/P6 落地
 
