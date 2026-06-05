@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
 
+from aegisqa.api.experience import build_report_experience, enrich_task_detail
 from aegisqa.api.app import (
     CIGateRuleRequest,
     RepairTaskActionRequest,
@@ -105,7 +106,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.get("/tasks/{task_id}")
     def get_task(task_id: str) -> dict[str, Any]:
-        return _get_record(ctx.store, "tasks", task_id)
+        return enrich_task_detail(ctx, _get_record(ctx.store, "tasks", task_id))
 
     @app.get("/tasks/{task_id}/diagnostics")
     def get_task_diagnostics(task_id: str) -> dict[str, Any]:
@@ -727,6 +728,9 @@ def _build_task_report_payload(
     # 页面报告只需要当前页坏例明细；聚合指标仍来自完整 RunReport。
     # 导出报告会显式 include_all_badcases=True，确保离线报告不被分页截断。
     report_payload["badcases"] = page_badcases
+    quality_decision = _build_quality_decision(task, run, report, segments)
+    budget_status = _build_budget_status(task, report)
+    report_experience = build_report_experience(task, report, diagnostics_payload, quality_decision, budget_status)
     return {
         "task": task,
         "task_summary": _build_task_report_summary(task, run),
@@ -738,9 +742,9 @@ def _build_task_report_payload(
         "segments": page_segments,
         "segments_pagination": segments_pagination,
         "recommendations": [recommendation.model_dump(mode="json") for recommendation in build_report_recommendations(segments)],
-        "quality_decision": _build_quality_decision(task, run, report, segments),
+        "quality_decision": quality_decision,
         "parameter_governance": parameter_governance,
-        "budget_status": _build_budget_status(task, report),
+        "budget_status": budget_status,
         "release_context": _build_task_release_context(ctx, task),
         "diagnostics": diagnostics_payload,
         "diagnostics_pagination": {
@@ -757,6 +761,7 @@ def _build_task_report_payload(
             "html": f"/tasks/{task['task_id']}/report/export?file_format=html",
             "offline_package": f"/tasks/{task['task_id']}/report/offline-package",
         },
+        **report_experience,
     }
 
 

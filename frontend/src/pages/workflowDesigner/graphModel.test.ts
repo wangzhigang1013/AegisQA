@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { demoSkills, demoWorkflowGraph } from '../../data/demo';
+import { demoSkills, demoWorkflowGraph } from '../../test/fixtures/demo';
 import {
   buildAvailableFieldPaths,
   buildWorkflowGraph,

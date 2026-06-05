@@ -1,5 +1,6 @@
 import type { ExperimentBaselineRecord, WorkflowReleaseRecord } from './experiment';
 import type { RunReport, TaskParameterGovernance, TaskPreflightResult, TaskRecord } from './task';
+import type { WorkbenchAction } from './actions';
 
 export type ReportPagination = {
   page: number;
@@ -88,6 +89,17 @@ export type TaskReport = {
     step_health?: ReportPagination;
     weak_segments?: ReportPagination;
   };
+  primary_findings?: {
+    type: string;
+    status: string;
+    severity: string;
+    title: string;
+    message: string;
+    evidence: string[];
+    source: string;
+  }[];
+  recommended_actions?: WorkbenchAction[];
+  action_targets?: Record<string, string>;
   report: RunReport;
   badcases: Record<string, unknown>[];
   badcase_pagination?: ReportPagination;

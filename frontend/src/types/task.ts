@@ -1,3 +1,5 @@
+import type { WorkbenchAction } from './actions';
+
 export type RunRecord = {
   run_id: string;
   status: string;
@@ -63,6 +65,23 @@ export type DashboardSummary = {
   latest_run: RunSummary | null;
 };
 
+export type TaskGateSummary = {
+  status: string;
+  message: string;
+  evidence: string[];
+  metrics?: Record<string, number>;
+  thresholds?: Record<string, unknown>;
+};
+
+export type TaskPreflightSummary = {
+  status: string;
+  message: string;
+  preflight_id?: string | null;
+  blocking_check_count: number;
+  warning_check_count: number;
+  checks?: TaskPreflightCheck[];
+};
+
 export type TaskRecord = {
   task_id: string;
   name: string;
@@ -122,8 +141,55 @@ export type TaskRecord = {
     started_at?: string | null;
     finished_at?: string | null;
   }[];
+  latest_run_summary?: Partial<RunSummary> & {
+    message?: string;
+  };
+  preflight_summary?: TaskPreflightSummary;
+  gate_summary?: TaskGateSummary;
+  available_actions?: WorkbenchAction[];
   created_at: string;
   updated_at: string;
+};
+
+export type OverviewWorkbench = {
+  source: 'real_store' | string;
+  summary: {
+    task_count: number;
+    run_count: number;
+    failed_run_count: number;
+    pending_badcase_count: number;
+    gate_failure_count: number;
+    report_count: number;
+  };
+  recent_tasks: TaskRecord[];
+  failed_runs: RunSummary[];
+  pending_badcases: Record<string, unknown>[];
+  gate_failures: {
+    task_id: string;
+    task_name?: string;
+    run_id?: string;
+    status: string;
+    message: string;
+    evidence?: string[];
+    target_url?: string;
+  }[];
+  recent_reports: {
+    task_id: string;
+    task_name?: string;
+    run_id?: string;
+    status?: string;
+    pass_rate: number;
+    failed_items: number;
+    badcase_count: number;
+    gate_status?: string;
+    target_url?: string;
+    updated_at?: string;
+  }[];
+  continue_actions: WorkbenchAction[];
+  empty_state: {
+    message: string;
+    next_actions: WorkbenchAction[];
+  };
 };
 
 export type TaskPageResult = {
@@ -370,6 +436,18 @@ export type TaskTraceFlow = {
       latency_ms: number;
       cache_hit: boolean;
       error?: Record<string, unknown> | null;
+      resolved_input?: Record<string, unknown>;
+      raw_output?: Record<string, unknown>;
+      validated_output?: Record<string, unknown>;
+      schema_errors?: Record<string, unknown>[];
+      prompt_calls?: Record<string, unknown>[];
+      diagnostic_tags?: string[];
+      error_explanation?: {
+        code: string;
+        message: string;
+        raw_error?: unknown;
+      } | null;
+      available_actions?: WorkbenchAction[];
     }[];
     badcase: {
       is_badcase: boolean;

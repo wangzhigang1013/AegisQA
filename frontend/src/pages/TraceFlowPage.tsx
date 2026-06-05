@@ -4,6 +4,7 @@ import { Alert, Button, Card, Col, Descriptions, Empty, List, Row, Space, Tabs, 
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
+import { workbenchActionId, workbenchActionTargetUrl } from '../actions/actionRouter';
 import { api } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 
@@ -126,16 +127,53 @@ export function TraceFlowPage() {
                         children: (
                           <Space direction="vertical" className="full-width-control">
                             {selectedItem.steps.map((step) => (
-                              <Card size="small" key={step.step_id} title={`${step.step_id} / ${step.skill_ref}`}>
-                                <Tabs
-                                  size="small"
-                                  items={[
-                                    { key: 'input', label: 'Input', children: <JsonBlock value={step.input} /> },
-                                    { key: 'params', label: '参数', children: <JsonBlock value={{ resolved_config: step.resolved_config, parameter_trace: step.parameter_trace }} /> },
-                                    { key: 'output', label: 'Output', children: <JsonBlock value={step.output} /> },
-                                    { key: 'error', label: 'Error', children: <JsonBlock value={step.error ?? {}} /> },
-                                  ]}
-                                />
+                              <Card
+                                size="small"
+                                key={step.step_id}
+                                title={`${step.step_id} / ${step.skill_ref}`}
+                                extra={<Tag color={stepStatusColor(step.status)}>{step.status}</Tag>}
+                              >
+                                <Space direction="vertical" className="full-width-control">
+                                  <Space wrap>
+                                    <Typography.Text type="secondary">诊断标签</Typography.Text>
+                                    {step.diagnostic_tags?.length ? (
+                                      step.diagnostic_tags.map((tag) => <Tag key={tag}>{tag}</Tag>)
+                                    ) : (
+                                      <Tag>none</Tag>
+                                    )}
+                                  </Space>
+                                  {step.error_explanation ? (
+                                    <Alert
+                                      type={step.status === 'succeeded' ? 'info' : 'error'}
+                                      showIcon
+                                      message={step.error_explanation.code}
+                                      description={step.error_explanation.message}
+                                    />
+                                  ) : null}
+                                  {step.available_actions?.length ? (
+                                    <Space wrap>
+                                      {step.available_actions.map((action) => (
+                                        <Button key={workbenchActionId(action)} size="small" href={workbenchActionTargetUrl(action) ?? undefined} disabled={action.enabled === false || action.disabled}>
+                                          {action.label}
+                                        </Button>
+                                      ))}
+                                    </Space>
+                                  ) : null}
+                                  <Tabs
+                                    size="small"
+                                    items={[
+                                      { key: 'resolved_input', label: 'Resolved Input', children: <JsonBlock value={step.resolved_input ?? step.input} /> },
+                                      { key: 'raw_output', label: 'Raw Output', children: <JsonBlock value={step.raw_output ?? step.output} /> },
+                                      { key: 'validated_output', label: 'Validated Output', children: <JsonBlock value={step.validated_output ?? step.output} /> },
+                                      { key: 'schema_errors', label: 'Schema Errors', children: <JsonBlock value={step.schema_errors ?? []} /> },
+                                      { key: 'prompt_calls', label: 'Prompt Calls', children: <JsonBlock value={step.prompt_calls ?? []} /> },
+                                      { key: 'input', label: 'Input', children: <JsonBlock value={step.input} /> },
+                                      { key: 'params', label: '参数', children: <JsonBlock value={{ resolved_config: step.resolved_config, parameter_trace: step.parameter_trace }} /> },
+                                      { key: 'output', label: 'Output', children: <JsonBlock value={step.output} /> },
+                                      { key: 'error', label: 'Error', children: <JsonBlock value={step.error ?? {}} /> },
+                                    ]}
+                                  />
+                                </Space>
                               </Card>
                             ))}
                           </Space>
@@ -163,4 +201,12 @@ function JsonBlock({ value }: { value: unknown }) {
       <pre className="json-block">{JSON.stringify(value, null, 2)}</pre>
     </Typography.Text>
   );
+}
+
+function stepStatusColor(status: string): string {
+  if (['succeeded', 'passed'].includes(status)) return 'green';
+  if (['failed', 'schema_invalid', 'timeout'].includes(status)) return 'red';
+  if (['running', 'queued', 'pending'].includes(status)) return 'blue';
+  if (status === 'skipped') return 'default';
+  return 'orange';
 }

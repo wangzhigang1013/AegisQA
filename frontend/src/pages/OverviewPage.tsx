@@ -3,17 +3,14 @@ import {
   AuditOutlined,
   BugOutlined,
   CheckCircleOutlined,
-  CodeOutlined,
   DatabaseOutlined,
-  ExperimentOutlined,
   FileDoneOutlined,
+  FileSearchOutlined,
   PlayCircleOutlined,
-  SafetyCertificateOutlined,
-  ToolOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Empty, Row, Space, Steps, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, Empty, List, Row, Space, Steps, Table, Tag, Typography } from 'antd';
 import { Link } from 'react-router-dom';
 
 import { api } from '../api/client';
@@ -22,11 +19,7 @@ import { MetricTile } from '../components/MetricTile';
 
 export function OverviewPage() {
   const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard });
-  const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
-  const skillPackagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
-  const experimentsQuery = useQuery({ queryKey: ['experiments'], queryFn: () => api.experiments() });
-  const annotationQuery = useQuery({ queryKey: ['annotation-queue'], queryFn: () => api.annotationQueue() });
-  const ciGatesQuery = useQuery({ queryKey: ['ci-gates'], queryFn: api.ciGateConfigs });
+  const workbenchQuery = useQuery({ queryKey: ['overview-workbench'], queryFn: api.workbench });
 
   const summary = dashboardQuery.data ?? {
     dataset_count: 0,
@@ -37,20 +30,19 @@ export function OverviewPage() {
     pass_rate: 0,
     latest_run: null,
   };
+  const workbenchSummary = workbenchQuery.data?.summary ?? {
+    task_count: 0,
+    run_count: 0,
+    failed_run_count: 0,
+    pending_badcase_count: 0,
+    gate_failure_count: 0,
+    report_count: 0,
+  };
   const passRate = Math.round(summary.pass_rate * 100);
-  const tasks = tasksQuery.data ?? [];
-  const recentTasks = tasks.slice(0, 6);
-  const pendingSkillPackages = (skillPackagesQuery.data ?? []).filter((item) => item.status === 'pending_review');
-  const pendingAnnotation = (annotationQuery.data ?? []).filter((item) => item.status !== 'reviewed');
-  const failedTasks = tasks.filter((task) => task.status === 'failed' || task.failed_items > 0);
-  const blockingGateCount = (ciGatesQuery.data ?? []).filter((gate) => gate.status === 'active').length;
-  const productCapabilities = [
-    { name: 'Experiment 快照', value: experimentsQuery.data?.length ?? 0, note: 'Run 不可变快照', icon: <ExperimentOutlined /> },
-    { name: 'Assertion DSL', value: '7 类', note: 'contains/regex/schema/latency/cost/safety', icon: <CodeOutlined /> },
-    { name: 'CI Gate', value: '可阻断', note: '按指标阈值拦截发布', icon: <SafetyCertificateOutlined /> },
-    { name: 'Annotation Queue', value: annotationQuery.data?.length ?? 0, note: '失败/低分样本人工复核', icon: <AuditOutlined /> },
-    { name: 'Trace Tree', value: 'Run Item', note: 'Skill 级输入输出与耗时', icon: <CheckCircleOutlined /> },
-  ];
+  const recentTasks = workbenchQuery.data?.recent_tasks ?? [];
+  const continueActions = workbenchQuery.data?.continue_actions ?? [];
+  const gateFailures = workbenchQuery.data?.gate_failures ?? [];
+  const recentReports = workbenchQuery.data?.recent_reports ?? [];
 
   return (
     <section className="page-stack">
@@ -71,13 +63,14 @@ export function OverviewPage() {
       />
 
       {dashboardQuery.isError ? <Alert type="error" showIcon message="Dashboard 读取失败" description="请确认后端 8000 服务已经启动，并且 Vite 代理指向 /api。" /> : null}
+      {workbenchQuery.isError ? <Alert type="error" showIcon message="工作台读取失败" description="请确认 /overview/workbench 可用，首页不会使用演示数据回退。" /> : null}
 
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} xl={6}>
           <MetricTile title="数据集数量" value={summary.dataset_count} icon={<DatabaseOutlined />} tone="blue" note="含 Golden" />
         </Col>
         <Col xs={24} sm={12} xl={6}>
-          <MetricTile title="Skill 数量" value={summary.skill_count} icon={<ExperimentOutlined />} tone="green" note="已审批" />
+          <MetricTile title="Skill 数量" value={summary.skill_count} icon={<CheckCircleOutlined />} tone="green" note="已审批" />
         </Col>
         <Col xs={24} sm={12} xl={6}>
           <MetricTile title="通过率" value={passRate} suffix="%" icon={<AuditOutlined />} tone="violet" note="最近 Run" />
@@ -102,18 +95,53 @@ export function OverviewPage() {
         </div>
         <Row gutter={[12, 12]}>
           <Col xs={24} md={12} xl={6}>
-            <MetricTile title="最近任务" value={tasks.length} icon={<PlayCircleOutlined />} tone="blue" note="Task 主对象" />
+            <MetricTile title="最近任务" value={workbenchSummary.task_count} icon={<PlayCircleOutlined />} tone="blue" note="Task 主对象" />
           </Col>
           <Col xs={24} md={12} xl={6}>
-            <MetricTile title="待审批 Skill" value={pendingSkillPackages.length} icon={<ToolOutlined />} tone="amber" note="插件合约测试后启用" />
+            <MetricTile title="待处理 Badcase" value={workbenchSummary.pending_badcase_count} icon={<BugOutlined />} tone="amber" note="来自真实报告或已持久化坏例" />
           </Col>
           <Col xs={24} md={12} xl={6}>
-            <MetricTile title="待审核样本" value={pendingAnnotation.length} icon={<AuditOutlined />} tone="violet" note="Annotation Queue" />
+            <MetricTile title="Gate 失败" value={workbenchSummary.gate_failure_count} icon={<WarningOutlined />} tone="red" note="质量门禁或报告风险" />
           </Col>
           <Col xs={24} md={12} xl={6}>
-            <MetricTile title="失败任务" value={failedTasks.length} icon={<WarningOutlined />} tone="red" note={`CI Gate 阻断 ${blockingGateCount}`} />
+            <MetricTile title="失败任务" value={workbenchSummary.failed_run_count} icon={<FileSearchOutlined />} tone="violet" note="可进入 Trace 定位" />
           </Col>
         </Row>
+      </div>
+
+      <div className="section-band">
+        <div className="section-title-row">
+          <div>
+            <h2>继续处理</h2>
+            <p>这些入口来自真实 Task、Report、Badcase 和 Gate 状态。</p>
+          </div>
+          <Link to="/repair-tasks">
+            <Button icon={<CheckCircleOutlined />}>修复任务</Button>
+          </Link>
+        </div>
+        {continueActions.length ? (
+          <List
+            dataSource={continueActions}
+            renderItem={(action) => (
+              <List.Item
+                actions={[
+                  action.target_url ? (
+                    <Link key="open" to={toAppPath(action.target_url)}>
+                      打开
+                    </Link>
+                  ) : null,
+                ]}
+              >
+                <List.Item.Meta
+                  title={<Space><Tag color={priorityColor(action.priority)}>{action.priority ?? 'normal'}</Tag>{action.label}</Space>}
+                  description={action.evidence?.length ? action.evidence.join(' / ') : action.target_url}
+                />
+              </List.Item>
+            )}
+          />
+        ) : (
+          <Empty description={workbenchQuery.data?.empty_state.message || '当前没有待继续处理的真实事项。'} />
+        )}
       </div>
 
       <div className="section-band">
@@ -135,37 +163,73 @@ export function OverviewPage() {
         />
       </div>
 
-      <div className="section-band">
-        <div className="section-title-row">
-          <div>
-            <h2>产品化增强</h2>
-            <p>对标 LangSmith、Braintrust、Langfuse、Promptfoo、W&B Weave 后补齐的核心能力。</p>
-          </div>
-          <Link to="/reports">
-            <Button icon={<ArrowRightOutlined />}>查看报告</Button>
-          </Link>
-        </div>
-        <Row gutter={[12, 12]}>
-          {productCapabilities.map((item) => (
-            <Col xs={24} md={12} xl={8} key={item.name}>
-              <Card className="flat-card" size="small">
-                <div className="metric-topline">
-                  <span className="metric-icon">{item.icon}</span>
-                  <Tag bordered={false}>{item.value}</Tag>
-                </div>
-                <h3>{item.name}</h3>
-                <p>{item.note}</p>
-              </Card>
-            </Col>
-          ))}
-        </Row>
-      </div>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={12}>
+          <Card className="flat-card" title="Gate 风险">
+            {gateFailures.length ? (
+              <List
+                dataSource={gateFailures}
+                renderItem={(item) => (
+                  <List.Item
+                    actions={[
+                      item.target_url ? (
+                        <Link key="open" to={toAppPath(item.target_url)}>
+                          查看报告
+                        </Link>
+                      ) : null,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      title={<Space><Tag color="red">{item.status}</Tag>{item.task_name ?? item.task_id}</Space>}
+                      description={(
+                        <Space direction="vertical" size={2}>
+                          <span>{item.message}</span>
+                          {item.evidence?.length ? <Typography.Text type="secondary">{item.evidence.join(' / ')}</Typography.Text> : null}
+                        </Space>
+                      )}
+                    />
+                  </List.Item>
+                )}
+              />
+            ) : (
+              <Empty description="当前没有真实 Gate 失败记录。" />
+            )}
+          </Card>
+        </Col>
+        <Col xs={24} lg={12}>
+          <Card className="flat-card" title="最近报告">
+            {recentReports.length ? (
+              <List
+                dataSource={recentReports}
+                renderItem={(report) => (
+                  <List.Item
+                    actions={[
+                      report.target_url ? (
+                        <Link key="open" to={toAppPath(report.target_url)}>
+                          打开
+                        </Link>
+                      ) : null,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      title={<Space>{report.task_name ?? report.task_id}<Tag color={report.gate_status === 'blocked' ? 'red' : 'green'}>{report.gate_status ?? report.status}</Tag></Space>}
+                      description={`通过率 ${Math.round(Number(report.pass_rate ?? 0) * 100)}% / 失败 ${report.failed_items} / Badcase ${report.badcase_count}`}
+                    />
+                  </List.Item>
+                )}
+              />
+            ) : (
+              <Empty description="执行任务后展示最近报告摘要。" />
+            )}
+          </Card>
+        </Col>
+      </Row>
 
       <Card className="flat-card" title="最近任务">
         {recentTasks.length ? (
           <Table
             pagination={false}
-            loading={tasksQuery.isLoading}
+            loading={workbenchQuery.isLoading}
             rowKey="task_id"
             dataSource={recentTasks}
             columns={[
@@ -180,7 +244,7 @@ export function OverviewPage() {
                 render: (_, task) => (
                   <Space>
                     <Link to={`/tasks/${task.task_id}/trace`}>Trace</Link>
-                    <Link to="/reports">报告</Link>
+                    <Link to={`/reports?task_id=${encodeURIComponent(task.task_id)}`}>报告</Link>
                   </Space>
                 ),
               },
@@ -200,4 +264,17 @@ export function OverviewPage() {
       ) : null}
     </section>
   );
+}
+
+function priorityColor(priority?: string | null): string {
+  if (priority === 'high') return 'red';
+  if (priority === 'medium') return 'gold';
+  if (priority === 'low') return 'blue';
+  return 'default';
+}
+
+function toAppPath(targetUrl: string | null | undefined): string {
+  if (!targetUrl) return '/';
+  if (targetUrl.startsWith('http')) return '/';
+  return targetUrl;
 }

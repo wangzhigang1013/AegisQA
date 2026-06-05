@@ -10,6 +10,7 @@ from __future__ import annotations
 from math import ceil
 from typing import Any
 
+from aegisqa.api.experience import enrich_step_flow
 from aegisqa.engine.runner import RunItem, RunRecord, RunItemStep
 from aegisqa.reports.aggregator import aggregate_run_report
 
@@ -49,7 +50,7 @@ def build_task_trace_flow(task: dict[str, Any], run: RunRecord, *, page: int = 1
         "data_edges": _data_edges(run),
         # Trace Flow 单条样本包含 row/context/steps/参数追踪，体积明显大于普通列表。
         # 这里先切片再构建 item flow，避免大任务接口一次性序列化全部样本明细。
-        "items": [_item_flow(item, badcases_by_item_id.get(item.item_id)) for item in page_items],
+        "items": [_item_flow(item, badcases_by_item_id.get(item.item_id), task_id=str(task.get("task_id") or "")) for item in page_items],
         "pagination": {
             "page": safe_page,
             "page_size": safe_page_size,
@@ -69,7 +70,7 @@ def _data_edges(run: RunRecord) -> list[dict[str, str]]:
     return edges
 
 
-def _item_flow(item: RunItem, badcase: Any | None) -> dict[str, Any]:
+def _item_flow(item: RunItem, badcase: Any | None, *, task_id: str) -> dict[str, Any]:
     context_snapshot = item.context_snapshot or {}
     return {
         "item_id": item.item_id,
@@ -81,7 +82,7 @@ def _item_flow(item: RunItem, badcase: Any | None) -> dict[str, Any]:
         "context": context_snapshot.get("context", {}),
         "metrics": item.metrics,
         "error": item.error,
-        "steps": [_step_flow(step) for step in item.steps],
+        "steps": [enrich_step_flow(_step_flow(step), task_id=task_id, item_id=item.item_id) for step in item.steps],
         "badcase": _badcase_flow(badcase),
     }
 

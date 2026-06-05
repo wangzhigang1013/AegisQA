@@ -42,17 +42,17 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getAllByText('最近任务').length).toBeGreaterThan(0);
   });
 
-  it('概览页读取真实 Dashboard 并展示产品化增强入口', async () => {
+  it('概览页读取真实 Dashboard 和工作台聚合数据', async () => {
     await renderWorkbench('/');
 
     expect(await screen.findByText('12')).toBeInTheDocument();
     expect(screen.getByText('34')).toBeInTheDocument();
     expect(screen.getByText('92')).toBeInTheDocument();
-    expect(screen.getByText('Experiment 快照')).toBeInTheDocument();
-    expect(screen.getByText('Assertion DSL')).toBeInTheDocument();
-    expect(screen.getAllByText('CI Gate').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Annotation Queue').length).toBeGreaterThan(0);
-    expect(screen.getByText('Trace Tree')).toBeInTheDocument();
+    expect(screen.getByText('继续处理')).toBeInTheDocument();
+    expect(screen.getByText('处理 Gate 风险 RAG 任务')).toBeInTheDocument();
+    expect(screen.getByText('定位 Badcase item-demo')).toBeInTheDocument();
+    expect(screen.getByText('Gate 风险')).toBeInTheDocument();
+    expect(screen.getByText('质量门禁存在阻断项。')).toBeInTheDocument();
   });
 
   it('首页作为任务工作台展示待办队列和主流程入口', async () => {
@@ -60,11 +60,10 @@ describe('AegisQA 前端工作台', () => {
 
     expect(await screen.findByText('任务工作台')).toBeInTheDocument();
     expect(screen.getAllByText('最近任务').length).toBeGreaterThan(0);
-    expect(screen.getByText('待审批 Skill')).toBeInTheDocument();
-    expect(screen.getByText('待审核样本')).toBeInTheDocument();
+    expect(screen.getByText('待处理 Badcase')).toBeInTheDocument();
     expect(screen.getByText('失败任务')).toBeInTheDocument();
-    expect(screen.getByText(/CI Gate 阻断/)).toBeInTheDocument();
-    expect(screen.getByText('RAG 任务')).toBeInTheDocument();
+    expect(screen.getByText('Gate 失败')).toBeInTheDocument();
+    expect(screen.getAllByText('RAG 任务').length).toBeGreaterThan(0);
     expect(screen.getAllByRole('link', { name: /上传数据/ }).length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: /选择 Workflow/ })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /创建任务/ })).toBeInTheDocument();
@@ -83,8 +82,9 @@ describe('AegisQA 前端工作台', () => {
     await renderWorkbench('/');
 
     expect(await screen.findByText('任务工作台')).toBeInTheDocument();
-    expect(await screen.findByText('RAG 任务')).toBeInTheDocument();
+    expect((await screen.findAllByText('RAG 任务')).length).toBeGreaterThan(0);
     expect(requests.some((url) => url.endsWith('/runs'))).toBe(false);
+    expect(requests.some((url) => url.endsWith('/overview/workbench'))).toBe(true);
   });
 
   it('Workflow 市场展示草稿、已发布版本、模板和新建入口', async () => {
@@ -625,6 +625,10 @@ describe('AegisQA 前端工作台', () => {
   it('报告页宽表使用统一滚动容器，避免窄屏撑破页面背景', async () => {
     await renderWorkbench('/reports');
 
+    expect(await screen.findByText('优先结论与动作')).toBeInTheDocument();
+    expect(screen.getAllByText('弱分层风险').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: '进入 Trace Flow 定位失败 Step' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '批量创建修复任务' })).toBeInTheDocument();
     expect(await screen.findByText('报告导出历史')).toBeInTheDocument();
     expect(screen.getByTestId('reports-header-actions')).toHaveClass('action-toolbar');
     expect(screen.getByTestId('reports-export-history-section')).toHaveClass('page-section');
@@ -774,6 +778,14 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getByText('item_id')).toBeInTheDocument();
     expect(screen.getByText('item-demo')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Steps' }));
+    expect(await screen.findByText('诊断标签')).toBeInTheDocument();
+    expect(screen.getByText('llm_step')).toBeInTheDocument();
+    expect(screen.getByText('Replay Step')).toBeInTheDocument();
+    expect(screen.getByText('Prompt Debug')).toBeInTheDocument();
+    expect(screen.getByText('导出 Repro Bundle')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Resolved Input' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Raw Output' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Validated Output' })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('tab', { name: '参数' }));
     expect(screen.getByText(/workflow_config/)).toBeInTheDocument();
   });

@@ -18,7 +18,7 @@ from typing import Any
 from uuid import uuid4
 import zipfile
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -493,8 +493,16 @@ def create_app(
     app.state.access_control = access_control
     app.state.workflows = workflows
 
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next: Any) -> Any:
+        trace_id = request.headers.get("X-AegisQA-Request-ID") or f"trace_{uuid4().hex[:12]}"
+        request.state.request_id = trace_id
+        response = await call_next(request)
+        response.headers["X-AegisQA-Request-ID"] = trace_id
+        return response
+
     @app.exception_handler(HTTPException)
-    def http_error_handler(_: Any, exc: HTTPException) -> JSONResponse:
+    def http_error_handler(request: Request, exc: HTTPException) -> JSONResponse:
         code = "NOT_FOUND" if exc.status_code == 404 else "HTTP_ERROR"
         details = exc.detail if isinstance(exc.detail, dict) else {}
         if isinstance(exc.detail, dict):
@@ -503,25 +511,25 @@ def create_app(
             details = exc.detail.get("details") if isinstance(exc.detail.get("details"), dict) else {key: value for key, value in exc.detail.items() if key not in {"code", "message"}}
         else:
             message = str(exc.detail)
-        return JSONResponse(status_code=exc.status_code, content=_api_error(code, message, details))
+        return _error_response(request, exc.status_code, code, message, details)
 
     @app.exception_handler(AegisQAError)
-    def aegisqa_error_handler(_: Any, exc: AegisQAError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content=_api_error(exc.code, exc.message, exc.details))
+    def aegisqa_error_handler(request: Request, exc: AegisQAError) -> JSONResponse:
+        return _error_response(request, exc.status_code, exc.code, exc.message, exc.details)
 
     @app.exception_handler(KeyError)
-    def key_error_handler(_: Any, exc: KeyError) -> JSONResponse:
+    def key_error_handler(request: Request, exc: KeyError) -> JSONResponse:
         # KeyError 的 str(exc) 会额外包一层引号，API 响应要给前端稳定可展示的中文消息。
         message = str(exc.args[0]) if exc.args else "资源不存在"
-        return JSONResponse(status_code=404, content=_api_error("NOT_FOUND", message))
+        return _error_response(request, 404, "NOT_FOUND", message)
 
     @app.exception_handler(ValueError)
-    def value_error_handler(_: Any, exc: ValueError) -> JSONResponse:
-        return JSONResponse(status_code=400, content=_api_error("BAD_REQUEST", str(exc)))
+    def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
+        return _error_response(request, 400, "BAD_REQUEST", str(exc))
 
     @app.exception_handler(RequestValidationError)
-    def validation_error_handler(_: Any, exc: RequestValidationError) -> JSONResponse:
-        return JSONResponse(status_code=422, content=_api_error("VALIDATION_ERROR", "请求参数校验失败", {"errors": exc.errors()}))
+    def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        return _error_response(request, 422, "VALIDATION_ERROR", "请求参数校验失败", {"errors": exc.errors()})
 
     @app.get("/")
     def root() -> dict[str, Any]:
@@ -601,12 +609,19 @@ def _create_store(store_root: Path | str, *, storage_backend: str | None = None,
     raise ValueError(f"不支持的存储后端：{backend}")
 
 
-def _api_error(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+def _error_response(request: Request, status_code: int, code: str, message: str, details: dict[str, Any] | None = None) -> JSONResponse:
+    trace_id = str(getattr(request.state, "request_id", "") or f"trace_{uuid4().hex[:12]}")
+    response = JSONResponse(status_code=status_code, content=_api_error(code, message, details, trace_id=trace_id))
+    response.headers["X-AegisQA-Request-ID"] = trace_id
+    return response
+
+
+def _api_error(code: str, message: str, details: dict[str, Any] | None = None, *, trace_id: str | None = None) -> dict[str, Any]:
     return {
         "code": code,
         "message": message,
         "details": details or {},
-        "trace_id": f"trace_{uuid4().hex[:12]}",
+        "trace_id": trace_id or f"trace_{uuid4().hex[:12]}",
     }
 
 
