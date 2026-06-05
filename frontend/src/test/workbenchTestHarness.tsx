@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, expect, vi } from 'vitest';
 
 import { AppShell } from '../App';
+import { FEATURE_FLAG_DEFAULTS, allFeatureFlagsEnabled, type FeatureFlags } from '../features';
 import { demoSkills, demoWorkflowGraph } from './fixtures/demo';
 
 export { demoSkills, demoWorkflowGraph };
@@ -1002,7 +1003,12 @@ export const skillVersionHistory = {
   ],
 };
 
-export async function renderWorkbench(path: string) {
+export type RenderWorkbenchOptions = {
+  featureFlags?: 'all' | 'defaults' | Partial<FeatureFlags>;
+};
+
+export async function renderWorkbench(path: string, options: RenderWorkbenchOptions = {}) {
+  window.__AEGISQA_FEATURE_FLAGS__ = resolveFeatureFlags(options.featureFlags);
   await act(async () => {
     render(
       <MemoryRouter initialEntries={[path]}>
@@ -1011,6 +1017,12 @@ export async function renderWorkbench(path: string) {
     );
   });
   await waitFor(() => expect(screen.queryByText('正在加载页面...')).not.toBeInTheDocument(), { timeout: 8_000 });
+}
+
+function resolveFeatureFlags(featureFlags: RenderWorkbenchOptions['featureFlags']) {
+  if (featureFlags === 'defaults') return { ...FEATURE_FLAG_DEFAULTS };
+  if (!featureFlags || featureFlags === 'all') return allFeatureFlagsEnabled();
+  return { ...FEATURE_FLAG_DEFAULTS, ...featureFlags };
 }
 
 export function jsonResponse(payload: unknown) {

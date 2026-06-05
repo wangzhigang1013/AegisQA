@@ -42,6 +42,19 @@ describe('AegisQA 前端工作台', () => {
     expect(screen.getAllByText('最近任务').length).toBeGreaterThan(0);
   });
 
+  it('默认隐藏高级模块导航，直达页面显示 Disabled 状态', async () => {
+    await renderWorkbench('/ci-gates', { featureFlags: 'defaults' });
+
+    expect(screen.queryByRole('link', { name: /修复任务/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /实验中心/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /CI Gate/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /人工审核/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /候选资产/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Judge 审计/ })).not.toBeInTheDocument();
+    expect(await screen.findByText('Experimental / Disabled')).toBeInTheDocument();
+    expect(screen.getByText(/VITE_ENABLE_CI_GATE/)).toBeInTheDocument();
+  });
+
   it('概览页读取真实 Dashboard 和工作台聚合数据', async () => {
     await renderWorkbench('/');
 

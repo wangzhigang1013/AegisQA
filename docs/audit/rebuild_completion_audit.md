@@ -20,6 +20,7 @@ AegisQA 的 Reality-First Rebuild 已达到“工程化 MVP 已成型、发布�
 | 体验工作台 | `/overview/workbench` 使用真实 store 聚合，不拉完整 Run 列表，不用 demo 兜底 | 完成 |
 | Action Contract | 后端动作结构统一为 `id/action/label/enabled/disabled/target_url/target/payload/evidence`，前端使用 `actionRouter` | 完成 |
 | 诊断链路 | API 返回 `X-AegisQA-Request-ID`，错误 payload `trace_id` 与请求头对齐 | 完成 |
+| Feature Flag 降噪 | `GET /features`、前端 `features.ts`、主导航过滤和 disabled route 已有定向测试；高级模块默认隐藏，不进入主流程 | 完成试用级收口 |
 | 本地 runtime smoke | `scripts/smoke_runtime.ps1` 已验证本地 JSON/SQLite 试用主链路，可自动避开非 AegisQA 8000 服务 | 完成 |
 | 前端稳定性 | Vitest 限制 2 worker，避免重页面并发导致懒加载超时 | 完成 |
 | 发布文档 | `docs/RELEASE_READINESS.md` 与 `docs/PROJECT_STATUS.md` 明确发布候选口径 | 完成 |

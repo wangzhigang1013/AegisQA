@@ -21,10 +21,31 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - 新增真实模型 Provider smoke 脚本，默认只验证连接别名和密钥不回显，显式 `-LiveCall` 时才发真实模型请求。
 - 新增 Step Replay、Prompt Debug 和 Repro Bundle 后端 API，Trace Flow 动作入口不再只是空链接。
 - Trace Flow Step 调试抽屉已接入 Replay、Prompt Debug、Repro Bundle 调用，前端可直接查看接口返回证据，并已有浏览器级 E2E 覆盖。
+- 新增统一 feature flag 机制，高级模块默认从主导航隐藏，直达路由显示 Experimental / Disabled 状态。
 - `docker-compose.yml` 已补 MySQL/Redis healthcheck，并确保 API 容器安装 Celery 后再启用 Celery executor。
 - 历史 `tmp-report-debug*` 与 `tmp-report-gate-debug/` 调试目录已加入忽略规则，避免污染 `git status`。
 
 ## 最近改动
+
+### 2026-06-05 Feature Flag 主导航降噪
+
+- 改动摘要：落实 Phase 0 的主线降噪要求，新增后端 `/features` 和前端 `features.ts`，默认关闭 CI Gate、候选资产、修复任务、实验中心、人工审核和 Judge 审计入口。
+- 主要变更：
+  - 新增 `aegisqa/core/features.py`，统一读取 `AEGISQA_ENABLE_<FEATURE>`，默认值全部为 false。
+  - 新增 `GET /features`，返回当前 flags、defaults 和后端环境变量前缀。
+  - 新增 `frontend/src/features.ts`，读取 `VITE_ENABLE_<FEATURE>`，并允许测试显式覆盖。
+  - AppShell 主导航按 flag 过滤高级模块；用户直达 disabled 路由时显示 `Experimental / Disabled` 和对应环境变量提示。
+  - Playwright E2E 配置显式开启高级模块 flags，保证已有产品化 E2E 继续覆盖高级页面。
+  - `docs/audit/rebuild_completion_audit.md` 已同步新增 Feature Flag 降噪证据，明确这是试用级收口，不代表高级模块生产完成。
+- 验证：
+  - 红灯验证：`python -m pytest tests/test_feature_flags.py -q` 初始失败，缺少 `aegisqa.core.features`。
+  - 红灯验证：`npm test -- App.test.tsx -t "默认隐藏高级模块导航"` 初始失败，高级导航仍可见。
+  - `python -m pytest tests/test_feature_flags.py -q`：2 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - `npm test -- App.test.tsx -t "默认隐藏高级模块导航"`：1 passed。
+  - `npm test -- App.test.tsx -t "展示主导航|默认隐藏高级模块导航|CI Gate 页面支持创建配置|Experiment 实验中心|Annotation Queue 人工审核|候选资产中心支持审批|Judge 审计创建"`：5 passed；该筛选未命中 Experiment/Annotation 的准确用例名。
+  - `npm test -- App.test.tsx -t "Experiment 页面展示|Annotation Queue 页面支持来源任务筛选"`：2 passed。
+  - `npm run typecheck`：passed。
+  - 本批没有运行前端全量 Vitest、全量 Playwright 或后端全量。
 
 ### 2026-06-05 Trace Flow Step 调试抽屉接入
 

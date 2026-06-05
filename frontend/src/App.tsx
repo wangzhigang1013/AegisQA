@@ -12,10 +12,13 @@ import {
   ToolOutlined,
 } from '@ant-design/icons';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ConfigProvider, Layout, Menu, theme } from 'antd';
+import { Alert, Button, ConfigProvider, Layout, Menu, theme, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import { lazy, Suspense, useState } from 'react';
+import type { ReactNode } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+
+import { FEATURE_ENV_PREFIX, type FeatureFlagKey, type FeatureFlags, getFeatureFlags, isFeatureEnabled } from './features';
 
 const OverviewPage = lazy(() => import('./pages/OverviewPage').then(({ OverviewPage }) => ({ default: OverviewPage })));
 const DatasetsPage = lazy(() => import('./pages/DatasetsPage').then(({ DatasetsPage }) => ({ default: DatasetsPage })));
@@ -46,19 +49,26 @@ function createAppQueryClient() {
   });
 }
 
-const navItems: MenuProps['items'] = [
+type NavItemConfig = {
+  key: string;
+  icon: ReactNode;
+  label: ReactNode;
+  feature?: FeatureFlagKey;
+};
+
+const navItemConfigs: NavItemConfig[] = [
   { key: '/', icon: <BarChartOutlined />, label: <NavLink to="/">概览</NavLink> },
   { key: '/datasets', icon: <DatabaseOutlined />, label: <NavLink to="/datasets">数据集</NavLink> },
   { key: '/skills', icon: <ExperimentOutlined />, label: <NavLink to="/skills">Skill 市场</NavLink> },
   { key: '/workflows', icon: <ApartmentOutlined />, label: <NavLink to="/workflows">Workflow 市场</NavLink> },
   { key: '/runs', icon: <PlayCircleOutlined />, label: <NavLink to="/runs">执行中心</NavLink> },
   { key: '/reports', icon: <BarChartOutlined />, label: <NavLink to="/reports">报告中心</NavLink> },
-  { key: '/repair-tasks', icon: <ToolOutlined />, label: <NavLink to="/repair-tasks">修复任务</NavLink> },
-  { key: '/experiments', icon: <ExperimentOutlined />, label: <NavLink to="/experiments">实验中心</NavLink> },
-  { key: '/ci-gates', icon: <ControlOutlined />, label: <NavLink to="/ci-gates">CI Gate</NavLink> },
-  { key: '/annotation-queue', icon: <FileSearchOutlined />, label: <NavLink to="/annotation-queue">人工审核</NavLink> },
-  { key: '/candidate-assets', icon: <FileSearchOutlined />, label: <NavLink to="/candidate-assets">候选资产</NavLink> },
-  { key: '/judge', icon: <AuditOutlined />, label: <NavLink to="/judge">Judge 审计</NavLink> },
+  { key: '/repair-tasks', icon: <ToolOutlined />, label: <NavLink to="/repair-tasks">修复任务</NavLink>, feature: 'repair_tasks' },
+  { key: '/experiments', icon: <ExperimentOutlined />, label: <NavLink to="/experiments">实验中心</NavLink>, feature: 'experiments' },
+  { key: '/ci-gates', icon: <ControlOutlined />, label: <NavLink to="/ci-gates">CI Gate</NavLink>, feature: 'ci_gate' },
+  { key: '/annotation-queue', icon: <FileSearchOutlined />, label: <NavLink to="/annotation-queue">人工审核</NavLink>, feature: 'annotation_queue' },
+  { key: '/candidate-assets', icon: <FileSearchOutlined />, label: <NavLink to="/candidate-assets">候选资产</NavLink>, feature: 'candidate_assets' },
+  { key: '/judge', icon: <AuditOutlined />, label: <NavLink to="/judge">Judge 审计</NavLink>, feature: 'judge_audit' },
   { key: '/governance', icon: <SafetyCertificateOutlined />, label: <NavLink to="/governance">治理与审计</NavLink> },
 ];
 
@@ -66,6 +76,10 @@ export function AppShell() {
   const location = useLocation();
   const selectedKey = `/${location.pathname.split('/')[1]}`.replace(/\/$/, '') || '/';
   const [queryClient] = useState(createAppQueryClient);
+  const featureFlags = getFeatureFlags();
+  const navItems: MenuProps['items'] = navItemConfigs
+    .filter((item) => !item.feature || isFeatureEnabled(item.feature, featureFlags))
+    .map(({ feature: _feature, ...item }) => item);
 
   return (
     <ConfigProvider
@@ -110,12 +124,12 @@ export function AppShell() {
                   <Route path="/tasks/:taskId/trace" element={<TraceFlowPage />} />
                   <Route path="/tasks/:taskId/trace-tree" element={<TraceTreePage />} />
                   <Route path="/reports" element={<ReportsPage />} />
-                  <Route path="/repair-tasks" element={<RepairTasksPage />} />
-                  <Route path="/experiments" element={<ExperimentsPage />} />
-                  <Route path="/ci-gates" element={<CIGatesPage />} />
-                  <Route path="/annotation-queue" element={<AnnotationQueuePage />} />
-                  <Route path="/candidate-assets" element={<CandidateAssetsPage />} />
-                  <Route path="/judge" element={<JudgeAuditPage />} />
+                  <Route path="/repair-tasks" element={<FeatureGate flags={featureFlags} feature="repair_tasks" title="修复任务"><RepairTasksPage /></FeatureGate>} />
+                  <Route path="/experiments" element={<FeatureGate flags={featureFlags} feature="experiments" title="实验中心"><ExperimentsPage /></FeatureGate>} />
+                  <Route path="/ci-gates" element={<FeatureGate flags={featureFlags} feature="ci_gate" title="CI Gate"><CIGatesPage /></FeatureGate>} />
+                  <Route path="/annotation-queue" element={<FeatureGate flags={featureFlags} feature="annotation_queue" title="人工审核"><AnnotationQueuePage /></FeatureGate>} />
+                  <Route path="/candidate-assets" element={<FeatureGate flags={featureFlags} feature="candidate_assets" title="候选资产"><CandidateAssetsPage /></FeatureGate>} />
+                  <Route path="/judge" element={<FeatureGate flags={featureFlags} feature="judge_audit" title="Judge 审计"><JudgeAuditPage /></FeatureGate>} />
                   <Route path="/governance" element={<GovernancePage />} />
                 </Routes>
               </Suspense>
@@ -124,5 +138,35 @@ export function AppShell() {
         </Layout>
       </QueryClientProvider>
     </ConfigProvider>
+  );
+}
+
+function FeatureGate({
+  flags,
+  feature,
+  title,
+  children,
+}: {
+  flags: FeatureFlags;
+  feature: FeatureFlagKey;
+  title: string;
+  children: ReactNode;
+}) {
+  if (isFeatureEnabled(feature, flags)) {
+    return <>{children}</>;
+  }
+  const envName = `${FEATURE_ENV_PREFIX}${feature.toUpperCase()}`;
+  return (
+    <section className="page-stack">
+      <Typography.Text type="secondary">Experimental / Disabled</Typography.Text>
+      <Typography.Title level={2}>{title}</Typography.Title>
+      <Alert
+        type="warning"
+        showIcon
+        message="该高级模块默认关闭"
+        description={`此页面仍保留路由，但不会进入主导航或主流程。需要试用时设置 ${envName}=true 后重启前端。`}
+      />
+      <Button href="/governance">查看治理与审计</Button>
+    </section>
   );
 }

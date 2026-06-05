@@ -27,6 +27,7 @@ import yaml
 from aegisqa.badcases.service import BadcaseService
 from aegisqa.audit.service import AuditService
 from aegisqa.core.errors import AegisQAError
+from aegisqa.core.features import FEATURE_ENV_PREFIX, FEATURE_FLAG_DEFAULTS, load_feature_flags
 from aegisqa.datasets.service import DatasetService
 from aegisqa.engine.runner import RunRecord, RunRequest, WorkflowRunner
 from aegisqa.engine.task_executor import TaskExecutor, create_task_executor
@@ -543,6 +544,14 @@ def create_app(
             "docs_url": "/docs",
             "health_url": "/health",
             "storage_backend": app.state.storage_backend,
+        }
+
+    @app.get("/features")
+    def features() -> dict[str, Any]:
+        return {
+            "flags": load_feature_flags(),
+            "defaults": FEATURE_FLAG_DEFAULTS,
+            "env_prefix": FEATURE_ENV_PREFIX,
         }
 
     from aegisqa.api.routes import (
