@@ -47,6 +47,13 @@
 .\scripts\smoke_production_like.ps1 -StartCompose
 ```
 
+真实模型 Provider 也单独验证，默认只检查连接别名和密钥不回显；只有显式 `-LiveCall` 才消耗模型额度：
+
+```powershell
+.\scripts\smoke_model_provider.ps1 -BaseUrl "https://example.com/v1" -DefaultModel "model-name" -SecretRef "env:MODEL_API_KEY"
+.\scripts\smoke_model_provider.ps1 -BaseUrl "https://example.com/v1" -DefaultModel "model-name" -SecretRef "env:MODEL_API_KEY" -ApiKeyEnv "MODEL_API_KEY" -LiveCall
+```
+
 ## 当前已知边界
 
 - `JsonStore` 和 `SQLiteStore` 可支撑本地试用；MySQL 仍需要真实容器 smoke 后才能宣称生产部署就绪。

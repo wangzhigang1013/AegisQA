@@ -70,6 +70,29 @@ temperature: 0
 
 任务执行快照会记录连接别名、模型名、参数和脱敏 secret ref，报告会聚合 token 与成本。旧的 `default_model` 行为仍保留；没有指定 `model_connection_id` 时会使用默认模型网关配置。
 
+## Smoke 验证
+
+先确认 API 已启动，再运行 provider smoke。默认只保存连接别名并验证响应不回显明文密钥，不发真实模型请求：
+
+```powershell
+.\scripts\smoke_model_provider.ps1 `
+  -BaseUrl "https://dashscope.aliyuncs.com/compatible-mode/v1" `
+  -DefaultModel "qwen-plus" `
+  -SecretRef "env:QWEN_API_KEY"
+```
+
+如果需要真实调用 provider，显式传 `-LiveCall`。可以用 `-ApiKeyEnv` 提供本次测试临时密钥；该密钥只进入 `/model-gateway/test` 请求，不会被保存到连接配置：
+
+```powershell
+$env:QWEN_API_KEY="sk-..."
+.\scripts\smoke_model_provider.ps1 `
+  -BaseUrl "https://dashscope.aliyuncs.com/compatible-mode/v1" `
+  -DefaultModel "qwen-plus" `
+  -SecretRef "env:QWEN_API_KEY" `
+  -ApiKeyEnv "QWEN_API_KEY" `
+  -LiveCall
+```
+
 ## 安全检查
 
 - store 文件里不应出现真实 API Key。

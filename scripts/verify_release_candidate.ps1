@@ -46,7 +46,8 @@ function Test-RequiredArtifacts {
     "docs/audit/rebuild_completion_audit.md",
     "docker-compose.yml",
     "scripts/smoke_runtime.ps1",
-    "scripts/smoke_production_like.ps1"
+    "scripts/smoke_production_like.ps1",
+    "scripts/smoke_model_provider.ps1"
   )
   foreach ($file in $requiredFiles) {
     Assert-RequiredFile $file

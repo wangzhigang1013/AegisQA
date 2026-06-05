@@ -18,6 +18,7 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - `docs/audit/feature_truth_audit.md` 与 `docs/audit/rebuild_completion_audit.md` 已恢复，状态文档不再引用不存在的审计文件。
 - 新增分层发布验证脚本，默认走 docs/targeted 轻量验证，只有发布候选前才跑 full release 回归。
 - 新增 production-like smoke 脚本骨架，显式 `-StartCompose` 时才启动 Docker 验证 MySQL、Redis、Celery 和 API/Worker。
+- 新增真实模型 Provider smoke 脚本，默认只验证连接别名和密钥不回显，显式 `-LiveCall` 时才发真实模型请求。
 - `docker-compose.yml` 已补 MySQL/Redis healthcheck，并确保 API 容器安装 Celery 后再启用 Celery executor。
 - 历史 `tmp-report-debug*` 与 `tmp-report-gate-debug/` 调试目录已加入忽略规则，避免污染 `git status`。
 
@@ -31,13 +32,15 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
   - 新增 `docs/audit/rebuild_completion_audit.md`，把当前结论限定为“发布候选/小团队试用”，并列出 MySQL、Redis、Celery、真实模型 Provider 和 Replay/Repro 的剩余缺口。
   - 新增 `scripts/verify_release_candidate.ps1`，提供 `docs`、`targeted`、`release` 三档验证，避免小改动后反复运行全量测试。
   - 新增 `scripts/smoke_production_like.ps1`，复用 `docker-compose.yml`，在显式传 `-StartCompose` 时验证 MySQL + Redis + Celery + API/Worker 异步执行链路。
+  - 新增 `scripts/smoke_model_provider.ps1`，用于验证 openai-compatible 模型连接别名、secret_ref 和临时密钥不持久化；默认不发真实模型请求。
   - 更新 `docker-compose.yml`，为 MySQL/Redis 增加 healthcheck，并让 API 容器安装 Celery 依赖后再使用 Celery executor。
   - 更新 `.gitignore`，忽略历史 `tmp-report-debug*/` 与 `tmp-report-gate-debug/` 调试目录。
-  - 更新 `docs/RELEASE_READINESS.md` 和 `docs/RUNTIME_SMOKE.md`，记录分层验证和 production-like smoke 使用方式。
+  - 更新 `docs/RELEASE_READINESS.md`、`docs/RUNTIME_SMOKE.md` 和 `docs/tutorials/connect-real-model.md`，记录分层验证、production-like smoke 和 provider smoke 使用方式。
 - 验证策略：
   - 本批主要是文档、脚本和忽略规则改动，不立即跑后端/前端全量测试。
   - `.\scripts\verify_release_candidate.ps1 -Scope docs`：通过。
-  - PowerShell 语法解析：`scripts/verify_release_candidate.ps1`、`scripts/smoke_production_like.ps1`、`scripts/smoke_runtime.ps1` 均通过。
+  - PowerShell 语法解析：`scripts/verify_release_candidate.ps1`、`scripts/smoke_production_like.ps1`、`scripts/smoke_runtime.ps1`、`scripts/smoke_model_provider.ps1` 均通过。
+  - `scripts/smoke_model_provider.ps1` 未执行真实 provider 调用；当前未提供真实 `BaseUrl`、`DefaultModel` 和密钥环境变量，本轮只验证脚本语法、文档和密钥不回显设计。
   - `docker-compose.yml` PyYAML 结构检查：通过，确认 mysql/redis/api/worker 服务、healthcheck 和 `service_healthy` 依赖存在。
   - `docker compose -f docker-compose.yml config`：未执行成功，当前机器未安装或未暴露 `docker` 命令；未启动任何容器。
   - `git diff --check`：通过，仅 Windows LF/CRLF 提示。
