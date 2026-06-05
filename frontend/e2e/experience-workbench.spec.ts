@@ -35,7 +35,14 @@ test('体验工作台串联 Overview、Task、Trace、Report 和 Badcase 修复�
   await expect(page.getByRole('heading', { name: 'Trace Flow' })).toBeVisible();
   await page.getByRole('tab', { name: 'Steps' }).click();
   await expect(page.getByText('诊断标签').first()).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Replay Step' }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Replay Step' }).first().click();
+  const stepDebugDialog = page.getByRole('dialog', { name: /Step 调试/ });
+  await expect(stepDebugDialog).toBeVisible();
+  await expect(stepDebugDialog.getByText(/mock_llm_calls=true/).first()).toBeVisible();
+  await stepDebugDialog.getByRole('button', { name: '运行 Prompt Debug' }).click();
+  await expect(stepDebugDialog.getByText(/Prompt Debug 已返回历史 prompt trace/).first()).toBeVisible();
+  await stepDebugDialog.getByRole('button', { name: '刷新 Repro Bundle' }).click();
+  await expect(stepDebugDialog.getByText(/aegisqa.step_repro_bundle.v1/).first()).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Resolved Input' }).first()).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Raw Output' }).first()).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Validated Output' }).first()).toBeVisible();

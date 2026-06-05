@@ -32,7 +32,7 @@ AegisQA 的 Reality-First Rebuild 已达到“工程化 MVP 已成型、发布�
 | Redis | 需要真实 Redis 限流/队列配置验证 | 有 rate limiter 和 compose，缺环境级证据 | 生产类 smoke 检查 runtime-status |
 | Celery | 需要 API 提交后台任务并由 worker 完成 | 有 executor/worker 入口，缺异步 smoke 结果 | production-like smoke 使用 `background=true` 执行并轮询 |
 | 真实模型 Provider | 需要 openai-compatible endpoint、secret_ref、usage/cost 验证 | mock provider 已可用，真实 provider 未验 | 增加 provider smoke，不回显密钥 |
-| Replay/Repro | 后端 Step Replay、Prompt Debug、Repro Bundle 已可调用；Trace Flow 前端抽屉已接入按钮调用 | 已有 API、后端定向测试和前端 Trace Flow Vitest，缺浏览器级操作验证 | 补浏览器级 E2E |
+| Replay/Repro | 后端 Step Replay、Prompt Debug、Repro Bundle 已可调用；Trace Flow 前端抽屉已接入按钮调用 | 已有 API、后端定向测试、前端 Trace Flow Vitest 和浏览器级 experience E2E | 后续扩展异常态、权限态和 override input 场景 |
 
 ## 阶段判定
 
@@ -41,7 +41,7 @@ AegisQA 的 Reality-First Rebuild 已达到“工程化 MVP 已成型、发布�
 | Feature Truth Audit | 完成但需持续维护 | 本文件与 `feature_truth_audit.md` 作为事实口径 |
 | Skill/Prompt/Runtime | 试用级完成 | mock provider 与包审批可用，真实 provider 待验证 |
 | Quality/Gate | 试用级完成 | 可阻断，缺更多生产指标样例 |
-| Replay/Debug/Repro | 前后端试用级完成 | Step 级 Replay、Prompt Debug、Repro Bundle 已有 API 和 Trace Flow 抽屉入口；仍需补浏览器级 E2E |
+| Replay/Debug/Repro | 前后端试用级完成 | Step 级 Replay、Prompt Debug、Repro Bundle 已有 API、Trace Flow 抽屉入口和浏览器级 E2E |
 | Worker/Artifact/Sandbox | 部分完成 | 本地 worker 可用，Celery/MySQL/Redis 需环境验证 |
 | Release Candidate | 已形成 | 本地验证栈已通过，分支仍需按需推送 |
 
@@ -49,7 +49,7 @@ AegisQA 的 Reality-First Rebuild 已达到“工程化 MVP 已成型、发布�
 
 1. 生产类 smoke 在 MySQL + Redis + Celery 下通过，并记录 Task/Run/Report 证据。
 2. 真实 provider smoke 能证明 secret_ref、token usage、cost source 和错误码。
-3. Trace Flow Step 抽屉调用 Replay、Prompt Debug、Repro Bundle 的浏览器级 E2E 覆盖。
+3. Trace Flow Step 调试抽屉继续补异常态、权限态和 override input 场景。
 4. `scripts/verify_release_candidate.ps1 -Scope release` 一条命令可复现本地发布候选验证。
 5. `docs/PROJECT_STATUS.md` 每次改动后更新，且不再引用不存在的审计文件。
 6. 高级模块继续保持 feature flag/disabled 口径，未验证能力不进入主流程。
