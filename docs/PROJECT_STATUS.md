@@ -41,6 +41,17 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 
 ## 最近改动
 
+### 2026-06-05 最终本地验证与外部环境缺口确认
+
+- 改动摘要：完成本轮本地可执行优化后，做发布候选 targeted 验证，并确认剩余缺口属于外部环境/密钥/生产存储验证。
+- 验证：
+  - `.\scripts\verify_release_candidate.ps1 -Scope targeted`：passed。包含 `git diff --check`、`python -m pytest tests/test_api_frontend_contract.py tests/test_experience_efficiency.py -q`（11 passed，仅 Starlette/httpx2 依赖弃用警告）和 `cd frontend && npm run typecheck`。
+  - `.\scripts\smoke_model_provider.ps1`：失败，原因是未提供 `-BaseUrl`；未执行真实 provider LiveCall。
+  - `.\scripts\smoke_production_like.ps1 -StartCompose`：失败，原因是本机 Docker CLI 不可用，无法启动 MySQL/Redis/Celery production-like smoke。
+- 当前边界：
+  - 本地 JSON/SQLite 试用链路、ArtifactStore 主产物、Prompt/LLM 调试产物、Feature Flag、Replay/Repro、Gate skipped 真实性均已有定向验证。
+  - 生产化仍需在具备 Docker、MySQL、Redis、Celery、真实 openai-compatible provider 和生产 ArtifactStore 后端的环境中完成环境级验证。
+
 ### 2026-06-05 Prompt/LLM ArtifactStore 接入
 
 - 改动摘要：继续补齐 ArtifactStore 运行时产物，把模型类 Step 的 rendered prompt 和 raw response 从仅存在于运行记录/调试响应，提升为可追溯、可校验、可读回的独立产物。
