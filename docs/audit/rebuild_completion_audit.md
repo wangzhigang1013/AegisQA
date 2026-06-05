@@ -23,8 +23,8 @@ AegisQA 的 Reality-First Rebuild 已达到“工程化 MVP 已成型、发布�
 | Feature Flag 降噪 | `GET /features`、前端 `features.ts`、主导航过滤和 disabled route 已有定向测试；高级模块默认隐藏，不进入主流程 | 完成试用级收口 |
 | Feature Flag 同步 | 前端启动后合并后端 `/features`，后端开启的高级模块可进入导航，同时本地显式开启不会被后端默认 false 覆盖 | 完成 |
 | Gate 真实性 | CI Gate 缺失真实指标返回 `skipped` 和 reason，不再把缺失指标按 0 生成假 passed | 完成 |
-| Step Debug/Repro | Replay schema invalid 保留 raw output；Replay、Prompt Debug、Repro Bundle 都有 Viewer 权限拒绝回归 | 完成试用级闭环 |
-| ArtifactStore | 新增 `ArtifactStore` / `LocalArtifactStore`，本地支持产物写入、读取、元数据、路径安全和大小限制，并挂载到 app state | 完成最小接口 |
+| Step Debug/Repro | Replay schema invalid 保留 raw output；Replay、Prompt Debug、Repro Bundle 都有 Viewer 权限拒绝回归；Repro Bundle 写入 ArtifactStore 并返回 artifact metadata | 完成试用级闭环 |
+| ArtifactStore | 新增 `ArtifactStore` / `LocalArtifactStore`，本地支持产物写入、读取、元数据、路径安全和大小限制；Step Repro Bundle 已接入 `repro_bundles` | 完成最小接口和首个主产物接入 |
 | Skill 包安全 | 上传包安全扫描记录可执行/二进制文件、直接模型 SDK 调用、疑似硬编码 API key warning | 完成第一版 |
 | 模型网关安全 | secret_ref/临时 api_key 不持久化，provider usage/cost 和缺失 usage 都有回归；HTTP/network 错误详情已脱敏 | 完成本地可验证部分 |
 | 本地 runtime smoke | `scripts/smoke_runtime.ps1` 已验证本地 JSON/SQLite 试用主链路，可自动避开非 AegisQA 8000 服务 | 完成 |
@@ -39,7 +39,7 @@ AegisQA 的 Reality-First Rebuild 已达到“工程化 MVP 已成型、发布�
 | Redis | 需要真实 Redis 限流/队列配置验证 | 有 rate limiter 和 compose；缺环境级证据 | 生产类 smoke 检查 runtime-status |
 | Celery | 需要 API 提交后台任务并由 worker 完成 | 有 executor/worker 入口；缺异步 smoke 结果 | production-like smoke 使用 `background=true` 执行并轮询 |
 | 真实模型 Provider | 需要真实 openai-compatible endpoint、secret_ref、usage/cost 验证 | 本地 mock/fake provider 已覆盖 secret 与 usage 规则，真实 LiveCall 未验 | 提供 BaseUrl/DefaultModel/Secret 后跑 provider smoke `-LiveCall` |
-| ArtifactStore 接入 | 需要 Dataset/Skill package/Report/Repro Bundle 等主产物逐步写入 ArtifactStore | 最小接口和 app state 已完成，历史文件流尚未统一迁移 | 按资产类型逐步接入 ArtifactStore |
+| ArtifactStore 接入 | 需要 Dataset/Skill package/Report 等主产物逐步写入 ArtifactStore | Repro Bundle 已接入，Dataset/Skill package/Report 历史文件流尚未统一迁移 | 按资产类型逐步接入 ArtifactStore |
 
 ## 阶段判定
 
@@ -48,15 +48,15 @@ AegisQA 的 Reality-First Rebuild 已达到“工程化 MVP 已成型、发布�
 | Feature Truth Audit | 完成但需持续维护 | 本文件与 `feature_truth_audit.md` 作为事实口径 |
 | Skill/Prompt/Runtime | 试用级完成 | mock provider 与包审批可用，真实 provider 待验证 |
 | Quality/Gate | 试用级完成 | 可阻断，缺失指标返回 skipped；仍缺更多生产指标样例 |
-| Replay/Debug/Repro | 前后端试用级完成 | Step 级 Replay、Prompt Debug、Repro Bundle 已有 API、权限态、schema invalid 和前端错误详情覆盖 |
-| Worker/Artifact/Sandbox | 部分完成 | 本地 pause/cancel 行为和 ArtifactStore 最小接口已覆盖，Celery/MySQL/Redis 需环境验证 |
+| Replay/Debug/Repro | 前后端试用级完成 | Step 级 Replay、Prompt Debug、Repro Bundle 已有 API、权限态、schema invalid、ArtifactStore 落盘和前端错误详情覆盖 |
+| Worker/Artifact/Sandbox | 部分完成 | 本地 pause/cancel 行为、ArtifactStore 最小接口和 Repro Bundle 首个产物接入已覆盖，Celery/MySQL/Redis 需环境验证 |
 | Release Candidate | 已形成 | 本地验证栈已通过，分支仍需按需推送 |
 
 ## 下一轮完成标准
 
 1. 生产类 smoke 在 MySQL + Redis + Celery 下通过，并记录 Task/Run/Report 证据。
 2. 真实 provider smoke 能证明 secret_ref、token usage、cost source、错误码和错误详情脱敏。
-3. Trace Flow Step 调试抽屉继续补真实 Prompt output schema debug、更多异常态和 ArtifactStore repro bundle 写入。
+3. Trace Flow Step 调试抽屉继续补真实 Prompt output schema debug、更多异常态、离线下载和跨进程 Repro Bundle 读取。
 4. `scripts/verify_release_candidate.ps1 -Scope release` 一条命令可复现本地发布候选验证。
 5. `docs/PROJECT_STATUS.md` 每次改动后更新，且不再引用不存在的审计文件。
 6. 高级模块继续保持 feature flag/disabled 口径，未验证能力不进入主流程。

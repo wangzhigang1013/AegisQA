@@ -163,6 +163,11 @@ def test_step_replay_prompt_debug_and_repro_bundle_are_callable(tmp_path: Path) 
     assert bundle["raw_output"]
     assert bundle["replay_endpoint"] == f"{base_path}/replay"
     assert bundle["prompt_debug_endpoint"] == f"{base_path}/prompt-debug"
+    assert bundle["artifact"]["kind"] == "repro_bundles"
+    assert bundle["artifact"]["artifact_id"] == f"runs/{task['run_id']}/items/{item['item_id']}/steps/{step['step_id']}/repro-bundle.json"
+    saved_bundle = json.loads(client.app.state.artifact_store.read_bytes(bundle["artifact"]["kind"], bundle["artifact"]["artifact_id"]).decode("utf-8"))
+    assert saved_bundle["bundle_type"] == "step_repro_bundle"
+    assert saved_bundle["resolved_input"] == bundle["resolved_input"]
 
 
 def test_step_debug_endpoints_reject_viewer_role(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 from copy import deepcopy
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from html import escape
 from math import ceil
@@ -325,7 +326,22 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 "prompt_debug_endpoint": f"/runs/{run_id}/items/{item_id}/steps/{step_id}/prompt-debug",
             }
         )
-        ctx.audit_service.record(actor=actor, role=role, action="step.repro_bundle", target=f"{run_id}/{item_id}/{step_id}", detail={"step_status": step.status})
+        artifact_id = f"runs/{run_id}/items/{item_id}/steps/{step_id}/repro-bundle.json"
+        artifact = ctx.artifact_store.put_bytes(
+            "repro_bundles",
+            artifact_id,
+            json_dumps(bundle).encode("utf-8"),
+            content_type="application/json",
+            metadata={"run_id": run_id, "item_id": item_id, "step_id": step_id, "task_id": task["task_id"]},
+        )
+        bundle["artifact"] = asdict(artifact)
+        ctx.audit_service.record(
+            actor=actor,
+            role=role,
+            action="step.repro_bundle",
+            target=f"{run_id}/{item_id}/{step_id}",
+            detail={"step_status": step.status, "artifact_id": artifact_id},
+        )
         return bundle
 
     @app.post("/runs", response_model=RunRecord)

@@ -22,6 +22,7 @@ class RouteContext:
     graph_service: Any
     runner: Any
     task_executor: Any
+    artifact_store: Any
     badcases: Any
     judge_profiles: Any
     access_control: Any

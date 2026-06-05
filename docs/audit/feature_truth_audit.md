@@ -15,7 +15,7 @@
 | Workflow | Workflow 市场和设计器 | `/workflow-*` | Workflow draft/version | 是，Task 运行引用发布版本 | Graph invalid、mapping invalid 可阻断发布/Preflight | 后端、前端、E2E | 模板是演示资产，不应冒充用户流程 | 保留主流程 | 继续减少模板/demo 对空态的影响 |
 | Task | 执行中心和 Task 抽屉 | `/tasks/*` | Task/Run/Attempt | 是，状态来自真实 Run | Task 创建和执行前有 Preflight/Gate 阻断 | 后端、前端、E2E | 本地同步执行和线程池是真实本地路径 | 保留主流程 | 在 Celery worker 下验证异步执行、暂停、取消 |
 | Preflight | Task 创建向导和详情证据 | `/tasks/preflight` | Task snapshot | 是，读取 Dataset/Workflow/Skill 状态 | 是，阻断 Task 创建或要求显式放行 | 后端、前端 | 无假通过 | 保留主流程 | 增加生产 smoke 中 blocking preflight 场景 |
-| Trace | Trace Tree/Flow、Step 详情与调试抽屉 | `/tasks/{task_id}/trace-*`、`/runs/{run_id}/items/{item_id}/steps/{step_id}/replay|prompt-debug|repro-bundle` | Run item/step | 是，来自 RunItemStep | Repro/Replay/Prompt Debug 受权限控制，不直接阻断主任务 | 后端、前端、E2E | 旧 Run 缺字段时降级展示；Replay 默认不隐式调用外部模型；schema invalid 会保留 raw output | 保留主流程 | 扩展更多运行时异常和真实 Prompt output schema debug 覆盖 |
+| Trace | Trace Tree/Flow、Step 详情与调试抽屉 | `/tasks/{task_id}/trace-*`、`/runs/{run_id}/items/{item_id}/steps/{step_id}/replay|prompt-debug|repro-bundle` | Run item/step、ArtifactStore repro bundle | 是，来自 RunItemStep | Repro/Replay/Prompt Debug 受权限控制，不直接阻断主任务 | 后端、前端、E2E | 旧 Run 缺字段时降级展示；Replay 默认不隐式调用外部模型；schema invalid 会保留 raw output；Repro Bundle 已落盘 | 保留主流程 | 扩展更多运行时异常和真实 Prompt output schema debug 覆盖 |
 | Report | Report 页面、导出、推荐动作 | `/tasks/{task_id}/report` | Report 聚合与导出 | 是，来自 Run/Step/Quality/Gate | Gate failed 可形成阻断证据 | 后端、前端、E2E | cost/token 缺失时显示 unavailable | 保留主流程 | 真实 provider usage/cost smoke |
 | Badcase | Report Badcase 明细和修复入口 | Report/Repair/Productization 路由 | Badcase/Repair task | 是，来自 Step/Quality/Gate evidence | 可进入修复任务，不直接阻断执行 | 后端、前端、E2E | 聚类向量仍为轻量本地规则 | 保留主流程 | 用真实 evidence 强约束 source_id/source 类型 |
 | Quality | Report 与 Gate 关联展示 | quality/gate 相关聚合 | Run/Report/Gate payload | 部分，真实规则已接入，缺数据返回 skipped | 部分，Gate 失败可阻断 | 后端 | 禁止假分数和假建议；缺失指标已有 skipped 回归 | 保留但继续硬化 | 增加规则覆盖矩阵和更多 skipped reason 测试 |
@@ -43,5 +43,5 @@
 
 1. 在安装 Docker 的目标环境使用 `scripts/smoke_production_like.ps1 -StartCompose` 验证 MySQL、Redis、Celery 和 API/Worker 主链路。
 2. 使用真实 `openai_compatible` provider 执行 `scripts/smoke_model_provider.ps1 -LiveCall`，验证 secret_ref、token usage、cost source 和 Prompt/Trace 输出。
-3. 扩展 Replay、Prompt Debug、Repro Bundle 的真实 Prompt output schema、更多运行时异常和导出到 ArtifactStore 的覆盖。
+3. 扩展 Replay、Prompt Debug、Repro Bundle 的真实 Prompt output schema、更多运行时异常和跨进程/离线下载覆盖。
 4. 持续回归 feature flag、disabled 页面和主导航收口规则，避免高级模块重新进入默认主流程。

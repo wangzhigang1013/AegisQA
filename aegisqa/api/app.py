@@ -598,6 +598,7 @@ def create_app(
         graph_service=graph_service,
         runner=runner,
         task_executor=task_executor,
+        artifact_store=artifact_store,
         badcases=badcases,
         judge_profiles=judge_profiles,
         access_control=access_control,

@@ -11,6 +11,7 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - Step Replay live 模式在 output schema invalid 时保留 raw output、清空 validated output，并返回 `OUTPUT_SCHEMA_INVALID`。
 - Step Replay、Prompt Debug、Repro Bundle 均有 Viewer 权限拒绝回归；Repro Bundle GET 已补权限门禁和审计。
 - 新增 `ArtifactStore` / `LocalArtifactStore`，提供本地产物写入、读取、元数据、大小限制和路径安全检查，并挂载到 `app.state.artifact_store`。
+- Step Repro Bundle 已写入 ArtifactStore 的 `repro_bundles` 命名空间，并在 API 响应中返回 artifact metadata，导出产物不再只是瞬时 JSON。
 - 模型网关 provider HTTP/network 错误详情会统一脱敏，避免外部服务回显 Authorization 或 API key 时泄漏。
 - Skill Package 上传会记录可执行/二进制文件、直接模型 SDK 调用和疑似硬编码 API key 的结构化 warning。
 - Trace Flow、Trace Tree 和 Report 页面加载失败时显示结构化错误码和 `trace_id`，便于定位后端请求。
@@ -35,6 +36,20 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - 历史 `tmp-report-debug*` 与 `tmp-report-gate-debug/` 调试目录已加入忽略规则，避免污染 `git status`。
 
 ## 最近改动
+
+### 2026-06-05 Repro Bundle ArtifactStore 接入
+
+- 改动摘要：继续执行优化计划中 ArtifactStore 与可回放产物的剩余缺口，把 Step Repro Bundle 从瞬时响应推进为可落盘、可审计、可后续下载/复现的本地产物。
+- 主要变更：
+  - `RouteContext` 新增 `artifact_store` 依赖，`create_app()` 将 `LocalArtifactStore(store.root / "artifacts")` 注入路由上下文。
+  - `GET /runs/{run_id}/items/{item_id}/steps/{step_id}/repro-bundle` 生成 bundle 后写入 ArtifactStore 的 `repro_bundles` 命名空间。
+  - Repro Bundle 响应新增 `artifact` 元数据，包含 `kind`、`artifact_id`、`size_bytes`、`sha256`、`content_type`、`storage_path`、业务 metadata 和 `created_at`。
+  - 更新 `tests/test_experience_efficiency.py`，验证 API 返回的 artifact metadata 可用于从 `app.state.artifact_store` 读回真实 JSON bundle。
+- 验证：
+  - 红灯验证：`python -m pytest tests/test_experience_efficiency.py::test_step_replay_prompt_debug_and_repro_bundle_are_callable -q` 初始失败，缺少 `bundle["artifact"]`。
+  - `python -m pytest tests/test_experience_efficiency.py::test_step_replay_prompt_debug_and_repro_bundle_are_callable -q`：1 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - `python -m pytest tests/test_experience_efficiency.py tests/test_artifact_store.py -q`：15 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - 本批只触碰 Repro Bundle ArtifactStore 接入和定向测试，没有运行后端全量、前端测试或 E2E。
 
 ### 2026-06-05 Reality-First 优化计划第二批硬化
 
