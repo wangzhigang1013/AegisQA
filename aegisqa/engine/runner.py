@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from aegisqa.datasets.service import DatasetRow, DatasetService
 from aegisqa.engine.rate_limit import RateLimiter, create_rate_limiter
 from aegisqa.skills.parameters import SkillParameterResolver
 from aegisqa.skills.registry import SkillRegistry
+from aegisqa.storage.artifacts import ArtifactStore
 from aegisqa.storage.json_store import JsonStore
 from aegisqa.workflows.models import WorkflowVersion
 
@@ -118,6 +120,7 @@ class WorkflowRunner:
         run_repository: Any | None = None,
         rate_limiter_factory: Callable[[dict[str, float]], RateLimiter] | None = None,
         progress_save_interval_items: int = 25,
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         self.store = store
         self.dataset_service = dataset_service
@@ -125,6 +128,7 @@ class WorkflowRunner:
         self.run_repository = run_repository
         self.rate_limiter_factory = rate_limiter_factory or create_rate_limiter
         self.progress_save_interval_items = max(1, int(progress_save_interval_items))
+        self.artifact_store = artifact_store
         self._cache: dict[str, dict[str, Any]] = {}
 
     def create_run(self, request: RunRequest) -> RunRecord:
@@ -424,6 +428,7 @@ class WorkflowRunner:
                         self._cache[cache_key] = {"output": output, "metrics": metrics}
 
                 validate_json_schema(output, skill.manifest.output_schema)
+                metrics = self._persist_prompt_call_artifacts(run, item, step, inputs, output, metrics)
                 # 标准输出命名空间固定为 `step_id.field`，下游映射可直接引用
                 # `answer.answer` 这类路径；output_mapping 仅保留为旧流程的别名写入能力。
                 context[workflow_step.step_id] = output
@@ -483,6 +488,61 @@ class WorkflowRunner:
         }
         return _stable_hash(payload)
 
+    def _persist_prompt_call_artifacts(
+        self,
+        run: RunRecord,
+        item: RunItem,
+        step: RunItemStep,
+        inputs: dict[str, Any],
+        output: dict[str, Any],
+        metrics: dict[str, Any],
+    ) -> dict[str, Any]:
+        prompt_calls = _prompt_calls_from_metrics_or_step(metrics, inputs, output, step.step_id)
+        if not prompt_calls or self.artifact_store is None:
+            return metrics
+        updated_metrics = dict(metrics)
+        persisted_calls: list[dict[str, Any]] = []
+        for index, prompt_call in enumerate(prompt_calls, start=1):
+            call = dict(prompt_call)
+            call_artifacts = dict(call.get("artifacts") or {})
+            rendered_prompt = call.get("rendered_prompt")
+            if rendered_prompt is not None:
+                prompt_artifact = self.artifact_store.put_bytes(
+                    "rendered_prompts",
+                    f"runs/{run.run_id}/items/{item.item_id}/steps/{step.step_id}/prompts/{index}.txt",
+                    str(rendered_prompt).encode("utf-8"),
+                    content_type="text/plain; charset=utf-8",
+                    metadata={
+                        "run_id": run.run_id,
+                        "item_id": item.item_id,
+                        "step_id": step.step_id,
+                        "skill_ref": step.skill_ref,
+                        "prompt_call_index": index,
+                    },
+                )
+                call_artifacts["rendered_prompt"] = asdict(prompt_artifact)
+            raw_response = call.get("raw_response")
+            if raw_response is not None:
+                response_artifact = self.artifact_store.put_bytes(
+                    "raw_llm_responses",
+                    f"runs/{run.run_id}/items/{item.item_id}/steps/{step.step_id}/responses/{index}.txt",
+                    _prompt_artifact_bytes(raw_response),
+                    content_type="text/plain; charset=utf-8",
+                    metadata={
+                        "run_id": run.run_id,
+                        "item_id": item.item_id,
+                        "step_id": step.step_id,
+                        "skill_ref": step.skill_ref,
+                        "prompt_call_index": index,
+                    },
+                )
+                call_artifacts["raw_response"] = asdict(response_artifact)
+            if call_artifacts:
+                call["artifacts"] = call_artifacts
+            persisted_calls.append(call)
+        updated_metrics["prompt_calls"] = persisted_calls
+        return updated_metrics
+
     def _save_run(self, run: RunRecord) -> None:
         if self.run_repository:
             self.run_repository.save(run.model_dump(mode="json"))
@@ -518,6 +578,47 @@ class WorkflowRunner:
         if control.get("paused"):
             run.paused = True
             run.status = "paused"
+
+
+def _prompt_calls_from_metrics_or_step(metrics: dict[str, Any], inputs: dict[str, Any], output: dict[str, Any], step_id: str) -> list[dict[str, Any]]:
+    existing = metrics.get("prompt_calls")
+    if isinstance(existing, list):
+        return [item for item in existing if isinstance(item, dict)]
+    rendered_prompt = inputs.get("prompt")
+    if rendered_prompt is None and isinstance(inputs.get("messages"), list):
+        rendered_prompt = json.dumps(inputs["messages"], ensure_ascii=False)
+    has_model_usage = any(key in metrics for key in ("model_provider", "model_name", "prompt_tokens", "completion_tokens", "total_tokens"))
+    if rendered_prompt is None or not has_model_usage:
+        return []
+    raw_response = output.get("answer") if isinstance(output, dict) else None
+    if raw_response is None and isinstance(output, dict):
+        raw_response = output.get("text") or output
+    token_usage = {
+        key: value
+        for key, value in {
+            "prompt_tokens": metrics.get("prompt_tokens"),
+            "completion_tokens": metrics.get("completion_tokens"),
+            "total_tokens": metrics.get("total_tokens"),
+        }.items()
+        if value is not None
+    }
+    return [
+        {
+            "prompt_name": step_id,
+            "rendered_prompt": rendered_prompt,
+            "raw_response": raw_response,
+            "parsed_output": output,
+            "token_usage": token_usage,
+            "model": metrics.get("model_name"),
+            "provider": metrics.get("model_provider"),
+        }
+    ]
+
+
+def _prompt_artifact_bytes(payload: Any) -> bytes:
+    if isinstance(payload, str):
+        return payload.encode("utf-8")
+    return json.dumps(payload, ensure_ascii=False, indent=2, default=str).encode("utf-8")
 
 
 def _now() -> str:

@@ -15,6 +15,7 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - Skill Package 上传原始 zip 已写入 ArtifactStore 的 `skill_packages` 命名空间，上传响应和包记录会返回 artifact metadata，后续可按 sha256 与 artifact_id 追溯原始包。
 - Task Report JSON/CSV/HTML 导出已写入 ArtifactStore 的 `reports` 命名空间，导出响应和审计事件会带 artifact metadata / artifact_id。
 - Dataset 上传原始文件和 Source materialize JSONL 已写入 ArtifactStore 的 `uploaded_datasets` 命名空间，并写回 `source_ref.artifact`。
+- 模型类 Step 的 rendered prompt 和 raw response 已写入 ArtifactStore 的 `rendered_prompts` / `raw_llm_responses` 命名空间，并回填到 `prompt_calls[].artifacts`。
 - 模型网关 provider HTTP/network 错误详情会统一脱敏，避免外部服务回显 Authorization 或 API key 时泄漏。
 - Skill Package 上传会记录可执行/二进制文件、直接模型 SDK 调用和疑似硬编码 API key 的结构化 warning。
 - Trace Flow、Trace Tree 和 Report 页面加载失败时显示结构化错误码和 `trace_id`，便于定位后端请求。
@@ -39,6 +40,20 @@ AegisQA 当前处于“工程化 MVP 已成型，发布候选硬化中”。核�
 - 历史 `tmp-report-debug*` 与 `tmp-report-gate-debug/` 调试目录已加入忽略规则，避免污染 `git status`。
 
 ## 最近改动
+
+### 2026-06-05 Prompt/LLM ArtifactStore 接入
+
+- 改动摘要：继续补齐 ArtifactStore 运行时产物，把模型类 Step 的 rendered prompt 和 raw response 从仅存在于运行记录/调试响应，提升为可追溯、可校验、可读回的独立产物。
+- 主要变更：
+  - `WorkflowRunner` 支持可选注入 `ArtifactStore`，`create_app()` 将 `LocalArtifactStore` 传入 Runner。
+  - Runner 对带模型 usage 的 prompt 类 Step 自动生成 `prompt_calls`，并写入 `rendered_prompts` 与 `raw_llm_responses` 命名空间。
+  - Step metrics 中的 `prompt_calls[].artifacts` 回填 rendered prompt/raw response 的 artifact metadata，Prompt Debug 可直接返回这些引用。
+  - 新增回归断言，验证 Prompt Debug 返回的 artifact metadata 可用于从 `app.state.artifact_store` 读回 rendered prompt 和 raw response。
+- 验证：
+  - 红灯验证：`python -m pytest tests/test_experience_efficiency.py::test_step_replay_prompt_debug_and_repro_bundle_are_callable -q` 初始失败，`prompt_debug["prompt_calls"]` 为空。
+  - `python -m pytest tests/test_experience_efficiency.py::test_step_replay_prompt_debug_and_repro_bundle_are_callable -q`：1 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - `python -m pytest tests/test_experience_efficiency.py tests/test_artifact_store.py tests/test_platform_core.py::test_workflow_runner_executes_chunked_items_and_generates_report tests/test_platform_core.py::test_workflow_runner_exposes_outputs_by_step_id_without_output_mapping -q`：17 passed；仅 Starlette/httpx2 依赖弃用警告。
+  - 本批只触碰本地 Runner 的 Prompt/LLM ArtifactStore 接入和定向测试，没有运行真实 provider LiveCall、后端全量、前端测试或 E2E。
 
 ### 2026-06-05 Dataset ArtifactStore 接入
 

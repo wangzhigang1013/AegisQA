@@ -153,6 +153,16 @@ def test_step_replay_prompt_debug_and_repro_bundle_are_callable(tmp_path: Path) 
     assert prompt_debug["rendered_prompt"] == item["row"]["question"]
     assert prompt_debug["token_usage"]["total_tokens"] >= 1
     assert prompt_debug["mock_llm_calls"] is True
+    assert prompt_debug["prompt_calls"]
+    prompt_artifacts = prompt_debug["prompt_calls"][0]["artifacts"]
+    rendered_prompt_artifact = prompt_artifacts["rendered_prompt"]
+    raw_response_artifact = prompt_artifacts["raw_response"]
+    assert rendered_prompt_artifact["kind"] == "rendered_prompts"
+    assert raw_response_artifact["kind"] == "raw_llm_responses"
+    saved_prompt = client.app.state.artifact_store.read_bytes(rendered_prompt_artifact["kind"], rendered_prompt_artifact["artifact_id"]).decode("utf-8")
+    saved_response = client.app.state.artifact_store.read_bytes(raw_response_artifact["kind"], raw_response_artifact["artifact_id"]).decode("utf-8")
+    assert saved_prompt == item["row"]["question"]
+    assert "模型回答" in saved_response
 
     bundle = client.get(f"{base_path}/repro-bundle").json()
     assert bundle["bundle_type"] == "step_repro_bundle"

@@ -476,7 +476,7 @@ def create_app(
     _load_skill_packages(store, registry)
     load_agent_skills_from_store(store, registry)
     dataset_service = DatasetService(store, artifact_store)
-    runner = WorkflowRunner(store, dataset_service, registry, run_repository=repositories.runs)
+    runner = WorkflowRunner(store, dataset_service, registry, run_repository=repositories.runs, artifact_store=artifact_store)
     task_executor = create_task_executor(
         task_executor=task_executor,
         backend=task_executor_backend,
