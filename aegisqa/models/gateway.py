@@ -19,6 +19,7 @@ from urllib.request import Request, urlopen
 from pydantic import BaseModel, Field, field_validator
 
 from aegisqa.core.errors import AegisQAError
+from aegisqa.core.security import redact_secrets
 
 
 MODEL_PROVIDER_ENV = "AEGISQA_MODEL_PROVIDER"
@@ -495,14 +496,14 @@ class ModelGateway:
                 "MODEL_GATEWAY_HTTP_ERROR",
                 f"模型网关请求失败：HTTP {exc.code}",
                 status_code=502,
-                details={"status_code": exc.code, "body": body[:1000]},
+                details={"status_code": exc.code, "body": str(redact_secrets(body))[:1000]},
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
             raise AegisQAError(
                 "MODEL_GATEWAY_NETWORK_ERROR",
                 "模型网关请求网络失败或超时。",
                 status_code=502,
-                details={"error": str(exc), "timeout_seconds": self.config.timeout_seconds},
+                details={"error": str(redact_secrets(str(exc))), "timeout_seconds": self.config.timeout_seconds},
             ) from exc
         choice = (data.get("choices") or [{}])[0]
         message = choice.get("message") or {}

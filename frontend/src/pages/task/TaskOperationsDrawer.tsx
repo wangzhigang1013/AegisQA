@@ -4,6 +4,7 @@ import { Alert, Button, Card, Descriptions, Drawer, Space, Table, Tabs, Tag, Tim
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 
+import { workbenchActionId } from '../../actions/actionRouter';
 import { api, formatApiError } from '../../api/client';
 import type { TaskPreflightResult, TaskRecord, TaskResultsExportDownload } from '../../types';
 import { TaskSnapshotPanel, formatExecutionConfig } from './TaskSnapshotPanel';
@@ -22,6 +23,12 @@ export function TaskOperationsDrawer({
   onAction: (task: TaskRecord, action: TaskAction) => void;
 }) {
   const [notice, setNotice] = useState<string | null>(null);
+  const taskDetailQuery = useQuery({
+    queryKey: ['task', task?.task_id, 'operations-detail'],
+    queryFn: () => api.task(task?.task_id ?? ''),
+    enabled: Boolean(task?.task_id),
+  });
+  const activeTask = selectLatestTask(task, taskDetailQuery.data);
   const traceQuery = useQuery({
     queryKey: ['task-trace-tree', task?.task_id],
     queryFn: () => api.taskTraceTree(task?.task_id ?? '', { page: 1, pageSize: 5 }),
@@ -39,11 +46,11 @@ export function TaskOperationsDrawer({
   });
   const exportResultsMutation = useMutation({
     mutationFn: async (format: 'csv' | 'jsonl') => {
-      if (!task) {
+      if (!activeTask) {
         throw new Error('请先选择任务，再导出结果。');
       }
-      const exported = await api.exportTaskResults(task.task_id, format);
-      return { exported, task };
+      const exported = await api.exportTaskResults(activeTask.task_id, format);
+      return { exported, task: activeTask };
     },
     onSuccess: ({ exported, task: exportedTask }) => {
       const filename = downloadTaskResultsExport(exported, exportedTask);
@@ -53,18 +60,18 @@ export function TaskOperationsDrawer({
   });
 
   return (
-    <Drawer title={task ? `任务详情：${task.name}` : '任务详情'} width={820} open={Boolean(task)} onClose={onClose}>
-      {task ? (
+    <Drawer title={activeTask ? `任务详情：${activeTask.name}` : '任务详情'} width={820} open={Boolean(task)} onClose={onClose}>
+      {activeTask ? (
         <Space direction="vertical" className="drawer-stack" size="large">
           <Space wrap>
-            <TaskActionButton task={task} action="execute" loading={loading} onClick={onAction} icon={<PlayCircleOutlined />} label="执行" />
-            <TaskActionButton task={task} action="pause" loading={loading} onClick={onAction} icon={<PauseCircleOutlined />} label="暂停" />
-            <TaskActionButton task={task} action="resume" loading={loading} onClick={onAction} icon={<PlayCircleOutlined />} label="恢复" />
-            <TaskActionButton task={task} action="cancel" loading={loading} onClick={onAction} icon={<StopOutlined />} label="取消" danger />
-            <TaskActionButton task={task} action="retry" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="重试失败项" />
-            <TaskActionButton task={task} action="attempt" loading={loading} onClick={onAction} icon={<ReloadOutlined />} label="新建 Attempt" />
-            <Button href={`/tasks/${task.task_id}/trace?return_task_id=${encodeURIComponent(task.task_id)}`}>查看 Trace Flow</Button>
-            <Button href={`/tasks/${task.task_id}/trace-tree?return_task_id=${encodeURIComponent(task.task_id)}`}>查看 Trace Tree</Button>
+            <TaskActionButton task={activeTask} action="execute" loading={loading || taskDetailQuery.isFetching} onClick={onAction} icon={<PlayCircleOutlined />} label="执行" />
+            <TaskActionButton task={activeTask} action="pause" loading={loading || taskDetailQuery.isFetching} onClick={onAction} icon={<PauseCircleOutlined />} label="暂停" />
+            <TaskActionButton task={activeTask} action="resume" loading={loading || taskDetailQuery.isFetching} onClick={onAction} icon={<PlayCircleOutlined />} label="恢复" />
+            <TaskActionButton task={activeTask} action="cancel" loading={loading || taskDetailQuery.isFetching} onClick={onAction} icon={<StopOutlined />} label="取消" danger />
+            <TaskActionButton task={activeTask} action="retry" loading={loading || taskDetailQuery.isFetching} onClick={onAction} icon={<ReloadOutlined />} label="重试失败项" />
+            <TaskActionButton task={activeTask} action="attempt" loading={loading || taskDetailQuery.isFetching} onClick={onAction} icon={<ReloadOutlined />} label="新建 Attempt" />
+            <Button href={`/tasks/${activeTask.task_id}/trace?return_task_id=${encodeURIComponent(activeTask.task_id)}`}>查看 Trace Flow</Button>
+            <Button href={`/tasks/${activeTask.task_id}/trace-tree?return_task_id=${encodeURIComponent(activeTask.task_id)}`}>查看 Trace Tree</Button>
             <Button icon={<DownloadOutlined />} loading={exportResultsMutation.isPending && exportResultsMutation.variables === 'csv'} disabled={exportResultsMutation.isPending} onClick={() => exportResultsMutation.mutate('csv')}>导出结果 CSV</Button>
             <Button icon={<DownloadOutlined />} loading={exportResultsMutation.isPending && exportResultsMutation.variables === 'jsonl'} disabled={exportResultsMutation.isPending} onClick={() => exportResultsMutation.mutate('jsonl')}>导出结果 JSONL</Button>
           </Space>
@@ -75,7 +82,7 @@ export function TaskOperationsDrawer({
               {
                 key: 'overview',
                 label: '概览',
-                children: <TaskSnapshotPanel task={task} />,
+                children: <TaskSnapshotPanel task={activeTask} />,
               },
               {
                 key: 'items',
@@ -83,9 +90,9 @@ export function TaskOperationsDrawer({
                 children: (
                   <Card size="small" title="样本执行进度">
                     <Descriptions bordered column={1} size="small">
-                      <Descriptions.Item label="总样本">{task.total_items}</Descriptions.Item>
-                      <Descriptions.Item label="已完成">{task.completed_items}</Descriptions.Item>
-                      <Descriptions.Item label="失败">{task.failed_items}</Descriptions.Item>
+                      <Descriptions.Item label="总样本">{activeTask.total_items}</Descriptions.Item>
+                      <Descriptions.Item label="已完成">{activeTask.completed_items}</Descriptions.Item>
+                      <Descriptions.Item label="失败">{activeTask.failed_items}</Descriptions.Item>
                       <Descriptions.Item label="队列消息">执行队列仅携带 item_id，样本内容从 Dataset Version 按 item_id 回读。</Descriptions.Item>
                     </Descriptions>
                   </Card>
@@ -133,10 +140,10 @@ export function TaskOperationsDrawer({
                 label: 'Attempts',
                 children: (
                   <Card size="small" title="Run Attempts">
-                    {task.attempts?.length ? (
+                    {activeTask.attempts?.length ? (
                       <Timeline
-                        items={task.attempts.map((attempt) => ({
-                          color: attempt.run_id === task.run_id ? 'blue' : attempt.status === 'completed' ? 'green' : 'gray',
+                        items={activeTask.attempts.map((attempt) => ({
+                          color: attempt.run_id === activeTask.run_id ? 'blue' : attempt.status === 'completed' ? 'green' : 'gray',
                           children: `#${attempt.attempt_index} / ${attempt.status} / ${attempt.run_id} / 通过率 ${Math.round(Number(attempt.pass_rate ?? 0) * 100)}%`,
                         }))}
                       />
@@ -151,9 +158,9 @@ export function TaskOperationsDrawer({
                 label: '参数',
                 children: (
                   <Card size="small" title="任务冻结参数">
-                    <Typography.Paragraph>{formatExecutionConfig(task)}</Typography.Paragraph>
-                    <pre className="json-block">{JSON.stringify(task.execution_config ?? {}, null, 2)}</pre>
-                    <PreflightEvidenceCard task={task} />
+                    <Typography.Paragraph>{formatExecutionConfig(activeTask)}</Typography.Paragraph>
+                    <pre className="json-block">{JSON.stringify(activeTask.execution_config ?? {}, null, 2)}</pre>
+                    <PreflightEvidenceCard task={activeTask} />
                     <Typography.Title level={5}>Skill 参数来源</Typography.Title>
                     <Table
                       size="small"
@@ -224,6 +231,17 @@ function preflightColor(status: TaskPreflightResult['status']) {
   return 'default';
 }
 
+function selectLatestTask(parentTask: TaskRecord | null, queriedTask?: TaskRecord): TaskRecord | null {
+  if (!parentTask) return queriedTask ?? null;
+  if (!queriedTask) return parentTask;
+  const parentUpdatedAt = Date.parse(parentTask.updated_at ?? '');
+  const queriedUpdatedAt = Date.parse(queriedTask.updated_at ?? '');
+  if (Number.isFinite(parentUpdatedAt) && Number.isFinite(queriedUpdatedAt) && parentUpdatedAt > queriedUpdatedAt) {
+    return parentTask;
+  }
+  return queriedTask;
+}
+
 function downloadTaskResultsExport(exported: TaskResultsExportDownload, task: TaskRecord) {
   const format = exported.file_format || 'csv';
   const filename = exported.filename || `${safeTaskResultFileName(task.name || task.task_id)}_results.${format}`;
@@ -268,10 +286,14 @@ export function TaskActionButton({
   label: string;
   danger?: boolean;
 }) {
-  const disabledReason = taskActionDisabledReason(task, action);
+  const actionState = task.available_actions?.find((item) => workbenchActionId(item) === action);
+  const disabledReason = actionState
+    ? (actionState.enabled === false || actionState.disabled ? actionState.disabled_reason ?? '当前动作不可执行。' : null)
+    : taskActionDisabledReason(task, action);
+  const actionLabel = actionState?.label ?? label;
   const button = (
     <Button danger={danger} icon={icon} loading={loading} disabled={Boolean(disabledReason)} onClick={() => onClick(task, action)}>
-      {label}
+      {actionLabel}
     </Button>
   );
   return disabledReason ? <Tooltip title={disabledReason}>{button}</Tooltip> : button;

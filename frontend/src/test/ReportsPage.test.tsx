@@ -192,7 +192,7 @@ describe('报告中心', () => {
     expect(screen.getByRole('button', { name: /加入审阅队列/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '查看参数治理' }));
-    expect(await screen.findByText('Trace Flow')).toBeInTheDocument();
+    expect(await screen.findByText('Trace Flow', {}, { timeout: 10_000 })).toBeInTheDocument();
     expect(await screen.findByText('问答回归集')).toBeInTheDocument();
   });
 

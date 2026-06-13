@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from aegisqa.api.app import MAX_SKILL_PACKAGE_FILES, MAX_SKILL_PACKAGE_FILE_BYTES, MAX_SKILL_PACKAGE_TOTAL_BYTES
+from aegisqa.api.experience import build_workbench_payload
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.models.gateway import ModelGateway
 from aegisqa.reports.aggregator import aggregate_run_report
@@ -80,6 +81,10 @@ def register_governance_routes(app: FastAPI, ctx: RouteContext) -> None:
             "badcases": {"total": badcase_count},
             "latest_report": latest_report,
         }
+
+    @app.get("/overview/workbench")
+    def overview_workbench() -> dict[str, Any]:
+        return build_workbench_payload(ctx)
 
     @app.get("/access/check")
     def access_check(role: str, permission: str) -> dict[str, bool]:

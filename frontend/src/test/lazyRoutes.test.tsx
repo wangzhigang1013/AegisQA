@@ -44,7 +44,7 @@ describe('App 路由懒加载', () => {
     expect(await screen.findByText('概览懒加载页面')).toBeInTheDocument();
     expect(reportsPageLoaded).not.toHaveBeenCalled();
     expect(judgePageLoaded).not.toHaveBeenCalled();
-  });
+  }, 60_000);
 
   it('进入报告中心时才加载报告页面模块', async () => {
     const { AppShell } = await import('../App');

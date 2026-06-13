@@ -3,14 +3,18 @@ from __future__ import annotations
 import csv
 import io
 from copy import deepcopy
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from html import escape
 from math import ceil
+from time import perf_counter
 from typing import Any, Iterable, Iterator
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field
 
+from aegisqa.api.experience import build_report_experience, enrich_task_detail
 from aegisqa.api.app import (
     CIGateRuleRequest,
     RepairTaskActionRequest,
@@ -41,6 +45,7 @@ from aegisqa.api.app import (
     _ensure_task_can_create_attempt,
     _get_record,
     _evaluate_gate,
+    _gate_evaluation_status,
     _list_records,
     _needs_annotation,
     _now,
@@ -52,7 +57,7 @@ from aegisqa.api.app import (
 )
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
-from aegisqa.core.mapper import MappingPathError, TypeMismatchError, collect_mapping_row_fields, resolve_input_mapping, set_by_path
+from aegisqa.core.mapper import MappingPathError, TypeMismatchError, collect_mapping_row_fields, resolve_input_mapping, set_by_path, validate_json_schema
 from aegisqa.core.security import redact_secrets
 from aegisqa.engine.runner import RunRecord, RunRequest
 from aegisqa.reports.aggregator import aggregate_run_report, build_report_recommendations, build_report_segments, compare_reports
@@ -70,6 +75,23 @@ TASK_RESULT_EXPORT_MEDIA_TYPES = {
     "jsonl": "application/x-ndjson; charset=utf-8",
     "json": "application/json; charset=utf-8",
 }
+
+
+class StepReplayRequest(BaseModel):
+    input_mode: str = Field(default="original", pattern="^(original|override)$")
+    override_input: dict[str, Any] = Field(default_factory=dict)
+    override_config: dict[str, Any] = Field(default_factory=dict)
+    disable_cache: bool = True
+    mock_llm_calls: bool = True
+    role: str = "Evaluator"
+    actor: str = "api"
+
+
+class StepPromptDebugRequest(BaseModel):
+    variables: dict[str, Any] = Field(default_factory=dict)
+    mock_llm_calls: bool = True
+    role: str = "Evaluator"
+    actor: str = "api"
 
 
 def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
@@ -105,7 +127,7 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.get("/tasks/{task_id}")
     def get_task(task_id: str) -> dict[str, Any]:
-        return _get_record(ctx.store, "tasks", task_id)
+        return enrich_task_detail(ctx, _get_record(ctx.store, "tasks", task_id))
 
     @app.get("/tasks/{task_id}/diagnostics")
     def get_task_diagnostics(task_id: str) -> dict[str, Any]:
@@ -139,6 +161,188 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
     ) -> dict[str, Any]:
         task = _get_record(ctx.store, "tasks", task_id)
         return build_task_trace_flow(task, ctx.runner.get_run(task["run_id"]), page=page, page_size=page_size)
+
+    @app.post("/runs/{run_id}/items/{item_id}/steps/{step_id}/replay")
+    def replay_run_item_step(run_id: str, item_id: str, step_id: str, request: StepReplayRequest | None = None) -> dict[str, Any]:
+        request = request or StepReplayRequest()
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            permission="run:create",
+            action="step.replay",
+            target=f"{run_id}/{item_id}/{step_id}",
+            actor=request.actor,
+        )
+        task, run, item, step = _locate_task_run_item_step(ctx, run_id, item_id, step_id)
+        resolved_input = request.override_input if request.input_mode == "override" else step.input_snapshot
+        resolved_config = {**step.config_snapshot, **request.override_config}
+        payload = _step_debug_payload(task, run, item, step)
+        payload.update(
+            {
+                "mode": "replay",
+                "input_mode": request.input_mode,
+                "resolved_input": resolved_input,
+                "resolved_config": redact_secrets(resolved_config),
+                "cache": {"disabled": request.disable_cache, "original_cache_key": step.cache_key, "original_cache_hit": step.cache_hit},
+                "mock_llm_calls": request.mock_llm_calls,
+            }
+        )
+        if request.mock_llm_calls:
+            payload.update(
+                {
+                    "status": "skipped",
+                    "error_code": "MOCK_LLM_CALLS_ENABLED",
+                    "message": "Replay 已解析原始输入和历史输出；mock_llm_calls=true 时不会重新执行 Skill 或调用外部模型。",
+                    "raw_output": step.output_snapshot,
+                    "validated_output": step.output_snapshot if step.status == "succeeded" else {},
+                }
+            )
+            ctx.audit_service.record(actor=request.actor, role=request.role, action="step.replay.skipped", target=f"{run_id}/{item_id}/{step_id}", detail={"mock_llm_calls": True})
+            return payload
+        try:
+            skill = ctx.registry.get(step.skill_ref)
+            validate_json_schema(resolved_input, skill.manifest.input_schema)
+            validate_json_schema(resolved_config, skill.manifest.config_schema)
+            started = perf_counter()
+            result = skill.run(resolved_input, resolved_config)
+            latency_ms = (perf_counter() - started) * 1000
+            raw_output = redact_secrets(result.output)
+            try:
+                validated_output = validate_json_schema(deepcopy(result.output), skill.manifest.output_schema)
+            except Exception as exc:  # noqa: BLE001 - Replay 必须保留未通过 schema 的原始输出，便于复现。
+                payload.update(
+                    {
+                        "status": "failed",
+                        "error_code": "OUTPUT_SCHEMA_INVALID",
+                        "raw_output": raw_output,
+                        "validated_output": {},
+                        "schema_errors": [{"type": type(exc).__name__, "message": str(exc)}],
+                        "metrics": result.metrics,
+                        "logs": result.logs,
+                        "latency_ms": latency_ms,
+                    }
+                )
+                ctx.audit_service.record(
+                    actor=request.actor,
+                    role=request.role,
+                    action="step.replay.failed",
+                    target=f"{run_id}/{item_id}/{step_id}",
+                    detail={"error_code": "OUTPUT_SCHEMA_INVALID", "error": str(exc)},
+                )
+                return payload
+            payload.update(
+                {
+                    "status": "succeeded",
+                    "raw_output": raw_output,
+                    "validated_output": redact_secrets(validated_output),
+                    "metrics": result.metrics,
+                    "logs": result.logs,
+                    "latency_ms": latency_ms,
+                    "schema_errors": [],
+                }
+            )
+            ctx.audit_service.record(actor=request.actor, role=request.role, action="step.replay", target=f"{run_id}/{item_id}/{step_id}", detail={"mock_llm_calls": False, "status": "succeeded"})
+            return payload
+        except Exception as exc:  # noqa: BLE001 - Replay 是调试接口，必须把任意运行时异常结构化返回。
+            payload.update(
+                {
+                    "status": "failed",
+                    "raw_output": {},
+                    "validated_output": {},
+                    "error": {"type": type(exc).__name__, "message": str(exc)},
+                }
+            )
+            ctx.audit_service.record(actor=request.actor, role=request.role, action="step.replay.failed", target=f"{run_id}/{item_id}/{step_id}", detail={"error": str(exc)})
+            return payload
+
+    @app.post("/runs/{run_id}/items/{item_id}/steps/{step_id}/prompt-debug")
+    def debug_run_item_step_prompt(run_id: str, item_id: str, step_id: str, request: StepPromptDebugRequest | None = None) -> dict[str, Any]:
+        request = request or StepPromptDebugRequest()
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            permission="run:create",
+            action="step.prompt_debug",
+            target=f"{run_id}/{item_id}/{step_id}",
+            actor=request.actor,
+        )
+        task, run, item, step = _locate_task_run_item_step(ctx, run_id, item_id, step_id)
+        payload = _step_debug_payload(task, run, item, step)
+        prompt_calls = _prompt_calls_from_step(step)
+        rendered_prompt = _rendered_prompt_from_step(step, request.variables)
+        payload.update(
+            {
+                "mode": "prompt_debug",
+                "status": "skipped" if request.mock_llm_calls else "unavailable",
+                "rendered_prompt": rendered_prompt,
+                "prompt_calls": prompt_calls,
+                "schema_validation": {"status": "skipped", "reason": "当前 Step 轨迹没有独立 Prompt output schema。"},
+                "token_usage": _token_usage_from_step(step),
+                "mock_llm_calls": request.mock_llm_calls,
+                "raw_response": prompt_calls[0].get("raw_response") if prompt_calls else None,
+                "parsed_output": prompt_calls[0].get("parsed_output") if prompt_calls else None,
+                "message": "Prompt Debug 已返回历史 prompt trace；当前接口不会隐式调用外部模型。",
+            }
+        )
+        ctx.audit_service.record(actor=request.actor, role=request.role, action="step.prompt_debug", target=f"{run_id}/{item_id}/{step_id}", detail={"prompt_call_count": len(prompt_calls)})
+        return payload
+
+    @app.get("/runs/{run_id}/items/{item_id}/steps/{step_id}/repro-bundle")
+    def get_run_item_step_repro_bundle(
+        run_id: str,
+        item_id: str,
+        step_id: str,
+        role: str = Query(default="Evaluator"),
+        actor: str = Query(default="api"),
+    ) -> dict[str, Any]:
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=role,
+            permission="run:create",
+            action="step.repro_bundle",
+            target=f"{run_id}/{item_id}/{step_id}",
+            actor=actor,
+        )
+        task, run, item, step = _locate_task_run_item_step(ctx, run_id, item_id, step_id)
+        skill_manifest = ctx.registry.get_manifest(step.skill_ref).model_dump(mode="json")
+        bundle = _step_debug_payload(task, run, item, step)
+        bundle.update(
+            {
+                "bundle_type": "step_repro_bundle",
+                "schema_version": "aegisqa.step_repro_bundle.v1",
+                "workflow": run.workflow.model_dump(mode="json"),
+                "skill_manifest": skill_manifest,
+                "resolved_input": step.input_snapshot,
+                "raw_output": step.output_snapshot,
+                "validated_output": step.output_snapshot if step.status == "succeeded" else {},
+                "schema_errors": [] if step.status == "succeeded" else ([step.error] if step.error else []),
+                "prompt_calls": _prompt_calls_from_step(step),
+                "error": step.error,
+                "llm_calls": _prompt_calls_from_step(step),
+                "replay_endpoint": f"/runs/{run_id}/items/{item_id}/steps/{step_id}/replay",
+                "prompt_debug_endpoint": f"/runs/{run_id}/items/{item_id}/steps/{step_id}/prompt-debug",
+            }
+        )
+        artifact_id = f"runs/{run_id}/items/{item_id}/steps/{step_id}/repro-bundle.json"
+        artifact = ctx.artifact_store.put_bytes(
+            "repro_bundles",
+            artifact_id,
+            json_dumps(bundle).encode("utf-8"),
+            content_type="application/json",
+            metadata={"run_id": run_id, "item_id": item_id, "step_id": step_id, "task_id": task["task_id"]},
+        )
+        bundle["artifact"] = asdict(artifact)
+        ctx.audit_service.record(
+            actor=actor,
+            role=role,
+            action="step.repro_bundle",
+            target=f"{run_id}/{item_id}/{step_id}",
+            detail={"step_status": step.status, "artifact_id": artifact_id},
+        )
+        return bundle
 
     @app.post("/runs", response_model=RunRecord)
     def create_run(request: RunCreateRequest) -> RunRecord:
@@ -743,6 +947,9 @@ def _build_task_report_payload(
     # 页面报告只需要当前页坏例明细；聚合指标仍来自完整 RunReport。
     # 导出报告会显式 include_all_badcases=True，确保离线报告不被分页截断。
     report_payload["badcases"] = page_badcases
+    quality_decision = _build_quality_decision(task, run, report, segments)
+    budget_status = _build_budget_status(task, report)
+    report_experience = build_report_experience(task, report, diagnostics_payload, quality_decision, budget_status)
     return {
         "task": task,
         "task_summary": _build_task_report_summary(task, run),
@@ -754,9 +961,9 @@ def _build_task_report_payload(
         "segments": page_segments,
         "segments_pagination": segments_pagination,
         "recommendations": [recommendation.model_dump(mode="json") for recommendation in build_report_recommendations(segments)],
-        "quality_decision": _build_quality_decision(task, run, report, segments),
+        "quality_decision": quality_decision,
         "parameter_governance": parameter_governance,
-        "budget_status": _build_budget_status(task, report),
+        "budget_status": budget_status,
         "release_context": _build_task_release_context(ctx, task),
         "diagnostics": diagnostics_payload,
         "diagnostics_pagination": {
@@ -773,6 +980,7 @@ def _build_task_report_payload(
             "html": f"/tasks/{task['task_id']}/report/export?file_format=html",
             "offline_package": f"/tasks/{task['task_id']}/report/offline-package",
         },
+        **report_experience,
     }
 
 
@@ -1819,7 +2027,7 @@ def _repair_action_evaluate_ci_gate(ctx: RouteContext, repair_task: dict[str, An
     evaluation = {
         "evaluation_id": f"gateeval-{uuid4().hex[:12]}",
         "config_id": None,
-        "status": "blocked" if blocking_failures else "passed",
+        "status": _gate_evaluation_status(results),
         "blocking_failures": len(blocking_failures),
         "target": {"kind": "task", "id": task["task_id"]},
         "metrics": metrics,
@@ -2671,6 +2879,94 @@ def _dedupe_remediation_items(items: list[dict[str, Any]]) -> list[dict[str, Any
         seen.add(key)
         result.append(item)
     return result
+
+
+def _locate_task_run_item_step(ctx: RouteContext, run_id: str, item_id: str, step_id: str) -> tuple[dict[str, Any], RunRecord, Any, Any]:
+    run = ctx.runner.get_run(run_id)
+    item = next((candidate for candidate in run.items if candidate.item_id == item_id), None)
+    if item is None:
+        raise AegisQAError("RUN_ITEM_NOT_FOUND", "Run Item 不存在。", status_code=404, details={"run_id": run_id, "item_id": item_id})
+    step = next((candidate for candidate in item.steps if candidate.step_id == step_id), None)
+    if step is None:
+        raise AegisQAError("RUN_ITEM_STEP_NOT_FOUND", "Run Item Step 不存在。", status_code=404, details={"run_id": run_id, "item_id": item_id, "step_id": step_id})
+    task = next((record for record in _list_records(ctx.store, "tasks") if record.get("run_id") == run_id), None)
+    if task is None:
+        task = {"task_id": None, "run_id": run_id, "name": None, "status": run.status}
+    return task, run, item, step
+
+
+def _step_debug_payload(task: dict[str, Any], run: RunRecord, item: Any, step: Any) -> dict[str, Any]:
+    return {
+        "task": {
+            "task_id": task.get("task_id"),
+            "name": task.get("name"),
+            "status": task.get("status"),
+        },
+        "run": {
+            "run_id": run.run_id,
+            "status": run.status,
+            "workflow_version_id": run.workflow.version_id,
+            "dataset_id": run.dataset_id,
+            "dataset_version": run.dataset_version,
+        },
+        "item": {
+            "item_id": item.item_id,
+            "row_id": item.row_id,
+            "row_index": item.row_index,
+            "status": item.status,
+            "context_snapshot": item.context_snapshot,
+            "metrics": item.metrics,
+            "error": item.error,
+        },
+        "step": {
+            "step_id": step.step_id,
+            "skill_ref": step.skill_ref,
+            "status": step.status,
+            "input_hash": step.input_hash,
+            "output_hash": step.output_hash,
+            "cache_key": step.cache_key,
+            "cache_hit": step.cache_hit,
+            "called_skill": step.called_skill,
+            "latency_ms": step.latency_ms,
+            "metrics": step.metrics,
+            "logs": step.logs,
+            "error": step.error,
+        },
+    }
+
+
+def _prompt_calls_from_step(step: Any) -> list[dict[str, Any]]:
+    metrics = step.metrics if isinstance(step.metrics, dict) else {}
+    prompt_calls = metrics.get("prompt_calls")
+    if isinstance(prompt_calls, list):
+        return [item for item in prompt_calls if isinstance(item, dict)]
+    return []
+
+
+def _rendered_prompt_from_step(step: Any, variables: dict[str, Any]) -> str:
+    if isinstance(variables.get("prompt"), str):
+        return str(variables["prompt"])
+    inputs = step.input_snapshot if isinstance(step.input_snapshot, dict) else {}
+    if isinstance(inputs.get("prompt"), str):
+        return str(inputs["prompt"])
+    if isinstance(inputs.get("messages"), list):
+        return json_dumps(inputs["messages"])
+    return json_dumps(inputs)
+
+
+def _token_usage_from_step(step: Any) -> dict[str, Any]:
+    metrics = step.metrics if isinstance(step.metrics, dict) else {}
+    usage = {
+        key: metrics.get(key)
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens", "cost", "cost_source", "model_provider", "model_name")
+        if key in metrics
+    }
+    if usage:
+        return usage
+    prompt_calls = _prompt_calls_from_step(step)
+    if prompt_calls and isinstance(prompt_calls[0].get("token_usage"), dict):
+        return prompt_calls[0]["token_usage"]
+    return {"status": "unavailable", "reason": "当前 Step 没有模型 token usage。"}
 
 
 def _repair_action_link_target(repair_task: dict[str, Any], action: str) -> dict[str, Any]:

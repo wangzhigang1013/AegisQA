@@ -48,7 +48,16 @@ export default defineConfig({
     {
       // 前端通过 Vite 代理访问 /api，保持和本地开发一致的路径。
       command: `npm run dev -- --host 127.0.0.1 --port ${webPort} > "${webLogPath}" 2>&1`,
-      env: { ...process.env, VITE_API_TARGET: apiTarget },
+      env: {
+        ...process.env,
+        VITE_API_TARGET: apiTarget,
+        VITE_ENABLE_CI_GATE: 'true',
+        VITE_ENABLE_CANDIDATE_ASSETS: 'true',
+        VITE_ENABLE_REPAIR_TASKS: 'true',
+        VITE_ENABLE_EXPERIMENTS: 'true',
+        VITE_ENABLE_ANNOTATION_QUEUE: 'true',
+        VITE_ENABLE_JUDGE_AUDIT: 'true',
+      },
       url: webTarget,
       reuseExistingServer: false,
       timeout: 60_000,

@@ -425,6 +425,54 @@ def test_workflow_runner_honors_pause_requested_during_active_execution(tmp_path
     assert item_statuses.count("pending") == 2
 
 
+def test_workflow_runner_honors_cancel_requested_during_active_execution(tmp_path: Path) -> None:
+    store = JsonStore(tmp_path / "store")
+    dataset_service = DatasetService(store)
+    started = Event()
+    release = Event()
+    registry = SkillRegistry()
+    registry.register(_BlockingEchoSkill(started, release))
+    data_path = tmp_path / "cancel.jsonl"
+    _write_jsonl(
+        data_path,
+        [
+            {"text": "第一条"},
+            {"text": "第二条"},
+            {"text": "第三条"},
+        ],
+    )
+    dataset = dataset_service.upload_dataset("cancel", data_path)
+    workflow = WorkflowDraft(
+        name="cancel_workflow",
+        steps=[
+            WorkflowStep(
+                step_id="echo",
+                skill_ref="test.blocking_echo@0.1.0",
+                input_mapping={"text": "row.text"},
+                output_mapping={},
+            )
+        ],
+    ).publish()
+    runner = WorkflowRunner(store, dataset_service, registry)
+    run = runner.create_run(RunRequest(workflow=workflow, dataset_id=dataset.dataset_id, dataset_version=dataset.version))
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(runner.execute_run, run.run_id)
+        assert started.wait(timeout=2)
+        canceled = runner.cancel_run(run.run_id)
+        release.set()
+        executed = future.result(timeout=3)
+
+    latest = runner.get_run(run.run_id)
+    item_statuses = [item.status for item in latest.items]
+
+    assert canceled.status == "canceled"
+    assert executed.status == "canceled"
+    assert latest.status == "canceled"
+    assert item_statuses.count("succeeded") == 1
+    assert item_statuses.count("pending") == 2
+
+
 def test_workflow_runner_exposes_outputs_by_step_id_without_output_mapping(tmp_path: Path) -> None:
     store = JsonStore(tmp_path / "store")
     dataset_service = DatasetService(store)

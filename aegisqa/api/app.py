@@ -8,6 +8,7 @@ Badcase 和 Judge Audit。为了本地 MVP 简洁，上传接口同时提供 `fr
 from __future__ import annotations
 
 import base64
+from dataclasses import asdict
 from datetime import datetime, timezone
 import json
 from math import ceil
@@ -18,7 +19,7 @@ from typing import Any
 from uuid import uuid4
 import zipfile
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,6 +28,7 @@ import yaml
 from aegisqa.badcases.service import BadcaseService
 from aegisqa.audit.service import AuditService
 from aegisqa.core.errors import AegisQAError
+from aegisqa.core.features import FEATURE_ENV_PREFIX, FEATURE_FLAG_DEFAULTS, load_feature_flags
 from aegisqa.datasets.service import DatasetService
 from aegisqa.engine.runner import RunRecord, RunRequest, WorkflowRunner
 from aegisqa.engine.task_executor import TaskExecutor, create_task_executor
@@ -44,6 +46,7 @@ from aegisqa.skills.packages import (
     resolve_package_entrypoint,
 )
 from aegisqa.skills.registry import SkillRegistry
+from aegisqa.storage.artifacts import ArtifactStore, LocalArtifactStore
 from aegisqa.storage.json_store import JsonStore
 from aegisqa.storage.mysql_store import ConnectionFactory, MySQLStore
 from aegisqa.storage.repositories import RepositoryRegistry
@@ -58,6 +61,18 @@ MAX_SKILL_PACKAGE_FILES = 200
 MAX_SKILL_PACKAGE_FILE_BYTES = 1_000_000
 MAX_SKILL_PACKAGE_TOTAL_BYTES = 1_500_000
 SKILL_PACKAGE_DEPENDENCY_FILES = {"requirements.txt", "pyproject.toml"}
+SKILL_PACKAGE_EXECUTABLE_SUFFIXES = {".bat", ".bin", ".cmd", ".dll", ".dylib", ".exe", ".sh", ".so"}
+SKILL_PACKAGE_TEXT_SUFFIXES = {".json", ".md", ".py", ".txt", ".yaml", ".yml"}
+SKILL_PACKAGE_DIRECT_MODEL_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bimport\s+(openai|anthropic|cohere|boto3)\b",
+        r"\bfrom\s+(openai|anthropic|cohere|boto3)\s+import\b",
+        r"\bimport\s+google\.generativeai\b",
+        r"\b(OpenAI|Anthropic)\s*\(",
+    )
+]
+SKILL_PACKAGE_API_KEY_PATTERN = re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]{12,}")
 
 
 class DatasetFromPathRequest(BaseModel):
@@ -452,6 +467,7 @@ def create_app(
         store_root = os.getenv("AEGISQA_STORE_ROOT", str(store_root))
     resolved_storage_backend = (storage_backend or os.getenv("AEGISQA_STORAGE_BACKEND") or "json").lower()
     store = _create_store(store_root, storage_backend=resolved_storage_backend, mysql_connection_factory=mysql_connection_factory)
+    artifact_store = LocalArtifactStore(Path(store.root) / "artifacts")
     repositories = RepositoryRegistry(store)
     setattr(store, "repositories", repositories)
     # 模型网关配置允许通过前端保存，本地 store 中有记录时要在启动阶段恢复到运行期。
@@ -459,8 +475,8 @@ def create_app(
     registry = SkillRegistry.with_builtin_skills()
     _load_skill_packages(store, registry)
     load_agent_skills_from_store(store, registry)
-    dataset_service = DatasetService(store)
-    runner = WorkflowRunner(store, dataset_service, registry, run_repository=repositories.runs)
+    dataset_service = DatasetService(store, artifact_store)
+    runner = WorkflowRunner(store, dataset_service, registry, run_repository=repositories.runs, artifact_store=artifact_store)
     task_executor = create_task_executor(
         task_executor=task_executor,
         backend=task_executor_backend,
@@ -478,6 +494,7 @@ def create_app(
 
     app = FastAPI(title="AegisQA", version="0.1.0")
     app.state.store = store
+    app.state.artifact_store = artifact_store
     app.state.repositories = repositories
     app.state.storage_backend = resolved_storage_backend
     app.state.registry = registry
@@ -493,8 +510,16 @@ def create_app(
     app.state.access_control = access_control
     app.state.workflows = workflows
 
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next: Any) -> Any:
+        trace_id = request.headers.get("X-AegisQA-Request-ID") or f"trace_{uuid4().hex[:12]}"
+        request.state.request_id = trace_id
+        response = await call_next(request)
+        response.headers["X-AegisQA-Request-ID"] = trace_id
+        return response
+
     @app.exception_handler(HTTPException)
-    def http_error_handler(_: Any, exc: HTTPException) -> JSONResponse:
+    def http_error_handler(request: Request, exc: HTTPException) -> JSONResponse:
         code = "NOT_FOUND" if exc.status_code == 404 else "HTTP_ERROR"
         details = exc.detail if isinstance(exc.detail, dict) else {}
         if isinstance(exc.detail, dict):
@@ -503,25 +528,25 @@ def create_app(
             details = exc.detail.get("details") if isinstance(exc.detail.get("details"), dict) else {key: value for key, value in exc.detail.items() if key not in {"code", "message"}}
         else:
             message = str(exc.detail)
-        return JSONResponse(status_code=exc.status_code, content=_api_error(code, message, details))
+        return _error_response(request, exc.status_code, code, message, details)
 
     @app.exception_handler(AegisQAError)
-    def aegisqa_error_handler(_: Any, exc: AegisQAError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content=_api_error(exc.code, exc.message, exc.details))
+    def aegisqa_error_handler(request: Request, exc: AegisQAError) -> JSONResponse:
+        return _error_response(request, exc.status_code, exc.code, exc.message, exc.details)
 
     @app.exception_handler(KeyError)
-    def key_error_handler(_: Any, exc: KeyError) -> JSONResponse:
+    def key_error_handler(request: Request, exc: KeyError) -> JSONResponse:
         # KeyError 的 str(exc) 会额外包一层引号，API 响应要给前端稳定可展示的中文消息。
         message = str(exc.args[0]) if exc.args else "资源不存在"
-        return JSONResponse(status_code=404, content=_api_error("NOT_FOUND", message))
+        return _error_response(request, 404, "NOT_FOUND", message)
 
     @app.exception_handler(ValueError)
-    def value_error_handler(_: Any, exc: ValueError) -> JSONResponse:
-        return JSONResponse(status_code=400, content=_api_error("BAD_REQUEST", str(exc)))
+    def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
+        return _error_response(request, 400, "BAD_REQUEST", str(exc))
 
     @app.exception_handler(RequestValidationError)
-    def validation_error_handler(_: Any, exc: RequestValidationError) -> JSONResponse:
-        return JSONResponse(status_code=422, content=_api_error("VALIDATION_ERROR", "请求参数校验失败", {"errors": exc.errors()}))
+    def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        return _error_response(request, 422, "VALIDATION_ERROR", "请求参数校验失败", {"errors": exc.errors()})
 
     @app.get("/")
     def root() -> dict[str, Any]:
@@ -535,6 +560,14 @@ def create_app(
             "docs_url": "/docs",
             "health_url": "/health",
             "storage_backend": app.state.storage_backend,
+        }
+
+    @app.get("/features")
+    def features() -> dict[str, Any]:
+        return {
+            "flags": load_feature_flags(),
+            "defaults": FEATURE_FLAG_DEFAULTS,
+            "env_prefix": FEATURE_ENV_PREFIX,
         }
 
     from aegisqa.api.routes import (
@@ -567,6 +600,7 @@ def create_app(
         graph_service=graph_service,
         runner=runner,
         task_executor=task_executor,
+        artifact_store=artifact_store,
         badcases=badcases,
         judge_profiles=judge_profiles,
         access_control=access_control,
@@ -603,12 +637,19 @@ def _create_store(store_root: Path | str, *, storage_backend: str | None = None,
     raise ValueError(f"不支持的存储后端：{backend}")
 
 
-def _api_error(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+def _error_response(request: Request, status_code: int, code: str, message: str, details: dict[str, Any] | None = None) -> JSONResponse:
+    trace_id = str(getattr(request.state, "request_id", "") or f"trace_{uuid4().hex[:12]}")
+    response = JSONResponse(status_code=status_code, content=_api_error(code, message, details, trace_id=trace_id))
+    response.headers["X-AegisQA-Request-ID"] = trace_id
+    return response
+
+
+def _api_error(code: str, message: str, details: dict[str, Any] | None = None, *, trace_id: str | None = None) -> dict[str, Any]:
     return {
         "code": code,
         "message": message,
         "details": details or {},
-        "trace_id": f"trace_{uuid4().hex[:12]}",
+        "trace_id": trace_id or f"trace_{uuid4().hex[:12]}",
     }
 
 
@@ -663,15 +704,21 @@ def _collection_id_key(collection: str) -> str:
     }.get(collection, "id")
 
 
-def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: SkillPackageUploadRequest) -> dict[str, Any]:
+def _install_skill_package(
+    store: JsonStore,
+    registry: SkillRegistry,
+    artifact_store: ArtifactStore,
+    request: SkillPackageUploadRequest,
+) -> dict[str, Any]:
     try:
         raw = base64.b64decode(request.content_base64)
     except Exception as exc:  # noqa: BLE001 - API 边界需要返回稳定错误。
         raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包内容不是合法 base64。") from exc
     package_id = f"pkg-{uuid4().hex[:12]}"
+    package_filename = _safe_skill_package_filename(request.filename)
     package_dir = store.path("uploaded_skill_packages", package_id, "package")
     package_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = store.path("uploaded_skill_packages", package_id, request.filename)
+    zip_path = store.path("uploaded_skill_packages", package_id, package_filename)
     zip_path.write_bytes(raw)
 
     try:
@@ -732,9 +779,23 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
             f"不支持的 Skill 包运行模式：{runtime_mode}",
             details={"supported": ["script", "instruction_model"]},
         )
+    artifact = artifact_store.put_bytes(
+        "skill_packages",
+        f"packages/{package_id}/{package_filename}",
+        raw,
+        content_type="application/zip",
+        metadata={
+            "package_id": package_id,
+            "filename": package_filename,
+            "original_filename": request.filename,
+            "skill_id": manifest.skill_id,
+            "runtime_mode": runtime_mode,
+        },
+    )
     record = {
         "package_id": package_id,
-        "filename": request.filename,
+        "filename": package_filename,
+        "original_filename": request.filename,
         "status": manifest.status,
         "manifest": manifest.model_dump(mode="json"),
         "package_dir": str(package_dir),
@@ -742,6 +803,7 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
         "skill_md_path": str(skill_md_path.resolve()) if skill_md_path.exists() else None,
         "runtime_mode": runtime_mode,
         "entrypoint": entrypoint,
+        "artifact": asdict(artifact),
         "package_security": package_security,
         "base_skill_id": _skill_base_id(manifest.skill_id),
         "skill_version": _skill_version_label(manifest),
@@ -758,6 +820,13 @@ def _install_skill_package(store: JsonStore, registry: SkillRegistry, request: S
     }
     _save_record(store, "skill_packages", "package_id", record)
     return record
+
+
+def _safe_skill_package_filename(filename: str) -> str:
+    candidate = PurePosixPath(str(filename or "").replace("\\", "/")).name.strip()
+    if not candidate or candidate in {".", ".."}:
+        return "package.zip"
+    return candidate
 
 
 def _load_skill_packages(store: JsonStore, registry: SkillRegistry) -> None:
@@ -888,6 +957,7 @@ def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> dict[str, 
     file_count = 0
     total_size = 0
     max_file_size = 0
+    warnings: list[dict[str, Any]] = []
     for member in archive.infolist():
         filename = member.filename.replace("\\", "/")
         parts = PurePosixPath(filename).parts
@@ -924,6 +994,8 @@ def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> dict[str, 
                 "插件包解压后的总大小超过安全限制。",
                 details={"total_size_bytes": total_size, "max_total_size_bytes": MAX_SKILL_PACKAGE_TOTAL_BYTES},
             )
+        member_payload = archive.read(member)
+        warnings.extend(_skill_package_member_warnings(filename, member, member_payload))
         target = (destination / member.filename).resolve()
         if destination not in target.parents and target != destination:
             raise AegisQAError(
@@ -936,12 +1008,65 @@ def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> dict[str, 
         "file_count": file_count,
         "total_size_bytes": total_size,
         "max_file_size_bytes": max_file_size,
+        "warnings": warnings,
         "limits": {
             "max_files": MAX_SKILL_PACKAGE_FILES,
             "max_file_size_bytes": MAX_SKILL_PACKAGE_FILE_BYTES,
             "max_total_size_bytes": MAX_SKILL_PACKAGE_TOTAL_BYTES,
         },
     }
+
+
+def _skill_package_member_warnings(filename: str, member: zipfile.ZipInfo, payload: bytes) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
+    suffix = Path(filename).suffix.lower()
+    executable_bits = (member.external_attr >> 16) & 0o111
+    if suffix in SKILL_PACKAGE_EXECUTABLE_SUFFIXES or executable_bits:
+        warnings.append(
+            {
+                "code": "SKILL_PACKAGE_EXECUTABLE_FILE_WARNING",
+                "message": "插件包包含可执行或二进制文件，审批时需要确认其必要性。",
+                "filename": filename,
+            }
+        )
+    elif b"\x00" in payload[:4096]:
+        warnings.append(
+            {
+                "code": "SKILL_PACKAGE_BINARY_FILE_WARNING",
+                "message": "插件包包含二进制内容，审批时需要确认来源和用途。",
+                "filename": filename,
+            }
+        )
+    text = _decode_skill_package_text(filename, payload)
+    if text is None:
+        return warnings
+    if any(pattern.search(text) for pattern in SKILL_PACKAGE_DIRECT_MODEL_PATTERNS):
+        warnings.append(
+            {
+                "code": "SKILL_PACKAGE_DIRECT_MODEL_SDK_WARNING",
+                "message": "插件包源码疑似直接调用模型 SDK，应改用平台模型网关和 model alias。",
+                "filename": filename,
+            }
+        )
+    if SKILL_PACKAGE_API_KEY_PATTERN.search(text):
+        warnings.append(
+            {
+                "code": "SKILL_PACKAGE_API_KEY_WARNING",
+                "message": "插件包疑似包含硬编码 API key，审批前必须移除或改用平台 secret_ref。",
+                "filename": filename,
+            }
+        )
+    return warnings
+
+
+def _decode_skill_package_text(filename: str, payload: bytes) -> str | None:
+    suffix = Path(filename).suffix.lower()
+    if suffix not in SKILL_PACKAGE_TEXT_SUFFIXES:
+        return None
+    try:
+        return payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def _reject_unsupported_skill_package_dependencies(package_dir: Path, runtime_payload: dict[str, Any]) -> None:
@@ -1899,7 +2024,20 @@ def _evaluate_assertion(payload: dict[str, Any], assertion: AssertionRuleRequest
 
 
 def _evaluate_gate(metrics: dict[str, float], gate: CIGateRuleRequest) -> dict[str, Any]:
-    actual = float(metrics.get(gate.metric, 0))
+    raw_actual = metrics.get(gate.metric)
+    if not isinstance(raw_actual, (int, float)) or isinstance(raw_actual, bool):
+        return {
+            "gate_id": gate.gate_id,
+            "metric": gate.metric,
+            "operator": gate.operator,
+            "threshold": gate.threshold,
+            "actual": None,
+            "blocking": gate.blocking,
+            "status": "skipped",
+            "message": f"质量门禁跳过：缺少真实指标 {gate.metric}。",
+            "reason": "metric_unavailable",
+        }
+    actual = float(raw_actual)
     passed = _compare(actual, gate.operator, gate.threshold)
     return {
         "gate_id": gate.gate_id,
@@ -1915,6 +2053,15 @@ def _evaluate_gate(metrics: dict[str, float], gate: CIGateRuleRequest) -> dict[s
             else f"质量门禁未通过：{gate.metric}={actual} 不满足 {gate.operator} {gate.threshold}"
         ),
     }
+
+
+def _gate_evaluation_status(results: list[dict[str, Any]]) -> str:
+    blocking_failures = [item for item in results if item["status"] == "failed" and item["blocking"]]
+    if blocking_failures:
+        return "blocked"
+    if results and all(item.get("status") == "skipped" for item in results):
+        return "skipped"
+    return "passed"
 
 
 def _needs_annotation(item: dict[str, Any], *, strategy: str) -> bool:

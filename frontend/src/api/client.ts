@@ -56,6 +56,7 @@ import type {
   ModelGatewayConfig,
   ModelGatewayConnection,
   ModelGatewayTestResult,
+  OverviewWorkbench,
   StoredJudgeAudit,
   TaskRecord,
   TaskReport,
@@ -66,12 +67,16 @@ import type {
   TaskPreflightResult,
   TaskResultsExportDownload,
   TaskTraceFlow,
+  StepDebugPayload,
+  StepPromptDebugRequest,
+  StepReplayRequest,
   TraceTree,
   WorkflowDraftRecord,
   WorkflowGraph,
   WorkflowParameterPreview,
   WorkflowVersion,
 } from '../types';
+import type { FeatureFlagsResponse } from '../features';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '/api';
 
@@ -110,12 +115,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   const payload = await response.json().catch(() => ({}));
+  const responseTraceId = responseHeader(response, 'X-AegisQA-Request-ID');
   if (!response.ok) {
     if (response.status >= 500 && !payload?.code && !payload?.message && !payload?.detail && API_BASE === '/api') {
       // Vite 代理连不上 FastAPI 时通常只返回空 500；这里给用户一个可操作的启动提示。
       throw new ApiError('后端服务不可用，请确认 FastAPI 已启动在 http://127.0.0.1:8000。', {
         code: 'BACKEND_UNAVAILABLE',
-        details: { api_base: API_BASE, status: response.status },
+        details: { api_base: API_BASE, status: response.status, request_id: responseTraceId },
+        trace_id: responseTraceId,
         status: response.status,
       });
     }
@@ -123,7 +130,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(message, {
       code: payload?.code,
       details: payload?.details,
-      trace_id: payload?.trace_id,
+      trace_id: payload?.trace_id ?? responseTraceId,
       status: response.status,
     });
   }
@@ -137,11 +144,12 @@ async function requestDownload(path: string, init?: RequestInit): Promise<TaskRe
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
+    const responseTraceId = responseHeader(response, 'X-AegisQA-Request-ID');
     const message = payload?.message ?? payload?.detail ?? `请求失败：${response.status}`;
     throw new ApiError(message, {
       code: payload?.code,
       details: payload?.details,
-      trace_id: payload?.trace_id,
+      trace_id: payload?.trace_id ?? responseTraceId,
       status: response.status,
     });
   }
@@ -164,11 +172,12 @@ async function requestOfflinePackageDownload(path: string, init?: RequestInit): 
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
+    const responseTraceId = responseHeader(response, 'X-AegisQA-Request-ID');
     const message = payload?.message ?? payload?.detail ?? `请求失败：${response.status}`;
     throw new ApiError(message, {
       code: payload?.code,
       details: payload?.details,
-      trace_id: payload?.trace_id,
+      trace_id: payload?.trace_id ?? responseTraceId,
       status: response.status,
     });
   }
@@ -179,6 +188,10 @@ async function requestOfflinePackageDownload(path: string, init?: RequestInit): 
     filename: parseContentDispositionFilename(response.headers.get('Content-Disposition')),
     file_count: Number.isFinite(fileCount) ? fileCount : undefined,
   };
+}
+
+function responseHeader(response: Response, name: string): string | undefined {
+  return response.headers?.get?.(name) ?? undefined;
 }
 
 function parseContentDispositionFilename(value: string | null): string | undefined {
@@ -193,7 +206,9 @@ function parseContentDispositionFilename(value: string | null): string | undefin
 
 export const api = {
   health: () => request<{ status: string; service: string }>('/health'),
+  features: () => request<FeatureFlagsResponse>('/features'),
   dashboard: () => request<DashboardSummary>('/dashboard/summary'),
+  workbench: () => request<OverviewWorkbench>('/overview/workbench'),
   redTeamScan: (body: { task_id?: string; run_id?: string }) =>
     request<RedTeamScanResult>('/red-team/scans', {
       method: 'POST',
@@ -793,6 +808,18 @@ export const api = {
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<TaskTraceFlow>(`/tasks/${taskId}/trace-flow${suffix}`);
   },
+  replayRunItemStep: (runId: string, itemId: string, stepId: string, body: StepReplayRequest = {}) =>
+    request<StepDebugPayload>(`/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/steps/${encodeURIComponent(stepId)}/replay`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  debugRunItemStepPrompt: (runId: string, itemId: string, stepId: string, body: StepPromptDebugRequest = {}) =>
+    request<StepDebugPayload>(`/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/steps/${encodeURIComponent(stepId)}/prompt-debug`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  runItemStepReproBundle: (runId: string, itemId: string, stepId: string) =>
+    request<StepDebugPayload>(`/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/steps/${encodeURIComponent(stepId)}/repro-bundle`),
   executeRun: (runId: string) => request<RunRecord>(`/runs/${runId}/execute`, { method: 'POST' }),
   pauseRun: (runId: string) => request<RunRecord>(`/runs/${runId}/pause`, { method: 'POST' }),
   resumeRun: (runId: string) => request<RunRecord>(`/runs/${runId}/resume`, { method: 'POST' }),

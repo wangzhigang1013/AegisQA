@@ -164,3 +164,16 @@ def test_source_materialize_trace_badcase_filter_and_error_contract(tmp_path: Pa
     assert error["code"] == "NOT_FOUND"
     assert error["message"] == "Run 不存在：run-missing"
     assert error["trace_id"].startswith("trace_")
+
+
+def test_api_request_id_is_returned_in_headers_and_error_payload(tmp_path: Path) -> None:
+    client = TestClient(create_app(store_root=tmp_path / "store"))
+
+    health = client.get("/health", headers={"X-AegisQA-Request-ID": "trace-contract-123"})
+    assert health.status_code == 200
+    assert health.headers["X-AegisQA-Request-ID"] == "trace-contract-123"
+
+    missing = client.get("/runs/run-missing", headers={"X-AegisQA-Request-ID": "trace-contract-404"})
+    assert missing.status_code == 404
+    assert missing.headers["X-AegisQA-Request-ID"] == "trace-contract-404"
+    assert missing.json()["trace_id"] == "trace-contract-404"

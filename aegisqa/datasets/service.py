@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import asdict
 import hashlib
 import json
 import re
@@ -14,6 +15,7 @@ from typing import Any, Iterator
 from pydantic import BaseModel, Field
 
 from aegisqa.core.errors import AegisQAError
+from aegisqa.storage.artifacts import ArtifactStore
 from aegisqa.storage.json_store import JsonStore
 
 
@@ -45,8 +47,9 @@ class DatasetVersion(BaseModel):
 class DatasetService:
     """负责把用户上传文件物化成可按需读取的数据集版本。"""
 
-    def __init__(self, store: JsonStore) -> None:
+    def __init__(self, store: JsonStore, artifact_store: ArtifactStore | None = None) -> None:
         self.store = store
+        self.artifact_store = artifact_store
 
     def upload_dataset(
         self,
@@ -96,6 +99,25 @@ class DatasetService:
                 details={"filename": path.name, "file_format": file_format},
             )
 
+        source_ref: dict[str, Any] = {"filename": path.name, "file_format": file_format}
+        artifact = self._persist_source_artifact(
+            dataset_id,
+            version,
+            file_format,
+            path.read_bytes(),
+            metadata={
+                "dataset_id": dataset_id,
+                "dataset_version": version,
+                "dataset_version_id": f"{dataset_id}:v{version}",
+                "name": name,
+                "filename": path.name,
+                "file_format": file_format,
+                "source_type": "file_upload",
+            },
+        )
+        if artifact:
+            source_ref["artifact"] = artifact
+
         dataset = DatasetVersion(
             dataset_id=dataset_id,
             name=name,
@@ -111,7 +133,7 @@ class DatasetService:
             row_store_path="/".join(row_store_parts),
             created_at=_now(),
             source_type="file_upload",
-            source_ref={"filename": path.name, "file_format": file_format},
+            source_ref=source_ref,
         )
         self._save_version(dataset)
         return dataset
@@ -145,6 +167,25 @@ class DatasetService:
                 for field, value in row_data.items():
                     if len(samples_by_field[field]) < 50:
                         samples_by_field[field].append(value)
+        source_ref: dict[str, Any] = {"materialized_row_count": len(rows)}
+        artifact = self._persist_source_artifact(
+            dataset_id,
+            version,
+            "jsonl",
+            _rows_to_jsonl_bytes(rows),
+            metadata={
+                "dataset_id": dataset_id,
+                "dataset_version": version,
+                "dataset_version_id": f"{dataset_id}:v{version}",
+                "name": name,
+                "file_format": "jsonl",
+                "source_type": "source_skill",
+                "materialized_row_count": len(rows),
+            },
+        )
+        if artifact:
+            source_ref["artifact"] = artifact
+
         dataset = DatasetVersion(
             dataset_id=dataset_id,
             name=name,
@@ -160,7 +201,7 @@ class DatasetService:
             row_store_path="/".join(row_store_parts),
             created_at=_now(),
             source_type="source_skill",
-            source_ref={"materialized_row_count": len(rows)},
+            source_ref=source_ref,
         )
         self._save_version(dataset)
         return dataset
@@ -467,6 +508,27 @@ class DatasetService:
         versions.append({"version": dataset.version, "version_id": dataset.version_id, "row_count": dataset.row_count})
         self.store.write_json(["datasets", dataset.dataset_id, "versions.json"], versions)
 
+    def _persist_source_artifact(
+        self,
+        dataset_id: str,
+        version: int,
+        file_format: str,
+        payload: bytes,
+        *,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if self.artifact_store is None:
+            return None
+        extension = file_format if file_format in {"csv", "jsonl"} else "jsonl"
+        artifact = self.artifact_store.put_bytes(
+            "uploaded_datasets",
+            f"datasets/{dataset_id}/v{version}/source.{extension}",
+            payload,
+            content_type=_dataset_artifact_content_type(file_format),
+            metadata=metadata,
+        )
+        return asdict(artifact)
+
     def _iter_source_rows(self, path: Path, file_format: str) -> Iterator[dict[str, Any]]:
         if file_format == "csv":
             with path.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -549,6 +611,18 @@ def _infer_field_type(values: list[Any]) -> str:
 def _stable_hash(payload: dict[str, Any]) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def _rows_to_jsonl_bytes(rows: list[dict[str, Any]]) -> bytes:
+    return "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows).encode("utf-8")
+
+
+def _dataset_artifact_content_type(file_format: str) -> str:
+    if file_format == "csv":
+        return "text/csv; charset=utf-8"
+    if file_format == "jsonl":
+        return "application/x-ndjson"
+    return "application/octet-stream"
 
 
 def _stable_value_key(value: Any) -> str:

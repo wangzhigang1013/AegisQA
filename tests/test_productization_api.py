@@ -179,6 +179,27 @@ def test_assertion_dsl_and_ci_gate_return_actionable_results(tmp_path: Path) -> 
     assert gate_result["results"][0]["message"].startswith("质量门禁未通过")
 
 
+def test_ci_gate_missing_metric_is_skipped_instead_of_fake_passed(tmp_path: Path) -> None:
+    app = create_app(store_root=tmp_path / "store")
+    client = TestClient(app)
+
+    gate_result = client.post(
+        "/ci-gates/evaluate",
+        json={
+            "metrics": {},
+            "gates": [
+                {"gate_id": "cost-budget", "metric": "cost", "operator": "<=", "threshold": 0, "blocking": True},
+            ],
+        },
+    ).json()
+
+    assert gate_result["status"] == "skipped"
+    assert gate_result["blocking_failures"] == 0
+    assert gate_result["results"][0]["status"] == "skipped"
+    assert gate_result["results"][0]["actual"] is None
+    assert gate_result["results"][0]["message"] == "质量门禁跳过：缺少真实指标 cost。"
+
+
 def test_ci_gate_config_can_be_saved_and_evaluated_against_run_and_task(tmp_path: Path) -> None:
     app = create_app(store_root=tmp_path / "store")
     client = TestClient(app)

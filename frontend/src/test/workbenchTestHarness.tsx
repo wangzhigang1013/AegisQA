@@ -3,7 +3,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, expect, vi } from 'vitest';
 
 import { AppShell } from '../App';
-import { demoSkills, demoWorkflowGraph } from '../data/demo';
+import { FEATURE_FLAG_DEFAULTS, allFeatureFlagsEnabled, type FeatureFlags } from '../features';
+import { demoSkills, demoWorkflowGraph } from './fixtures/demo';
 
 export { demoSkills, demoWorkflowGraph };
 
@@ -68,6 +69,55 @@ export const demoTask = {
   ],
   created_at: '2026-05-31T00:00:00Z',
   updated_at: '2026-05-31T00:00:00Z',
+};
+
+export const demoWorkbench = {
+  source: 'real_store',
+  summary: {
+    task_count: 1,
+    run_count: 1,
+    failed_run_count: 1,
+    pending_badcase_count: 1,
+    gate_failure_count: 1,
+    report_count: 1,
+  },
+  recent_tasks: [
+    {
+      ...demoTask,
+      status: 'completed',
+      completed_items: 80,
+      failed_items: 20,
+      pass_rate: 0.8,
+      badcase_count: 20,
+      latest_run_summary: { run_id: 'run-demo', status: 'completed', total_items: 100, completed_items: 80, failed_items: 20 },
+      preflight_summary: { status: 'passed', message: 'Preflight 通过：可以创建并执行任务。', blocking_check_count: 0, warning_check_count: 0 },
+      gate_summary: { status: 'blocked', message: '质量门禁存在阻断项。', evidence: ['pass_rate=0.8 < 0.9'], metrics: { pass_rate: 0.8, badcase_count: 20 } },
+      available_actions: [
+        { action: 'open_trace_flow', label: '查看 Trace Flow', enabled: true, target_url: '/tasks/task-demo/trace' },
+        { action: 'open_report', label: '查看 Report', enabled: true, target_url: '/reports?task_id=task-demo' },
+      ],
+    },
+  ],
+  failed_runs: [{ run_id: 'run-demo', status: 'completed', total_items: 100, completed_items: 80, failed_items: 20 }],
+  pending_badcases: [
+    {
+      badcase_id: 'badcase-demo',
+      run_id: 'run-demo',
+      item_id: 'item-demo',
+      status: 'pending_review',
+      reason: 'judge_label=fail',
+      payload: { question: '坏例样本', score: 0.2 },
+      task_id: 'task-demo',
+      target_url: '/reports?task_id=task-demo',
+    },
+  ],
+  gate_failures: [{ task_id: 'task-demo', task_name: 'RAG 任务', status: 'blocked', message: '质量门禁存在阻断项。', target_url: '/reports?task_id=task-demo', evidence: ['pass_rate=0.8 < 0.9'] }],
+  recent_reports: [{ task_id: 'task-demo', task_name: 'RAG 任务', run_id: 'run-demo', status: 'completed', pass_rate: 0.8, failed_items: 20, badcase_count: 20, gate_status: 'blocked', target_url: '/reports?task_id=task-demo' }],
+  continue_actions: [
+    { action: 'open_report', label: '处理 Gate 风险 RAG 任务', target_url: '/reports?task_id=task-demo', priority: 'high' },
+    { action: 'open_trace_flow', label: '定位 Badcase item-demo', target_url: '/tasks/task-demo/trace', priority: 'high' },
+  ],
+  empty_state: { message: '', next_actions: [] },
 };
 
 export const demoPreflightResult = {
@@ -199,6 +249,19 @@ export const demoTraceFlow = {
           resolved_config: { model: 'trace-model' },
           parameter_trace: { model: { source: 'workflow_config', value_preview: 'trace-model', redacted: false } },
           output: { answer: '模型回答' },
+          resolved_input: { prompt: '什么是 Trace?' },
+          raw_output: { answer: '模型回答' },
+          validated_output: { answer: '模型回答' },
+          schema_errors: [],
+          prompt_calls: [{ prompt_name: 'answer_prompt', status: 'succeeded', token_usage: { total_tokens: 12 } }],
+          diagnostic_tags: ['llm_step', 'prompt_call'],
+          error_explanation: null,
+          available_actions: [
+            { action: 'view_step_detail', label: '查看 Step 详情', target_url: '/runs?task_id=task-demo&item_id=item-demo&step_id=answer' },
+            { action: 'replay_step', label: 'Replay Step', target_url: '/runs?task_id=task-demo&item_id=item-demo&step_id=answer&action=replay_step' },
+            { action: 'prompt_debug', label: 'Prompt Debug', target_url: '/runs?task_id=task-demo&item_id=item-demo&step_id=answer&action=prompt_debug' },
+            { action: 'open_repro_bundle', label: '导出 Repro Bundle', target_url: '/runs?task_id=task-demo&item_id=item-demo&step_id=answer&action=repro_bundle' },
+          ],
           metrics: { tokens: 12 },
           latency_ms: 1,
           cache_hit: false,
@@ -940,7 +1003,12 @@ export const skillVersionHistory = {
   ],
 };
 
-export async function renderWorkbench(path: string) {
+export type RenderWorkbenchOptions = {
+  featureFlags?: 'all' | 'defaults' | Partial<FeatureFlags>;
+};
+
+export async function renderWorkbench(path: string, options: RenderWorkbenchOptions = {}) {
+  window.__AEGISQA_FEATURE_FLAGS__ = resolveFeatureFlags(options.featureFlags);
   await act(async () => {
     render(
       <MemoryRouter initialEntries={[path]}>
@@ -949,6 +1017,12 @@ export async function renderWorkbench(path: string) {
     );
   });
   await waitFor(() => expect(screen.queryByText('正在加载页面...')).not.toBeInTheDocument(), { timeout: 8_000 });
+}
+
+function resolveFeatureFlags(featureFlags: RenderWorkbenchOptions['featureFlags']) {
+  if (featureFlags === 'defaults') return { ...FEATURE_FLAG_DEFAULTS };
+  if (!featureFlags || featureFlags === 'all') return allFeatureFlagsEnabled();
+  return { ...FEATURE_FLAG_DEFAULTS, ...featureFlags };
 }
 
 export function jsonResponse(payload: unknown) {
@@ -1166,7 +1240,17 @@ export function installDefaultWorkbenchMocks() {
         return jsonResponse({ ...demoTask, status: 'completed', completed_items: 100, pass_rate: 0.8, badcase_count: 20 });
       }
       if (url.endsWith('/tasks/task-demo')) {
-        return jsonResponse(demoTask);
+        return jsonResponse({
+          ...demoTask,
+          available_actions: [
+            { action: 'execute', label: '执行', enabled: true, target_url: '/tasks/task-demo/execute' },
+            { action: 'pause', label: '暂停', enabled: true, target_url: '/tasks/task-demo/pause' },
+            { action: 'resume', label: '恢复', enabled: false, disabled_reason: '只有 paused 任务可以恢复。', target_url: '/tasks/task-demo/resume' },
+            { action: 'cancel', label: '取消', enabled: true, target_url: '/tasks/task-demo/cancel' },
+            { action: 'retry', label: '重试失败项', enabled: false, disabled_reason: '只有 failed 任务可以重试失败项。', target_url: '/tasks/task-demo/retry-failed' },
+            { action: 'attempt', label: '新建 Attempt', enabled: false, disabled_reason: '当前任务仍有活动执行实例，结束后才能新建 Attempt。', target_url: '/tasks/task-demo/attempts' },
+          ],
+        });
       }
       if (url.endsWith('/tasks/task-demo/repair-tasks/from-diagnostics')) {
         return jsonResponse({ source_task_id: 'task-demo', created_count: 1, reused_count: 0, repair_tasks: [{ repair_task_id: 'repair-demo', source_task_id: 'task-demo', cause_type: 'weak_segment', status: 'open' }] });
@@ -1604,6 +1688,48 @@ export function installDefaultWorkbenchMocks() {
             top_risks: [{ type: 'badcase_budget', severity: 'warning', message: '当前任务产生 1 条 Badcase。' }],
             next_actions: [{ action: 'add_to_annotation_queue', label: '将 Badcase 加入人工审核队列' }],
           },
+          primary_findings: [
+            {
+              type: 'weak_segment',
+              status: 'warning',
+              severity: 'warning',
+              title: '弱分层风险',
+              message: 'scene=payment 分层通过率明显偏低，需要优先复核。',
+              evidence: ['scene=payment 通过率 40%，Badcase 12 条。'],
+              source: 'diagnostics.root_causes',
+            },
+            {
+              type: 'quality_gate',
+              status: 'warning',
+              severity: 'medium',
+              title: '质量门禁未完全通过',
+              message: '请优先处理质量门禁风险后再发布。',
+              evidence: ['当前任务产生 1 条 Badcase。'],
+              source: 'quality_decision',
+            },
+          ],
+          recommended_actions: [
+            {
+              action: 'open_trace_flow',
+              label: '进入 Trace Flow 定位失败 Step',
+              priority: 'high',
+              enabled: true,
+              target_url: '/tasks/task-demo/trace',
+              evidence: ['failed_items=20'],
+            },
+            {
+              action: 'create_repair_tasks',
+              label: '生成修复任务',
+              priority: 'high',
+              enabled: true,
+              target_url: '/reports?task_id=task-demo&action=create_repair_tasks',
+              evidence: ['badcase_count=1'],
+            },
+          ],
+          action_targets: {
+            open_trace_flow: '/tasks/task-demo/trace',
+            create_repair_tasks: '/reports?task_id=task-demo&action=create_repair_tasks',
+          },
           parameter_governance: demoParameterGovernance,
           budget_status: {
             status: 'warning',
@@ -1773,6 +1899,9 @@ export function installDefaultWorkbenchMocks() {
       }
       if (url.endsWith('/dashboard/summary')) {
         return jsonResponse({ dataset_count: 12, skill_count: 34, workflow_count: 5, run_count: 8, latest_run: null, pass_rate: 0.92, badcase_count: 7 });
+      }
+      if (url.endsWith('/overview/workbench')) {
+        return jsonResponse(demoWorkbench);
       }
       if (url.includes('/annotation-queue?')) {
         return jsonResponse({

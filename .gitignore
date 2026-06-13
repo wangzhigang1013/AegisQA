@@ -9,7 +9,10 @@ frontend/dist/
 frontend/playwright-report/
 frontend/test-results/
 .e2e-artifacts/
+.runtime-smoke/
 tmp-debug-redis/
+tmp-report-debug*/
+tmp-report-gate-debug/
 frontend/*.tsbuildinfo
 frontend/*.js
 frontend/*.d.ts

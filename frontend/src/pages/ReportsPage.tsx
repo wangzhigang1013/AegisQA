@@ -1,16 +1,17 @@
 import { DownloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Empty, Input, Row, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Col, Empty, Input, List, Row, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useEffect, useMemo, useState, type Key } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSearchParams } from 'react-router-dom';
 
-import { api } from '../api/client';
+import { runWorkbenchAction } from '../actions/actionRouter';
+import { api, formatApiError } from '../api/client';
 import { LazyECharts } from '../components/LazyECharts';
 import { ActionToolbar, DataTableShell, PageSection } from '../components/LayoutPrimitives';
 import { MetricTile } from '../components/MetricTile';
 import { PageHeader } from '../components/PageHeader';
-import type { AuditEvent, RepairTaskRecord, ReportExportRequest, TaskRecord } from '../types';
+import type { AuditEvent, RepairTaskRecord, ReportExportRequest, TaskRecord, WorkbenchAction } from '../types';
 import { BadcaseTable } from './report/BadcaseTable';
 import { ReportSegmentAnalysis } from './report/ReportSegmentAnalysis';
 import { ReportSummary } from './report/ReportSummary';
@@ -339,6 +340,26 @@ export function ReportsPage() {
     onError: (error) => setNotice(error instanceof Error ? `批量处理失败：${error.message}` : '批量处理失败'),
   });
 
+  const bulkRepairTaskMutation = useMutation({
+    mutationFn: async () => {
+      if (!task) {
+        throw new Error('请先选择任务，再生成修复任务。');
+      }
+      const selectedCount = selectedBadcaseKeys.length;
+      if (!selectedCount) {
+        throw new Error('请选择 Badcase 后再批量生成修复任务。');
+      }
+      const result = await api.createRepairTasksFromDiagnostics(task.task_id);
+      return { result, selectedCount };
+    },
+    onSuccess: async ({ result, selectedCount }) => {
+      setSelectedBadcaseKeys([]);
+      setNotice(`已基于当前报告诊断和 ${selectedCount} 条选中 Badcase 生成修复任务：新增 ${result.created_count} 个，复用 ${result.reused_count} 个。`);
+      await queryClient.invalidateQueries({ queryKey: ['repair-tasks', selectedTask?.task_id] });
+    },
+    onError: (error) => setNotice(error instanceof Error ? `批量生成修复任务失败：${error.message}` : '批量生成修复任务失败'),
+  });
+
   const diagnosticActionMutation = useMutation({
     mutationFn: async (action: string) => {
       if (!task) {
@@ -408,6 +429,9 @@ export function ReportsPage() {
   const qualityDecision = reportQuery.data?.quality_decision;
   const budgetStatus = reportQuery.data?.budget_status;
   const diagnostics = reportQuery.data?.diagnostics;
+  const primaryFindings = reportQuery.data?.primary_findings ?? [];
+  const qualityNextActions: WorkbenchAction[] = (qualityDecision?.next_actions ?? []).map((action) => ({ ...action }));
+  const recommendedActions: WorkbenchAction[] = reportQuery.data?.recommended_actions ?? qualityNextActions;
   const scoreAnalytics = scoreAnalyticsQuery.data;
   const exportHistory: AuditEvent[] = exportHistoryQuery.data ?? [];
   const exportRequests: ReportExportRequest[] = exportRequestsQuery.data ?? [];
@@ -452,6 +476,19 @@ export function ReportsPage() {
     }
     setPendingDiagnosticAction(action);
     diagnosticActionMutation.mutate(action);
+  }
+
+  function handleRecommendedAction(action: WorkbenchAction) {
+    if (!task) {
+      setNotice('请先选择任务，再执行报告建议动作。');
+      return;
+    }
+    runWorkbenchAction(action, {
+      navigate,
+      createRepairTasks: () => repairTaskMutation.mutate(),
+      fallback: handleDiagnosticAction,
+      notify: setNotice,
+    });
   }
 
   return (
@@ -514,6 +551,18 @@ export function ReportsPage() {
       />
 
       {notice ? <Alert type={notice.includes('失败') || notice.includes('请先') ? 'warning' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
+      {tasksQuery.isError ? (
+        <Alert type="error" showIcon message="报告任务列表加载失败" description={formatApiError(tasksQuery.error)} />
+      ) : null}
+      {selectedTaskQuery.isError ? (
+        <Alert type="error" showIcon message="报告任务详情加载失败" description={formatApiError(selectedTaskQuery.error)} />
+      ) : null}
+      {reportQuery.isError ? (
+        <Alert type="error" showIcon message="报告加载失败" description={formatApiError(reportQuery.error)} />
+      ) : null}
+      {scoreAnalyticsQuery.isError ? (
+        <Alert type="warning" showIcon message="Score Analytics 加载失败" description={formatApiError(scoreAnalyticsQuery.error)} />
+      ) : null}
       {!canExportReport ? (
         <Alert
           type={hasHtmlExportApproval || hasOfflinePackageApproval ? 'info' : 'warning'}
@@ -585,7 +634,7 @@ export function ReportsPage() {
                 <Col xs={24} lg={8}>
                   <Typography.Text type="secondary">为什么</Typography.Text>
                   <Typography.Paragraph className="paragraph-tight">
-                    {diagnostics?.root_causes[0]?.recommendation ?? qualityDecision.top_risks[0]?.message ?? '当前任务未发现阻断性风险。'}
+                    {primaryFindings[0]?.message ?? diagnostics?.root_causes[0]?.recommendation ?? qualityDecision.top_risks[0]?.message ?? '当前任务未发现阻断性风险。'}
                   </Typography.Paragraph>
                 </Col>
                 <Col xs={24} lg={6}>
@@ -603,8 +652,75 @@ export function ReportsPage() {
                     loading={repairTaskMutation.isPending}
                     onClick={() => repairTaskMutation.mutate()}
                   >
-                    生成修复任务
+                    生成诊断修复任务
                   </Button>
+                </Col>
+              </Row>
+            </Card>
+          ) : null}
+
+          {primaryFindings.length || recommendedActions.length ? (
+            <Card className="flat-card" title="优先结论与动作">
+              <Row gutter={[16, 16]}>
+                <Col xs={24} xl={14}>
+                  <List
+                    dataSource={primaryFindings}
+                    locale={{ emptyText: '当前报告没有需要优先处理的结构化结论。' }}
+                    renderItem={(finding) => (
+                      <List.Item>
+                        <List.Item.Meta
+                          title={(
+                            <Space wrap>
+                              <Typography.Text strong>{finding.title}</Typography.Text>
+                              <Tag color={severityColor(finding.severity)}>{finding.status}</Tag>
+                              <Tag>{finding.source}</Tag>
+                            </Space>
+                          )}
+                          description={(
+                            <Space direction="vertical" className="full-width-control">
+                              <Typography.Text>{finding.message}</Typography.Text>
+                              {finding.evidence?.length ? (
+                                <Space wrap>
+                                  {finding.evidence.map((item) => <Tag key={item}>{item}</Tag>)}
+                                </Space>
+                              ) : null}
+                            </Space>
+                          )}
+                        />
+                      </List.Item>
+                    )}
+                  />
+                </Col>
+                <Col xs={24} xl={10}>
+                  <List
+                    dataSource={recommendedActions}
+                    locale={{ emptyText: '当前报告没有可执行的建议动作。' }}
+                    renderItem={(action) => (
+                      <List.Item
+                        actions={[
+                          <Button
+                            key={action.action}
+                            size="small"
+                            disabled={action.enabled === false}
+                            loading={repairTaskMutation.isPending && action.action === 'create_repair_tasks'}
+                            onClick={() => handleRecommendedAction(action)}
+                          >
+                            {action.label}
+                          </Button>,
+                        ]}
+                      >
+                        <List.Item.Meta
+                          title={(
+                            <Space wrap>
+                              <Typography.Text>{action.label}</Typography.Text>
+                              {action.priority ? <Tag color={priorityColor(action.priority)}>{action.priority}</Tag> : null}
+                            </Space>
+                          )}
+                          description={action.disabled_reason ?? action.evidence?.join('；') ?? action.target_url ?? action.action}
+                        />
+                      </List.Item>
+                    )}
+                  />
                 </Col>
               </Row>
             </Card>
@@ -1076,9 +1192,15 @@ export function ReportsPage() {
 
           <Card className="flat-card" title="Badcase 明细">
             <Space direction="vertical" className="full-width-control">
-              <Button type="primary" disabled={!selectedBadcaseKeys.length} loading={bulkGoldenMutation.isPending} onClick={() => bulkGoldenMutation.mutate()}>
-                批量加入 Golden
-              </Button>
+              <Space wrap>
+                <Button type="primary" disabled={!selectedBadcaseKeys.length} loading={bulkGoldenMutation.isPending} onClick={() => bulkGoldenMutation.mutate()}>
+                  批量加入 Golden
+                </Button>
+                <Button disabled={!selectedBadcaseKeys.length || !task} loading={bulkRepairTaskMutation.isPending} onClick={() => bulkRepairTaskMutation.mutate()}>
+                  批量创建修复任务
+                </Button>
+                <Typography.Text type="secondary">已选 {selectedBadcaseKeys.length} 条</Typography.Text>
+              </Space>
               <BadcaseTable
                 badcases={badcases}
                 pagination={reportQuery.data?.badcase_pagination}
@@ -1199,6 +1321,20 @@ function causeLabel(value: string) {
     parameter_risk: '参数风险',
   };
   return labels[value] ?? value;
+}
+
+function severityColor(value: string) {
+  if (['critical', 'high', 'failed', 'blocked'].includes(value)) return 'red';
+  if (['warning', 'medium'].includes(value)) return 'orange';
+  if (['passed', 'healthy', 'low'].includes(value)) return 'green';
+  return 'blue';
+}
+
+function priorityColor(value: string) {
+  if (value === 'high') return 'red';
+  if (value === 'medium') return 'orange';
+  if (value === 'low') return 'blue';
+  return 'default';
 }
 
 function actionLabel(value: string) {

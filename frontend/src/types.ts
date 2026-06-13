@@ -1,4 +1,5 @@
 export * from './types/common';
+export * from './types/actions';
 export * from './types/dataset';
 export * from './types/skill';
 export * from './types/workflow';
