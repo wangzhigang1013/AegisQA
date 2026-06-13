@@ -17,6 +17,7 @@ from aegisqa.engine.rate_limit import RateLimiter, create_rate_limiter
 from aegisqa.skills.parameters import SkillParameterResolver
 from aegisqa.skills.registry import SkillRegistry
 from aegisqa.storage.json_store import JsonStore
+from aegisqa.workflows.dag import DAGWorkflow, DAGWorkflowExecutor, DAGWorkflowStep
 from aegisqa.workflows.models import WorkflowVersion
 
 
@@ -126,6 +127,8 @@ class WorkflowRunner:
         self.rate_limiter_factory = rate_limiter_factory or create_rate_limiter
         self.progress_save_interval_items = max(1, int(progress_save_interval_items))
         self._cache: dict[str, dict[str, Any]] = {}
+        self._cache_ttl: int = 3600  # 缓存 TTL（秒）
+        self._cache_created_at: dict[str, float] = {}  # 缓存创建时间
 
     def create_run(self, request: RunRequest) -> RunRecord:
         dataset = self.dataset_service.get_version(request.dataset_id, request.dataset_version)
@@ -203,6 +206,15 @@ class WorkflowRunner:
         limiter = self.rate_limiter_factory({key: float(value) for key, value in run.snapshot.get("runtime", {}).get("rate_limits", {}).items()})
 
         rows_by_id = self._rows_by_id(run.dataset_id, run.dataset_version)
+
+        # 检测是否有 DAG 结构，如果有则构建 DAG 执行器
+        dag = None
+        if self._has_dag_structure(run.workflow):
+            try:
+                dag = self._build_dag_from_graph(run.workflow)
+            except Exception:
+                dag = None  # 回退到线性执行
+
         processed_since_save = 0
         for item in run.items:
             self._merge_control_flags(run)
@@ -211,7 +223,10 @@ class WorkflowRunner:
             if item.status == "succeeded":
                 continue
             row = rows_by_id[item.row_id]
-            self._execute_item(run, item, row, limiter)
+            if dag:
+                self._execute_item_dag(run, item, row, limiter, dag)
+            else:
+                self._execute_item(run, item, row, limiter)
             self._merge_control_flags(run)
             processed_since_save += 1
             # RunRecord 里包含所有 item，逐条完整写 JSON 会在 1000+ 样本时退化成
@@ -406,7 +421,8 @@ class WorkflowRunner:
 
                 cache_key = self._cache_key(workflow_step, skill.manifest.version, inputs, resolved_parameters.config)
                 step.cache_key = cache_key[:16]
-                if workflow_step.cacheable and cache_key in self._cache:
+                cache_valid = self._is_cache_valid(cache_key)
+                if workflow_step.cacheable and cache_valid:
                     raw_output = self._cache[cache_key]
                     step.cache_hit = True
                     step.called_skill = False
@@ -421,7 +437,9 @@ class WorkflowRunner:
                     metrics = result.metrics
                     logs = result.logs
                     if workflow_step.cacheable:
+                        import time
                         self._cache[cache_key] = {"output": output, "metrics": metrics}
+                        self._cache_created_at[cache_key] = time.time()
 
                 validate_json_schema(output, skill.manifest.output_schema)
                 # 标准输出命名空间固定为 `step_id.field`，下游映射可直接引用
@@ -466,6 +484,97 @@ class WorkflowRunner:
         item.metrics = context["metrics"]
         item.finished_at = _now()
 
+    def _execute_item_dag(self, run: RunRecord, item: RunItem, row: DatasetRow, limiter: RateLimiter, dag: DAGWorkflow) -> None:
+        """使用 DAG 执行器执行单个 item，支持并行步骤。"""
+        item.status = "running"
+        item.started_at = _now()
+
+        # 构建 DAG 执行器
+        executor = DAGWorkflowExecutor(self.registry, max_workers=run.concurrency or 4)
+
+        # 执行 DAG
+        context = executor.execute_row(dag, row.data)
+
+        # 将 DAG 执行结果转换为 RunItemStep
+        steps_by_id = {step.step_id: step for step in dag.steps}
+        for step_id, step_result in context.get("steps", {}).items():
+            dag_step = steps_by_id.get(step_id)
+            if not dag_step:
+                continue
+
+            run_step = RunItemStep(
+                step_id=step_id,
+                skill_ref=dag_step.skill_ref,
+                status=step_result.get("status", "unknown"),
+            )
+
+            if step_result.get("status") == "succeeded":
+                run_step.input_snapshot = redact_secrets(step_result.get("input", {}))
+                run_step.output_snapshot = redact_secrets(step_result.get("output", {}))
+                run_step.metrics = step_result.get("metrics", {})
+                run_step.latency_ms = step_result.get("latency_ms", 0.0)
+                run_step.called_skill = True
+            elif step_result.get("status") == "failed":
+                run_step.error = step_result.get("error")
+                run_step.called_skill = True
+            elif step_result.get("status") == "skipped":
+                run_step.called_skill = False
+
+            item.steps.append(run_step)
+
+        # 判断整体状态
+        has_failure = any(s.get("status") == "failed" for s in context.get("steps", {}).values())
+        if has_failure:
+            item.status = "failed"
+            first_error = next((s.get("error") for s in context.get("steps", {}).values() if s.get("status") == "failed"), None)
+            item.error = first_error
+        else:
+            item.status = "succeeded"
+
+        item.context_snapshot = redact_secrets({key: value for key, value in context.items() if key not in ("secrets", "steps")})
+        item.metrics = context.get("metrics", {})
+        item.finished_at = _now()
+
+    def _has_dag_structure(self, workflow: WorkflowVersion) -> bool:
+        """检查 workflow 是否有 DAG 结构（graph 字段包含 edges）。"""
+        graph = workflow.graph
+        if not graph:
+            return False
+        edges = graph.get("edges", [])
+        return len(edges) > 0
+
+    def _build_dag_from_graph(self, workflow: WorkflowVersion) -> DAGWorkflow:
+        """从 WorkflowVersion.graph 构建 DAGWorkflow。"""
+        graph = workflow.graph or {}
+        nodes = {node["id"]: node for node in graph.get("nodes", [])}
+        edges = graph.get("edges", [])
+
+        # 构建依赖关系
+        depends_on: dict[str, list[str]] = {node_id: [] for node_id in nodes}
+        for edge in edges:
+            target = edge.get("target")
+            source = edge.get("source")
+            if target and source and target in depends_on:
+                depends_on[target].append(source)
+
+        # 构建 DAG 步骤
+        dag_steps: list[DAGWorkflowStep] = []
+        for step in workflow.steps:
+            node = nodes.get(step.step_id, {})
+            dag_step = DAGWorkflowStep(
+                step_id=step.step_id,
+                skill_ref=step.skill_ref,
+                depends_on=depends_on.get(step.step_id, []),
+                condition=node.get("data", {}).get("condition"),
+                input_mapping=step.input_mapping,
+                output_mapping=step.output_mapping,
+                config=step.config,
+                cacheable=step.cacheable,
+            )
+            dag_steps.append(dag_step)
+
+        return DAGWorkflow(name=workflow.name, steps=dag_steps)
+
     def _rows_by_id(self, dataset_id: str, dataset_version: int) -> dict[str, DatasetRow]:
         # Worker 按 item_id/row_id 单条读取是生产形态；本地 MVP 为了简化单进程执行，
         # 在 execute_run 中建立索引。数据集创建和队列投递阶段仍保持流式。
@@ -482,6 +591,14 @@ class WorkflowRunner:
             "schema_version": "json-schema-mvp-v1",
         }
         return _stable_hash(payload)
+
+    def _is_cache_valid(self, cache_key: str) -> bool:
+        """检查缓存是否有效（存在且未过期）。"""
+        if cache_key not in self._cache:
+            return False
+        created_at = self._cache_created_at.get(cache_key, 0)
+        import time
+        return (time.time() - created_at) < self._cache_ttl
 
     def _save_run(self, run: RunRecord) -> None:
         if self.run_repository:
@@ -518,6 +635,59 @@ class WorkflowRunner:
         if control.get("paused"):
             run.paused = True
             run.status = "paused"
+
+    def get_cache_stats(self, run_id: str) -> dict[str, Any]:
+        """获取 Run 的缓存统计信息。"""
+        run = self.get_run(run_id)
+        total_steps = 0
+        cached_steps = 0
+        cache_hits: dict[str, int] = {}
+
+        for item in run.items:
+            for step in item.steps:
+                total_steps += 1
+                if step.cache_hit:
+                    cached_steps += 1
+                    skill = step.skill_ref
+                    cache_hits[skill] = cache_hits.get(skill, 0) + 1
+
+        return {
+            "run_id": run_id,
+            "total_steps": total_steps,
+            "cached_steps": cached_steps,
+            "cache_hit_rate": cached_steps / total_steps if total_steps > 0 else 0.0,
+            "cache_hits_by_skill": cache_hits,
+            "cache_size": len(self._cache),
+        }
+
+    def invalidate_cache(self, run_id: str | None = None, skill_ref: str | None = None) -> int:
+        """失效缓存。
+
+        Args:
+            run_id: 指定 Run ID（当前未使用，预留接口）。
+            skill_ref: 指定 Skill，只失效该 Skill 的缓存。
+
+        Returns:
+            失效的缓存条数。
+        """
+        if skill_ref:
+            keys_to_remove = [k for k, v in self._cache.items() if v.get("skill_ref") == skill_ref]
+        else:
+            keys_to_remove = list(self._cache.keys())
+
+        for key in keys_to_remove:
+            del self._cache[key]
+
+        return len(keys_to_remove)
+
+    def get_cache_config(self) -> dict[str, Any]:
+        """获取缓存配置。"""
+        return {
+            "enabled": True,
+            "max_size": 10000,
+            "ttl_seconds": 3600,
+            "current_size": len(self._cache),
+        }
 
 
 def _now() -> str:

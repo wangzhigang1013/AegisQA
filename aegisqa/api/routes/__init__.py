@@ -2,6 +2,7 @@
 
 from aegisqa.api.routes.agent_skills import register_agent_skill_routes
 from aegisqa.api.routes.datasets import register_dataset_routes
+from aegisqa.api.routes.experiments import register_experiment_routes
 from aegisqa.api.routes.governance import register_governance_routes
 from aegisqa.api.routes.judge import register_judge_routes
 from aegisqa.api.routes.models import register_model_routes
@@ -18,6 +19,7 @@ from aegisqa.api.routes.workflows import register_workflow_routes
 __all__ = [
     "register_agent_skill_routes",
     "register_dataset_routes",
+    "register_experiment_routes",
     "register_governance_routes",
     "register_judge_routes",
     "register_model_routes",

@@ -2,11 +2,16 @@
 
 插件包里的 Python 代码不在 FastAPI 主进程中 import，而是通过短生命周期子进程执行。
 这样即使插件抛异常或污染全局状态，也不会影响 API 服务本身。
+
+支持两种运行时模式：
+- subprocess（默认）：通过子进程执行，兼容性最好。
+- container：通过 Docker 容器执行，提供更强的隔离边界。
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -19,6 +24,8 @@ import yaml
 from aegisqa.core.errors import AegisQAError
 from aegisqa.models.gateway import ModelGateway, model_response_usage_metrics
 from aegisqa.skills.base import BaseSkill, SkillManifest, SkillResult
+
+logger = logging.getLogger(__name__)
 
 
 PACKAGE_SKILL_TIMEOUT_ENV = "AEGISQA_PACKAGE_SKILL_TIMEOUT_SECONDS"
@@ -62,7 +69,13 @@ def resolve_package_skill_timeout_seconds(timeout_seconds: int | str | None = No
 
 
 class SubprocessPackageSkill(BaseSkill):
-    """通过受控子进程执行插件包脚本入口的 Skill。"""
+    """通过受控子进程或容器执行插件包脚本入口的 Skill。
+
+    支持两种运行时模式：
+    - subprocess（默认）：通过子进程执行，兼容性最好。
+    - container：通过 Docker 容器执行，提供网络隔离、资源限制等更强的安全边界。
+      当 Docker 不可用时自动回退到 subprocess 模式。
+    """
 
     def __init__(
         self,
@@ -72,6 +85,7 @@ class SubprocessPackageSkill(BaseSkill):
         package_root: Path | None = None,
         function_name: str = "run",
         timeout_seconds: int | None = None,
+        runtime_mode: str = "subprocess",
     ) -> None:
         self.manifest = manifest
         # 子进程会把 cwd 切到插件根目录；这里必须提前转成绝对路径，
@@ -82,9 +96,24 @@ class SubprocessPackageSkill(BaseSkill):
         # 这里是单次 Skill 调用的保护阈值，不是整个任务的总时长限制。
         # 真实任务可以循环执行很多条样本，但每条样本仍需要可控的最大运行时间。
         self.timeout_seconds = resolve_package_skill_timeout_seconds(timeout_seconds)
+        self.runtime_mode = runtime_mode
         super().__init__()
 
     def run(self, inputs: dict[str, Any], config: dict[str, Any] | None = None) -> SkillResult:
+        # 容器模式：尝试通过 Docker 执行，失败时回退到子进程
+        if self.runtime_mode == "container":
+            try:
+                return self._run_in_container(inputs, config)
+            except Exception as exc:
+                logger.warning(
+                    "容器模式执行失败，回退到子进程模式：%s",
+                    exc,
+                )
+        # 子进程模式（默认 / 回退）
+        return self._run_in_subprocess(inputs, config)
+
+    def _run_in_subprocess(self, inputs: dict[str, Any], config: dict[str, Any] | None = None) -> SkillResult:
+        """通过子进程执行 Skill 插件包。"""
         payload = json.dumps({"inputs": inputs, "config": config or {}}, ensure_ascii=False)
         try:
             env = os.environ.copy()
@@ -156,6 +185,75 @@ class SubprocessPackageSkill(BaseSkill):
             artifacts=data.get("artifacts", {}),
             logs=data.get("logs", []),
         )
+
+    def _run_in_container(self, inputs: dict[str, Any], config: dict[str, Any] | None = None) -> SkillResult:
+        """通过 Docker 容器执行 Skill 插件包。
+
+        容器模式提供网络隔离、只读根文件系统和资源限制。
+        需要 Docker daemon 运行且 docker SDK 已安装。
+        """
+        from aegisqa.skills.container_runtime import (
+            ContainerLimits,
+            ContainerRuntime,
+            ContainerRuntimeError,
+        )
+
+        runtime = ContainerRuntime()
+
+        # 读取 skill.yaml 获取 runtime 配置
+        skill_yaml_path = self.package_root / "skill.yaml"
+        skill_manifest: dict[str, Any] = {}
+        if skill_yaml_path.exists():
+            skill_manifest = yaml.safe_load(skill_yaml_path.read_text(encoding="utf-8")) or {}
+
+        # 构建镜像
+        image_tag = runtime.build_image(
+            skill_path=str(self.package_root),
+            skill_manifest=skill_manifest,
+        )
+
+        try:
+            # 执行容器
+            input_data = {"inputs": inputs, "config": config or {}}
+            result = runtime.run(
+                image_tag=image_tag,
+                input_data=input_data,
+                limits=ContainerLimits(),
+                timeout=self.timeout_seconds,
+            )
+
+            if result.exit_code != 0:
+                raise AegisQAError(
+                    "SKILL_PACKAGE_RUNTIME_ERROR",
+                    result.stderr or f"容器退出码：{result.exit_code}",
+                    details={
+                        "returncode": result.exit_code,
+                        "stderr": result.stderr,
+                        "stdout": result.stdout,
+                        "runtime_mode": "container",
+                        "duration_ms": result.duration_ms,
+                    },
+                )
+
+            # 解析容器 stdout 输出
+            try:
+                data = json.loads(result.stdout or "{}")
+            except json.JSONDecodeError as exc:
+                raise AegisQAError(
+                    "SKILL_PACKAGE_OUTPUT_ERROR",
+                    "容器内插件必须向 stdout 输出合法 JSON。",
+                    details={"stdout": result.stdout, "runtime_mode": "container"},
+                ) from exc
+
+            return SkillResult(
+                output=data.get("output", {}),
+                metrics=data.get("metrics", {}),
+                artifacts=data.get("artifacts", {}),
+                logs=data.get("logs", []),
+            )
+        finally:
+            # 清理镜像
+            runtime.cleanup(image_tag=image_tag)
 
 
 class InstructionPackageSkill(BaseSkill):

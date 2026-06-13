@@ -17,6 +17,7 @@ const permissionRows = [
 const modelProviderOptions = [
   { value: 'mock', label: '离线 Mock（不调用真实模型）' },
   { value: 'openai_compatible', label: '真实模型服务（OpenAI-compatible）' },
+  { value: 'anthropic', label: 'Anthropic Claude' },
 ];
 const modelProviderValues = new Set(modelProviderOptions.map((option) => option.value));
 
@@ -58,6 +59,21 @@ const modelServiceTemplates: ModelServiceTemplate[] = [
     secret_ref: 'env:OPENAI_API_KEY',
     default_model: 'gpt-4o-mini',
     default_models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'],
+  },
+  {
+    value: 'anthropic',
+    label: 'Anthropic Claude',
+    provider: 'anthropic',
+    base_url: 'https://api.anthropic.com/v1',
+    secret_ref: 'env:ANTHROPIC_API_KEY',
+    default_model: 'claude-sonnet-4-20250514',
+    default_models: [
+      'claude-sonnet-4-20250514',
+      'claude-haiku-4-20250414',
+      'claude-opus-4-20250514',
+      'claude-3-5-sonnet-20241022',
+      'claude-3-5-haiku-20241022',
+    ],
   },
   {
     value: 'local-compatible',

@@ -540,6 +540,7 @@ def create_app(
     from aegisqa.api.routes import (
         register_agent_skill_routes,
         register_dataset_routes,
+        register_experiment_routes,
         register_governance_routes,
         register_judge_routes,
         register_model_routes,
@@ -586,6 +587,7 @@ def create_app(
     register_task_routes(app, route_context)
     register_productization_routes(app, route_context)
     register_judge_routes(app, route_context)
+    register_experiment_routes(app, route_context)
 
     return app
 

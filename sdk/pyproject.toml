@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aegisqa-sdk"
+version = "0.1.0"
+description = "AegisQA Python SDK - AI 评测治理平台客户端"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "AegisQA Team"},
+]
+keywords = ["aegisqa", "ai", "evaluation", "testing", "agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.scripts]
+aegisqa = "sdk.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/aegisqa/aegisqa"
+Documentation = "https://docs.aegisqa.com"
+Repository = "https://github.com/aegisqa/aegisqa"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["sdk*"]

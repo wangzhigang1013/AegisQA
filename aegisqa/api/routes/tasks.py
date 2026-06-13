@@ -274,6 +274,22 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
     def get_run(run_id: str) -> RunRecord:
         return ctx.runner.get_run(run_id)
 
+    @app.get("/runs/{run_id}/cache-stats")
+    def get_run_cache_stats(run_id: str) -> dict[str, Any]:
+        """获取 Run 的缓存统计信息。"""
+        return ctx.runner.get_cache_stats(run_id)
+
+    @app.post("/runs/{run_id}/cache/invalidate")
+    def invalidate_run_cache(run_id: str, skill_ref: str | None = None) -> dict[str, Any]:
+        """失效缓存。"""
+        invalidated = ctx.runner.invalidate_cache(run_id=run_id, skill_ref=skill_ref)
+        return {"run_id": run_id, "invalidated": invalidated}
+
+    @app.get("/cache/config")
+    def get_cache_config() -> dict[str, Any]:
+        """获取缓存配置。"""
+        return ctx.runner.get_cache_config()
+
 
 def _build_task_preflight(ctx: RouteContext, request: TaskPreflightRequest) -> dict[str, Any]:
     """生成任务创建前预检结果。

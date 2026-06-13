@@ -1,0 +1,29 @@
+# AegisQA Skill 基础镜像
+#
+# 为所有 Skill 插件包提供统一的最小运行环境。
+# 基于 python:3.12-slim 以控制镜像体积，预装常用依赖。
+#
+# 构建方式：
+#   docker build -t aegisqa-skill-base -f Dockerfile.base .
+
+FROM python:3.12-slim
+
+# 系统依赖：ca-certificates 用于 HTTPS 请求
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# 常用 Python 依赖
+RUN pip install --no-cache-dir \
+    pyyaml \
+    requests
+
+# 创建非 root 用户，Skill 在此用户下运行以限制权限
+RUN groupadd --gid 1000 skilluser \
+    && useradd --uid 1000 --gid 1000 --create-home skilluser
+
+# 工作目录
+WORKDIR /app/skill
+
+# 切换到非 root 用户
+USER skilluser

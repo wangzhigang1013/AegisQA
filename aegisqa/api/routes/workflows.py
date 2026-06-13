@@ -209,6 +209,76 @@ def register_workflow_routes(app: FastAPI, ctx: RouteContext) -> None:
         ctx.audit_service.record(actor=actor, role=role, action="workflow.archive", target=version_id, detail={"role": role})
         return archived
 
+    @app.get("/eval-templates")
+    def list_eval_template(category: str | None = None) -> list[dict[str, Any]]:
+        """列出评测模板。"""
+        from aegisqa.workflows.eval_templates import list_eval_templates
+        templates = list_eval_templates(category=category)
+        return [t.model_dump(mode="json") for t in templates]
+
+    @app.get("/eval-templates/{template_id}")
+    def get_eval_template(template_id: str) -> dict[str, Any]:
+        """获取评测模板详情。"""
+        from aegisqa.workflows.eval_templates import get_eval_template
+        template = get_eval_template(template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail=f"模板 {template_id} 不存在")
+        return template.model_dump(mode="json")
+
+    @app.post("/eval-templates/{template_id}/create-workflow")
+    def create_workflow_from_template(template_id: str, name: str = "", role: str = "Evaluator", actor: str = "api") -> dict[str, Any]:
+        """从评测模板创建 Workflow 草稿。"""
+        from aegisqa.workflows.eval_templates import get_eval_template
+        template = get_eval_template(template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail=f"模板 {template_id} 不存在")
+
+        _require_workflow_write(ctx, role=role, actor=actor, action="workflow_draft.create_from_template", target=template_id)
+
+        # 构建 Workflow 草稿
+        draft_name = name or template.name
+        steps = [
+            {
+                "step_id": step["step_id"],
+                "skill_ref": step["skill_ref"],
+                "input_mapping": step.get("input_mapping", {}),
+                "output_mapping": step.get("output_mapping", {}),
+                "config": step.get("config", {}),
+            }
+            for step in template.workflow_steps
+        ]
+
+        draft = {
+            "draft_id": f"draft-{uuid4().hex[:12]}",
+            "name": draft_name,
+            "status": "draft",
+            "graph": {
+                "name": draft_name,
+                "nodes": [
+                    {"id": "source", "type": "source", "position": {"x": 0, "y": 100}, "data": {"label": "数据源"}},
+                    *[
+                        {"id": step["step_id"], "type": "skill", "position": {"x": (i + 1) * 200, "y": 100}, "data": {"label": step["step_id"], "skill_ref": step["skill_ref"]}}
+                        for i, step in enumerate(template.workflow_steps)
+                    ],
+                    {"id": "output", "type": "output", "position": {"x": (len(template.workflow_steps) + 1) * 200, "y": 100}, "data": {"label": "输出"}},
+                ],
+                "edges": [
+                    {"id": f"e-source-{template.workflow_steps[0]['step_id']}", "source": "source", "target": template.workflow_steps[0]["step_id"]},
+                    *[
+                        {"id": f"e-{template.workflow_steps[i]['step_id']}-{template.workflow_steps[i+1]['step_id']}", "source": template.workflow_steps[i]["step_id"], "target": template.workflow_steps[i+1]["step_id"]}
+                        for i in range(len(template.workflow_steps) - 1)
+                    ],
+                    {"id": f"e-{template.workflow_steps[-1]['step_id']}-output", "source": template.workflow_steps[-1]["step_id"], "target": "output"},
+                ],
+            },
+            "steps": steps,
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        _save_workflow_draft(ctx.store, draft)
+        ctx.audit_service.record(actor=actor, role=role, action="workflow_draft.create_from_template", target=template_id, detail={"template_id": template_id, "draft_id": draft["draft_id"]})
+        return draft
+
 
 def _require_workflow_write(ctx: RouteContext, *, role: str, actor: str, action: str, target: str) -> None:
     require_permission(

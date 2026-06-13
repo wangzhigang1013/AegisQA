@@ -47,19 +47,25 @@ function createAppQueryClient() {
 }
 
 const navItems: MenuProps['items'] = [
-  { key: '/', icon: <BarChartOutlined />, label: <NavLink to="/">概览</NavLink> },
-  { key: '/datasets', icon: <DatabaseOutlined />, label: <NavLink to="/datasets">数据集</NavLink> },
-  { key: '/skills', icon: <ExperimentOutlined />, label: <NavLink to="/skills">Skill 市场</NavLink> },
-  { key: '/workflows', icon: <ApartmentOutlined />, label: <NavLink to="/workflows">Workflow 市场</NavLink> },
-  { key: '/runs', icon: <PlayCircleOutlined />, label: <NavLink to="/runs">执行中心</NavLink> },
-  { key: '/reports', icon: <BarChartOutlined />, label: <NavLink to="/reports">报告中心</NavLink> },
-  { key: '/repair-tasks', icon: <ToolOutlined />, label: <NavLink to="/repair-tasks">修复任务</NavLink> },
-  { key: '/experiments', icon: <ExperimentOutlined />, label: <NavLink to="/experiments">实验中心</NavLink> },
-  { key: '/ci-gates', icon: <ControlOutlined />, label: <NavLink to="/ci-gates">CI Gate</NavLink> },
-  { key: '/annotation-queue', icon: <FileSearchOutlined />, label: <NavLink to="/annotation-queue">人工审核</NavLink> },
-  { key: '/candidate-assets', icon: <FileSearchOutlined />, label: <NavLink to="/candidate-assets">候选资产</NavLink> },
-  { key: '/judge', icon: <AuditOutlined />, label: <NavLink to="/judge">Judge 审计</NavLink> },
-  { key: '/governance', icon: <SafetyCertificateOutlined />, label: <NavLink to="/governance">治理与审计</NavLink> },
+  { type: 'group', label: '工作台', key: 'grp-workspace', children: [
+    { key: '/', icon: <BarChartOutlined />, label: <NavLink to="/">概览</NavLink> },
+    { key: '/datasets', icon: <DatabaseOutlined />, label: <NavLink to="/datasets">数据集</NavLink> },
+    { key: '/skills', icon: <ExperimentOutlined />, label: <NavLink to="/skills">Skill 市场</NavLink> },
+    { key: '/workflows', icon: <ApartmentOutlined />, label: <NavLink to="/workflows">Workflow</NavLink> },
+  ]},
+  { type: 'group', label: '评测', key: 'grp-evaluation', children: [
+    { key: '/runs', icon: <PlayCircleOutlined />, label: <NavLink to="/runs">执行中心</NavLink> },
+    { key: '/reports', icon: <BarChartOutlined />, label: <NavLink to="/reports">报告中心</NavLink> },
+    { key: '/repair-tasks', icon: <ToolOutlined />, label: <NavLink to="/repair-tasks">修复任务</NavLink> },
+    { key: '/experiments', icon: <ExperimentOutlined />, label: <NavLink to="/experiments">实验中心</NavLink> },
+    { key: '/ci-gates', icon: <ControlOutlined />, label: <NavLink to="/ci-gates">CI Gate</NavLink> },
+  ]},
+  { type: 'group', label: '治理', key: 'grp-governance', children: [
+    { key: '/annotation-queue', icon: <FileSearchOutlined />, label: <NavLink to="/annotation-queue">人工审核</NavLink> },
+    { key: '/candidate-assets', icon: <FileSearchOutlined />, label: <NavLink to="/candidate-assets">候选资产</NavLink> },
+    { key: '/judge', icon: <AuditOutlined />, label: <NavLink to="/judge">Judge 审计</NavLink> },
+    { key: '/governance', icon: <SafetyCertificateOutlined />, label: <NavLink to="/governance">治理与审计</NavLink> },
+  ]},
 ];
 
 export function AppShell() {
@@ -73,13 +79,79 @@ export function AppShell() {
         algorithm: theme.defaultAlgorithm,
         token: {
           colorPrimary: '#2563eb',
-          colorSuccess: '#0f9f6e',
-          colorWarning: '#b45309',
+          colorSuccess: '#059669',
+          colorWarning: '#d97706',
           colorError: '#dc2626',
-          borderRadius: 8,
-          fontFamily: 'Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif',
+          colorInfo: '#2563eb',
+          borderRadius: 10,
+          borderRadiusLG: 14,
+          borderRadiusSM: 6,
+          fontFamily: '"DM Sans", "Segoe UI", "Microsoft YaHei", Arial, sans-serif',
+          fontSize: 14,
+          colorBgContainer: '#ffffff',
+          colorBgLayout: '#f0f2f5',
+          colorBgElevated: '#ffffff',
+          colorBorder: '#e2e8f0',
+          colorBorderSecondary: '#e2e8f0',
+          colorText: '#0f172a',
+          colorTextSecondary: '#475569',
+          colorTextTertiary: '#94a3b8',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.07)',
+          boxShadowSecondary: '0 8px 24px rgba(0, 0, 0, 0.1)',
           // Vitest 的 jsdom 环境不渲染真实动画，关闭 motion 可以减少无意义的计时器等待和 act 噪声；生产环境保持 Ant Design 默认动效。
           motion: import.meta.env.MODE === 'test' ? false : undefined,
+        },
+        components: {
+          Menu: {
+            itemBg: 'transparent',
+            subMenuItemBg: 'transparent',
+            itemSelectedBg: 'rgba(59, 130, 246, 0.15)',
+            itemHoverBg: 'rgba(59, 130, 246, 0.08)',
+            itemSelectedColor: '#f8fafc',
+            itemColor: '#94a3b8',
+            itemHoverColor: '#f8fafc',
+            itemActiveBg: 'rgba(59, 130, 246, 0.12)',
+            groupTitleColor: '#64748b',
+            fontSize: 14,
+            itemHeight: 40,
+            itemMarginBlock: 2,
+            itemMarginInline: 8,
+            itemBorderRadius: 6,
+            iconSize: 16,
+          },
+          Card: {
+            headerBg: 'transparent',
+            paddingLG: 20,
+            borderRadiusLG: 10,
+          },
+          Table: {
+            headerBg: '#f8fafc',
+            headerColor: '#475569',
+            rowHoverBg: '#eff6ff',
+            borderColor: '#e2e8f0',
+            cellPaddingBlock: 12,
+            cellPaddingInline: 16,
+          },
+          Button: {
+            borderRadius: 8,
+            controlHeight: 36,
+            fontWeight: 500,
+          },
+          Input: {
+            borderRadius: 8,
+            controlHeight: 36,
+          },
+          Select: {
+            borderRadius: 8,
+            controlHeight: 36,
+          },
+          Tag: {
+            borderRadiusSM: 6,
+          },
+          Statistic: {
+            titleFontSize: 13,
+            contentFontSize: 28,
+          },
         },
       }}
     >
@@ -90,10 +162,13 @@ export function AppShell() {
               <DeploymentUnitOutlined />
               <div>
                 <strong>AegisQA</strong>
-                <span>AI 评测工作台</span>
+                <span>AI 评测治理平台</span>
               </div>
             </div>
             <Menu className="app-menu" mode="inline" selectedKeys={[selectedKey]} items={navItems} />
+            <div className="sider-footer">
+              <span>v0.1.0 · Local</span>
+            </div>
           </Layout.Sider>
           <Layout className="app-main">
             <Layout.Content className="app-content">

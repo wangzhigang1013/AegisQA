@@ -16,3 +16,4 @@
 - 每次执行代码、文档、配置、测试、脚手架、UI 等任何改动后，都必须同步更新 `docs/PROJECT_STATUS.md`。
 - `docs/PROJECT_STATUS.md` 必须记录当前阶段、最近改动、变更文件、验证命令、测试结果和下一步。
 - 若状态文件没有同步更新，本次改动不能视为完成。
+- 历史改动记录归档在 `docs/archive/PROJECT_STATUS_HISTORY.md`；`PROJECT_STATUS.md` 保持精简（目标 < 200 行），只保留当前阶段摘要和最近改动。

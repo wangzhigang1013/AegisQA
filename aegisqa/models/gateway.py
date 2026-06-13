@@ -12,7 +12,7 @@ import math
 import os
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, Generator
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -28,14 +28,16 @@ MODEL_API_KEY_REF_ENV = "AEGISQA_MODEL_API_KEY_REF"
 MODEL_DEFAULT_ENV = "AEGISQA_MODEL_DEFAULT_MODEL"
 MODEL_TIMEOUT_ENV = "AEGISQA_MODEL_TIMEOUT_SECONDS"
 MODEL_SECRET_DOTENV_ENV = "AEGISQA_MODEL_SECRET_DOTENV"
+ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_MODEL_TIMEOUT_SECONDS = 60
 MAX_MODEL_TIMEOUT_SECONDS = 600
 MODEL_GATEWAY_SETTINGS_PARTS = ["settings", "model_gateway.json"]
 MODEL_GATEWAY_CONNECTIONS_PARTS = ["settings", "model_gateway_connections.json"]
-SUPPORTED_MODEL_PROVIDERS = {"mock", "demo", "offline", "openai", "openai_compatible", "compatible"}
+SUPPORTED_MODEL_PROVIDERS = {"mock", "demo", "offline", "openai", "openai_compatible", "compatible", "anthropic", "claude"}
 DEFAULT_OR_EMPTY_MODEL_NAMES = {"", "mock-eval-model"}
 _runtime_config: ModelGatewayConfig | None = None
 _runtime_connections: dict[str, ModelGatewayConnectionConfig] = {}
+_api_key_rotation_index: int = 0
 
 
 class ModelGatewayConfig(BaseModel):
@@ -46,7 +48,11 @@ class ModelGatewayConfig(BaseModel):
     secret_ref: str | None = None
     # `api_key` 只允许作为运行期临时值存在，持久化时必须剔除。
     api_key: str | None = None
+    # 多 API Key 支持（轮询使用）
+    api_keys: list[str] = Field(default_factory=list)
     default_model: str = "mock-eval-model"
+    # Fallback 模型链
+    fallback_models: list[str] = Field(default_factory=list)
     timeout_seconds: int = DEFAULT_MODEL_TIMEOUT_SECONDS
 
     @field_validator("provider")
@@ -136,10 +142,13 @@ class ModelGateway:
         provider = self.config.provider.lower()
         uses_external_endpoint = provider not in {"mock", "demo", "offline", ""}
         api_key = resolve_model_gateway_api_key(self.config)
+        mode = "offline_mock"
+        if uses_external_endpoint:
+            mode = "anthropic" if provider in {"anthropic", "claude"} else "openai_compatible"
         return {
             "provider": provider or "mock",
             "ready": True if not uses_external_endpoint else bool(self.config.base_url),
-            "mode": "offline_mock" if not uses_external_endpoint else "openai_compatible",
+            "mode": mode,
             "default_model": self.config.default_model,
             "base_url_configured": bool(self.config.base_url),
             "api_key_configured": bool(api_key),
@@ -156,25 +165,273 @@ class ModelGateway:
         max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> ModelResponse:
-        provider = self.config.provider.lower()
+        """生成文本，支持 Fallback 链。"""
         selected_model = model or self.config.default_model
+        models_to_try = [selected_model] + self.config.fallback_models
+        last_error = None
+
+        for try_model in models_to_try:
+            try:
+                return self._generate_with_provider(
+                    prompt=prompt, messages=messages, model=try_model,
+                    temperature=temperature, max_tokens=max_tokens,
+                    response_format=response_format,
+                )
+            except AegisQAError as exc:
+                last_error = exc
+                # 只有网络错误和 5xx 才尝试 fallback
+                status_code = exc.details.get("status_code", 0)
+                if isinstance(status_code, int) and status_code < 500:
+                    raise
+                continue
+
+        # 所有模型都失败
+        raise last_error or AegisQAError(
+            "MODEL_GATEWAY_ALL_FAILED",
+            "所有模型都调用失败。",
+            status_code=502,
+        )
+
+    def _generate_with_provider(
+        self,
+        *,
+        prompt: str | None = None,
+        messages: list[dict[str, Any]] | None = None,
+        model: str = "mock-eval-model",
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> ModelResponse:
+        """使用当前 provider 生成文本。"""
+        provider = self.config.provider.lower()
+        # 轮询 API Key
+        if self.config.api_keys:
+            self._rotate_api_key()
         if provider in {"mock", "demo", "offline", ""}:
-            return self._mock_generate(prompt=prompt, messages=messages, model=selected_model)
+            return self._mock_generate(prompt=prompt, messages=messages, model=model)
         if provider in {"openai", "openai_compatible", "compatible"}:
             return self._openai_compatible_generate(
-                prompt=prompt,
-                messages=messages,
-                model=selected_model,
-                temperature=temperature,
-                max_tokens=max_tokens,
+                prompt=prompt, messages=messages, model=model,
+                temperature=temperature, max_tokens=max_tokens,
                 response_format=response_format,
+            )
+        if provider in {"anthropic", "claude"}:
+            return self._anthropic_generate(
+                prompt=prompt, messages=messages, model=model,
+                temperature=temperature, max_tokens=max_tokens,
             )
         raise AegisQAError(
             "MODEL_PROVIDER_UNSUPPORTED",
             f"不支持的模型 Provider：{self.config.provider}",
             status_code=400,
-            details={"provider": self.config.provider, "supported": ["mock", "openai_compatible"]},
+            details={"provider": self.config.provider, "supported": ["mock", "openai_compatible", "anthropic"]},
         )
+
+    def _rotate_api_key(self) -> None:
+        """轮询 API Key（round-robin）。"""
+        if not self.config.api_keys:
+            return
+        # 使用模块级变量追踪当前索引
+        global _api_key_rotation_index
+        keys = self.config.api_keys
+        _api_key_rotation_index = (_api_key_rotation_index + 1) % len(keys)
+        self.config.api_key = keys[_api_key_rotation_index]
+
+    def generate_stream(
+        self,
+        *,
+        prompt: str | None = None,
+        messages: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> Generator[str, None, None]:
+        """流式生成文本。
+
+        Yields:
+            逐 token 的文本片段。
+        """
+        provider = self.config.provider.lower()
+        selected_model = model or self.config.default_model
+        if provider in {"mock", "demo", "offline", ""}:
+            yield from self._mock_generate_stream(prompt=prompt, messages=messages, model=selected_model)
+            return
+        if provider in {"openai", "openai_compatible", "compatible"}:
+            yield from self._openai_compatible_generate_stream(
+                prompt=prompt,
+                messages=messages,
+                model=selected_model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return
+        if provider in {"anthropic", "claude"}:
+            yield from self._anthropic_generate_stream(
+                prompt=prompt,
+                messages=messages,
+                model=selected_model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return
+        # 不支持 streaming 的 provider 回退到非流式
+        response = self.generate(
+            prompt=prompt, messages=messages, model=model,
+            temperature=temperature, max_tokens=max_tokens,
+        )
+        yield response.text
+
+    def _mock_generate_stream(self, *, prompt: str | None, messages: list[dict[str, Any]] | None, model: str) -> Generator[str, None, None]:
+        """Mock 流式生成。"""
+        text_prompt = prompt or _messages_to_prompt(messages)
+        full_text = f"模型回答：{text_prompt}。这是 AegisQA 统一模型网关的离线示例输出。"
+        # 模拟逐字输出
+        for char in full_text:
+            yield char
+
+    def _openai_compatible_generate_stream(
+        self,
+        *,
+        prompt: str | None,
+        messages: list[dict[str, Any]] | None,
+        model: str,
+        temperature: float | None,
+        max_tokens: int | None,
+    ) -> Generator[str, None, None]:
+        """OpenAI-compatible 流式生成。"""
+        if not self.config.base_url:
+            raise AegisQAError(
+                "MODEL_GATEWAY_NOT_CONFIGURED",
+                "模型网关未配置 base_url。",
+                status_code=400,
+            )
+
+        endpoint = self._chat_completions_endpoint()
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages or [{"role": "user", "content": prompt or ""}],
+            "stream": True,
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+
+        headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+        api_key = resolve_model_gateway_api_key(self.config)
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        request = Request(
+            endpoint,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urlopen(request, timeout=self.config.timeout_seconds) as response:  # noqa: S310
+                for line in response:
+                    line = line.decode("utf-8").strip()
+                    if not line or line == "data: [DONE]":
+                        continue
+                    if line.startswith("data: "):
+                        try:
+                            data = json.loads(line[6:])
+                            choices = data.get("choices", [])
+                            if choices:
+                                delta = choices[0].get("delta", {})
+                                content = delta.get("content")
+                                if content:
+                                    yield content
+                        except json.JSONDecodeError:
+                            continue
+        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            raise AegisQAError(
+                "MODEL_GATEWAY_STREAM_ERROR",
+                f"流式请求失败：{exc}",
+                status_code=502,
+                details={"error": str(exc)},
+            ) from exc
+
+    def _anthropic_generate_stream(
+        self,
+        *,
+        prompt: str | None,
+        messages: list[dict[str, Any]] | None,
+        model: str,
+        temperature: float | None,
+        max_tokens: int | None,
+    ) -> Generator[str, None, None]:
+        """Anthropic 流式生成。"""
+        if not self.config.base_url:
+            raise AegisQAError(
+                "MODEL_GATEWAY_NOT_CONFIGURED",
+                "模型网关未配置 base_url。",
+                status_code=400,
+            )
+
+        anthropic_messages, system_prompt = _convert_to_anthropic_messages(messages, prompt)
+
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": anthropic_messages,
+            "max_tokens": max_tokens or 4096,
+            "stream": True,
+        }
+        if system_prompt:
+            payload["system"] = system_prompt
+        if temperature is not None:
+            payload["temperature"] = temperature
+
+        api_key = resolve_model_gateway_api_key(self.config)
+        headers = {
+            "Content-Type": "application/json",
+            "anthropic-version": ANTHROPIC_VERSION,
+            "Accept": "text/event-stream",
+        }
+        if api_key:
+            headers["x-api-key"] = api_key
+
+        base_url = (self.config.base_url or "").rstrip("/")
+        if base_url.endswith("/messages"):
+            endpoint = base_url
+        elif base_url.endswith("/v1"):
+            endpoint = f"{base_url}/messages"
+        else:
+            endpoint = f"{base_url}/v1/messages"
+
+        request = Request(
+            endpoint,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urlopen(request, timeout=self.config.timeout_seconds) as response:  # noqa: S310
+                for line in response:
+                    line = line.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        try:
+                            data = json.loads(line[6:])
+                            event_type = data.get("type")
+                            if event_type == "content_block_delta":
+                                delta = data.get("delta", {})
+                                text = delta.get("text")
+                                if text:
+                                    yield text
+                        except json.JSONDecodeError:
+                            continue
+        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            raise AegisQAError(
+                "MODEL_GATEWAY_STREAM_ERROR",
+                f"Anthropic 流式请求失败：{exc}",
+                status_code=502,
+                details={"error": str(exc)},
+            ) from exc
 
     def _mock_generate(self, *, prompt: str | None, messages: list[dict[str, Any]] | None, model: str) -> ModelResponse:
         started = perf_counter()
@@ -257,6 +514,110 @@ class ModelGateway:
             usage=data.get("usage") or {},
             latency_ms=(perf_counter() - started) * 1000,
             raw={"id": data.get("id"), "finish_reason": choice.get("finish_reason")},
+        )
+
+    def _anthropic_generate(
+        self,
+        *,
+        prompt: str | None,
+        messages: list[dict[str, Any]] | None,
+        model: str,
+        temperature: float | None,
+        max_tokens: int | None,
+    ) -> ModelResponse:
+        """调用 Anthropic Claude API。
+
+        Anthropic API 格式与 OpenAI 不同：
+        - 端点：/v1/messages
+        - 认证：x-api-key 头
+        - 消息格式：system 独立字段，messages 只含 user/assistant
+        - 响应：content[].text，usage.input_tokens/output_tokens
+        """
+        if not self.config.base_url:
+            raise AegisQAError(
+                "MODEL_GATEWAY_NOT_CONFIGURED",
+                "模型网关未配置 base_url，请设置 AEGISQA_MODEL_BASE_URL。",
+                status_code=400,
+                details={"required_env": MODEL_BASE_URL_ENV},
+            )
+        started = perf_counter()
+
+        # 构建消息体
+        anthropic_messages, system_prompt = _convert_to_anthropic_messages(messages, prompt)
+
+        # 构建请求 payload
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": anthropic_messages,
+            "max_tokens": max_tokens or 4096,
+        }
+        if system_prompt:
+            payload["system"] = system_prompt
+        if temperature is not None:
+            payload["temperature"] = temperature
+
+        # 构建请求头
+        api_key = resolve_model_gateway_api_key(self.config)
+        headers = {
+            "Content-Type": "application/json",
+            "anthropic-version": ANTHROPIC_VERSION,
+        }
+        if api_key:
+            headers["x-api-key"] = api_key
+
+        # 构建端点 URL
+        base_url = (self.config.base_url or "").rstrip("/")
+        if base_url.endswith("/messages"):
+            endpoint = base_url
+        elif base_url.endswith("/v1"):
+            endpoint = f"{base_url}/messages"
+        else:
+            endpoint = f"{base_url}/v1/messages"
+
+        request = Request(
+            endpoint,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.config.timeout_seconds) as response:  # noqa: S310
+                data = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise AegisQAError(
+                "MODEL_GATEWAY_HTTP_ERROR",
+                f"Anthropic API 请求失败：HTTP {exc.code}",
+                status_code=502,
+                details={"status_code": exc.code, "body": body[:1000]},
+            ) from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise AegisQAError(
+                "MODEL_GATEWAY_NETWORK_ERROR",
+                "Anthropic API 请求网络失败或超时。",
+                status_code=502,
+                details={"error": str(exc), "timeout_seconds": self.config.timeout_seconds},
+            ) from exc
+
+        # 解析响应
+        content_blocks = data.get("content") or []
+        text = "".join(block.get("text", "") for block in content_blocks if block.get("type") == "text")
+
+        # 解析 usage（Anthropic 格式：input_tokens / output_tokens）
+        raw_usage = data.get("usage") or {}
+        usage = {
+            "prompt_tokens": raw_usage.get("input_tokens", 0),
+            "completion_tokens": raw_usage.get("output_tokens", 0),
+            "total_tokens": (raw_usage.get("input_tokens", 0) or 0) + (raw_usage.get("output_tokens", 0) or 0),
+        }
+
+        return ModelResponse(
+            text=text,
+            provider="anthropic",
+            model=str(data.get("model") or model),
+            usage=usage,
+            latency_ms=(perf_counter() - started) * 1000,
+            raw={"id": data.get("id"), "stop_reason": data.get("stop_reason")},
         )
 
     def _chat_completions_endpoint(self) -> str:
@@ -559,6 +920,51 @@ def _dotenv_candidate_paths() -> list[Path]:
     if explicit_path:
         return [Path(explicit_path).expanduser()]
     return [Path.cwd() / ".env"]
+
+
+def _convert_to_anthropic_messages(
+    messages: list[dict[str, Any]] | None,
+    prompt: str | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """将通用消息格式转换为 Anthropic API 格式。
+
+    Anthropic 要求：
+    - system 作为独立字段（不在 messages 中）
+    - messages 只能包含 user 和 assistant 角色
+    - 消息必须以 user 角色开始
+
+    返回：(anthropic_messages, system_prompt)
+    """
+    if not messages:
+        if prompt:
+            return [{"role": "user", "content": prompt}], None
+        return [{"role": "user", "content": ""}], None
+
+    system_parts: list[str] = []
+    anthropic_messages: list[dict[str, Any]] = []
+
+    for msg in messages:
+        role = str(msg.get("role") or "user")
+        content = str(msg.get("content") or "")
+
+        if role == "system":
+            system_parts.append(content)
+        elif role in {"user", "assistant"}:
+            anthropic_messages.append({"role": role, "content": content})
+        else:
+            # 未知角色当作 user
+            anthropic_messages.append({"role": "user", "content": content})
+
+    # 确保消息以 user 开始
+    if anthropic_messages and anthropic_messages[0]["role"] != "user":
+        anthropic_messages.insert(0, {"role": "user", "content": prompt or ""})
+
+    # 确保消息不为空
+    if not anthropic_messages:
+        anthropic_messages = [{"role": "user", "content": prompt or ""}]
+
+    system_prompt = "\n\n".join(system_parts) if system_parts else None
+    return anthropic_messages, system_prompt
 
 
 def _messages_to_prompt(messages: list[dict[str, Any]] | None) -> str:

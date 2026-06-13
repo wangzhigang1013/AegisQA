@@ -107,6 +107,37 @@ class SQLiteStore:
             if line.strip():
                 yield json.loads(line)
 
+    def delete_json(self, parts: Iterable[str]) -> bool:
+        """删除指定 key 的 JSON 文档。返回是否存在并被删除。"""
+        key = _key(parts)
+        with self._connection() as conn:
+            cursor = conn.execute("delete from json_documents where key = ?", (key,))
+            return cursor.rowcount > 0
+
+    def delete_jsonl(self, parts: Iterable[str]) -> None:
+        """删除指定 stream 的所有 JSONL 行。"""
+        key = _key(parts)
+        with self._connection() as conn:
+            conn.execute("delete from jsonl_rows where stream_key = ?", (key,))
+
+    def list_jsonl_keys(self, prefix: Iterable[str]) -> list[str]:
+        """列出指定前缀下的所有 JSONL stream key。"""
+        prefix_key = _key(prefix).strip("/")
+        match_prefix = f"{prefix_key}/" if prefix_key else ""
+        with self._connection() as conn:
+            rows = conn.execute(
+                "select distinct stream_key from jsonl_rows where stream_key like ? order by stream_key",
+                (f"{match_prefix}%",),
+            ).fetchall()
+        return [row["stream_key"] for row in rows]
+
+    def count_jsonl(self, parts: Iterable[str]) -> int:
+        """统计指定 stream 的 JSONL 行数。"""
+        key = _key(parts)
+        with self._connection() as conn:
+            row = conn.execute("select count(*) as cnt from jsonl_rows where stream_key = ?", (key,)).fetchone()
+        return row["cnt"] if row else 0
+
     def list_json(self, prefix: Iterable[str], *, recursive: bool = False) -> list[dict[str, Any]]:
         prefix_key = _key(prefix).strip("/")
         match_prefix = f"{prefix_key}/" if prefix_key else ""

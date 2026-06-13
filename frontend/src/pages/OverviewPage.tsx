@@ -45,19 +45,25 @@ export function OverviewPage() {
   const failedTasks = tasks.filter((task) => task.status === 'failed' || task.failed_items > 0);
   const blockingGateCount = (ciGatesQuery.data ?? []).filter((gate) => gate.status === 'active').length;
   const productCapabilities = [
-    { name: 'Experiment 快照', value: experimentsQuery.data?.length ?? 0, note: 'Run 不可变快照', icon: <ExperimentOutlined /> },
-    { name: 'Assertion DSL', value: '7 类', note: 'contains/regex/schema/latency/cost/safety', icon: <CodeOutlined /> },
-    { name: 'CI Gate', value: '可阻断', note: '按指标阈值拦截发布', icon: <SafetyCertificateOutlined /> },
-    { name: 'Annotation Queue', value: annotationQuery.data?.length ?? 0, note: '失败/低分样本人工复核', icon: <AuditOutlined /> },
-    { name: 'Trace Tree', value: 'Run Item', note: 'Skill 级输入输出与耗时', icon: <CheckCircleOutlined /> },
+    { name: 'Experiment 快照', value: experimentsQuery.data?.length ?? 0, note: 'Run 不可变快照', icon: <ExperimentOutlined />, tone: 'blue' },
+    { name: 'Assertion DSL', value: '7 类', note: 'contains/regex/schema/latency/cost/safety', icon: <CodeOutlined />, tone: 'green' },
+    { name: 'CI Gate', value: '可阻断', note: '按指标阈值拦截发布', icon: <SafetyCertificateOutlined />, tone: 'violet' },
+    { name: 'Annotation Queue', value: annotationQuery.data?.length ?? 0, note: '失败/低分样本人工复核', icon: <AuditOutlined />, tone: 'amber' },
+    { name: 'Trace Tree', value: 'Run Item', note: 'Skill 级输入输出与耗时', icon: <CheckCircleOutlined />, tone: 'blue' },
   ];
 
   return (
-    <section className="page-stack">
+    <section className="page-stack route-fade-in">
+      {/* 欢迎横幅 */}
+      <div className="welcome-banner">
+        <h2>🛡️ AegisQA 评测指挥中心</h2>
+        <p>AI 评测治理平台 · 任务驱动 · 全链路可追溯</p>
+      </div>
+
       <PageHeader
         eyebrow="工作台总览"
-        title="AegisQA 评测工作台"
-        description="任务工作台围绕一次评测组织信息：先看待办，再沿着数据、Workflow、任务和报告完成闭环。"
+        title="评测工作台"
+        description="围绕一次评测组织信息：先看待办，再沿着数据、Workflow、任务和报告完成闭环。"
         primaryAction={
           <Space wrap>
             <Link to="/datasets">
@@ -72,25 +78,27 @@ export function OverviewPage() {
 
       {dashboardQuery.isError ? <Alert type="error" showIcon message="Dashboard 读取失败" description="请确认后端 8000 服务已经启动，并且 Vite 代理指向 /api。" /> : null}
 
+      {/* 核心指标 */}
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} xl={6}>
-          <MetricTile title="数据集数量" value={summary.dataset_count} icon={<DatabaseOutlined />} tone="blue" note="含 Golden" />
+          <MetricTile title="数据集数量" value={summary.dataset_count} icon={<DatabaseOutlined />} tone="blue" note="含 Golden" className="card-enter" />
         </Col>
         <Col xs={24} sm={12} xl={6}>
-          <MetricTile title="Skill 数量" value={summary.skill_count} icon={<ExperimentOutlined />} tone="green" note="已审批" />
+          <MetricTile title="Skill 数量" value={summary.skill_count} icon={<ExperimentOutlined />} tone="green" note="已审批" className="card-enter" />
         </Col>
         <Col xs={24} sm={12} xl={6}>
-          <MetricTile title="通过率" value={passRate} suffix="%" icon={<AuditOutlined />} tone="violet" note="最近 Run" />
+          <MetricTile title="通过率" value={passRate} suffix="%" icon={<AuditOutlined />} tone="violet" note="最近 Run" className="card-enter" />
         </Col>
         <Col xs={24} sm={12} xl={6}>
-          <MetricTile title="Badcase 数" value={summary.badcase_count} icon={<BugOutlined />} tone="amber" note="待复盘" />
+          <MetricTile title="Badcase 数" value={summary.badcase_count} icon={<BugOutlined />} tone="amber" note="待复盘" className="card-enter" />
         </Col>
       </Row>
 
-      <div className="section-band">
+      {/* 任务工作台 */}
+      <div className="section-band card-enter">
         <div className="section-title-row">
           <div>
-            <h2>任务工作台</h2>
+            <h2>⚡ 任务工作台</h2>
             <p>先处理阻塞项，再从主流程入口创建新的评测任务。</p>
           </div>
           <Space wrap>
@@ -116,10 +124,11 @@ export function OverviewPage() {
         </Row>
       </div>
 
-      <div className="section-band">
+      {/* 推荐操作路径 */}
+      <div className="section-band card-enter">
         <div className="section-title-row">
           <div>
-            <h2>推荐操作路径</h2>
+            <h2>📋 推荐操作路径</h2>
             <p>新用户按这条路径走，就能完成一次可追溯评测。</p>
           </div>
         </div>
@@ -135,10 +144,11 @@ export function OverviewPage() {
         />
       </div>
 
-      <div className="section-band">
+      {/* 产品化增强 */}
+      <div className="section-band card-enter">
         <div className="section-title-row">
           <div>
-            <h2>产品化增强</h2>
+            <h2>🚀 产品化增强</h2>
             <p>对标 LangSmith、Braintrust、Langfuse、Promptfoo、W&B Weave 后补齐的核心能力。</p>
           </div>
           <Link to="/reports">
@@ -148,7 +158,7 @@ export function OverviewPage() {
         <Row gutter={[12, 12]}>
           {productCapabilities.map((item) => (
             <Col xs={24} md={12} xl={8} key={item.name}>
-              <Card className="flat-card" size="small">
+              <Card className={`flat-card capability-card capability-${item.tone}`} size="small">
                 <div className="metric-topline">
                   <span className="metric-icon">{item.icon}</span>
                   <Tag bordered={false}>{item.value}</Tag>
@@ -161,7 +171,8 @@ export function OverviewPage() {
         </Row>
       </div>
 
-      <Card className="flat-card" title="最近任务">
+      {/* 最近任务 */}
+      <Card className="flat-card card-enter" title="📊 最近任务">
         {recentTasks.length ? (
           <Table
             pagination={false}
@@ -172,7 +183,20 @@ export function OverviewPage() {
               { title: '任务', dataIndex: 'name' },
               { title: '数据源', dataIndex: 'dataset_name' },
               { title: 'Workflow', dataIndex: 'workflow_name' },
-              { title: '状态', dataIndex: 'status', render: (status) => <Tag color={status === 'completed' ? 'green' : status === 'failed' ? 'red' : 'blue'}>{status}</Tag> },
+              {
+                title: '状态',
+                dataIndex: 'status',
+                render: (status) => {
+                  const colorMap: Record<string, string> = {
+                    completed: 'green',
+                    failed: 'red',
+                    running: 'blue',
+                    pending: 'default',
+                  };
+                  const pulseClass = status === 'running' ? 'status-pulse' : '';
+                  return <Tag color={colorMap[status] ?? 'default'} className={pulseClass}>{status}</Tag>;
+                },
+              },
               { title: '进度', render: (_, task) => `${task.completed_items} / ${task.total_items}` },
               { title: 'Badcase', dataIndex: 'badcase_count' },
               {
@@ -196,7 +220,7 @@ export function OverviewPage() {
       </Card>
 
       {summary.run_count > 0 ? (
-        <Typography.Text type="secondary">底层 Run 仍保留为执行批次，用户主线以任务为准。</Typography.Text>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>底层 Run 仍保留为执行批次，用户主线以任务为准。</Typography.Text>
       ) : null}
     </section>
   );

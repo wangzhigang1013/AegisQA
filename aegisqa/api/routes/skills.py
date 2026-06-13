@@ -29,6 +29,7 @@ from aegisqa.skills.agent_skills import (
     update_agent_skill_status,
 )
 from aegisqa.skills.base import SkillManifest
+from aegisqa.skills.export_import import export_skill_package, import_skill_package, extract_zip_to_directory
 
 
 class SkillRollbackRequest(BaseModel):
@@ -233,6 +234,212 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             detail={"reason": request.reason, "role": request.role},
         )
         return manifest
+
+    @app.get("/skills/{skill_id:path}/export")
+    def export_skill(skill_id: str, include_tests: bool = False, include_history: bool = False) -> dict[str, Any]:
+        """导出 Skill 包为标准 zip 格式。"""
+        manifest = ctx.registry.get(skill_id)
+        if not manifest:
+            raise ValueError(f"Skill {skill_id} 不存在。")
+
+        # 查找包根目录
+        package_root = None
+        package_record = _find_skill_package(ctx.store, skill_id)
+        if package_record and package_record.get("package_dir"):
+            from pathlib import Path
+            package_root = Path(package_record["package_dir"])
+
+        # 获取版本历史
+        history_records = None
+        if include_history:
+            version_history = _build_skill_version_history(ctx, skill_id)
+            history_records = version_history.get("versions", [])
+
+        result = export_skill_package(
+            skill_id=skill_id,
+            manifest=manifest,
+            package_root=package_root,
+            include_tests=include_tests,
+            include_history=include_history,
+            history_records=history_records,
+        )
+
+        import base64
+        return {
+            "skill_id": result.skill_id,
+            "filename": result.filename,
+            "zip_base64": base64.b64encode(result.zip_bytes).decode('ascii'),
+            "metadata": result.metadata,
+        }
+
+    class SkillImportRequest(BaseModel):
+        zip_base64: str
+        validate_compatibility: bool = True
+        role: str = "Skill Developer"
+        actor: str = "api"
+
+    @app.post("/skills/import")
+    def import_skill(request: SkillImportRequest) -> dict[str, Any]:
+        """从标准 zip 格式导入 Skill 包。"""
+        require_permission(
+            ctx.access_control,
+            ctx.audit_service,
+            role=request.role,
+            permission="skill:register",
+            action="skill.import",
+            target="skill_import",
+            actor=request.actor,
+        )
+
+        import base64
+        try:
+            zip_bytes = base64.b64decode(request.zip_base64)
+        except Exception as e:
+            raise ValueError(f"无效的 base64 编码：{e}")
+
+        result = import_skill_package(
+            zip_bytes=zip_bytes,
+            validate_compatibility=request.validate_compatibility,
+        )
+
+        # 保存导入的包
+        from pathlib import Path
+        import tempfile
+        import os
+
+        # 创建临时目录并解压
+        with tempfile.TemporaryDirectory(prefix="aegisqa_import_") as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            extract_zip_to_directory(zip_bytes, tmp_path)
+
+            # 查找 handler.py 或 SKILL.md
+            handler_path = None
+            skill_md_path = None
+            for f in tmp_path.rglob('*'):
+                if f.name == 'handler.py':
+                    handler_path = f
+                elif f.name == 'SKILL.md':
+                    skill_md_path = f
+
+            # 构建上传请求
+            upload_request = SkillPackageUploadRequest(
+                filename=result.filename,
+                zip_base64=request.zip_base64,
+                role=request.role,
+                actor=request.actor,
+            )
+
+            # 安装包
+            record = _install_skill_package(ctx.store, ctx.registry, upload_request)
+
+        ctx.audit_service.record(
+            actor=request.actor,
+            role=request.role,
+            action="skill.import",
+            target=result.skill_id,
+            detail={"filename": result.filename, "warnings": result.warnings, "role": request.role},
+        )
+
+        return {
+            "skill_id": result.skill_id,
+            "filename": result.filename,
+            "manifest": result.manifest,
+            "metadata": result.metadata,
+            "warnings": result.warnings,
+            "package_record": record,
+        }
+
+    class SkillBatchExportRequest(BaseModel):
+        skill_ids: list[str]
+        include_tests: bool = False
+        include_history: bool = False
+
+    @app.post("/skills/batch-export")
+    def batch_export_skills(request: SkillBatchExportRequest) -> dict[str, Any]:
+        """批量导出 Skill 包。"""
+        results = []
+        for skill_id in request.skill_ids:
+            try:
+                manifest = ctx.registry.get(skill_id)
+                if not manifest:
+                    results.append({"skill_id": skill_id, "error": "不存在"})
+                    continue
+
+                package_root = None
+                package_record = _find_skill_package(ctx.store, skill_id)
+                if package_record and package_record.get("package_dir"):
+                    from pathlib import Path
+                    package_root = Path(package_record["package_dir"])
+
+                history_records = None
+                if request.include_history:
+                    version_history = _build_skill_version_history(ctx, skill_id)
+                    history_records = version_history.get("versions", [])
+
+                result = export_skill_package(
+                    skill_id=skill_id,
+                    manifest=manifest,
+                    package_root=package_root,
+                    include_tests=request.include_tests,
+                    include_history=request.include_history,
+                    history_records=history_records,
+                )
+
+                import base64
+                results.append({
+                    "skill_id": result.skill_id,
+                    "filename": result.filename,
+                    "zip_base64": base64.b64encode(result.zip_bytes).decode('ascii'),
+                    "metadata": result.metadata,
+                })
+            except Exception as e:
+                results.append({"skill_id": skill_id, "error": str(e)})
+
+        return {"exported": len([r for r in results if "error" not in r]), "results": results}
+
+    class SkillBatchImportRequest(BaseModel):
+        packages: list[SkillImportRequest]
+
+    @app.post("/skills/batch-import")
+    def batch_import_skills(request: SkillBatchImportRequest) -> dict[str, Any]:
+        """批量导入 Skill 包。"""
+        results = []
+        for pkg in request.packages:
+            try:
+                import base64
+                zip_bytes = base64.b64decode(pkg.zip_base64)
+                result = import_skill_package(
+                    zip_bytes=zip_bytes,
+                    validate_compatibility=pkg.validate_compatibility,
+                )
+
+                # 保存包
+                upload_request = SkillPackageUploadRequest(
+                    filename=result.filename,
+                    zip_base64=pkg.zip_base64,
+                    role=pkg.role,
+                    actor=pkg.actor,
+                )
+                record = _install_skill_package(ctx.store, ctx.registry, upload_request)
+
+                ctx.audit_service.record(
+                    actor=pkg.actor,
+                    role=pkg.role,
+                    action="skill.import",
+                    target=result.skill_id,
+                    detail={"filename": result.filename, "warnings": result.warnings},
+                )
+
+                results.append({
+                    "skill_id": result.skill_id,
+                    "filename": result.filename,
+                    "manifest": result.manifest,
+                    "warnings": result.warnings,
+                })
+            except Exception as e:
+                results.append({"error": str(e)})
+
+        return {"imported": len([r for r in results if "error" not in r]), "results": results}
 
 
 def _build_skill_version_history(ctx: RouteContext, skill_id: str) -> dict[str, Any]:

@@ -1,0 +1,26 @@
+# AegisQA Skill 专用镜像模板
+#
+# 由 ContainerRuntime.build_image() 自动生成最终 Dockerfile。
+# 此文件仅供参考，展示自动生成内容的结构。
+#
+# 构建参数：
+#   BASE_IMAGE - 基础镜像标签，默认 aegisqa-skill-base
+
+ARG BASE_IMAGE=aegisqa-skill-base
+FROM ${BASE_IMAGE}
+
+# Skill 声明的 pip 依赖（由 ContainerRuntime 根据 skill.yaml 注入）
+# RUN pip install --no-cache-dir \
+#     'some-package>=1.0' \
+#     'another-package'
+
+# 复制 Skill 插件包（由 docker build context 注入）
+COPY --chown=skilluser:skilluser . /app/skill
+
+# 切换到非 root 用户
+USER skilluser
+WORKDIR /app/skill
+
+# 入口：从 stdin 读取 JSON 输入，调用 handler 函数，结果输出到 stdout
+# ENTRYPOINT 由 ContainerRuntime._generate_skill_dockerfile() 动态生成
+ENTRYPOINT ["python", "-c", "..."]

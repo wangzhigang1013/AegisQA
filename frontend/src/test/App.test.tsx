@@ -38,7 +38,7 @@ describe('AegisQA 前端工作台', () => {
 
     expect(screen.getByText('AegisQA')).toBeInTheDocument();
     expect(screen.getByText('开始一次评测')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Workflow 市场/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /Workflow/ }).length).toBeGreaterThan(0);
     expect(screen.getAllByText('最近任务').length).toBeGreaterThan(0);
   });
 
@@ -58,7 +58,7 @@ describe('AegisQA 前端工作台', () => {
   it('首页作为任务工作台展示待办队列和主流程入口', async () => {
     await renderWorkbench('/');
 
-    expect(await screen.findByText('任务工作台')).toBeInTheDocument();
+    expect(await screen.findByText(/任务工作台/)).toBeInTheDocument();
     expect(screen.getAllByText('最近任务').length).toBeGreaterThan(0);
     expect(screen.getByText('待审批 Skill')).toBeInTheDocument();
     expect(screen.getByText('待审核样本')).toBeInTheDocument();
@@ -82,7 +82,7 @@ describe('AegisQA 前端工作台', () => {
 
     await renderWorkbench('/');
 
-    expect(await screen.findByText('任务工作台')).toBeInTheDocument();
+    expect(await screen.findByText(/任务工作台/)).toBeInTheDocument();
     expect(await screen.findByText('RAG 任务')).toBeInTheDocument();
     expect(requests.some((url) => url.endsWith('/runs'))).toBe(false);
   });
@@ -90,7 +90,7 @@ describe('AegisQA 前端工作台', () => {
   it('Workflow 市场展示草稿、已发布版本、模板和新建入口', async () => {
     await renderWorkbench('/workflows');
 
-    expect(await screen.findByText('Workflow 市场')).toBeInTheDocument();
+    expect(await screen.findByText('Workflow 资产市场')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /新建 Workflow/ })).toBeInTheDocument();
     expect(await screen.findByText('测试草稿')).toBeInTheDocument();
     expect(await screen.findByText('RAG 回归评测')).toBeInTheDocument();
