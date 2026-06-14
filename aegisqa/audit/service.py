@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -9,6 +10,19 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from aegisqa.storage.json_store import JsonStore
+
+# 请求级上下文变量，由中间件设置，供审计服务自动读取
+_current_request_id: ContextVar[str | None] = ContextVar("current_request_id", default=None)
+
+
+def set_current_request_id(request_id: str | None) -> None:
+    """设置当前请求 ID（由中间件调用）。"""
+    _current_request_id.set(request_id)
+
+
+def get_current_request_id() -> str | None:
+    """获取当前请求 ID。"""
+    return _current_request_id.get()
 
 
 class AuditEvent(BaseModel):
@@ -41,6 +55,8 @@ class AuditService:
         result: str = "success",
         trace_id: str | None = None,
     ) -> AuditEvent:
+        # 自动从上下文变量获取 request_id，无需每个调用方手动传递
+        effective_trace_id = trace_id or get_current_request_id() or f"trace_{uuid4().hex[:12]}"
         event = AuditEvent(
             event_id=f"audit-{uuid4().hex[:12]}",
             actor=actor,
@@ -48,7 +64,7 @@ class AuditService:
             action=action,
             target=target,
             result=result,
-            trace_id=trace_id or f"trace_{uuid4().hex[:12]}",
+            trace_id=effective_trace_id,
             detail=detail or {},
             created_at=datetime.now(timezone.utc).isoformat(),
         )

@@ -324,13 +324,13 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             # 构建上传请求
             upload_request = SkillPackageUploadRequest(
                 filename=result.filename,
-                zip_base64=request.zip_base64,
+                content_base64=request.zip_base64,
                 role=request.role,
                 actor=request.actor,
             )
 
             # 安装包
-            record = _install_skill_package(ctx.store, ctx.registry, upload_request)
+            record = _install_skill_package(ctx.store, ctx.registry, ctx.artifact_store, upload_request)
 
         ctx.audit_service.record(
             actor=request.actor,
@@ -416,11 +416,11 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
                 # 保存包
                 upload_request = SkillPackageUploadRequest(
                     filename=result.filename,
-                    zip_base64=pkg.zip_base64,
+                    content_base64=pkg.zip_base64,
                     role=pkg.role,
                     actor=pkg.actor,
                 )
-                record = _install_skill_package(ctx.store, ctx.registry, upload_request)
+                record = _install_skill_package(ctx.store, ctx.registry, ctx.artifact_store, upload_request)
 
                 ctx.audit_service.record(
                     actor=pkg.actor,

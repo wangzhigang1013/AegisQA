@@ -1,0 +1,117 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search",
+    "filter": "Filter",
+    "reset": "Reset",
+    "refresh": "Refresh",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "submit": "Submit",
+    "close": "Close",
+    "yes": "Yes",
+    "no": "No",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "active": "Active",
+    "inactive": "Inactive",
+    "pending": "Pending",
+    "completed": "Completed",
+    "failed": "Failed",
+    "running": "Running",
+    "canceled": "Canceled",
+    "paused": "Paused"
+  },
+  "nav": {
+    "workspace": "Workspace",
+    "overview": "Overview",
+    "datasets": "Datasets",
+    "skills": "Skills",
+    "workflows": "Workflows",
+    "runs": "Runs",
+    "tasks": "Tasks",
+    "reports": "Reports",
+    "governance": "Governance",
+    "experiments": "Experiments",
+    "settings": "Settings"
+  },
+  "overview": {
+    "title": "Evaluation Command Center",
+    "subtitle": "AI Evaluation Governance Platform · Task-Driven · Full Traceability",
+    "metrics": {
+      "datasets": "Datasets",
+      "skills": "Skills",
+      "passRate": "Pass Rate",
+      "badcases": "Badcases"
+    },
+    "recentTasks": "Recent Tasks",
+    "noTasks": "No tasks yet",
+    "createTask": "Create Task"
+  },
+  "tasks": {
+    "title": "Task Center",
+    "create": "Create Task",
+    "name": "Task Name",
+    "status": "Status",
+    "progress": "Progress",
+    "actions": "Actions",
+    "execute": "Execute",
+    "pause": "Pause",
+    "resume": "Resume",
+    "cancel": "Cancel",
+    "retry": "Retry",
+    "details": "Details",
+    "trace": "Trace",
+    "report": "Report"
+  },
+  "datasets": {
+    "title": "Datasets",
+    "upload": "Upload Dataset",
+    "name": "Dataset Name",
+    "rows": "Rows",
+    "versions": "Versions",
+    "golden": "Golden"
+  },
+  "skills": {
+    "title": "Skills",
+    "upload": "Upload Skill Package",
+    "name": "Skill Name",
+    "version": "Version",
+    "status": "Status",
+    "approve": "Approve",
+    "disable": "Disable",
+    "deprecate": "Deprecate"
+  },
+  "workflows": {
+    "title": "Workflows",
+    "designer": "Designer",
+    "publish": "Publish",
+    "copy": "Copy",
+    "archive": "Archive"
+  },
+  "reports": {
+    "title": "Reports",
+    "export": "Export",
+    "summary": "Summary",
+    "details": "Details",
+    "badcases": "Badcases",
+    "metrics": "Metrics"
+  },
+  "auth": {
+    "login": "Login",
+    "logout": "Logout",
+    "username": "Username",
+    "password": "Password",
+    "rememberMe": "Remember me",
+    "forgotPassword": "Forgot password?"
+  }
+}

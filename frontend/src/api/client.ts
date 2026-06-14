@@ -104,37 +104,60 @@ export function formatApiError(error: unknown): string {
   return error instanceof Error ? error.message : '未知错误';
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    cache: init?.cache ?? 'no-store',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  });
+async function request<T>(path: string, init?: RequestInit, retries = 3): Promise<T> {
+  let lastError: Error | null = null;
 
-  const payload = await response.json().catch(() => ({}));
-  const responseTraceId = responseHeader(response, 'X-AegisQA-Request-ID');
-  if (!response.ok) {
-    if (response.status >= 500 && !payload?.code && !payload?.message && !payload?.detail && API_BASE === '/api') {
-      // Vite 代理连不上 FastAPI 时通常只返回空 500；这里给用户一个可操作的启动提示。
-      throw new ApiError('后端服务不可用，请确认 FastAPI 已启动在 http://127.0.0.1:8000。', {
-        code: 'BACKEND_UNAVAILABLE',
-        details: { api_base: API_BASE, status: response.status, request_id: responseTraceId },
-        trace_id: responseTraceId,
-        status: response.status,
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const response = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        cache: init?.cache ?? 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(init?.headers ?? {}),
+        },
       });
+
+      const payload = await response.json().catch(() => ({}));
+      const responseTraceId = responseHeader(response, 'X-AegisQA-Request-ID');
+
+      if (!response.ok) {
+        // 对于 502/503/504 瞬态错误，重试
+        if (response.status in {502: true, 503: true, 504: true} && attempt < retries - 1) {
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+          continue;
+        }
+
+        if (response.status >= 500 && !payload?.code && !payload?.message && !payload?.detail && API_BASE === '/api') {
+          // Vite 代理连不上 FastAPI 时通常只返回空 500；这里给用户一个可操作的启动提示。
+          throw new ApiError('后端服务不可用，请确认 FastAPI 已启动在 http://127.0.0.1:8000。', {
+            code: 'BACKEND_UNAVAILABLE',
+            details: { api_base: API_BASE, status: response.status, request_id: responseTraceId },
+            trace_id: responseTraceId,
+            status: response.status,
+          });
+        }
+        const message = payload?.message ?? payload?.detail ?? `请求失败：${response.status}`;
+        throw new ApiError(message, {
+          code: payload?.code,
+          details: payload?.details,
+          trace_id: payload?.trace_id ?? responseTraceId,
+          status: response.status,
+        });
+      }
+      return payload as T;
+    } catch (error) {
+      lastError = error as Error;
+      // 对于网络错误，重试
+      if (error instanceof TypeError && error.message.includes('fetch') && attempt < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        continue;
+      }
+      throw error;
     }
-    const message = payload?.message ?? payload?.detail ?? `请求失败：${response.status}`;
-    throw new ApiError(message, {
-      code: payload?.code,
-      details: payload?.details,
-      trace_id: payload?.trace_id ?? responseTraceId,
-      status: response.status,
-    });
   }
-  return payload as T;
+
+  throw lastError || new Error('Request failed after retries');
 }
 
 async function requestDownload(path: string, init?: RequestInit): Promise<TaskResultsExportDownload> {

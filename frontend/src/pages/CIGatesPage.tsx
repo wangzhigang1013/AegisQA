@@ -32,11 +32,11 @@ export function CIGatesPage() {
   const configName = Form.useWatch('name', form);
 
   const configsQuery = useQuery({ queryKey: ['ci-gates'], queryFn: api.ciGateConfigs });
-  const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
+  const tasksQuery = useQuery({ queryKey: ['tasks-all'], queryFn: () => api.tasksPage({ page: 1, pageSize: 100 }) });
   const runsQuery = useQuery({ queryKey: ['runs', 'summary', 1, 100], queryFn: () => api.runsPage({ page: 1, pageSize: 100 }) });
 
   const configs = configsQuery.data ?? [];
-  const tasks = tasksQuery.data ?? [];
+  const tasks = tasksQuery.data?.items ?? [];
   const runs = runsQuery.data?.items ?? [];
   const activeConfigId = selectedConfigId ?? configs[0]?.config_id;
   const activeTaskId = selectedTaskId ?? tasks[0]?.task_id;

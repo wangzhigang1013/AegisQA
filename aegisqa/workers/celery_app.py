@@ -6,11 +6,36 @@
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     from celery import Celery
 except ImportError:  # pragma: no cover - 本地测试环境默认不安装 Celery。
     Celery = None  # type: ignore[assignment]
+
+
+# Worker 级单例应用实例
+_worker_app = None
+_worker_store = None
+_worker_runner = None
+_worker_audit_service = None
+
+
+def _get_worker_app(store_root: str = "data/aegisqa_store", storage_backend: str = "json"):
+    """获取 Worker 级单例应用实例。"""
+    global _worker_app, _worker_store, _worker_runner, _worker_audit_service
+
+    if _worker_app is None:
+        logger.info("Creating worker app instance (store_root=%s, backend=%s)", store_root, storage_backend)
+        from aegisqa.api.app import create_app
+        _worker_app = create_app(store_root=store_root, storage_backend=storage_backend, task_executor_backend="local_thread")
+        _worker_store = _worker_app.state.store
+        _worker_runner = _worker_app.state.runner
+        _worker_audit_service = _worker_app.state.audit_service
+
+    return _worker_app, _worker_store, _worker_runner, _worker_audit_service
 
 
 if Celery is not None:
@@ -20,12 +45,10 @@ if Celery is not None:
     def execute_task(task_id: str, store_root: str = "data/aegisqa_store", storage_backend: str = "json") -> dict[str, str]:
         """在 Worker 进程里执行一个 Task 绑定的 Run。"""
 
-        from aegisqa.api.app import _get_record, _now, _refresh_task_from_run, _save_record, create_app
+        from aegisqa.api.app import _get_record, _now, _refresh_task_from_run, _save_record
 
-        worker_app = create_app(store_root=store_root, storage_backend=storage_backend, task_executor_backend="local_thread")
-        store = worker_app.state.store
-        runner = worker_app.state.runner
-        audit_service = worker_app.state.audit_service
+        # 使用单例应用实例
+        worker_app, store, runner, audit_service = _get_worker_app(store_root, storage_backend)
         task = _get_record(store, "tasks", task_id)
 
         def refresh_progress(current_run) -> None:  # noqa: ANN001 - Worker 只透传 RunRecord 给共享刷新函数。

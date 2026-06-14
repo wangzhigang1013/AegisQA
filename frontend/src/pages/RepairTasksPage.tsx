@@ -47,13 +47,13 @@ export function RepairTasksPage() {
     queryFn: () => api.repairTaskTree(treeTask?.repair_task_id ?? ''),
     enabled: Boolean(treeTask),
   });
-  const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
+  const tasksQuery = useQuery({ queryKey: ['tasks-all'], queryFn: () => api.tasksPage({ page: 1, pageSize: 100 }) });
 
   const visibleRepairTasks = repairTasksQuery.data?.items ?? [];
   const repairPagination = repairTasksQuery.data?.pagination;
 
   const taskNameById = useMemo(() => {
-    return Object.fromEntries((tasksQuery.data ?? []).map((task) => [task.task_id, task.name]));
+    return Object.fromEntries((tasksQuery.data?.items ?? []).map((task) => [task.task_id, task.name]));
   }, [tasksQuery.data]);
 
   const startMutation = useMutation({
@@ -225,7 +225,7 @@ export function RepairTasksPage() {
               setSourceTaskId(value);
               setRepairPage(1);
             }}
-            options={(tasksQuery.data ?? []).map((task) => ({ value: task.task_id, label: `${task.name} / ${task.status}` }))}
+            options={(tasksQuery.data?.items ?? []).map((task) => ({ value: task.task_id, label: `${task.name} / ${task.status}` }))}
           />
           <Typography.Text type="secondary">
             当前展示 {repairPagination?.total_items ?? visibleRepairTasks.length} 个修复工作项。

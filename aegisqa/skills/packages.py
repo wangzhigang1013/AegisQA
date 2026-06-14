@@ -561,7 +561,27 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 if not hasattr(module, function_name):
     raise RuntimeError(f"脚本入口必须暴露 {function_name}(inputs, config)")
-result = getattr(module, function_name)(payload.get("inputs", {}), payload.get("config", {}))
+
+inputs = payload.get("inputs", {})
+config = payload.get("config", {})
+func = getattr(module, function_name)
+
+# 尝试多种调用方式以支持不同函数签名
+try:
+    # 方式1: 标准 AegisQA 签名 func(inputs, config)
+    result = func(inputs, config)
+except TypeError:
+    try:
+        # 方式2: OpenAI Tool 风格 func(**inputs)
+        result = func(**inputs)
+    except TypeError:
+        try:
+            # 方式3: 单参数 func(inputs)
+            result = func(inputs)
+        except TypeError:
+            # 方式4: 无参数 func()
+            result = func()
+
 if result is None:
     result = {}
 if "output" not in result:

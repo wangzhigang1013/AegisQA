@@ -94,8 +94,8 @@ def register_report_routes(app: FastAPI, ctx: RouteContext) -> None:
         reason: str | None = None,
         skill: str | None = None,
         query: str | None = None,
-        min_score: float | None = Query(default=None),
-        max_score: float | None = Query(default=None),
+        min_score: float | None = Query(default=None, ge=0.0, le=1.0),
+        max_score: float | None = Query(default=None, ge=0.0, le=1.0),
         page: int = Query(1, ge=1),
         page_size: int = Query(20, ge=1, le=100),
     ) -> list[dict[str, Any]] | dict[str, Any]:

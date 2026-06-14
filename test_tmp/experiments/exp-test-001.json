@@ -1,0 +1,8 @@
+{
+  "experiment_id": "exp-test-001",
+  "name": "Test Experiment",
+  "run_id": "run-test-001",
+  "baseline_run_id": "run-test-002",
+  "status": "snapshotted",
+  "created_at": "2025-01-01T00:00:00Z"
+}

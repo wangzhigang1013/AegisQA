@@ -21,6 +21,7 @@ import zipfile
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 import yaml
@@ -73,6 +74,44 @@ SKILL_PACKAGE_DIRECT_MODEL_PATTERNS = [
     )
 ]
 SKILL_PACKAGE_API_KEY_PATTERN = re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]{12,}")
+
+# 网络外传模式
+SKILL_PACKAGE_NETWORK_EXFIL_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\brequests\.(post|put|patch)\s*\(",
+        r"\burllib\.(request|urlopen)\s*\(",
+        r"\bhttpx\.(post|put|patch)\s*\(",
+        r"\bhttp\.client\.HTTP(S)?Connection\s*\(",
+        r"\bsocket\.(socket|create_connection)\s*\(",
+        r"\bftplib\.FTP\s*\(",
+        r"\bsmtplib\.SMTP\s*\(",
+    )
+]
+
+# Shell 注入模式
+SKILL_PACKAGE_SHELL_INJECTION_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bos\.(system|popen|exec|execl|execle|execlp|execv|execve|execvp)\s*\(",
+        r"\bsubprocess\.(run|call|check_call|check_output|Popen)\s*\(",
+        r"\bcommands\.(getoutput|getstatusoutput)\s*\(",
+        r"\bshell=True\b",
+        r"\bos\.exec\s*\(",
+    )
+]
+
+# 文件系统访问模式
+SKILL_PACKAGE_FILE_ACCESS_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bopen\s*\([^)]*['\"](/|\\\\)",
+        r"\bpathlib\.Path\s*\([^)]*['\"](/|\\\\)",
+        r"\bos\.(chdir|chroot|mkdir|makedirs|remove|unlink|rmdir|rename)\s*\(",
+        r"\bshutil\.(copy|move|rmtree)\s*\(",
+        r"\bglob\.glob\s*\([^)]*['\"](/|\\\\)",
+    )
+]
 
 
 class DatasetFromPathRequest(BaseModel):
@@ -476,7 +515,7 @@ def create_app(
     _load_skill_packages(store, registry)
     load_agent_skills_from_store(store, registry)
     dataset_service = DatasetService(store, artifact_store)
-    runner = WorkflowRunner(store, dataset_service, registry, run_repository=repositories.runs, artifact_store=artifact_store)
+    runner = WorkflowRunner(store, dataset_service, registry, run_repository=repositories.runs)
     task_executor = create_task_executor(
         task_executor=task_executor,
         backend=task_executor_backend,
@@ -492,7 +531,26 @@ def create_app(
     access_control = AccessControl()
     workflows: dict[str, WorkflowVersion] = {}
 
-    app = FastAPI(title="AegisQA", version="0.1.0")
+    app = FastAPI(title="AegisQA", version="0.2.0")
+
+    # CORS 中间件：支持多源部署
+    cors_origins = os.getenv("AEGISQA_CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[origin.strip() for origin in cors_origins],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # JWT 认证中间件
+    from aegisqa.security.middleware import AuthenticationMiddleware
+    app.add_middleware(AuthenticationMiddleware)
+
+    # API 速率限制中间件
+    from aegisqa.security.rate_limit import RateLimitMiddleware
+    app.add_middleware(RateLimitMiddleware)
+
     app.state.store = store
     app.state.artifact_store = artifact_store
     app.state.repositories = repositories
@@ -512,10 +570,30 @@ def create_app(
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next: Any) -> Any:
+        import logging
+        import time
+        from aegisqa.audit.service import set_current_request_id
+        from aegisqa.observability.metrics import record_http_request
+        logger = logging.getLogger("aegisqa.api.access")
         trace_id = request.headers.get("X-AegisQA-Request-ID") or f"trace_{uuid4().hex[:12]}"
         request.state.request_id = trace_id
+        set_current_request_id(trace_id)
+        start = time.monotonic()
         response = await call_next(request)
+        elapsed_ms = (time.monotonic() - start) * 1000
+        elapsed_seconds = elapsed_ms / 1000
         response.headers["X-AegisQA-Request-ID"] = trace_id
+        logger.info(
+            "%s %s %d %.1fms trace=%s",
+            request.method, request.url.path, response.status_code, elapsed_ms, trace_id,
+        )
+        # 记录 Prometheus 指标
+        record_http_request(
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration_seconds=elapsed_seconds,
+        )
         return response
 
     @app.exception_handler(HTTPException)
@@ -556,7 +634,7 @@ def create_app(
             "name": "AegisQA",
             "status": "ok",
             "message": "后端 API 已启动。请打开前端工作台或 API 文档继续使用。",
-            "frontend_url": "http://localhost:5173",
+            "frontend_url": os.getenv("AEGISQA_FRONTEND_URL", "http://localhost:5173"),
             "docs_url": "/docs",
             "health_url": "/health",
             "storage_backend": app.state.storage_backend,
@@ -570,8 +648,90 @@ def create_app(
             "env_prefix": FEATURE_ENV_PREFIX,
         }
 
+    @app.get("/healthz")
+    def healthz() -> dict[str, Any]:
+        """Kubernetes 风格健康检查端点。
+
+        检查数据库连接、磁盘空间等关键依赖。
+        返回 200 表示健康，503 表示不健康。
+        """
+        import shutil
+        from datetime import datetime, timezone
+
+        checks: dict[str, Any] = {}
+        overall_status = "healthy"
+
+        # 1. 数据库连接检查
+        try:
+            if hasattr(store, "db_path"):
+                # SQLite
+                import sqlite3
+                conn = sqlite3.connect(str(store.db_path))
+                conn.execute("SELECT 1")
+                conn.close()
+                checks["database"] = {"status": "ok", "backend": "sqlite"}
+            elif hasattr(store, "connection_factory"):
+                # MySQL
+                conn = store.connection_factory()
+                conn.ping()
+                conn.close()
+                checks["database"] = {"status": "ok", "backend": "mysql"}
+            else:
+                # JSON store - just check if directory exists
+                checks["database"] = {"status": "ok", "backend": "json"}
+        except Exception as exc:
+            checks["database"] = {"status": "error", "error": str(exc)}
+            overall_status = "unhealthy"
+
+        # 2. 磁盘空间检查
+        try:
+            usage = shutil.disk_usage(str(store.root))
+            free_gb = usage.free / (1024 ** 3)
+            checks["disk"] = {
+                "status": "ok" if free_gb > 1.0 else "warning",
+                "free_gb": round(free_gb, 2),
+            }
+            if free_gb < 0.5:
+                overall_status = "unhealthy"
+        except Exception as exc:
+            checks["disk"] = {"status": "error", "error": str(exc)}
+
+        # 3. 存储后端检查
+        try:
+            test_key = ["_health_check", "test.json"]
+            store.write_json(test_key, {"timestamp": datetime.now(timezone.utc).isoformat()})
+            store.read_json(test_key)
+            checks["storage"] = {"status": "ok", "backend": app.state.storage_backend}
+        except Exception as exc:
+            checks["storage"] = {"status": "error", "error": str(exc)}
+            overall_status = "unhealthy"
+
+        return {
+            "status": overall_status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "checks": checks,
+            "version": "0.2.0",
+        }
+
+    @app.get("/metrics")
+    def metrics_endpoint() -> Any:
+        """Prometheus 指标端点。"""
+        from fastapi.responses import PlainTextResponse
+        from aegisqa.observability.metrics import get_prometheus_format
+        return PlainTextResponse(
+            content=get_prometheus_format(),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
+
+    @app.get("/metrics/summary")
+    def metrics_summary() -> dict[str, Any]:
+        """指标摘要（JSON 格式）。"""
+        from aegisqa.observability.metrics import get_metrics_summary
+        return get_metrics_summary()
+
     from aegisqa.api.routes import (
         register_agent_skill_routes,
+        register_auth_routes,
         register_dataset_routes,
         register_experiment_routes,
         register_governance_routes,
@@ -607,6 +767,7 @@ def create_app(
         workflows=workflows,
     )
     # 先注册更具体的 Run Report/Trace 路由，再注册 /runs/{run_id}，避免路径匹配被泛化路由截获。
+    register_auth_routes(app, route_context)
     register_governance_routes(app, route_context)
     register_model_routes(app, route_context)
     register_agent_skill_routes(app, route_context)
@@ -756,6 +917,13 @@ def _install_skill_package(
             raise AegisQAError("SKILL_PACKAGE_RUNTIME_INVALID", "runtime 必须是对象。")
         _reject_unsupported_skill_package_dependencies(package_dir, runtime_payload)
         manifest = SkillManifest(**manifest_payload)
+
+        # 检测 OpenAI Tool 格式，自动设置 entrypoint
+        if manifest_payload.get("openai_tool") or manifest_payload.get("tool_type") == "openai":
+            tool_name = manifest_payload.get("name", "")
+            if tool_name and not runtime_payload.get("entrypoint"):
+                runtime_payload["entrypoint"] = f"handler.py:{tool_name}"
+
     manifest.enabled = False
     manifest.status = "pending_review"
     runtime_mode = _resolve_skill_package_runtime_mode(runtime_payload, package_dir)
@@ -1053,6 +1221,33 @@ def _skill_package_member_warnings(filename: str, member: zipfile.ZipInfo, paylo
             {
                 "code": "SKILL_PACKAGE_API_KEY_WARNING",
                 "message": "插件包疑似包含硬编码 API key，审批前必须移除或改用平台 secret_ref。",
+                "filename": filename,
+            }
+        )
+    # 网络外传检测
+    if any(pattern.search(text) for pattern in SKILL_PACKAGE_NETWORK_EXFIL_PATTERNS):
+        warnings.append(
+            {
+                "code": "SKILL_PACKAGE_NETWORK_EXFIL_WARNING",
+                "message": "插件包源码疑似包含网络外传代码（HTTP 请求、Socket 连接等），审批时需要确认其必要性和目标地址。",
+                "filename": filename,
+            }
+        )
+    # Shell 注入检测
+    if any(pattern.search(text) for pattern in SKILL_PACKAGE_SHELL_INJECTION_PATTERNS):
+        warnings.append(
+            {
+                "code": "SKILL_PACKAGE_SHELL_INJECTION_WARNING",
+                "message": "插件包源码疑似包含 Shell 注入代码（subprocess、os.system 等），审批时需要确认其必要性和安全性。",
+                "filename": filename,
+            }
+        )
+    # 文件系统访问检测
+    if any(pattern.search(text) for pattern in SKILL_PACKAGE_FILE_ACCESS_PATTERNS):
+        warnings.append(
+            {
+                "code": "SKILL_PACKAGE_FILE_ACCESS_WARNING",
+                "message": "插件包源码疑似访问受限文件路径（绝对路径、系统目录等），审批时需要确认其必要性和权限范围。",
                 "filename": filename,
             }
         )

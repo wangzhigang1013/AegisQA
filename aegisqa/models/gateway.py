@@ -39,6 +39,8 @@ DEFAULT_OR_EMPTY_MODEL_NAMES = {"", "mock-eval-model"}
 _runtime_config: ModelGatewayConfig | None = None
 _runtime_connections: dict[str, ModelGatewayConnectionConfig] = {}
 _api_key_rotation_index: int = 0
+_config_last_loaded: float = 0  # 配置最后加载时间戳
+_config_store_ref: Any = None  # store 引用，用于跨进程同步
 
 
 class ModelGatewayConfig(BaseModel):
@@ -661,7 +663,7 @@ def model_response_usage_metrics(response: ModelResponse, *, connection_id: str 
     return metrics
 
 
-def set_model_gateway_runtime_config(config: ModelGatewayConfig | None) -> None:
+def set_model_gateway_runtime_config(config: ModelGatewayConfig | None, store: Any = None) -> None:
     """设置当前进程内的模型网关配置。
 
     Workflow、Agent Skill 和内置模型 Skill 都通过 `ModelGateway.from_env()` 获取配置。
@@ -669,12 +671,34 @@ def set_model_gateway_runtime_config(config: ModelGatewayConfig | None) -> None:
     持久化仍由 store 承担，避免只改环境变量导致重启丢失。
     """
 
-    global _runtime_config
+    global _runtime_config, _config_last_loaded, _config_store_ref
+    import time
     _runtime_config = config.model_copy(deep=True) if config else None
+    _config_last_loaded = time.time()
+    if store is not None:
+        _config_store_ref = store
 
 
 def get_model_gateway_runtime_config() -> ModelGatewayConfig | None:
-    """返回运行期配置副本，避免调用方误改全局对象。"""
+    """返回运行期配置副本，避免调用方误改全局对象。
+
+    支持跨进程配置同步：如果 store 中的配置时间戳比当前内存中的新，则自动重新加载。
+    """
+    global _runtime_config, _config_last_loaded
+
+    # 如果有 store 引用，检查是否需要重新加载
+    if _config_store_ref is not None:
+        import time
+        try:
+            # 检查 store 中的配置时间戳
+            store_timestamp = _config_store_ref.read_json(
+                ["settings", "model_gateway_timestamp.json"], default=None
+            )
+            if store_timestamp and store_timestamp.get("updated_at", 0) > _config_last_loaded:
+                # 重新加载配置
+                load_model_gateway_config_from_store(_config_store_ref)
+        except Exception:
+            pass  # 忽略加载错误，使用当前配置
 
     return _runtime_config.model_copy(deep=True) if _runtime_config else None
 
@@ -719,24 +743,30 @@ def load_model_gateway_config_from_store(store: Any) -> ModelGatewayConfig | Non
     load_model_gateway_connections_from_store(store)
     payload = store.read_json(MODEL_GATEWAY_SETTINGS_PARTS, default=None)
     if not payload:
-        set_model_gateway_runtime_config(None)
+        set_model_gateway_runtime_config(None, store=store)
         return None
     migrated_payload = _migrate_legacy_model_provider_payload(payload)
     sanitized_payload = _persisted_model_gateway_payload(ModelGatewayConfig(**migrated_payload))
     if payload != sanitized_payload:
         store.write_json(MODEL_GATEWAY_SETTINGS_PARTS, sanitized_payload)
     config = ModelGatewayConfig(**sanitized_payload)
-    set_model_gateway_runtime_config(config)
+    set_model_gateway_runtime_config(config, store=store)
     return config
 
 
 def save_model_gateway_config_to_store(store: Any, config: ModelGatewayConfig) -> ModelGatewayConfig:
     """保存模型网关配置，并立即让当前进程生效。"""
 
+    import time
     payload = _persisted_model_gateway_payload(config)
     store.write_json(MODEL_GATEWAY_SETTINGS_PARTS, payload)
+    # 存储时间戳用于跨进程同步
+    store.write_json(
+        ["settings", "model_gateway_timestamp.json"],
+        {"updated_at": time.time()},
+    )
     runtime_config = ModelGatewayConfig(**payload)
-    set_model_gateway_runtime_config(runtime_config)
+    set_model_gateway_runtime_config(runtime_config, store=store)
     return runtime_config
 
 

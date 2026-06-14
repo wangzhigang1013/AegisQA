@@ -101,9 +101,9 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         dataset_id: str | None = Query(default=None),
         workflow_id: str | None = Query(default=None),
         q: str | None = Query(default=None),
-        page: int | None = Query(default=None, ge=1),
+        page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, ge=1, le=100),
-    ) -> list[dict[str, Any]] | dict[str, Any]:
+    ) -> dict[str, Any]:
         tasks = _list_records(ctx.store, "tasks")
         if status:
             tasks = [task for task in tasks if task.get("status") == status]
@@ -120,9 +120,6 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
                 or keyword in str(task.get("dataset_name", "")).lower()
                 or keyword in str(task.get("workflow_name", "")).lower()
             ]
-        if page is None:
-            # 旧前端和部分测试仍依赖数组响应；只有显式分页时才切换为分页对象。
-            return tasks
         return _paginate_records(tasks, page=page, page_size=page_size)
 
     @app.get("/tasks/{task_id}")
@@ -381,12 +378,9 @@ def register_task_routes(app: FastAPI, ctx: RouteContext) -> None:
         status: str | None = Query(default=None),
         dataset_id: str | None = Query(default=None),
         workflow_version_id: str | None = Query(default=None),
-        page: int | None = Query(default=None, ge=1),
+        page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, ge=1, le=100),
-    ) -> list[RunRecord] | dict[str, Any]:
-        if page is None:
-            # 旧接口保持完整 RunRecord[]，兼容仍依赖 item 明细的测试和外部脚本。
-            return ctx.runner.list_runs()
+    ) -> dict[str, Any]:
         summaries = ctx.runner.list_run_summaries()
         if status:
             summaries = [run for run in summaries if run.get("status") == status]

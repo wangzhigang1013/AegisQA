@@ -69,8 +69,8 @@ def test_frontend_list_and_summary_api_contract(tmp_path: Path) -> None:
     assert workflows[0]["graph"]["name"] == "交互回归 Workflow"
 
     runs = client.get("/runs").json()
-    assert runs[0]["run_id"] == executed["run_id"]
-    assert runs[0]["status"] == "completed"
+    assert runs["items"][0]["run_id"] == executed["run_id"]
+    assert runs["items"][0]["status"] == "completed"
 
     summary = client.get("/dashboard/summary").json()
     assert summary["dataset_count"] == 1
@@ -94,13 +94,20 @@ def test_runs_support_compatible_lightweight_server_side_pagination(tmp_path: Pa
         if index % 2 == 0:
             client.post(f"/runs/{run['run_id']}/execute")
 
-    legacy = client.get("/runs").json()
+    # 现在 /runs 默认返回分页响应
+    default_page = client.get("/runs").json()
     page = client.get("/runs", params={"page": 2, "page_size": 2}).json()
     completed_page = client.get("/runs", params={"status": "completed", "page": 1, "page_size": 10}).json()
 
-    assert isinstance(legacy, list)
-    assert "items" in legacy[0]
-    assert "queue_messages" in legacy[0]
+    # 默认分页：page=1, page_size=20
+    assert "items" in default_page
+    assert "pagination" in default_page
+    assert default_page["pagination"]["page"] == 1
+    assert default_page["pagination"]["page_size"] == 20
+    assert default_page["pagination"]["total_items"] == 5
+    assert all("items" not in item for item in default_page["items"])
+    assert all("queue_messages" not in item for item in default_page["items"])
+
     assert page["pagination"] == {"page": 2, "page_size": 2, "total_items": 5, "total_pages": 3}
     assert [item["run_id"] for item in page["items"]] == list(reversed(created_run_ids))[2:4]
     assert all("items" not in item for item in page["items"])

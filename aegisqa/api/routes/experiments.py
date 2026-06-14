@@ -84,11 +84,11 @@ def register_experiment_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.post("/experiments/{experiment_id}/compare")
     def compare_experiment_runs(experiment_id: str, metric_name: str = "pass_rate") -> dict[str, Any]:
         """对比实验中的两个 Run。"""
-        from aegisqa.api.app import _find_record
-        from aegisqa.engine.runner import WorkflowRunner
+        from aegisqa.api.app import _get_record
 
-        experiment = _find_record(ctx.store, "experiments", experiment_id)
-        if not experiment:
+        try:
+            experiment = _get_record(ctx.store, "experiments", experiment_id)
+        except KeyError:
             raise HTTPException(status_code=404, detail=f"实验 {experiment_id} 不存在")
 
         baseline_run_id = experiment.get("baseline_run_id")
@@ -98,11 +98,11 @@ def register_experiment_routes(app: FastAPI, ctx: RouteContext) -> None:
             raise HTTPException(status_code=400, detail="实验缺少 baseline 或 compare run")
 
         # 获取两个 Run 的指标
-        baseline_run = ctx.run_repository.get(baseline_run_id) if ctx.run_repository else None
-        compare_run = ctx.run_repository.get(compare_run_id) if ctx.run_repository else None
-
-        if not baseline_run or not compare_run:
-            raise HTTPException(status_code=404, detail="Run 不存在")
+        try:
+            baseline_run = ctx.runner.get_run(baseline_run_id)
+            compare_run = ctx.runner.get_run(compare_run_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
 
         # 提取指标值
         baseline_values = []

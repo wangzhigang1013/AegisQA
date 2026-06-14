@@ -1,6 +1,7 @@
 """AegisQA API 路由注册入口。"""
 
 from aegisqa.api.routes.agent_skills import register_agent_skill_routes
+from aegisqa.api.routes.auth import register_auth_routes
 from aegisqa.api.routes.datasets import register_dataset_routes
 from aegisqa.api.routes.experiments import register_experiment_routes
 from aegisqa.api.routes.governance import register_governance_routes
@@ -18,6 +19,7 @@ from aegisqa.api.routes.workflows import register_workflow_routes
 
 __all__ = [
     "register_agent_skill_routes",
+    "register_auth_routes",
     "register_dataset_routes",
     "register_experiment_routes",
     "register_governance_routes",

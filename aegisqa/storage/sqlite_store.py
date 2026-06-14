@@ -11,9 +11,13 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
+import logging
 from pathlib import Path
 import sqlite3
+import time
 from typing import Any, Iterable, Iterator
+
+logger = logging.getLogger(__name__)
 
 
 class SQLiteStore:
@@ -175,12 +179,24 @@ class SQLiteStore:
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
-        conn = self._connect()
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+        """获取数据库连接，带重试逻辑处理 'database is locked' 错误。"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            conn = self._connect()
+            try:
+                yield conn
+                conn.commit()
+                return
+            except sqlite3.OperationalError as exc:
+                conn.rollback()
+                if "locked" in str(exc).lower() and attempt < max_retries - 1:
+                    wait = 0.1 * (2 ** attempt)
+                    logger.warning("SQLite locked, retrying in %.1fs (attempt %d/%d)", wait, attempt + 1, max_retries)
+                    time.sleep(wait)
+                    continue
+                raise
+            finally:
+                conn.close()
 
     def _init_schema(self) -> None:
         with self._connection() as conn:

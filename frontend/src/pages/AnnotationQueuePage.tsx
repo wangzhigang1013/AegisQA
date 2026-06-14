@@ -43,7 +43,7 @@ export function AnnotationQueuePage() {
     queryKey: ['annotation-queue', statusFilter, assigneeFilter, sourceTaskId, queuePage, queuePageSize],
     queryFn: () => api.annotationQueuePage({ status: statusFilter, assignee: assigneeFilter, source_task_id: sourceTaskId, page: queuePage, pageSize: queuePageSize }),
   });
-  const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
+  const tasksQuery = useQuery({ queryKey: ['tasks-all'], queryFn: () => api.tasksPage({ page: 1, pageSize: 100 }) });
   const candidatesQuery = useQuery({
     queryKey: ['annotation-candidates', sourceTaskId],
     queryFn: () => api.annotationCandidates({ source_task_id: sourceTaskId }),
@@ -186,7 +186,7 @@ export function AnnotationQueuePage() {
               setSourceTaskId(value);
               resetQueuePaging();
             }}
-            options={(tasksQuery.data ?? []).map((task) => ({ value: task.task_id, label: `${task.name} / ${task.status}` }))}
+            options={(tasksQuery.data?.items ?? []).map((task) => ({ value: task.task_id, label: `${task.name} / ${task.status}` }))}
           />
         </Space>
       </Card>

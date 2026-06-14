@@ -17,6 +17,10 @@ import type { MenuProps } from 'antd';
 import { lazy, Suspense, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 
+import { ChunkErrorBoundary } from './components/ChunkErrorBoundary';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import './i18n';
+
 const OverviewPage = lazy(() => import('./pages/OverviewPage').then(({ OverviewPage }) => ({ default: OverviewPage })));
 const DatasetsPage = lazy(() => import('./pages/DatasetsPage').then(({ DatasetsPage }) => ({ default: DatasetsPage })));
 const SkillsPage = lazy(() => import('./pages/SkillsPage').then(({ SkillsPage }) => ({ default: SkillsPage })));
@@ -172,8 +176,10 @@ export function AppShell() {
           </Layout.Sider>
           <Layout className="app-main">
             <Layout.Content className="app-content">
-              <Suspense fallback={<div className="route-loading" role="status">正在加载页面...</div>}>
-                <Routes>
+              <ErrorBoundary>
+                <ChunkErrorBoundary>
+                  <Suspense fallback={<div className="route-loading" role="status">正在加载页面...</div>}>
+                    <Routes>
                   <Route path="/" element={<OverviewPage />} />
                   <Route path="/datasets" element={<DatasetsPage />} />
                   <Route path="/skills" element={<SkillsPage />} />
@@ -193,7 +199,9 @@ export function AppShell() {
                   <Route path="/judge" element={<JudgeAuditPage />} />
                   <Route path="/governance" element={<GovernancePage />} />
                 </Routes>
-              </Suspense>
+                  </Suspense>
+                </ChunkErrorBoundary>
+              </ErrorBoundary>
             </Layout.Content>
           </Layout>
         </Layout>

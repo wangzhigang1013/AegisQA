@@ -22,7 +22,7 @@ import { MetricTile } from '../components/MetricTile';
 
 export function OverviewPage() {
   const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard });
-  const tasksQuery = useQuery({ queryKey: ['tasks'], queryFn: api.tasks });
+  const tasksQuery = useQuery({ queryKey: ['tasks-paged'], queryFn: () => api.tasksPage({ page: 1, pageSize: 6 }) });
   const skillPackagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
   const experimentsQuery = useQuery({ queryKey: ['experiments'], queryFn: () => api.experiments() });
   const annotationQuery = useQuery({ queryKey: ['annotation-queue'], queryFn: () => api.annotationQueue() });
@@ -38,7 +38,8 @@ export function OverviewPage() {
     latest_run: null,
   };
   const passRate = Math.round(summary.pass_rate * 100);
-  const tasks = tasksQuery.data ?? [];
+  const tasks = tasksQuery.data?.items ?? [];
+  const totalTasks = tasksQuery.data?.pagination?.total_items ?? 0;
   const recentTasks = tasks.slice(0, 6);
   const pendingSkillPackages = (skillPackagesQuery.data ?? []).filter((item) => item.status === 'pending_review');
   const pendingAnnotation = (annotationQuery.data ?? []).filter((item) => item.status !== 'reviewed');
@@ -77,6 +78,9 @@ export function OverviewPage() {
       />
 
       {dashboardQuery.isError ? <Alert type="error" showIcon message="Dashboard 读取失败" description="请确认后端 8000 服务已经启动，并且 Vite 代理指向 /api。" /> : null}
+      {tasksQuery.isError ? <Alert type="error" showIcon message="任务列表读取失败" description="请刷新页面重试。" /> : null}
+      {skillPackagesQuery.isError ? <Alert type="warning" showIcon message="Skill 包列表读取失败" /> : null}
+      {experimentsQuery.isError ? <Alert type="warning" showIcon message="实验列表读取失败" /> : null}
 
       {/* 核心指标 */}
       <Row gutter={[16, 16]}>
@@ -110,7 +114,7 @@ export function OverviewPage() {
         </div>
         <Row gutter={[12, 12]}>
           <Col xs={24} md={12} xl={6}>
-            <MetricTile title="最近任务" value={tasks.length} icon={<PlayCircleOutlined />} tone="blue" note="Task 主对象" />
+            <MetricTile title="最近任务" value={totalTasks} icon={<PlayCircleOutlined />} tone="blue" note="Task 主对象" />
           </Col>
           <Col xs={24} md={12} xl={6}>
             <MetricTile title="待审批 Skill" value={pendingSkillPackages.length} icon={<ToolOutlined />} tone="amber" note="插件合约测试后启用" />

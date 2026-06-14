@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 from uuid import uuid4
@@ -19,6 +22,88 @@ from aegisqa.skills.registry import SkillRegistry
 from aegisqa.storage.json_store import JsonStore
 from aegisqa.workflows.dag import DAGWorkflow, DAGWorkflowExecutor, DAGWorkflowStep
 from aegisqa.workflows.models import WorkflowVersion
+
+logger = logging.getLogger(__name__)
+
+
+class LazyRowCache:
+    """懒加载行缓存。
+
+    对于大型数据集，按需加载行而不是一次性加载全部。
+    实现了 dict-like 接口以兼容现有代码。
+    """
+
+    def __init__(
+        self,
+        dataset_service: DatasetService,
+        dataset_id: str,
+        dataset_version: int,
+        initial_cache: dict[str, DatasetRow] | None = None,
+    ) -> None:
+        self._dataset_service = dataset_service
+        self._dataset_id = dataset_id
+        self._dataset_version = dataset_version
+        self._cache: dict[str, DatasetRow] = initial_cache or {}
+        self._loaded_all = False
+        self._row_ids: set[str] | None = None
+
+    def _ensure_all_loaded(self) -> None:
+        """确保所有行已加载。"""
+        if self._loaded_all:
+            return
+        for row in self._dataset_service.iter_rows(self._dataset_id, self._dataset_version, chunk_size=100):
+            if row.row_id not in self._cache:
+                self._cache[row.row_id] = row
+        self._loaded_all = True
+
+    def __getitem__(self, row_id: str) -> DatasetRow:
+        """获取指定行。"""
+        if row_id in self._cache:
+            return self._cache[row_id]
+        # 尝试按需加载
+        for row in self._dataset_service.iter_rows(self._dataset_id, self._dataset_version, chunk_size=100):
+            self._cache[row.row_id] = row
+            if row.row_id == row_id:
+                return row
+        raise KeyError(f"Row not found: {row_id}")
+
+    def get(self, row_id: str, default: Any = None) -> DatasetRow | Any:
+        """获取指定行，不存在返回默认值。"""
+        try:
+            return self[row_id]
+        except KeyError:
+            return default
+
+    def __contains__(self, row_id: str) -> bool:
+        """检查行是否存在。"""
+        if row_id in self._cache:
+            return True
+        # 尝试按需加载
+        try:
+            self[row_id]
+            return True
+        except KeyError:
+            return False
+
+    def __len__(self) -> int:
+        """获取行数。"""
+        self._ensure_all_loaded()
+        return len(self._cache)
+
+    def __iter__(self) -> Iterator[str]:
+        """迭代行 ID。"""
+        self._ensure_all_loaded()
+        return iter(self._cache)
+
+    def values(self) -> Any:
+        """获取所有行。"""
+        self._ensure_all_loaded()
+        return self._cache.values()
+
+    def items(self) -> Any:
+        """获取所有行键值对。"""
+        self._ensure_all_loaded()
+        return self._cache.items()
 
 
 class RunRequest(BaseModel):
@@ -126,9 +211,17 @@ class WorkflowRunner:
         self.run_repository = run_repository
         self.rate_limiter_factory = rate_limiter_factory or create_rate_limiter
         self.progress_save_interval_items = max(1, int(progress_save_interval_items))
+        self._cache_ttl: int = int(os.getenv("AEGISQA_CACHE_TTL", "3600"))
+
+        # 初始化混合缓存（内存 + Redis）
+        from aegisqa.engine.redis_cache import HybridCache, RedisCache
+        redis_url = os.getenv("AEGISQA_REDIS_URL")
+        redis_cache = RedisCache(redis_url) if redis_url else None
+        self._hybrid_cache = HybridCache(redis_cache=redis_cache, ttl_seconds=self._cache_ttl)
+
+        # 保持向后兼容的内存缓存接口
         self._cache: dict[str, dict[str, Any]] = {}
-        self._cache_ttl: int = 3600  # 缓存 TTL（秒）
-        self._cache_created_at: dict[str, float] = {}  # 缓存创建时间
+        self._cache_created_at: dict[str, float] = {}
 
     def create_run(self, request: RunRequest) -> RunRecord:
         dataset = self.dataset_service.get_version(request.dataset_id, request.dataset_version)
@@ -201,19 +294,27 @@ class WorkflowRunner:
         run.status = "running"
         run.started_at = run.started_at or _now()
         self._save_run(run)
+        logger.info("Run %s started (%d items)", run_id, len(run.items))
         if progress_callback:
             progress_callback(run)
         limiter = self.rate_limiter_factory({key: float(value) for key, value in run.snapshot.get("runtime", {}).get("rate_limits", {}).items()})
 
         rows_by_id = self._rows_by_id(run.dataset_id, run.dataset_version)
 
+        # 从 task_config_snapshot 读取重试配置
+        task_config = run.snapshot.get("task_config_snapshot", {})
+        max_retries = int(task_config.get("max_retries", 0)) if isinstance(task_config, dict) else 0
+        retry_backoff_seconds = float(task_config.get("retry_backoff_seconds", 1.0)) if isinstance(task_config, dict) else 1.0
+
         # 检测是否有 DAG 结构，如果有则构建 DAG 执行器
         dag = None
         if self._has_dag_structure(run.workflow):
             try:
                 dag = self._build_dag_from_graph(run.workflow)
-            except Exception:
-                dag = None  # 回退到线性执行
+                logger.info("Run %s: DAG execution enabled (%d edges)", run_id, len(run.workflow.graph.get("edges", [])))
+            except Exception as exc:
+                logger.warning("Run %s: DAG construction failed, falling back to linear execution: %s", run_id, exc)
+                dag = None
 
         processed_since_save = 0
         for item in run.items:
@@ -223,10 +324,35 @@ class WorkflowRunner:
             if item.status == "succeeded":
                 continue
             row = rows_by_id[item.row_id]
-            if dag:
-                self._execute_item_dag(run, item, row, limiter, dag)
-            else:
-                self._execute_item(run, item, row, limiter)
+            logger.debug("Run %s: executing item %s (row_index=%d)", run_id, item.item_id, item.row_index)
+
+            # 带自动重试的执行逻辑
+            attempt = 0
+            while True:
+                if dag:
+                    self._execute_item_dag(run, item, row, limiter, dag)
+                else:
+                    self._execute_item(run, item, row, limiter)
+
+                if item.status != "failed" or attempt >= max_retries:
+                    break
+                attempt += 1
+                backoff = retry_backoff_seconds * (2 ** (attempt - 1))
+                logger.warning(
+                    "Run %s: item %s failed (attempt %d/%d), retrying in %.1fs: %s",
+                    run_id, item.item_id, attempt, max_retries, backoff,
+                    item.error.get("message", "") if item.error else "",
+                )
+                item.retry_count = attempt
+                item.status = "pending"
+                item.steps = []
+                item.error = None
+                time.sleep(backoff)
+
+            if item.status == "failed":
+                logger.warning("Run %s: item %s failed after %d attempts: %s",
+                    run_id, item.item_id, attempt + 1,
+                    item.error.get("message", "") if item.error else "")
             self._merge_control_flags(run)
             processed_since_save += 1
             # RunRecord 里包含所有 item，逐条完整写 JSON 会在 1000+ 样本时退化成
@@ -250,14 +376,19 @@ class WorkflowRunner:
         if run.canceled:
             run.status = "canceled"
             run.finished_at = _now()
+            logger.info("Run %s canceled", run_id)
         elif run.paused and not all_succeeded:
             run.status = "paused"
+            logger.info("Run %s paused", run_id)
         elif all_succeeded:
             run.status = "completed"
             run.finished_at = _now()
+            logger.info("Run %s completed (%d items)", run_id, len(run.items))
         else:
             run.status = "failed"
             run.finished_at = _now()
+            failed_count = sum(1 for item in run.items if item.status == "failed")
+            logger.warning("Run %s finished with %d failures out of %d items", run_id, failed_count, len(run.items))
         self._save_run(run)
         if progress_callback:
             progress_callback(run)
@@ -420,16 +551,21 @@ class WorkflowRunner:
                 step.status = "rate_limited" if decision.rate_limited_count else "running"
 
                 cache_key = self._cache_key(workflow_step, skill.manifest.version, inputs, resolved_parameters.config)
-                step.cache_key = cache_key[:16]
+                step.cache_key = cache_key
                 cache_valid = self._is_cache_valid(cache_key)
                 if workflow_step.cacheable and cache_valid:
-                    raw_output = self._cache[cache_key]
+                    # 优先从混合缓存读取
+                    cached = self._hybrid_cache.get(cache_key)
+                    if cached is None:
+                        cached = self._cache.get(cache_key)
+                    raw_output = cached
                     step.cache_hit = True
                     step.called_skill = False
                     output = raw_output["output"]
                     metrics = raw_output.get("metrics", {})
                     latency_ms = 0.0
                     logs = ["命中 Step 级 Evaluation Cache，跳过真实 Skill 调用。"]
+                    logger.debug("Step %s cache hit (key=%s)", workflow_step.step_id, cache_key[:16])
                 else:
                     step.called_skill = True
                     result, latency_ms = skill.execute(inputs, resolved_parameters.config)
@@ -437,8 +573,11 @@ class WorkflowRunner:
                     metrics = result.metrics
                     logs = result.logs
                     if workflow_step.cacheable:
-                        import time
-                        self._cache[cache_key] = {"output": output, "metrics": metrics}
+                        cache_value = {"output": output, "metrics": metrics}
+                        # 写入混合缓存
+                        self._hybrid_cache.set(cache_key, cache_value)
+                        # 向后兼容：也写入内存缓存
+                        self._cache[cache_key] = cache_value
                         self._cache_created_at[cache_key] = time.time()
 
                 validate_json_schema(output, skill.manifest.output_schema)
@@ -576,9 +715,22 @@ class WorkflowRunner:
         return DAGWorkflow(name=workflow.name, steps=dag_steps)
 
     def _rows_by_id(self, dataset_id: str, dataset_version: int) -> dict[str, DatasetRow]:
-        # Worker 按 item_id/row_id 单条读取是生产形态；本地 MVP 为了简化单进程执行，
-        # 在 execute_run 中建立索引。数据集创建和队列投递阶段仍保持流式。
-        return {row.row_id: row for row in self.dataset_service.iter_rows(dataset_id, dataset_version, chunk_size=1)}
+        """加载数据集行到内存索引。
+
+        对于小型数据集（<10000 行），直接加载到内存。
+        对于大型数据集，使用懒加载缓存避免一次性占用过多内存。
+        """
+        # 预加载小型数据集
+        rows = {}
+        row_count = 0
+        for row in self.dataset_service.iter_rows(dataset_id, dataset_version, chunk_size=100):
+            rows[row.row_id] = row
+            row_count += 1
+            # 大型数据集使用懒加载
+            if row_count > 10000:
+                logger.warning("Dataset has %d+ rows, using lazy loading", row_count)
+                return LazyRowCache(self.dataset_service, dataset_id, dataset_version, rows)
+        return rows
 
     def _cache_key(self, step: Any, skill_version: str, inputs: dict[str, Any], config: dict[str, Any]) -> str:
         payload = {
@@ -594,10 +746,13 @@ class WorkflowRunner:
 
     def _is_cache_valid(self, cache_key: str) -> bool:
         """检查缓存是否有效（存在且未过期）。"""
+        # 优先检查混合缓存
+        if self._hybrid_cache.get(cache_key) is not None:
+            return True
+        # 向后兼容：检查内存缓存
         if cache_key not in self._cache:
             return False
         created_at = self._cache_created_at.get(cache_key, 0)
-        import time
         return (time.time() - created_at) < self._cache_ttl
 
     def _save_run(self, run: RunRecord) -> None:
@@ -651,6 +806,9 @@ class WorkflowRunner:
                     skill = step.skill_ref
                     cache_hits[skill] = cache_hits.get(skill, 0) + 1
 
+        # 获取混合缓存统计
+        hybrid_stats = self._hybrid_cache.get_stats()
+
         return {
             "run_id": run_id,
             "total_steps": total_steps,
@@ -658,6 +816,7 @@ class WorkflowRunner:
             "cache_hit_rate": cached_steps / total_steps if total_steps > 0 else 0.0,
             "cache_hits_by_skill": cache_hits,
             "cache_size": len(self._cache),
+            "hybrid_cache": hybrid_stats,
         }
 
     def invalidate_cache(self, run_id: str | None = None, skill_ref: str | None = None) -> int:

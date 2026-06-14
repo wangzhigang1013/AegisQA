@@ -11,13 +11,122 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
+import queue
+import threading
+import time
 from typing import Any, Callable, Iterable, Iterator
 
+logger = logging.getLogger(__name__)
 
 ConnectionFactory = Callable[[], Any]
 MYSQL_JSONL_LOCK_TIMEOUT_SECONDS = 10
+
+# 连接池配置
+POOL_MIN_SIZE = int(os.getenv("AEGISQA_MYSQL_POOL_MIN_SIZE", "2"))
+POOL_MAX_SIZE = int(os.getenv("AEGISQA_MYSQL_POOL_MAX_SIZE", "10"))
+POOL_MAX_IDLE_SECONDS = int(os.getenv("AEGISQA_MYSQL_POOL_MAX_IDLE", "300"))  # 5 minutes
+
+
+class ConnectionPool:
+    """线程安全的 MySQL 连接池。"""
+
+    def __init__(self, factory: ConnectionFactory, min_size: int = 2, max_size: int = 10, max_idle_seconds: int = 300) -> None:
+        self._factory = factory
+        self._min_size = min_size
+        self._max_size = max_size
+        self._max_idle_seconds = max_idle_seconds
+        self._pool: queue.Queue[tuple[Any, float]] = queue.Queue(maxsize=max_size)
+        self._lock = threading.Lock()
+        self._size = 0
+        self._closed = False
+
+        # 预创建最小连接数
+        for _ in range(min_size):
+            try:
+                conn = self._create_connection()
+                self._pool.put((conn, time.time()))
+                self._size += 1
+            except Exception as exc:
+                logger.warning("Failed to pre-create MySQL connection: %s", exc)
+
+    def _create_connection(self) -> Any:
+        """创建新连接。"""
+        conn = self._factory()
+        # 设置连接超时
+        if hasattr(conn, "ping"):
+            try:
+                conn.ping(reconnect=True)
+            except Exception:
+                pass
+        return conn
+
+    def acquire(self) -> Any:
+        """获取连接。"""
+        if self._closed:
+            raise RuntimeError("Connection pool is closed")
+
+        # 尝试从池中获取
+        try:
+            conn, created_at = self._pool.get_nowait()
+            # 检查连接是否过期
+            if time.time() - created_at > self._max_idle_seconds:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                with self._lock:
+                    self._size -= 1
+                return self.acquire()
+            return conn
+        except queue.Empty:
+            pass
+
+        # 池为空，尝试创建新连接
+        with self._lock:
+            if self._size < self._max_size:
+                conn = self._create_connection()
+                self._size += 1
+                return conn
+
+        # 池已满，等待连接释放
+        try:
+            conn, created_at = self._pool.get(timeout=30)
+            return conn
+        except queue.Empty:
+            raise RuntimeError("Connection pool timeout: no available connections")
+
+    def release(self, conn: Any) -> None:
+        """释放连接回池。"""
+        if self._closed:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return
+
+        try:
+            self._pool.put_nowait((conn, time.time()))
+        except queue.Full:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            with self._lock:
+                self._size -= 1
+
+    def close_all(self) -> None:
+        """关闭所有连接。"""
+        self._closed = True
+        while not self._pool.empty():
+            try:
+                conn, _ = self._pool.get_nowait()
+                conn.close()
+            except Exception:
+                pass
+        self._size = 0
 
 
 class MySQLStore:
@@ -37,6 +146,13 @@ class MySQLStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.connection_factory = connection_factory or _mysql_connection_factory_from_env
         self.schema_path = Path(schema_path) if schema_path else _default_schema_path()
+        # 初始化连接池
+        self._pool = ConnectionPool(
+            factory=self.connection_factory,
+            min_size=POOL_MIN_SIZE,
+            max_size=POOL_MAX_SIZE,
+            max_idle_seconds=POOL_MAX_IDLE_SECONDS,
+        )
         if initialize_schema:
             self._init_schema()
 
@@ -178,7 +294,8 @@ class MySQLStore:
 
     @contextmanager
     def _connection(self) -> Iterator[Any]:
-        conn = self.connection_factory()
+        """获取数据库连接（从连接池）。"""
+        conn = self._pool.acquire()
         try:
             yield conn
             conn.commit()
@@ -188,7 +305,7 @@ class MySQLStore:
                 rollback()
             raise
         finally:
-            conn.close()
+            self._pool.release(conn)
 
     def _init_schema(self) -> None:
         with self._connection() as conn:
