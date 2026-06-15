@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from aegisqa.core.time import now_beijing_str, now_beijing
 import json
 from typing import Any
 from uuid import uuid4
@@ -223,7 +224,7 @@ class BadcaseService:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return now_beijing_str()
 
 
 def _text_vector(text: str) -> set[str]:

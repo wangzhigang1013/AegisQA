@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from datetime import datetime, timezone
+from aegisqa.core.time import now_beijing_str, now_beijing
 from typing import Any
 from uuid import uuid4
 
@@ -66,7 +67,7 @@ class AuditService:
             result=result,
             trace_id=effective_trace_id,
             detail=detail or {},
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=now_beijing_str(),
         )
         if self.audit_repository:
             self.audit_repository.append(event.model_dump(mode="json"))

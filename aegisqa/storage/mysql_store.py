@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from aegisqa.core.time import now_beijing_str, now_beijing
 import hashlib
 import json
 import logging
@@ -582,4 +583,4 @@ def _timestamp(value: Any, fallback: str | None = None) -> str | None:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return now_beijing().strftime("%Y-%m-%d %H:%M:%S")

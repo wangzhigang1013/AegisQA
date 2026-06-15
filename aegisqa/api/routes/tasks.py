@@ -787,7 +787,7 @@ def _ensure_report_export_approval(
 
 def _normalise_report_export_expires_at(expires_at: str | None) -> str:
     if not expires_at:
-        return (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+        return (now_beijing() + timedelta(hours=24)).isoformat()
     parsed = _parse_report_export_datetime(expires_at)
     if parsed is None:
         raise AegisQAError(
@@ -802,7 +802,7 @@ def _refresh_report_export_request_status(ctx: RouteContext, record: dict[str, A
     if record.get("status") not in {"pending", "approved"}:
         return record
     expires_at = _parse_report_export_datetime(record.get("expires_at"))
-    if expires_at is None or expires_at > datetime.now(timezone.utc):
+    if expires_at is None or expires_at > now_beijing():
         return record
     # 过期状态在读取、审批或导出时即时刷新，避免长期待处理申请被误用。
     record.update({"status": "expired", "expired_at": _now(), "updated_at": _now()})
@@ -1931,7 +1931,7 @@ def _repair_task_is_overdue(due_at: Any, status: str) -> bool:
             due_time = due_time.replace(tzinfo=timezone.utc)
     except ValueError:
         return False
-    return due_time < datetime.now(timezone.utc)
+    return due_time < now_beijing()
 
 
 def _transition_repair_task(

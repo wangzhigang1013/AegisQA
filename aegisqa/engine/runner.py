@@ -8,6 +8,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
+from aegisqa.core.time import now_beijing_str, now_beijing
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -850,7 +851,7 @@ class WorkflowRunner:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return now_beijing_str()
 
 
 def _stable_hash(payload: Any) -> str:

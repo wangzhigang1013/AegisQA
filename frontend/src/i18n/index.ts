@@ -14,7 +14,7 @@ i18n
       zh: { translation: zh },
     },
     fallbackLng: 'zh',
-    debug: process.env.NODE_ENV === 'development',
+    debug: import.meta.env.DEV,
     interpolation: {
       escapeValue: false,
     },

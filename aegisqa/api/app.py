@@ -19,6 +19,7 @@ from typing import Any
 from uuid import uuid4
 import zipfile
 
+from aegisqa.core.time import now_beijing_str, now_beijing
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -700,7 +701,7 @@ def create_app(
         # 3. 存储后端检查
         try:
             test_key = ["_health_check", "test.json"]
-            store.write_json(test_key, {"timestamp": datetime.now(timezone.utc).isoformat()})
+            store.write_json(test_key, {"timestamp": now_beijing_str()})
             store.read_json(test_key)
             checks["storage"] = {"status": "ok", "backend": app.state.storage_backend}
         except Exception as exc:
@@ -709,7 +710,7 @@ def create_app(
 
         return {
             "status": overall_status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now_beijing_str(),
             "checks": checks,
             "version": "0.2.0",
         }
@@ -816,7 +817,7 @@ def _api_error(code: str, message: str, details: dict[str, Any] | None = None, *
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return now_beijing_str()
 
 
 def _save_workflow_draft(store: JsonStore, draft: dict[str, Any]) -> None:

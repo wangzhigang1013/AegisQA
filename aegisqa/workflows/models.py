@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
+from aegisqa.core.time import now_beijing_str, now_beijing
 from typing import Any
 from uuid import uuid4
 
@@ -74,5 +75,5 @@ class WorkflowDraft(BaseModel):
             runtime=self.runtime,
             graph=self.graph,
             snapshot_hash=snapshot_hash,
-            published_at=datetime.now(timezone.utc).isoformat(),
+            published_at=now_beijing_str(),
         )

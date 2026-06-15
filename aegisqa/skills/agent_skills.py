@@ -401,6 +401,5 @@ def _list_records(store: Any, collection: str) -> list[dict[str, Any]]:
 
 
 def _now() -> str:
-    from datetime import datetime, timezone
-
-    return datetime.now(timezone.utc).isoformat()
+    from aegisqa.core.time import now_beijing_iso
+    return now_beijing_str()

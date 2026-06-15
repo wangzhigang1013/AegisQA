@@ -55,7 +55,7 @@ export class ErrorBoundary extends Component<Props, State> {
             </Button>,
           ]}
         >
-          {process.env.NODE_ENV === 'development' && this.state.error && (
+          {import.meta.env.DEV && this.state.error && (
             <details style={{ whiteSpace: 'pre-wrap', marginTop: 16 }}>
               <summary>错误详情（开发模式）</summary>
               <p>{this.state.error.toString()}</p>

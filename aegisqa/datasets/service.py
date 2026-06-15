@@ -9,6 +9,7 @@ import json
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
+from aegisqa.core.time import now_beijing_str, now_beijing
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -660,4 +661,4 @@ def _default_missing_value(field_type: str) -> Any:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return now_beijing_str()

@@ -672,44 +672,285 @@ pre {
 }
 
 /* ============================================================
-   Workflow Designer
+   Workflow Designer - Premium Style (v2)
    ============================================================ */
 
 .designer-grid {
   align-items: stretch;
 }
 
-.full-height,
-.canvas-card {
+.full-height {
   height: 100%;
 }
 
-.canvas-card .ant-card-body {
-  height: 560px;
-  padding: 0;
+/* 画布容器 - 新设计 */
+.canvas-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 600px;
+  border: none;
+  border-radius: 12px;
+  overflow: visible;
+  background: #f8fafc;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.04);
 }
 
+.canvas-wrapper .react-flow {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: visible;
+  outline: none;
+  border: none;
+}
+
+.canvas-wrapper .react-flow__viewport {
+  overflow: visible;
+}
+
+.canvas-wrapper .react-flow__container {
+  outline: none;
+  border: none;
+}
+
+.canvas-wrapper .react-flow__pane {
+  cursor: grab;
+}
+
+.canvas-wrapper .react-flow__pane:active {
+  cursor: grabbing;
+}
+
+/* 移除所有可能的黑色边框和轮廓 */
+.canvas-wrapper *:focus,
+.canvas-wrapper *:focus-visible,
+.canvas-wrapper *:active {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* 确保 Controls 和 MiniMap 没有黑色边框 */
+.react-flow__controls-wrapper,
+.react-flow__minimap-wrapper {
+  border: none !important;
+  outline: none !important;
+}
+
+/* 工具栏 - 悬浮在画布顶部 */
+.canvas-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
+  backdrop-filter: blur(12px);
+}
+
+.canvas-toolbar .ant-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: #64748b;
+  transition: all 0.15s ease;
+}
+
+.canvas-toolbar .ant-btn:hover {
+  background: #eff6ff;
+  color: #3b82f6;
+}
+
+.canvas-toolbar .ant-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.canvas-toolbar .ant-btn-danger:hover {
+  background: #fef2f2;
+  color: #ef4444;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: #e2e8f0;
+  margin: 0 4px;
+}
+
+/* 背景网格 */
+.react-flow__background {
+  z-index: 0;
+}
+
+/* 连线样式 */
+.react-flow__edge {
+  z-index: 5;
+}
+
+.react-flow__edge-path {
+  stroke: #94a3b8;
+  stroke-width: 2;
+}
+
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #3b82f6;
+  stroke-width: 2.5;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #3b82f6;
+  stroke-width: 2.5;
+}
+
+.react-flow__arrowhead {
+  fill: #94a3b8;
+}
+
+.react-flow__edge:hover .react-flow__arrowhead,
+.react-flow__edge.selected .react-flow__arrowhead {
+  fill: #3b82f6;
+}
+
+/* 连线动画 */
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke-dasharray: 5 5;
+  animation: edgeAnimation 1s linear infinite;
+}
+
+@keyframes edgeAnimation {
+  from { stroke-dashoffset: 10; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* 动画点 */
+.edge-animated-dot {
+  fill: #3b82f6;
+  filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.6));
+}
+
+/* 连接线预览 */
+.react-flow__connection-path {
+  stroke: #3b82f6;
+  stroke-width: 2;
+  stroke-dasharray: 5 5;
+}
+
+/* MiniMap */
+.react-flow__minimap {
+  z-index: 100;
+  border: none !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.95) !important;
+}
+
+.react-flow__minimap-mask {
+  fill: rgba(59, 130, 246, 0.08) !important;
+  stroke: #3b82f6 !important;
+  stroke-width: 2 !important;
+}
+
+.react-flow__minimap-node {
+  fill: #94a3b8;
+  stroke: none;
+}
+
+/* Controls */
+.react-flow__controls {
+  z-index: 100;
+  border: none !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border: none !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  color: #64748b !important;
+  transition: all 0.15s ease !important;
+  outline: none !important;
+}
+
+.react-flow__controls-button:hover {
+  background: #eff6ff !important;
+  color: #3b82f6 !important;
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor !important;
+}
+
+.react-flow__controls-button:last-child {
+  border-bottom: none !important;
+}
+
+/* 空状态 */
+.react-flow__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+/* 水印 */
+.react-flow__watermark {
+  opacity: 0.3;
+}
+
+/* 节点层级 */
 .react-flow__node {
-  min-width: 150px;
-  border: 1px solid var(--aq-border-strong);
-  border-radius: var(--aq-radius-md);
-  background: var(--aq-bg-elevated);
-  box-shadow: var(--aq-shadow-md);
-  color: var(--aq-text);
-  white-space: pre-line;
-  transition: box-shadow 0.2s ease;
+  z-index: 10;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
-.react-flow__node:hover {
-  box-shadow: var(--aq-shadow-glow);
+.react-flow__node.selected {
+  z-index: 20;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
-.react-flow__node-output {
-  border-color: var(--aq-success);
+.react-flow__node.dragging {
+  z-index: 30;
 }
 
-.node-help {
-  margin-top: 10px;
+/* 移除 ReactFlow 默认的节点包装样式 */
+.react-flow__node > div,
+.react-flow__node > div > div {
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* 确保节点内容没有黑色边框 */
+.react-flow__node-content,
+.react-flow__node-content::before,
+.react-flow__node-content::after {
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 /* ============================================================
@@ -948,4 +1189,328 @@ pre {
 /* 空状态 */
 .ant-empty-description {
   color: var(--aq-text-tertiary) !important;
+}
+
+/* ============================================================
+   BaseNode Component - Premium DAG Nodes
+   ============================================================ */
+
+.base-node {
+  min-width: 220px;
+  max-width: 280px;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  overflow: visible;
+  position: relative;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  z-index: 10;
+  outline: none !important;
+}
+
+/* 移除所有可能的黑色边框 */
+.base-node::before,
+.base-node::after {
+  display: none !important;
+}
+
+.base-node.selected {
+  z-index: 20;
+}
+
+.base-node.dragging {
+  z-index: 30;
+}
+
+/* 左侧彩色条 */
+.base-node .node-accent {
+  position: absolute;
+  left: -1px;
+  top: -1px;
+  bottom: -1px;
+  width: 5px;
+  background: var(--node-color, #3b82f6);
+  border-radius: 12px 0 0 12px;
+  z-index: 1;
+}
+
+/* Hover 效果 */
+.base-node:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.06);
+  border-color: #cbd5e1;
+}
+
+/* 选中状态 */
+.base-node.selected {
+  border-color: #3b82f6;
+  box-shadow:
+    0 0 0 3px rgba(59, 130, 246, 0.15),
+    0 4px 12px rgba(59, 130, 246, 0.2);
+}
+
+.base-node.selected .node-accent {
+  width: 5px;
+  box-shadow: 0 0 8px var(--node-color, #3b82f6);
+}
+
+/* 运行中状态 */
+.base-node.running {
+  border-color: #3b82f6;
+  animation: nodeRunning 2s ease-in-out infinite;
+}
+
+@keyframes nodeRunning {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1); }
+}
+
+/* 成功状态 */
+.base-node.success {
+  border-color: #22c55e;
+}
+
+.base-node.success .node-accent {
+  background: #22c55e;
+}
+
+/* 错误状态 */
+.base-node.error {
+  border-color: #ef4444;
+}
+
+.base-node.error .node-accent {
+  background: #ef4444;
+}
+
+/* 节点主体 */
+.base-node .node-body {
+  padding: 14px 16px 14px 20px;
+  position: relative;
+  z-index: 2;
+}
+
+/* 标题栏 */
+.base-node .node-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.base-node .node-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--node-gradient, linear-gradient(135deg, #3b82f6, #6366f1));
+  color: white;
+  font-size: 16px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+}
+
+.base-node .node-title-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.base-node .node-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.base-node .node-subtitle {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 端口区域 */
+.base-node .node-ports {
+  margin-bottom: 10px;
+}
+
+.base-node .port-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.base-node .port-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.base-node .port-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  flex-shrink: 0;
+}
+
+.base-node .port-dot.input {
+  background: #3b82f6;
+}
+
+.base-node .port-dot.output {
+  background: #22c55e;
+}
+
+.base-node .port-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.base-node .input-ports {
+  padding-right: 80px;
+}
+
+.base-node .output-ports {
+  text-align: right;
+  padding-left: 80px;
+}
+
+.base-node .output-ports .port-item {
+  justify-content: flex-end;
+}
+
+/* 状态栏 */
+.base-node .node-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.base-node .node-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.base-node .status-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.base-node .status-icon {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.base-node .node-metrics {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.base-node .metric {
+  font-size: 10px;
+  color: #94a3b8;
+  padding: 1px 6px;
+  background: #f8fafc;
+  border-radius: 4px;
+}
+
+.base-node .metric.cached {
+  color: #8b5cf6;
+  background: #f5f3ff;
+}
+
+/* 错误信息 */
+.base-node .node-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: #fef2f2;
+  border-radius: 6px;
+  border: 1px solid #fecaca;
+}
+
+.base-node .error-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: #ef4444;
+  color: white;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.base-node .error-text {
+  font-size: 11px;
+  color: #dc2626;
+  line-height: 1.3;
+}
+
+/* 连接点 */
+.base-node .node-handle {
+  width: 12px !important;
+  height: 12px !important;
+  border: 2px solid white !important;
+  background: #94a3b8 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+}
+
+.base-node .node-handle:hover {
+  transform: scale(1.3);
+  background: var(--node-color, #3b82f6) !important;
+  box-shadow: 0 0 10px var(--node-color, rgba(59, 130, 246, 0.5));
+}
+
+.base-node .input-handle {
+  left: -6px !important;
+}
+
+.base-node .output-handle {
+  right: -6px !important;
+}
+
+/* 拖拽状态 */
+.base-node.dragging {
+  opacity: 0.9;
+  cursor: grabbing;
+  transform: scale(1.02);
 }

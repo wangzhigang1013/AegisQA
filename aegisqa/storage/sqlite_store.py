@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from aegisqa.core.time import now_beijing_str, now_beijing
 import json
 import logging
 from pathlib import Path
@@ -228,4 +229,4 @@ def _key(parts: Iterable[str]) -> str:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return now_beijing_str()

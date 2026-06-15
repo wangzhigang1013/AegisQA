@@ -30,7 +30,7 @@ export const nodeTypeLabel: Record<WorkflowGraphNode['node_type'], string> = {
 export function graphNodeToFlowNode(graphNode: WorkflowGraphNode, position: { x: number; y: number }): FlowNode {
   return {
     id: graphNode.node_id,
-    type: graphNode.node_type === 'output' ? 'output' : 'default',
+    type: graphNode.node_type || 'skill',
     position,
     data: { label: formatNodeLabel(graphNode), graphNode },
   };

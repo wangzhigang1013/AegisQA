@@ -19,6 +19,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError, api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import type { DatasetVersion, GraphValidationResult, SkillManifest, WorkflowGraph, WorkflowGraphNode } from '../types';
+import { getLayoutedElements } from './workflowDesigner/Layout';
 import {
   buildAvailableFieldPaths,
   buildWorkflowGraph,
@@ -417,13 +418,15 @@ function WorkflowDesignerContent() {
 
   function autoLayout() {
     rememberGraph();
-    updateNodes((current) =>
-      current.map((node, index) => ({
-        ...node,
-        position: { x: 80 + (index % 4) * 240, y: 100 + Math.floor(index / 4) * 150 },
-      })),
-    );
-    setConsoleText('已自动布局：节点按拓扑编辑顺序重新排列。');
+    const { nodes: layoutedNodes } = getLayoutedElements(nodesRef.current, edgesRef.current, {
+      direction: 'LR',
+      nodeWidth: 220,
+      nodeHeight: 120,
+      ranksep: 150,
+      nodesep: 80,
+    });
+    updateNodes(layoutedNodes);
+    setConsoleText('已自动布局：使用 dagre 算法按拓扑结构重新排列。');
   }
 
   function rememberGraph() {

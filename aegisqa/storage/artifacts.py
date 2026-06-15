@@ -8,6 +8,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from aegisqa.core.time import now_beijing_str, now_beijing
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -114,7 +115,7 @@ class LocalArtifactStore(ArtifactStore):
             content_type=content_type,
             storage_path=self._relative_storage_path(path),
             metadata=dict(metadata or {}),
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=now_beijing_str(),
         )
         self._metadata_path(path).write_text(json.dumps(asdict(artifact_metadata), ensure_ascii=False, indent=2), encoding="utf-8")
         return artifact_metadata

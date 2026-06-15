@@ -1029,7 +1029,7 @@ def _parse_annotation_datetime(value: Any) -> datetime | None:
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return now_beijing()
 
 
 def _review_annotation_task(ctx: RouteContext, task_id: str, request: AnnotationReviewRequest, *, reviewer: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
