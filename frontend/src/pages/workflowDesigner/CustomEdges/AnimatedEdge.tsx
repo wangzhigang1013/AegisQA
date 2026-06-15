@@ -32,16 +32,16 @@ export const AnimatedEdge = memo(({
         style={{
           ...style,
           strokeWidth: selected ? 3 : 2,
-          stroke: selected ? "#6366f1" : "#cbd5e1",
+          stroke: selected ? "#4f46e5" : "#e2e8f0",
         }}
       />
-      {/* 流动的虚线光圈 */}
+      {/* 流动的粒子光圈 */}
       <path
         className="react-flow__edge-path animated-flow"
         d={edgePath}
         style={{
           strokeWidth: 2,
-          stroke: selected ? "#818cf8" : "#94a3b8",
+          stroke: selected ? "#6366f1" : "#818cf8",
         }}
       />
     </>

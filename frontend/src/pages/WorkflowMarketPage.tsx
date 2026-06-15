@@ -166,29 +166,27 @@ export function WorkflowMarketPage() {
         </Space>
       </Modal>
 
-      <Row gutter={[16, 16]}>
-        <Col xs={24} xl={16}>
-          <Card
-            className="flat-card"
-            title="Workflow 列表"
-            extra={
-              <Space wrap>
-                <Select
-                  aria-label="Workflow 状态筛选"
-                  value={statusFilter}
-                  onChange={setStatusFilter}
-                  options={[
-                    { value: 'all', label: '全部' },
-                    { value: 'draft', label: '草稿' },
-                    { value: 'published', label: '已发布' },
-                    { value: 'deleted', label: '已删除' },
-                    { value: 'archived', label: '已归档' },
-                  ]}
-                />
-                <Input.Search allowClear placeholder="搜索 Workflow 名称" className="wide-search" onSearch={setWorkflowQuery} onChange={(event) => setWorkflowQuery(event.target.value)} />
-              </Space>
-            }
-          >
+      <div className="action-toolbar flex justify-between items-center mb-6">
+        <Space wrap>
+          <Select
+            aria-label="Workflow 状态筛选"
+            value={statusFilter}
+            onChange={setStatusFilter}
+            style={{ width: 120 }}
+            options={[
+              { value: 'all', label: '全部状态' },
+              { value: 'draft', label: '草稿' },
+              { value: 'published', label: '已发布' },
+              { value: 'deleted', label: '已删除' },
+              { value: 'archived', label: '已归档' },
+            ]}
+          />
+          <Input.Search allowClear placeholder="搜索 Workflow 名称" className="wide-search" style={{ width: 280 }} onSearch={setWorkflowQuery} onChange={(event) => setWorkflowQuery(event.target.value)} />
+        </Space>
+      </div>
+
+      <Row gutter={[24, 24]}>
+        <Col xs={24} xl={18}>
             <motion.div
               initial="hidden"
               animate="show"
@@ -198,8 +196,8 @@ export function WorkflowMarketPage() {
               }}
             >
               <List
-                grid={{ gutter: 16, xs: 1, sm: 1, md: 2, xl: 3 }}
-                pagination={{ pageSize: 12 }}
+                grid={{ gutter: 24, xs: 1, sm: 1, md: 2, xl: 3 }}
+                pagination={{ pageSize: 12, position: 'bottom', align: 'center' }}
                 dataSource={workflowRows}
                 locale={{ emptyText: <Empty description="暂无 Workflow，点击右上角新建。" /> }}
                 renderItem={(record) => (
@@ -213,36 +211,36 @@ export function WorkflowMarketPage() {
                     >
                       <Card 
                         hoverable 
-                        className="flat-card h-full flex flex-col group border-slate-200"
-                        bodyStyle={{ flex: 1, padding: '20px' }}
+                        className="flat-card h-full flex flex-col group border-transparent"
+                        bodyStyle={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column' }}
                       >
-                        <div className="flex justify-between items-start mb-4">
+                        <div className="flex justify-between items-start mb-6">
                           <Space className="group-hover:translate-x-1 transition-transform">
-                            <div className="p-2 bg-indigo-50 rounded-xl text-indigo-500">
-                              <Network className="w-5 h-5" />
+                            <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-500 shadow-inner">
+                              <Network className="w-6 h-6" />
                             </div>
-                            <Typography.Text strong className="text-base text-slate-800">{record.name}</Typography.Text>
+                            <Typography.Text strong className="text-lg text-slate-800">{record.name}</Typography.Text>
                           </Space>
-                          <Tag color={record.type === '草稿' ? 'orange' : 'green'} className="rounded-md border-transparent px-2 py-0.5">{record.type}</Tag>
+                          <Tag color={record.type === '草稿' ? 'processing' : 'success'} className="rounded-full border-transparent px-3 py-1 font-semibold">{record.type}</Tag>
                         </div>
                         
-                        <Space direction="vertical" size="small" className="w-full mb-4 text-xs font-medium text-slate-500">
+                        <Space direction="vertical" size="small" className="w-full mb-6 text-sm font-medium text-slate-500">
                           <div className="flex justify-between">
                             <span>版本：{record.version}</span>
                             <span>状态：{record.status}</span>
                           </div>
                         </Space>
 
-                        <div className="mt-auto pt-4 border-t border-slate-100 flex flex-wrap gap-2">
+                        <div className="mt-auto pt-4 border-t border-slate-100 flex flex-wrap gap-3">
                           {record.draft && (
                             <>
-                              <Button size="small" type="primary" className="shadow-sm" icon={<Edit3 className="w-3.5 h-3.5" />} disabled={record.status === 'deleted'} onClick={() => openDraft(record.draft!)}>编辑</Button>
-                              <Button size="small" icon={<Copy className="w-3.5 h-3.5" />} loading={copyDraftMutation.isPending} onClick={() => copyDraftMutation.mutate(record.draft!)}>复制</Button>
+                              <Button size="small" type="primary" shape="round" className="shadow-sm" icon={<Edit3 className="w-3.5 h-3.5" />} disabled={record.status === 'deleted'} onClick={() => openDraft(record.draft!)}>编辑草稿</Button>
+                              <Button size="small" shape="round" icon={<Copy className="w-3.5 h-3.5" />} loading={copyDraftMutation.isPending} onClick={() => copyDraftMutation.mutate(record.draft!)}>克隆</Button>
                               <Popconfirm
                                 title="确认删除草稿？"
                                 onConfirm={() => deleteDraftMutation.mutate(record.draft!.draft_id)}
                               >
-                                <Button size="small" danger icon={<Trash2 className="w-3.5 h-3.5" />} disabled={record.status === 'deleted'} loading={deleteDraftMutation.isPending} />
+                                <Button size="small" shape="round" danger icon={<Trash2 className="w-3.5 h-3.5" />} disabled={record.status === 'deleted'} loading={deleteDraftMutation.isPending} />
                               </Popconfirm>
                             </>
                           )}
@@ -251,16 +249,17 @@ export function WorkflowMarketPage() {
                               <Button
                                 size="small"
                                 type="primary"
+                                shape="round"
                                 className="shadow-sm"
                                 icon={<Edit3 className="w-3.5 h-3.5" />}
                                 loading={draftsQuery.isLoading}
                                 disabled={draftsQuery.isLoading || !linkedDraftForWorkflow(record.workflow)}
                                 onClick={() => openPublished(record.workflow!)}
                               >
-                                编辑
+                                编辑草稿
                               </Button>
-                              <Button size="small" icon={<Copy className="w-3.5 h-3.5" />} loading={copyPublishedMutation.isPending} onClick={() => copyPublishedMutation.mutate(record.workflow!)}>复制</Button>
-                              <Button size="small" danger icon={<Ban className="w-3.5 h-3.5" />} disabled={record.status === 'archived'} loading={archiveWorkflowMutation.isPending} onClick={() => archiveWorkflowMutation.mutate(record.workflow!.version_id)} />
+                              <Button size="small" shape="round" icon={<Copy className="w-3.5 h-3.5" />} loading={copyPublishedMutation.isPending} onClick={() => copyPublishedMutation.mutate(record.workflow!)}>克隆版本</Button>
+                              <Button size="small" shape="round" danger icon={<Ban className="w-3.5 h-3.5" />} disabled={record.status === 'archived'} loading={archiveWorkflowMutation.isPending} onClick={() => archiveWorkflowMutation.mutate(record.workflow!.version_id)} />
                             </>
                           )}
                         </div>
@@ -270,33 +269,45 @@ export function WorkflowMarketPage() {
                 )}
               />
             </motion.div>
-          </Card>
         </Col>
-        <Col xs={24} xl={8}>
-          <Card className="flat-card" title="模板">
-            <Space direction="vertical" className="drawer-stack">
-              {workflowTemplates.map((template) => (
-                <Card size="small" key={String(template.template_id)}>
-                  <Space direction="vertical">
-                    <Typography.Text strong>{String(template.name)}样例</Typography.Text>
-                    <Typography.Text type="secondary">{String(template.description ?? '')}</Typography.Text>
-                    <Button
-                      icon={<Plus className="w-4 h-4" />}
-                      onClick={() => {
-                        const name = String(template.name);
-                        api.createWorkflowDraft({ name, graph: graphFromTemplate(template, name) }).then((draft) => {
-                          queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
-                          navigate(`/workflows/designer/${draft.draft_id}`);
-                        });
-                      }}
-                    >
-                      从样例创建
-                    </Button>
-                  </Space>
-                </Card>
-              ))}
-            </Space>
-          </Card>
+        <Col xs={24} xl={6}>
+          <div className="mb-4">
+            <Typography.Title level={5} className="text-slate-700 m-0">快速模板</Typography.Title>
+            <Typography.Text type="secondary" className="text-xs">一键从预置结构创建新工作流</Typography.Text>
+          </div>
+          <Space direction="vertical" className="drawer-stack w-full" size="middle">
+            {workflowTemplates.map((template) => (
+              <Card 
+                key={String(template.template_id)}
+                className="flat-card border-transparent hover:-translate-y-1 transition-transform"
+                bodyStyle={{ padding: '20px' }}
+              >
+                <Space direction="vertical" size="small" className="w-full">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-500 flex items-center justify-center">
+                      <Plus className="w-4 h-4" />
+                    </div>
+                    <Typography.Text strong className="text-base text-slate-800">{String(template.name)}</Typography.Text>
+                  </div>
+                  <Typography.Text type="secondary" className="text-sm line-clamp-2 min-h-[40px] mb-2">{String(template.description ?? '')}</Typography.Text>
+                  <Button
+                    type="default"
+                    shape="round"
+                    className="w-full"
+                    onClick={() => {
+                      const name = String(template.name);
+                      api.createWorkflowDraft({ name, graph: graphFromTemplate(template, name) }).then((draft) => {
+                        queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
+                        navigate(`/workflows/designer/${draft.draft_id}`);
+                      });
+                    }}
+                  >
+                    从样例创建
+                  </Button>
+                </Space>
+              </Card>
+            ))}
+          </Space>
         </Col>
       </Row>
     </section>

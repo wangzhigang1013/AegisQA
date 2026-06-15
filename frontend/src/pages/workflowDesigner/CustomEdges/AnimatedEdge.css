@@ -1,14 +1,14 @@
 .animated-flow {
-  stroke-dasharray: 6;
-  animation: dashdraw 1.5s linear infinite;
-  opacity: 0.85;
+  stroke-dasharray: 12, 18;
+  animation: dashdraw 1.2s linear infinite;
+  opacity: 0.9;
   will-change: stroke-dashoffset;
   transform: translateZ(0);
 }
 
 @keyframes dashdraw {
   from {
-    stroke-dashoffset: 20;
+    stroke-dashoffset: 30;
   }
 }
 

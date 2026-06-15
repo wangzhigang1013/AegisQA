@@ -511,76 +511,52 @@ function WorkflowDesignerContent() {
   }
 
   return (
-    <section className="page-stack">
-      <PageHeader
-        eyebrow="流程编排"
-        title="Workflow 设计器"
-        description="用可视化 DAG 把 Skill 组成评测流程，支持点对点、点对多、多对一、条件分支、Join 和 Aggregator。"
-        primaryAction={
-          <Space wrap>
-            <Button icon={<SaveOutlined />} onClick={() => saveDraftMutation.mutate()} loading={saveDraftMutation.isPending}>保存草稿</Button>
-            <Button type="primary" icon={<DeploymentUnitOutlined />} onClick={() => publishMutation.mutate()} loading={publishMutation.isPending}>校验并发布</Button>
-            <Button onClick={() => navigate('/workflows')}>返回市场</Button>
-          </Space>
-        }
-      />
+    <div className="designer-fullscreen-layout">
+      {/* 顶部紧凑控制台 */}
+      <header className="designer-header">
+        <div className="designer-header-left">
+          <Typography.Title level={5} style={{ margin: 0 }}>Workflow 设计器</Typography.Title>
+          <Tag color={draftId ? 'blue' : 'default'}>草稿：{draftId ?? '未保存'}</Tag>
+          <Tag color={isDirty ? 'orange' : 'green'}>{isDirty ? '有修改' : '已保存'}</Tag>
+        </div>
+        <div className="designer-header-right">
+          {selectedDataset ? <Tag color="green">可试运行</Tag> : <Tag color="gold">无映射预览集</Tag>}
+          <Button icon={<SaveOutlined />} onClick={() => saveDraftMutation.mutate()} loading={saveDraftMutation.isPending}>保存</Button>
+          <Button type="primary" icon={<DeploymentUnitOutlined />} onClick={() => publishMutation.mutate()} loading={publishMutation.isPending}>发布</Button>
+          <Button onClick={() => navigate('/workflows')}>退出</Button>
+        </div>
+      </header>
 
-      <Space wrap>
-        <Tag color={draftId ? 'blue' : 'default'}>当前草稿：{draftId ?? '未保存'}</Tag>
-        <Tag color={isDirty ? 'orange' : 'green'}>{isDirty ? '有未保存修改' : '已保存'}</Tag>
-        <Tag>最近保存：{lastSavedAt || '尚未保存'}</Tag>
-        <Tag color={selectedDataset ? 'green' : 'gold'}>{selectedDataset ? '可试运行' : '请选择映射预览数据集'}</Tag>
-      </Space>
+      {/* 警告区：保持原有的 Alert 机制，但不占用主布局高度 */}
+      {(publishNotice || validationErrors.length > 0) && (
+        <div className="designer-notices">
+          {publishNotice && (
+            <Alert
+              type={publishNotice.type}
+              showIcon
+              closable
+              message={publishNotice.message}
+              description={
+                publishNotice.type === 'success' ? (
+                  <Space wrap>
+                    <Typography.Text>{publishNotice.description}</Typography.Text>
+                    <Button size="small" type="primary" onClick={() => navigate('/runs')}>去创建任务</Button>
+                  </Space>
+                ) : publishNotice.description
+              }
+              onClose={() => setPublishNotice(null)}
+            />
+          )}
+          {validationErrors.length > 0 && (
+            <InlineIssueSummary issues={validationErrors} onSelectNode={selectIssueNode} />
+          )}
+        </div>
+      )}
 
-      {publishNotice ? (
-        <Alert
-          type={publishNotice.type}
-          showIcon
-          closable
-          message={publishNotice.message}
-          description={
-            publishNotice.type === 'success' ? (
-              <Space wrap>
-                <Typography.Text>{publishNotice.description}</Typography.Text>
-                <Button size="small" type="primary" onClick={() => navigate('/runs')}>去创建任务</Button>
-                <Button size="small" onClick={() => navigate('/workflows')}>返回 Workflow 市场</Button>
-              </Space>
-            ) : publishNotice.description
-          }
-          onClose={() => setPublishNotice(null)}
-        />
-      ) : null}
-
-      <InlineIssueSummary issues={validationErrors} onSelectNode={selectIssueNode} />
-
-      <Alert
-        type="info"
-        showIcon
-        message="Workflow 使用规则"
-        description="每条连线表示数据依赖；一个节点可以点对多连接多个下游；多个上游进入同一节点时，必须先通过 Join 或 Aggregator，避免隐式覆盖 context。"
-      />
-
-      <WorkflowDraftLoaderPanel
-        workflowDrafts={workflowDrafts}
-        workflowVersions={workflowVersions}
-        workflowTemplates={workflowTemplates}
-        datasetVersions={datasetVersions}
-        selectedDatasetVersion={selectedDatasetVersion}
-        selectedDataset={selectedDataset}
-        sampleSize={sampleSize}
-        workflowName={workflowName}
-        datasetFieldSearch={datasetFieldSearch}
-        datasetFieldRows={datasetFieldRows}
-        filteredDatasetFieldRows={filteredDatasetFieldRows}
-        onLoadWorkflow={loadSelectedWorkflow}
-        onDatasetVersionChange={setSelectedDatasetVersion}
-        onSampleSizeChange={setSampleSize}
-        onWorkflowNameChange={changeWorkflowName}
-        onDatasetFieldSearchChange={setDatasetFieldSearch}
-      />
-
-      <Row gutter={[16, 16]} className="designer-grid">
-        <Col xs={24} xl={5}>
+      {/* 全屏主体 */}
+      <div className="designer-body">
+        {/* 左侧边栏：组件面板 */}
+        <div className="designer-sidebar-left">
           <SkillPalettePanel
             skills={paletteSkills}
             skillSearch={skillSearch}
@@ -589,9 +565,28 @@ function WorkflowDesignerContent() {
             onShowSkill={setActivePaletteSkill}
             onAddStructureNode={addStructureNode}
           />
-        </Col>
+        </div>
 
-        <Col xs={24} xl={13}>
+        {/* 中间画板：主工作区 */}
+        <div className="designer-canvas">
+          <WorkflowDraftLoaderPanel
+            workflowDrafts={workflowDrafts}
+            workflowVersions={workflowVersions}
+            workflowTemplates={workflowTemplates}
+            datasetVersions={datasetVersions}
+            selectedDatasetVersion={selectedDatasetVersion}
+            selectedDataset={selectedDataset}
+            sampleSize={sampleSize}
+            workflowName={workflowName}
+            datasetFieldSearch={datasetFieldSearch}
+            datasetFieldRows={datasetFieldRows}
+            filteredDatasetFieldRows={filteredDatasetFieldRows}
+            onLoadWorkflow={loadSelectedWorkflow}
+            onDatasetVersionChange={setSelectedDatasetVersion}
+            onSampleSizeChange={setSampleSize}
+            onWorkflowNameChange={changeWorkflowName}
+            onDatasetFieldSearchChange={setDatasetFieldSearch}
+          />
           <WorkflowCanvasPanel
             nodes={nodes}
             edges={edges}
@@ -616,9 +611,10 @@ function WorkflowDesignerContent() {
             onAutoLayout={autoLayout}
             onDeleteSelected={deleteSelected}
           />
-        </Col>
+        </div>
 
-        <Col xs={24} xl={6}>
+        {/* 右侧边栏：配置与终端 */}
+        <div className="designer-sidebar-right">
           <WorkflowInspectorPanel
             selectedGraphNode={selectedGraphNode}
             selectedEdgeId={selectedEdgeId}
@@ -641,24 +637,23 @@ function WorkflowDesignerContent() {
             onUpdateAggregatorStrategy={updateAggregatorStrategy}
             onConsoleTextChange={setConsoleText}
           />
-        </Col>
-      </Row>
+          <WorkflowConsolePanel
+            graph={graph}
+            selectedDataset={selectedDataset}
+            consoleTab={consoleTab}
+            consoleText={consoleText}
+            consoleResult={consoleResult}
+            validateLoading={validateMutation.isPending}
+            dryRunLoading={dryRunMutation.isPending}
+            onConsoleTabChange={setConsoleTab}
+            onValidate={() => validateMutation.mutate()}
+            onDryRun={() => dryRunMutation.mutate()}
+          />
+        </div>
+      </div>
 
       <SkillDetailDrawer skill={activePaletteSkill} onClose={() => setActivePaletteSkill(null)} />
-
-      <WorkflowConsolePanel
-        graph={graph}
-        selectedDataset={selectedDataset}
-        consoleTab={consoleTab}
-        consoleText={consoleText}
-        consoleResult={consoleResult}
-        validateLoading={validateMutation.isPending}
-        dryRunLoading={dryRunMutation.isPending}
-        onConsoleTabChange={setConsoleTab}
-        onValidate={() => validateMutation.mutate()}
-        onDryRun={() => dryRunMutation.mutate()}
-      />
-    </section>
+    </div>
   );
 }
 

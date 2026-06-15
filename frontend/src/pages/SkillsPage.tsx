@@ -1,8 +1,9 @@
-import { CheckCircleOutlined, CopyOutlined, InboxOutlined, InfoCircleOutlined, SwapOutlined, UploadOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, CheckCircleOutlined, CopyOutlined, DatabaseOutlined, ExperimentOutlined, InboxOutlined, InfoCircleOutlined, SwapOutlined, TagOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, List, Modal, Radio, Select, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd';
 import type { UploadFile } from 'antd';
 import { useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
@@ -138,33 +139,42 @@ export function SkillsPage() {
       {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
       {skillsQuery.isError ? <Alert type="error" showIcon message={`Skill 列表加载失败：${formatApiError(skillsQuery.error)}`} /> : null}
 
-      <Card className="flat-card" title="筛选">
+      <div className="action-toolbar flex justify-between items-center mb-6">
         <Space wrap>
           <Input.Search
             placeholder="搜索 Skill 名称或 ID"
             allowClear
             className="wide-search"
+            style={{ width: 320 }}
             onSearch={setSkillQuery}
             onChange={(event) => setSkillQuery(event.target.value)}
           />
           <Select
             value={statusFilter}
             onChange={setStatusFilter}
+            style={{ width: 140 }}
             options={[
               { value: 'all', label: '全部状态' },
-              { value: 'approved', label: 'approved' },
-              { value: 'pending_review', label: 'pending_review' },
-              { value: 'disabled', label: 'disabled' },
-              { value: 'deprecated', label: 'deprecated' },
+              { value: 'approved', label: '已审批' },
+              { value: 'pending_review', label: '审核中' },
+              { value: 'disabled', label: '已禁用' },
+              { value: 'deprecated', label: '已弃用' },
             ]}
           />
         </Space>
-      </Card>
+      </div>
 
-      <Card className="flat-card" title="Skill 列表">
+      <motion.div
+        initial="hidden"
+        animate="show"
+        variants={{
+          hidden: { opacity: 0 },
+          show: { opacity: 1, transition: { staggerChildren: 0.05 } }
+        }}
+      >
         <List
-          grid={{ gutter: 16, xs: 1, sm: 1, md: 2, xl: 3 }}
-          pagination={{ pageSize: 12 }}
+          grid={{ gutter: 24, xs: 1, sm: 1, md: 2, xl: 3, xxl: 4 }}
+          pagination={{ pageSize: 12, position: 'bottom', align: 'center' }}
           dataSource={filteredSkills}
           loading={skillsQuery.isLoading}
           locale={{ emptyText: <Empty description="暂无 Skill，请上传 Agent Skill 包并完成合约测试和审批。" /> }}
@@ -175,57 +185,70 @@ export function SkillsPage() {
             
             return (
               <List.Item>
-                <Card 
-                  hoverable 
-                  className="flat-card h-full flex flex-col"
-                  bodyStyle={{ flex: 1, padding: '16px' }}
+                <motion.div
+                  variants={{
+                    hidden: { opacity: 0, y: 20 },
+                    show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
+                  }}
+                  className="h-full"
                 >
-                  <div className="flex justify-between items-start mb-3">
-                    <Space direction="vertical" size={0}>
-                      <Typography.Text strong className="text-base">{record.name}</Typography.Text>
-                      <Typography.Text type="secondary" className="text-xs font-mono">{record.skill_id}</Typography.Text>
-                    </Space>
-                    <Tag color={record.enabled ? 'green' : 'orange'}>{formatSkillStatus(record.status)}</Tag>
-                  </div>
-                  
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {record.tags.map(tag => <Tag key={tag} className="text-xs m-0">{tag}</Tag>)}
-                    <Tag color="purple" className="text-xs m-0">{runtimeMode}</Tag>
-                  </div>
-
-                  <div className="text-xs text-slate-500 flex flex-col gap-1 mb-4">
-                    <div className="flex justify-between">
-                      <span>合约状态:</span>
-                      <span className={isContractOk ? 'text-green-600' : 'text-red-500'}>
-                        {!packageRecord ? '内置 Skill' : (isContractOk ? '已通过' : '未通过')}
-                      </span>
+                  <Card 
+                    hoverable 
+                    className="flat-card h-full flex flex-col group border-transparent"
+                    bodyStyle={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column' }}
+                  >
+                    <div className="flex justify-between items-start mb-5">
+                      <Space className="group-hover:translate-x-1 transition-transform">
+                        <div className="p-3 bg-violet-50 rounded-2xl text-violet-500 shadow-inner">
+                          <ExperimentOutlined className="text-xl" />
+                        </div>
+                        <Space direction="vertical" size={0}>
+                          <Typography.Text strong className="text-lg text-slate-800">{record.name}</Typography.Text>
+                          <Typography.Text type="secondary" className="text-xs font-mono">{record.skill_id}</Typography.Text>
+                        </Space>
+                      </Space>
+                      <Tag color={record.enabled ? 'success' : 'warning'} className="rounded-full border-transparent px-3 py-1 font-semibold">{formatSkillStatus(record.status)}</Tag>
                     </div>
-                    <div className="flex justify-between">
-                      <span>审批人:</span>
-                      <span>{packageRecord?.approved_by ?? '未审批'}</span>
+                    
+                    <div className="flex flex-wrap gap-2 mb-5">
+                      {record.tags.map(tag => <Tag key={tag} className="text-xs m-0 border-slate-200">{tag}</Tag>)}
+                      <Tag color="purple" className="text-xs m-0 border-transparent">{runtimeMode}</Tag>
                     </div>
-                  </div>
 
-                  <div className="mt-auto pt-3 border-t border-slate-100 text-right">
-                    <Button
-                      size="small"
-                      type="primary"
-                      icon={<InfoCircleOutlined />}
-                      onClick={() => {
-                        setContractResultText(null);
-                        setContractResult(null);
-                        setActiveSkill(record);
-                      }}
-                    >
-                      查看详情
-                    </Button>
-                  </div>
-                </Card>
+                    <div className="text-sm text-slate-500 flex flex-col gap-2 mb-6 font-medium">
+                      <div className="flex justify-between bg-slate-50 px-3 py-2 rounded-lg">
+                        <span>合约验证</span>
+                        <span className={isContractOk ? 'text-emerald-600 font-semibold' : 'text-red-500 font-semibold'}>
+                          {!packageRecord ? '内置 Skill' : (isContractOk ? 'Pass' : 'Failed')}
+                        </span>
+                      </div>
+                      <div className="flex justify-between px-3">
+                        <span>审批人</span>
+                        <span>{packageRecord?.approved_by ?? '未审批'}</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-auto pt-4 border-t border-slate-100 flex justify-end">
+                      <Button
+                        size="small"
+                        shape="round"
+                        icon={<InfoCircleOutlined />}
+                        onClick={() => {
+                          setContractResultText(null);
+                          setContractResult(null);
+                          setActiveSkill(record);
+                        }}
+                      >
+                        配置与检查
+                      </Button>
+                    </div>
+                  </Card>
+                </motion.div>
               </List.Item>
             );
           }}
         />
-      </Card>
+      </motion.div>
 
       <Drawer width={680} title={activeSkill?.name} open={Boolean(activeSkill)} onClose={() => setActiveSkill(null)}>
         {activeSkill ? (

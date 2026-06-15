@@ -1,2 +1,158 @@
-/* The BaseNode is now fully styled with TailwindCSS in the component file.
-   This file is kept empty to avoid broken imports if referenced elsewhere. */
+/* BaseNode.css - Dify / Coze 级精细视觉框架 */
+
+.aegis-node-card {
+  width: 260px !important;
+  background-color: #ffffff !important;
+  /* 极细浅色边框，替代粗糙的灰边 */
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  border-radius: 16px !important;
+  /* 多层微小的高级弥散阴影 */
+  box-shadow: 0 4px 24px -4px rgba(0, 0, 0, 0.04), 0 2px 8px -2px rgba(0, 0, 0, 0.02) !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  transition: box-shadow 0.25s ease, border-color 0.25s ease, transform 0.25s ease !important;
+  transform: translateZ(0) !important;
+  backface-visibility: hidden !important;
+  position: relative !important;
+}
+
+.aegis-node-card:hover {
+  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.06), 0 4px 12px -2px rgba(0, 0, 0, 0.03) !important;
+}
+
+/* 选中状态：带有极其柔和的品牌色光晕 */
+.aegis-node-card.selected {
+  border-color: rgba(79, 70, 229, 0.5) !important;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12), 0 12px 32px -4px rgba(0, 0, 0, 0.06) !important;
+}
+
+/* 顶部点缀饰条 (Top Decor Bar) */
+.aegis-node-decor {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: 4px !important;
+  width: 100% !important;
+  z-index: 1 !important;
+}
+
+/* 节点头部 */
+.aegis-node-header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 16px 16px 8px 16px !important;
+  background-color: transparent !important; /* 无缝设计，与 body 融为一体 */
+  z-index: 2 !important;
+  position: relative !important;
+}
+
+/* 图标容器：柔和透明，不抢戏 */
+.aegis-node-icon {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 8px !important;
+  flex-shrink: 0 !important;
+}
+
+.aegis-node-title-group {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 !important;
+  min-width: 0 !important;
+}
+
+.aegis-node-title {
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  color: #0f172a !important; /* 更深的石板灰，高对比 */
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  line-height: 1.2 !important;
+  letter-spacing: -0.2px !important;
+}
+
+.aegis-node-subtitle {
+  font-size: 11px !important;
+  color: #94a3b8 !important; /* 更柔和的副标题 */
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  margin-top: 3px !important;
+  line-height: 1.2 !important;
+}
+
+/* 节点内容区 (Ports) */
+.aegis-node-body {
+  padding: 4px 0 12px 0 !important;
+  background-color: transparent !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  z-index: 2 !important;
+}
+
+.aegis-node-port-row {
+  display: flex !important;
+  align-items: center !important;
+  padding: 5px 16px !important;
+  position: relative !important;
+  min-height: 26px !important;
+  transition: background-color 0.2s ease !important;
+}
+
+.aegis-node-port-row:hover {
+  background-color: #f8fafc !important; /* 极柔和的悬停反馈 */
+}
+
+.aegis-node-port-label {
+  font-size: 11.5px !important;
+  color: #64748b !important;
+  font-weight: 500 !important;
+}
+
+/* 极其隐蔽优雅的连接点 (Handle) */
+.aegis-handle {
+  width: 8px !important;
+  height: 8px !important;
+  background-color: #ffffff !important;
+  border: 1.5px solid #cbd5e1 !important;
+  border-radius: 50% !important;
+  position: absolute !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+  z-index: 10 !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+}
+
+.aegis-handle.input {
+  left: -4px !important;
+}
+
+.aegis-handle.output {
+  right: -4px !important;
+}
+
+.aegis-handle:hover {
+  border-color: #4f46e5 !important;
+  background-color: #e0e7ff !important;
+  transform: translateY(-50%) scale(1.6) !important; /* 悬停时放大并变成具有品牌色的靶点 */
+}
+
+/* Footer / Metrics */
+.aegis-node-footer {
+  padding: 10px 16px !important;
+  background-color: rgba(248, 250, 252, 0.6) !important;
+  border-top: 1px solid rgba(0, 0, 0, 0.04) !important;
+  display: flex !important;
+  gap: 6px !important;
+  flex-wrap: wrap !important;
+  z-index: 2 !important;
+}

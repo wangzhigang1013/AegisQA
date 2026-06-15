@@ -144,12 +144,7 @@ export function DatasetsPage() {
 
   return (
     <section className="page-stack">
-      <PageHeader
-        eyebrow="数据准备"
-        title="数据集"
-        description="把 CSV/JSONL 或 Source Skill 输出固定成 Dataset Version，后续 Run 只引用 dataset_id、version 和 row_id。"
-        primaryAction={<Button type="primary" icon={<CloudUploadOutlined />} onClick={() => setUploadOpen(true)}>上传 CSV / JSONL</Button>}
-      />
+
 
       {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
 
@@ -161,10 +156,49 @@ export function DatasetsPage() {
         className="mb-4"
       />
 
-      <PageSection title="数据上传与预览" testId="datasets-upload-section">
-        <Row gutter={[16, 16]}>
-        <Col xs={24} lg={10}>
-          <Card className="flat-card" title="上传数据">
+      <div className="bg-gradient-to-br from-slate-800 via-slate-900 to-slate-900 rounded-3xl shadow-2xl p-6 mb-8 mt-2 relative overflow-hidden">
+        {/* 背景光晕 (与全局 PageHeader 一致) */}
+        <div className="absolute -top-32 -right-32 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-slate-500/20 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div className="relative z-10 flex flex-col lg:flex-row gap-8">
+          <div className="w-full lg:w-1/3 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="p-4 bg-slate-700/50 rounded-2xl text-slate-400 shadow-inner border border-slate-600/50">
+                  <DatabaseOutlined className="text-3xl" />
+                </div>
+                <div>
+                  <Typography.Title level={4} className="m-0 text-white font-bold tracking-wide">数据中心</Typography.Title>
+                  <Typography.Text className="text-slate-400 text-sm">构建与管理评测集</Typography.Text>
+                </div>
+              </div>
+              <p className="text-slate-300 text-sm leading-relaxed mb-6 font-medium">
+                上传 CSV / JSONL 数据文件，生成具有严格类型校验的不可变 Dataset Version，为 Workflow 执行提供基准测试数据。
+              </p>
+            </div>
+            
+            <Form layout="vertical" className="compact-form w-full">
+              <Form.Item label={<span className="font-semibold text-white">活跃数据版本</span>} className="mb-2">
+                <Select
+                  placeholder="选择已上传数据集"
+                  size="large"
+                  loading={datasetsQuery.isLoading}
+                  value={previewDataset?.version_id}
+                  onChange={(versionId) => setActiveDataset(datasetVersions.find((item) => item.version_id === versionId) ?? null)}
+                  options={datasetVersions.map((dataset) => ({ value: dataset.version_id, label: `${dataset.name} v${dataset.version}` }))}
+                  className="w-full"
+                />
+              </Form.Item>
+              <div className="flex flex-wrap gap-3 mt-5">
+                <Button type="primary" shape="round" className="bg-blue-600 shadow-lg shadow-blue-500/30 border-none hover:bg-blue-500" onClick={() => setUploadOpen(true)}>创建新版本</Button>
+                <Button shape="round" className="bg-slate-700/50 border-slate-600/50 text-slate-300 hover:bg-slate-600/50 hover:border-slate-500/50 hover:text-white" onClick={() => setMaterializeOpen(true)}>虚拟物化</Button>
+                <Button shape="round" className="bg-transparent border-slate-600/50 text-slate-300 hover:text-white" disabled={!previewDataset} onClick={() => setLineageDataset(previewDataset)}>查看血缘</Button>
+              </div>
+            </Form>
+          </div>
+
+          <div className="w-full lg:w-2/3">
             <Upload.Dragger
               beforeUpload={(file) => {
                 setUploadFile(file);
@@ -175,126 +209,120 @@ export function DatasetsPage() {
               fileList={uploadFile ? [uploadFile] : []}
               onRemove={() => setUploadFile(null)}
               maxCount={1}
+              className="bg-slate-900/30 backdrop-blur-sm border-2 border-dashed border-slate-600/50 hover:border-blue-500/50 transition-all rounded-3xl h-full py-10"
             >
-              <p className="ant-upload-drag-icon"><DatabaseOutlined /></p>
-              <p className="ant-upload-text">选择 CSV 或 JSONL 文件</p>
-              <p className="ant-upload-hint">上传后会生成不可变 Dataset Version，并展示字段预览。</p>
+              <p className="ant-upload-drag-icon text-blue-400/80 mb-4">
+                <CloudUploadOutlined className="text-5xl" />
+              </p>
+              <p className="text-white font-semibold text-lg mb-2">拖拽 CSV 或 JSONL 文件至此</p>
+              <p className="text-slate-400 text-sm">上传后自动生成字段预览并检测数据质量</p>
             </Upload.Dragger>
-            <Form layout="vertical" className="compact-form">
-              <Form.Item label="当前数据集">
-                <Select
-                  placeholder="选择已上传数据集"
-                  loading={datasetsQuery.isLoading}
-                  value={previewDataset?.version_id}
-                  onChange={(versionId) => setActiveDataset(datasetVersions.find((item) => item.version_id === versionId) ?? null)}
-                  options={datasetVersions.map((dataset) => ({ value: dataset.version_id, label: `${dataset.name} v${dataset.version}` }))}
-                />
-              </Form.Item>
-              <Space wrap>
-                <Button type="primary" onClick={() => setUploadOpen(true)}>创建版本</Button>
-                <Button onClick={() => setMaterializeOpen(true)}>Source Skill 物化</Button>
-                <Button disabled={!previewDataset} onClick={() => setLineageDataset(previewDataset)}>查看 Lineage</Button>
-              </Space>
-            </Form>
-          </Card>
-        </Col>
-        <Col xs={24} lg={14}>
-          <Card
-            className="flat-card"
-            title="字段预览与类型修正"
-            extra={
+          </div>
+        </div>
+      </div>
+
+      <Row gutter={[24, 24]} className="mb-8">
+        <Col xs={24} xl={10}>
+          <div className="bg-white rounded-3xl shadow-[0_4px_24px_-6px_rgba(0,0,0,0.04)] p-8 h-full flex flex-col border border-slate-100">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <Typography.Title level={5} className="text-slate-800 m-0 font-bold">字段预览</Typography.Title>
+                <Typography.Text type="secondary" className="text-xs">检查字段映射与类型推断</Typography.Text>
+              </div>
               <Tooltip title="字段类型错误会在 Workflow 发布或执行前触发 TYPE_MISMATCH。">
-                <FieldStringOutlined />
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-400 hover:text-indigo-600 hover:bg-indigo-100 transition-colors cursor-pointer shadow-sm">
+                  <FieldStringOutlined className="text-lg" />
+                </div>
               </Tooltip>
-            }
-          >
-            <Table
-              pagination={false}
-              dataSource={previewRows}
-              locale={{ emptyText: '暂无 Dataset Version，请先上传 CSV/JSONL 或通过 Source Skill 物化数据。' }}
-              columns={[
-                { title: '字段路径', dataIndex: 'path', render: (path) => <code>{path}</code> },
-                { title: '类型', dataIndex: 'type', render: (type) => <Tag color="blue">{type}</Tag> },
-                { title: '样例', dataIndex: 'example' },
-                { title: '推荐映射', dataIndex: 'target' },
-              ]}
-            />
-          </Card>
+            </div>
+            
+            <div className="flex-1 bg-slate-50/50 rounded-2xl border border-slate-100 overflow-hidden">
+              <Table
+                size="middle"
+                pagination={false}
+                dataSource={previewRows}
+                locale={{ emptyText: '暂无数据集。请先在上方数据中心上传文件或选择版本。' }}
+                columns={[
+                  { title: '字段路径', dataIndex: 'path', render: (path) => <code className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md text-xs font-mono border border-slate-200">{path}</code> },
+                  { title: '推断类型', dataIndex: 'type', render: (type) => <Tag color="blue" className="rounded-full px-2 py-0.5 font-medium border-transparent">{type}</Tag> },
+                  { title: '示例数据', dataIndex: 'example', render: (text) => <span className="text-slate-600 text-sm truncate max-w-[120px] block" title={text}>{text}</span> },
+                ]}
+              />
+            </div>
+          </div>
+        </Col>
+        
+        <Col xs={24} xl={14}>
+          <div className="bg-white rounded-3xl shadow-[0_4px_24px_-6px_rgba(0,0,0,0.04)] p-8 h-full flex flex-col border border-slate-100">
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <Typography.Title level={5} className="text-slate-800 m-0 font-bold">数据质量诊断</Typography.Title>
+                <Typography.Text type="secondary" className="text-xs">缺失值与重复样本分析</Typography.Text>
+              </div>
+              <Button
+                type="primary"
+                shape="round"
+                className="bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/20 border-none"
+                disabled={!previewDataset || !qualityQuery.data}
+                loading={repairVersionMutation.isPending}
+                onClick={() => repairVersionMutation.mutate()}
+              >
+                生成修复版
+              </Button>
+            </div>
+            
+            <div className="flex-1">
+              {previewDataset ? (
+                <Space direction="vertical" className="w-full" size="middle">
+                  {qualityQuery.isError ? <Alert type="error" showIcon message="诊断加载失败" /> : null}
+                  {qualityQuery.data ? (
+                    <>
+                      <div className="grid grid-cols-3 gap-4 mb-2">
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                          <div className="text-xs text-slate-500 mb-1 font-medium">总样本数</div>
+                          <div className="text-2xl font-bold text-slate-800">{qualityQuery.data.summary.row_count}</div>
+                        </div>
+                        <div className="bg-orange-50/50 p-4 rounded-2xl border border-orange-100 text-center">
+                          <div className="text-xs text-orange-600/70 mb-1 font-medium">缺失字段</div>
+                          <div className="text-2xl font-bold text-orange-600">{qualityQuery.data.summary.fields_with_missing}</div>
+                        </div>
+                        <div className="bg-red-50/50 p-4 rounded-2xl border border-red-100 text-center">
+                          <div className="text-xs text-red-600/70 mb-1 font-medium">重复样本</div>
+                          <div className="text-2xl font-bold text-red-600">{qualityQuery.data.summary.duplicate_row_count}</div>
+                        </div>
+                      </div>
+                      
+                      <div className="bg-slate-50/50 rounded-2xl border border-slate-100 overflow-hidden">
+                        <Table
+                          size="small"
+                          rowKey="field"
+                          loading={qualityQuery.isLoading}
+                          dataSource={qualityQuery.data.fields}
+                          pagination={qualityQuery.data.fields.length > 5 ? { pageSize: 5, size: 'small' } : false}
+                          columns={[
+                            { title: '诊断字段', dataIndex: 'path', render: (value) => <code className="bg-slate-100 px-1.5 py-0.5 rounded text-xs text-slate-700">{value}</code> },
+                            { title: '覆盖率', dataIndex: 'coverage_rate', width: 100, render: (value) => <span className={`font-semibold ${Number(value) < 1 ? 'text-orange-500' : 'text-emerald-500'}`}>{formatPercent(Number(value))}</span> },
+                            { title: '缺失行', dataIndex: 'missing_count', width: 80, render: (value) => <span className={Number(value) > 0 ? 'text-red-500 font-medium' : 'text-slate-400'}>{value}</span> },
+                            { title: '治理建议', dataIndex: 'recommendation', render: (recommendation: DatasetQualityDiagnosis['fields'][number]['recommendation']) => (
+                                <span className={`text-xs ${recommendation.action === 'none' ? 'text-slate-400' : 'text-orange-600 font-medium bg-orange-50 px-2 py-1 rounded-md'}`}>{recommendation.message}</span>
+                            )},
+                          ]}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <Alert type="info" showIcon message={qualityQuery.isLoading ? '正在扫描数据集缺失率和重复率...' : '选择数据集版本查看质量诊断'} className="rounded-xl border-slate-200 bg-slate-50 text-slate-600" />
+                  )}
+                </Space>
+              ) : (
+                <div className="h-48 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50">
+                  <Typography.Text type="secondary" className="font-medium">请在上方数据中心挂载数据集版本</Typography.Text>
+                </div>
+              )}
+            </div>
+          </div>
         </Col>
       </Row>
-      </PageSection>
-
-      <PageSection title="质量诊断" testId="datasets-quality-section">
-        <Card
-        className="flat-card"
-        title="字段治理诊断"
-        extra={
-          <Button
-            type="primary"
-            disabled={!previewDataset || !qualityQuery.data}
-            loading={repairVersionMutation.isPending}
-            onClick={() => repairVersionMutation.mutate()}
-          >
-            生成修复版 Dataset Version
-          </Button>
-        }
-      >
-        {previewDataset ? (
-          <Space direction="vertical" className="full-width-control" size="middle">
-            {qualityQuery.isError ? <Alert type="error" showIcon message="字段治理诊断加载失败" /> : null}
-            {qualityQuery.data ? (
-              <>
-                <Descriptions bordered size="small" column={{ xs: 1, md: 3 }}>
-                  <Descriptions.Item label="样本数">{qualityQuery.data.summary.row_count}</Descriptions.Item>
-                  <Descriptions.Item label="缺失字段">{qualityQuery.data.summary.fields_with_missing} 个</Descriptions.Item>
-                  <Descriptions.Item label="重复样本">重复样本 {qualityQuery.data.summary.duplicate_row_count} 条</Descriptions.Item>
-                </Descriptions>
-                <Table
-                  size="small"
-                  rowKey="field"
-                  loading={qualityQuery.isLoading}
-                  dataSource={qualityQuery.data.fields}
-                  pagination={qualityQuery.data.fields.length > 6 ? { pageSize: 6, size: 'small', showSizeChanger: false } : false}
-                  columns={[
-                    { title: '字段', dataIndex: 'path', render: (value) => <code>{value}</code> },
-                    { title: '类型', dataIndex: 'type', width: 110, render: (value) => <Tag color="blue">{value}</Tag> },
-                    {
-                      title: '覆盖率',
-                      dataIndex: 'coverage_rate',
-                      width: 150,
-                      render: (value) => <Typography.Text>覆盖率 {formatPercent(Number(value))}</Typography.Text>,
-                    },
-                    { title: '缺失行', dataIndex: 'missing_count', width: 100 },
-                    { title: '唯一值', dataIndex: 'distinct_count', width: 100 },
-                    {
-                      title: '治理建议',
-                      dataIndex: 'recommendation',
-                      render: (recommendation: DatasetQualityDiagnosis['fields'][number]['recommendation']) => (
-                        <Typography.Text type={recommendation.action === 'none' ? 'secondary' : 'warning'}>{recommendation.message}</Typography.Text>
-                      ),
-                    },
-                  ]}
-                />
-                {qualityQuery.data.duplicate_groups.length ? (
-                  <Alert
-                    type="warning"
-                    showIcon
-                    message={`检测到 ${qualityQuery.data.summary.duplicate_group_count} 组重复样本`}
-                    description={`示例 row_id：${qualityQuery.data.duplicate_groups[0].row_ids.join(', ')}`}
-                  />
-                ) : (
-                  <Alert type="success" showIcon message="未检测到重复样本。" />
-                )}
-              </>
-            ) : (
-              <Alert type="info" showIcon message={qualityQuery.isLoading ? '正在计算字段覆盖率、缺失率和重复率。' : '选择 Dataset Version 后查看字段治理诊断。'} />
-            )}
-          </Space>
-        ) : (
-          <Alert type="info" showIcon message="暂无可诊断的 Dataset Version，请先上传或物化数据集。" />
-        )}
-        </Card>
-      </PageSection>
 
       <Modal
         title="上传数据集文件"

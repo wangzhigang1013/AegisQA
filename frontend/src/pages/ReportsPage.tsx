@@ -1,4 +1,4 @@
-import { DownloadOutlined } from '@ant-design/icons';
+import { DownloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, Empty, Input, List, Row, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useEffect, useMemo, useState, type Key } from 'react';
@@ -493,62 +493,7 @@ export function ReportsPage() {
 
   return (
     <section className="page-stack">
-      <PageHeader
-        eyebrow="任务结果"
-        title="任务报告"
-        description="报告不再孤立展示指标，而是绑定具体任务，展示数据源、Workflow、执行结果、Badcase 和导出入口。"
-        primaryAction={
-          <ActionToolbar className="report-header-actions" testId="reports-header-actions">
-            <Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace` : undefined}>查看 Trace Flow</Button>
-            <Button href={selectedTask ? `/tasks/${selectedTask.task_id}/trace-tree` : undefined}>查看 Trace Tree</Button>
-            <Button disabled={!selectedTask} loading={redTeamScanMutation.isPending} onClick={() => redTeamScanMutation.mutate()}>运行红队扫描</Button>
-            <Select
-              aria-label="报告导出角色"
-              className="role-select"
-              value={exportRole}
-              onChange={setExportRole}
-              options={reportExportRoles.map((role) => ({ value: role.value, label: role.label }))}
-            />
-            <Space wrap size={4} className="report-export-actions">
-              <Tooltip title={!canExportFormat('html') ? '当前角色没有 report:export 权限，请先申请并通过审批' : ''}>
-                <Button
-                  type="primary"
-                  icon={<DownloadOutlined />}
-                  disabled={!selectedTask || exportMutation.isPending || !canExportFormat('html')}
-                  loading={exportMutation.isPending && exportMutation.variables === 'html'}
-                  onClick={() => exportMutation.mutate('html')}
-                >
-                  导出 HTML
-                </Button>
-              </Tooltip>
-              <Button
-                icon={<DownloadOutlined />}
-                disabled={!selectedTask || exportMutation.isPending || !canExportFormat('csv')}
-                loading={exportMutation.isPending && exportMutation.variables === 'csv'}
-                onClick={() => exportMutation.mutate('csv')}
-              >
-                导出 CSV
-              </Button>
-              <Button
-                icon={<DownloadOutlined />}
-                disabled={!selectedTask || exportMutation.isPending || !canExportFormat('json')}
-                loading={exportMutation.isPending && exportMutation.variables === 'json'}
-                onClick={() => exportMutation.mutate('json')}
-              >
-                导出 JSON
-              </Button>
-              <Button
-                icon={<DownloadOutlined />}
-                disabled={!selectedTask || offlinePackageMutation.isPending || !canExportFormat('offline_zip')}
-                loading={offlinePackageMutation.isPending}
-                onClick={() => offlinePackageMutation.mutate()}
-              >
-                导出离线包
-              </Button>
-            </Space>
-          </ActionToolbar>
-        }
-      />
+
 
       {notice ? <Alert type={notice.includes('失败') || notice.includes('请先') ? 'warning' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
       {tasksQuery.isError ? (
@@ -587,13 +532,28 @@ export function ReportsPage() {
         />
       ) : null}
 
-      <PageSection title="报告列表">
-        <Row gutter={[12, 12]} align="middle">
-          <Col xs={24} lg={8}>
+      <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl shadow-2xl p-6 mb-8 mt-2 relative overflow-hidden">
+        {/* 装饰性背景 */}
+        <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-purple-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+        <div className="relative flex flex-col lg:flex-row justify-between items-center gap-6 z-10">
+          <div className="flex items-center gap-5 w-full lg:w-1/3">
+            <div className="p-4 bg-blue-500/20 rounded-2xl text-blue-400 shadow-inner border border-blue-500/20">
+              <FileTextOutlined className="text-3xl" />
+            </div>
+            <div>
+              <Typography.Title level={4} className="m-0 text-white font-bold tracking-wide">报告分析大屏</Typography.Title>
+              <Typography.Text className="text-slate-400 text-sm">选择运行任务并查看全方位诊断</Typography.Text>
+            </div>
+          </div>
+          
+          <div className="w-full lg:w-2/3 flex flex-col lg:items-end gap-3">
             <Select
               aria-label="选择报告任务"
-              placeholder="选择任务"
-              className="full-width-control"
+              placeholder="快速切换分析任务..."
+              className="w-full lg:max-w-md"
+              size="large"
               showSearch
               filterOption={false}
               searchValue={taskSearch}
@@ -601,22 +561,22 @@ export function ReportsPage() {
               loading={tasksQuery.isLoading || selectedTaskQuery.isFetching}
               onSearch={setTaskSearch}
               onChange={changeSelectedTask}
-              options={taskOptions.map((item) => ({ value: item.task_id, label: `${item.name} / ${item.status}` }))}
+              options={taskOptions.map((item) => ({ value: item.task_id, label: `${item.name} - [${item.status}]` }))}
             />
-          </Col>
-          <Col xs={24} lg={16}>
-            {task ? (
-              <Space wrap>
-                <Tag color="blue">{task.dataset_name} v{task.dataset_version}</Tag>
-                <Tag color="purple">{task.workflow_name}</Tag>
-                <Tag color={task.status === 'completed' ? 'green' : 'orange'}>{task.status}</Tag>
-              </Space>
-            ) : (
-              <Typography.Text type="secondary">暂无任务报告，请先在执行中心创建任务。</Typography.Text>
-            )}
-          </Col>
-        </Row>
-      </PageSection>
+            <div className="h-8 flex items-center justify-start lg:justify-end">
+              {task ? (
+                <div className="flex flex-wrap gap-2">
+                  <span className="bg-blue-500/20 text-blue-300 border border-blue-500/20 px-3 py-1 rounded-full text-xs font-semibold tracking-wide">数据集: {task.dataset_name} v{task.dataset_version}</span>
+                  <span className="bg-purple-500/20 text-purple-300 border border-purple-500/20 px-3 py-1 rounded-full text-xs font-semibold tracking-wide">工作流: {task.workflow_name}</span>
+                  <span className={`${task.status === 'completed' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/20' : 'bg-orange-500/20 text-orange-300 border-orange-500/20'} border px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide`}>{task.status}</span>
+                </div>
+              ) : (
+                <span className="text-slate-500 text-sm">暂无任务报告，请先在执行中心创建任务。</span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {task ? (
         <>

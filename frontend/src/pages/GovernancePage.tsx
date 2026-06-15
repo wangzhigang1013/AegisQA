@@ -517,13 +517,15 @@ export function GovernancePage() {
         onApprove={(skill) => skillMutation.mutate({ skill, action: 'approve' })}
       />
 
-      <Card className="flat-card" title="审计日志">
-        <Timeline
-          items={(auditEventsQuery.data ?? []).map((event) => ({
-            color: 'blue',
-            children: `${String(event.action)}：${String(event.target ?? '-')}`,
-          }))}
-        />
+      <Card className="flat-card" title="审计日志" bodyStyle={{ padding: 0 }}>
+        <div className="custom-scrollbar" style={{ maxHeight: '400px', overflowY: 'auto', padding: '24px' }}>
+          <Timeline
+            items={(auditEventsQuery.data ?? []).map((event) => ({
+              color: 'blue',
+              children: `${String(event.action)}：${String(event.target ?? '-')}`,
+            }))}
+          />
+        </div>
       </Card>
       </PageSection>
 

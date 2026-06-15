@@ -5,6 +5,7 @@ import {
   RedoOutlined,
   UndoOutlined,
 } from '@ant-design/icons';
+import '@xyflow/react/dist/style.css';
 import {
   Background,
   BackgroundVariant,
@@ -145,11 +146,11 @@ export function WorkflowCanvasPanel({
         proOptions={{ hideAttribution: true }}
       >
         <Background
-          variant={BackgroundVariant.Lines}
-          gap={24}
-          size={1}
-          color="#cbd5e1"
-          style={{ opacity: 0.5 }}
+          variant={BackgroundVariant.Dots}
+          gap={20}
+          size={1.5}
+          color="#94a3b8"
+          style={{ opacity: 0.6 }}
         />
 
         {/* 控制按钮 */}
@@ -165,8 +166,7 @@ export function WorkflowCanvasPanel({
             overflow: 'hidden',
             boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.05)',
             border: '1px solid rgba(226, 232, 240, 0.8)',
-            background: 'rgba(255, 255, 255, 0.8)',
-            backdropFilter: 'blur(8px)',
+            background: '#ffffff',
           }}
         />
 
@@ -194,8 +194,7 @@ export function WorkflowCanvasPanel({
             overflow: 'hidden',
             boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.05)',
             border: '1px solid rgba(226, 232, 240, 0.8)',
-            background: 'rgba(255, 255, 255, 0.85)',
-            backdropFilter: 'blur(12px)',
+            background: '#ffffff',
           }}
         />
       </ReactFlow>

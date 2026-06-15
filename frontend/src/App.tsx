@@ -82,85 +82,87 @@ export function AppShell() {
       theme={{
         algorithm: theme.defaultAlgorithm,
         token: {
-          colorPrimary: '#3b82f6', // 更现代明亮的蓝色
+          colorPrimary: '#4f46e5', // Indigo 600 高级靛蓝
           colorSuccess: '#10b981',
           colorWarning: '#f59e0b',
           colorError: '#ef4444',
-          colorInfo: '#3b82f6',
-          borderRadius: 12,
+          colorInfo: '#4f46e5',
+          borderRadius: 8,
           borderRadiusLG: 16,
-          borderRadiusSM: 8,
-          fontFamily: '"Inter", "DM Sans", "Segoe UI", "Microsoft YaHei", Arial, sans-serif',
+          borderRadiusSM: 6,
+          fontFamily: '"Outfit", "Inter", "Segoe UI", "Microsoft YaHei", sans-serif',
           fontSize: 14,
           colorBgContainer: '#ffffff',
-          colorBgLayout: '#f4f7fb', // 更柔和的背景色
+          colorBgLayout: '#f8fafc', // 极简灰白
           colorBgElevated: '#ffffff',
           colorBorder: '#e2e8f0',
           colorBorderSecondary: '#f1f5f9',
           colorText: '#0f172a',
           colorTextSecondary: '#475569',
           colorTextTertiary: '#94a3b8',
-          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01)', // 更加弥散柔和的阴影
-          boxShadowSecondary: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05)',
-          // Vitest 的 jsdom 环境不渲染真实动画，关闭 motion 可以减少无意义的计时器等待和 act 噪声；生产环境保持 Ant Design 默认动效。
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+          boxShadowSecondary: '0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.02)',
           motion: import.meta.env.MODE === 'test' ? false : undefined,
         },
         components: {
           Menu: {
             itemBg: 'transparent',
             subMenuItemBg: 'transparent',
-            itemSelectedBg: 'rgba(59, 130, 246, 0.15)',
-            itemHoverBg: 'rgba(59, 130, 246, 0.08)',
-            itemSelectedColor: '#f8fafc',
-            itemColor: '#94a3b8',
-            itemHoverColor: '#f8fafc',
-            itemActiveBg: 'rgba(59, 130, 246, 0.12)',
-            groupTitleColor: '#64748b',
+            itemSelectedBg: 'rgba(79, 70, 229, 0.1)',
+            itemHoverBg: 'rgba(79, 70, 229, 0.04)',
+            itemSelectedColor: '#4f46e5',
+            itemColor: '#64748b',
+            itemHoverColor: '#0f172a',
+            itemActiveBg: 'rgba(79, 70, 229, 0.08)',
+            groupTitleColor: '#94a3b8',
             fontSize: 14,
-            itemHeight: 44, // 增加高度
+            itemHeight: 46,
             itemMarginBlock: 4,
             itemMarginInline: 12,
-            itemBorderRadius: 8,
+            itemBorderRadius: 10,
             iconSize: 18,
           },
           Card: {
             headerBg: 'transparent',
-            paddingLG: 24, // 增加卡片内边距
-            borderRadiusLG: 16,
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.025)', // 添加默认微阴影
+            paddingLG: 24,
+            borderRadiusLG: 20, // 更柔和的大圆角
+            boxShadow: '0 4px 24px -6px rgba(0, 0, 0, 0.04)', // 极其高级的微弥散阴影
+            colorBorderSecondary: 'transparent', // 消除突兀的卡片边框
           },
           Table: {
-            headerBg: '#f8fafc',
-            headerColor: '#475569',
-            rowHoverBg: '#f1f5f9',
-            borderColor: '#e2e8f0',
-            cellPaddingBlock: 14,
-            cellPaddingInline: 16,
-            headerBorderRadius: 8,
+            headerBg: 'rgba(248, 250, 252, 0.6)', // 极度微弱的表头底色，毛玻璃感
+            headerColor: '#64748b',
+            rowHoverBg: '#f8fafc',
+            borderColor: 'transparent', // 彻底取消数据表之间的生硬边框
+            cellPaddingBlock: 18, // 呼吸感拉满
+            cellPaddingInline: 24,
+            headerBorderRadius: 12,
           },
           Button: {
-            borderRadius: 8,
+            borderRadius: 12, // App 级大圆角
             controlHeight: 38,
-            fontWeight: 500,
-            boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', // 按钮微发光
+            fontWeight: 600,
+            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.02)', // 按钮基础浮雕感
+            primaryShadow: '0 4px 14px 0 rgba(79, 70, 229, 0.39)', // 主按钮紫光发光阴影
           },
           Input: {
-            borderRadius: 8,
-            controlHeight: 38,
-            colorBorder: '#cbd5e1',
-            hoverBorderColor: '#3b82f6',
-            activeBorderColor: '#3b82f6',
+            borderRadius: 12,
+            controlHeight: 40,
+            colorBorder: '#e2e8f0',
+            hoverBorderColor: '#818cf8',
+            activeBorderColor: '#4f46e5',
           },
           Select: {
-            borderRadius: 8,
-            controlHeight: 38,
+            borderRadius: 12,
+            controlHeight: 40,
           },
           Tag: {
-            borderRadiusSM: 6,
+            borderRadiusSM: 100, // 强制变为 Pill 胶囊形态
+            lineHeight: 2,
           },
           Statistic: {
             titleFontSize: 13,
-            contentFontSize: 28,
+            contentFontSize: 32, // 数据指标更加磅礴
           },
         },
       }}
