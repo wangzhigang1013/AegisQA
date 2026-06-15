@@ -1,8 +1,9 @@
-import { ApartmentOutlined, CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined, StopOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Empty, Input, Modal, Popconfirm, Row, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, Empty, Input, List, Modal, Popconfirm, Row, Select, Space, Tag, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { Copy, Trash2, Edit3, Plus, Ban, Network } from 'lucide-react';
 
 import { api } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
@@ -139,7 +140,7 @@ export function WorkflowMarketPage() {
         eyebrow="流程资产"
         title="Workflow 资产市场"
         description="先选择或创建 Workflow，再进入画布编辑。已发布版本可直接用于创建任务。"
-        primaryAction={<Button type="primary" icon={<PlusOutlined />} loading={createDraftMutation.isPending} onClick={() => setIsCreateModalOpen(true)}>新建 Workflow</Button>}
+        primaryAction={<Button type="primary" icon={<Plus className="w-4 h-4" />} loading={createDraftMutation.isPending} onClick={() => setIsCreateModalOpen(true)}>新建 Workflow</Button>}
       />
 
       {notice ? <Alert type="success" showIcon closable message={notice} onClose={() => setNotice(null)} /> : null}
@@ -188,55 +189,87 @@ export function WorkflowMarketPage() {
               </Space>
             }
           >
-            <Table
-              rowKey={(record) => record.key}
-              pagination={{ pageSize: 8 }}
-              dataSource={workflowRows}
-              columns={[
-                { title: 'Workflow', dataIndex: 'name', render: (value) => <Space><ApartmentOutlined /><Typography.Text strong>{value}</Typography.Text></Space> },
-                { title: '类型', dataIndex: 'type', render: (value) => <Tag color={value === '草稿' ? 'orange' : 'green'}>{value}</Tag> },
-                { title: '版本', dataIndex: 'version' },
-                { title: '状态', dataIndex: 'status' },
-                { title: '关联任务数', render: () => 0 },
-                {
-                  title: '操作',
-                  render: (_, record) => (
-                    <Space>
-                      {record.draft ? (
-                        <>
-                          <Button icon={<EditOutlined />} disabled={record.status === 'deleted'} onClick={() => openDraft(record.draft!)}>编辑</Button>
-                          <Button icon={<CopyOutlined />} loading={copyDraftMutation.isPending} onClick={() => copyDraftMutation.mutate(record.draft!)}>复制草稿</Button>
-                          <Popconfirm
-                            title="确认删除 Workflow 草稿？"
-                            description="删除后不会影响已发布 Workflow 和已有任务。"
-                            okText="确认删除"
-                            cancelText="取消"
-                            onConfirm={() => deleteDraftMutation.mutate(record.draft!.draft_id)}
-                          >
-                            <Button danger icon={<DeleteOutlined />} disabled={record.status === 'deleted'} loading={deleteDraftMutation.isPending}>删除草稿</Button>
-                          </Popconfirm>
-                        </>
-                      ) : null}
-                      {record.workflow ? (
-                        <>
-                          <Button
-                            icon={<EditOutlined />}
-                            loading={draftsQuery.isLoading}
-                            disabled={draftsQuery.isLoading || !linkedDraftForWorkflow(record.workflow)}
-                            onClick={() => openPublished(record.workflow!)}
-                          >
-                            编辑
-                          </Button>
-                          <Button icon={<CopyOutlined />} loading={copyPublishedMutation.isPending} onClick={() => copyPublishedMutation.mutate(record.workflow!)}>复制为草稿</Button>
-                          <Button danger icon={<StopOutlined />} disabled={record.status === 'archived'} loading={archiveWorkflowMutation.isPending} onClick={() => archiveWorkflowMutation.mutate(record.workflow!.version_id)}>归档</Button>
-                        </>
-                      ) : null}
-                    </Space>
-                  ),
-                },
-              ]}
-              locale={{ emptyText: <Empty description="暂无 Workflow，点击右上角新建。" /> }}
-            />
+            <motion.div
+              initial="hidden"
+              animate="show"
+              variants={{
+                hidden: { opacity: 0 },
+                show: { opacity: 1, transition: { staggerChildren: 0.05 } }
+              }}
+            >
+              <List
+                grid={{ gutter: 16, xs: 1, sm: 1, md: 2, xl: 3 }}
+                pagination={{ pageSize: 12 }}
+                dataSource={workflowRows}
+                locale={{ emptyText: <Empty description="暂无 Workflow，点击右上角新建。" /> }}
+                renderItem={(record) => (
+                  <List.Item>
+                    <motion.div
+                      variants={{
+                        hidden: { opacity: 0, y: 20 },
+                        show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
+                      }}
+                      className="h-full"
+                    >
+                      <Card 
+                        hoverable 
+                        className="flat-card h-full flex flex-col group border-slate-200"
+                        bodyStyle={{ flex: 1, padding: '20px' }}
+                      >
+                        <div className="flex justify-between items-start mb-4">
+                          <Space className="group-hover:translate-x-1 transition-transform">
+                            <div className="p-2 bg-indigo-50 rounded-xl text-indigo-500">
+                              <Network className="w-5 h-5" />
+                            </div>
+                            <Typography.Text strong className="text-base text-slate-800">{record.name}</Typography.Text>
+                          </Space>
+                          <Tag color={record.type === '草稿' ? 'orange' : 'green'} className="rounded-md border-transparent px-2 py-0.5">{record.type}</Tag>
+                        </div>
+                        
+                        <Space direction="vertical" size="small" className="w-full mb-4 text-xs font-medium text-slate-500">
+                          <div className="flex justify-between">
+                            <span>版本：{record.version}</span>
+                            <span>状态：{record.status}</span>
+                          </div>
+                        </Space>
+
+                        <div className="mt-auto pt-4 border-t border-slate-100 flex flex-wrap gap-2">
+                          {record.draft && (
+                            <>
+                              <Button size="small" type="primary" className="shadow-sm" icon={<Edit3 className="w-3.5 h-3.5" />} disabled={record.status === 'deleted'} onClick={() => openDraft(record.draft!)}>编辑</Button>
+                              <Button size="small" icon={<Copy className="w-3.5 h-3.5" />} loading={copyDraftMutation.isPending} onClick={() => copyDraftMutation.mutate(record.draft!)}>复制</Button>
+                              <Popconfirm
+                                title="确认删除草稿？"
+                                onConfirm={() => deleteDraftMutation.mutate(record.draft!.draft_id)}
+                              >
+                                <Button size="small" danger icon={<Trash2 className="w-3.5 h-3.5" />} disabled={record.status === 'deleted'} loading={deleteDraftMutation.isPending} />
+                              </Popconfirm>
+                            </>
+                          )}
+                          {record.workflow && (
+                            <>
+                              <Button
+                                size="small"
+                                type="primary"
+                                className="shadow-sm"
+                                icon={<Edit3 className="w-3.5 h-3.5" />}
+                                loading={draftsQuery.isLoading}
+                                disabled={draftsQuery.isLoading || !linkedDraftForWorkflow(record.workflow)}
+                                onClick={() => openPublished(record.workflow!)}
+                              >
+                                编辑
+                              </Button>
+                              <Button size="small" icon={<Copy className="w-3.5 h-3.5" />} loading={copyPublishedMutation.isPending} onClick={() => copyPublishedMutation.mutate(record.workflow!)}>复制</Button>
+                              <Button size="small" danger icon={<Ban className="w-3.5 h-3.5" />} disabled={record.status === 'archived'} loading={archiveWorkflowMutation.isPending} onClick={() => archiveWorkflowMutation.mutate(record.workflow!.version_id)} />
+                            </>
+                          )}
+                        </div>
+                      </Card>
+                    </motion.div>
+                  </List.Item>
+                )}
+              />
+            </motion.div>
           </Card>
         </Col>
         <Col xs={24} xl={8}>
@@ -248,7 +281,7 @@ export function WorkflowMarketPage() {
                     <Typography.Text strong>{String(template.name)}样例</Typography.Text>
                     <Typography.Text type="secondary">{String(template.description ?? '')}</Typography.Text>
                     <Button
-                      icon={<PlusOutlined />}
+                      icon={<Plus className="w-4 h-4" />}
                       onClick={() => {
                         const name = String(template.name);
                         api.createWorkflowDraft({ name, graph: graphFromTemplate(template, name) }).then((draft) => {

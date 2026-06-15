@@ -4,6 +4,7 @@ import { Alert, Button, Card, Checkbox, Descriptions, Form, Input, InputNumber, 
 import { useMemo, useState } from 'react';
 
 import { api } from '../api/client';
+import { PageSection } from '../components/LayoutPrimitives';
 import { PageHeader } from '../components/PageHeader';
 import { SkillApprovalDrawer } from './skills/SkillApprovalDrawer';
 import type { ModelGatewayConfig, ModelGatewayConnection, ModelGatewayTestResult, RuntimeStatus, RuntimeStatusComponent, SkillManifest, SkillPackageRecord } from '../types';
@@ -277,8 +278,9 @@ export function GovernancePage() {
         primaryAction={<Button type="primary" icon={<SafetyCertificateOutlined />} onClick={() => setMatrixOpen(true)}>查看权限矩阵</Button>}
       />
 
-      {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
+      {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} className="mb-4" /> : null}
 
+      <PageSection title="运行状态" testId="governance-runtime-section">
       <Card className="flat-card" title="运行状态与生产边界" loading={runtimeStatusQuery.isLoading}>
         <Space direction="vertical" className="full-width-control" size={12}>
           <Typography.Title level={5}>运行态驾驶舱</Typography.Title>
@@ -375,7 +377,9 @@ export function GovernancePage() {
           </Typography.Text>
         </Space>
       </Card>
+      </PageSection>
 
+      <PageSection title="模型网关与连接" testId="governance-model-section">
       <Card
         className="flat-card"
         title="模型接入"
@@ -450,7 +454,9 @@ export function GovernancePage() {
           ) : null}
         </Space>
       </Card>
+      </PageSection>
 
+      <PageSection title="资源治理" testId="governance-assets-section">
       <Card
         className="flat-card"
         title="Skill 生命周期"
@@ -519,6 +525,7 @@ export function GovernancePage() {
           }))}
         />
       </Card>
+      </PageSection>
 
       <Modal title="RBAC 权限矩阵" open={matrixOpen} onCancel={() => setMatrixOpen(false)} footer={<Button type="primary" onClick={() => setMatrixOpen(false)}>关闭</Button>}>
         <Table

@@ -4,6 +4,7 @@ import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Radio, Row, 
 import { useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
+import { PageSection } from '../components/LayoutPrimitives';
 import { PageHeader } from '../components/PageHeader';
 import type { CIGateConfigRecord, CIGateEvaluationPageResult, CIGateEvaluationRecord, CIGateEvaluationResult } from '../types';
 
@@ -119,8 +120,9 @@ export function CIGatesPage() {
         primaryAction={<Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>创建质量门禁</Button>}
       />
 
-      {notice ? <Alert type={notice.includes('失败') || notice.includes('阻断') ? 'warning' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
+      {notice ? <Alert type={notice.includes('失败') || notice.includes('阻断') ? 'warning' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} className="mb-4" /> : null}
 
+      <PageSection title="评估中心" testId="ci-gates-evaluation-section">
       <Card className="flat-card" title="Gate 评估控制台" extra={<Button icon={<ReloadOutlined />} onClick={() => void configsQuery.refetch()}>刷新配置</Button>}>
         <Row gutter={[16, 16]} align="bottom">
           <Col xs={24} lg={8}>
@@ -207,7 +209,9 @@ export function CIGatesPage() {
           </Col>
         </Row>
       ) : null}
+      </PageSection>
 
+      <PageSection title="评估报表" testId="ci-gates-report-section">
       <Card className="flat-card" title="历史趋势">
         <Row gutter={[12, 12]} className="metric-row">
           <Col xs={24} md={8}>
@@ -244,7 +248,9 @@ export function CIGatesPage() {
           ]}
         />
       </Card>
+      </PageSection>
 
+      <PageSection title="门禁配置" testId="ci-gates-config-section">
       <Card className="flat-card" title="质量门禁配置列表">
         <Table
           rowKey="config_id"
@@ -271,6 +277,7 @@ export function CIGatesPage() {
           ]}
         />
       </Card>
+      </PageSection>
 
       <Modal
         title="新建质量门禁配置"

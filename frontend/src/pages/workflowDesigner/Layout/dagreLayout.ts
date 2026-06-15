@@ -15,8 +15,8 @@ const defaultOptions: Required<LayoutOptions> = {
   direction: 'LR',
   nodeWidth: 220,
   nodeHeight: 120,
-  ranksep: 120,
-  nodesep: 80,
+  ranksep: 220,
+  nodesep: 120,
   marginx: 40,
   marginy: 40,
 };

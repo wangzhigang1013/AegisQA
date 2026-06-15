@@ -1,6 +1,6 @@
 import { CheckCircleOutlined, CopyOutlined, InboxOutlined, InfoCircleOutlined, SwapOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, Modal, Radio, Select, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd';
+import { Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, List, Modal, Radio, Select, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd';
 import type { UploadFile } from 'antd';
 import { useMemo, useState } from 'react';
 
@@ -162,72 +162,68 @@ export function SkillsPage() {
       </Card>
 
       <Card className="flat-card" title="Skill 列表">
-        <Table
-          rowKey="skill_id"
-          loading={skillsQuery.isLoading}
+        <List
+          grid={{ gutter: 16, xs: 1, sm: 1, md: 2, xl: 3 }}
+          pagination={{ pageSize: 12 }}
           dataSource={filteredSkills}
-          pagination={{ pageSize: 8 }}
+          loading={skillsQuery.isLoading}
           locale={{ emptyText: <Empty description="暂无 Skill，请上传 Agent Skill 包并完成合约测试和审批。" /> }}
-          columns={[
-            { title: 'Skill', dataIndex: 'skill_id', render: (value, record) => <Space direction="vertical" size={0}><Typography.Text strong>{record.name}</Typography.Text><code>{value}</code></Space> },
-            {
-              title: '状态',
-              dataIndex: 'status',
-              render: (value, record) => (
-                <Space wrap>
-                  <Tag color={record.enabled ? 'green' : 'orange'}>{formatSkillStatus(value)}</Tag>
-                  {!record.enabled ? <Tag>未启用</Tag> : null}
-                </Space>
-              ),
-            },
-            {
-              title: '合约测试',
-              render: (_, record) => {
-                const packageRecord = packageBySkillId[record.skill_id];
-                if (!packageRecord) return <Tag>内置 Skill</Tag>;
-                return <Tag color={packageRecord.last_contract_ok ? 'green' : 'red'}>{packageRecord.last_contract_ok ? '合约已通过' : '合约未通过'}</Tag>;
-              },
-            },
-            {
-              title: '审批人',
-              render: (_, record) => {
-                const lifecycleRecord = packageBySkillId[record.skill_id];
-                return lifecycleRecord ? (lifecycleRecord.approved_by ?? '未审批') : '-';
-              },
-            },
-            {
-              title: '审批时间',
-              render: (_, record) => {
-                const lifecycleRecord = packageBySkillId[record.skill_id];
-                return lifecycleRecord ? (lifecycleRecord.approved_at ?? '-') : '-';
-              },
-            },
-            { title: '标签', dataIndex: 'tags', render: (tags: string[]) => <Space wrap>{tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}</Space> },
-            { title: '权限', dataIndex: 'permissions', render: (items: string[]) => <Space wrap>{items.map((item) => <Tag color="blue" key={item}>{item}</Tag>)}</Space> },
-            {
-              title: '来源',
-              render: (_, record) => {
-                const packageRecord = packageBySkillId[record.skill_id];
-                if (packageRecord) return <Tag color="purple">{formatPackageRuntime(packageRecord.runtime_mode)}</Tag>;
-                return <Tag>builtin</Tag>;
-              },
-            },
-            {
-              title: '操作',
-              render: (_, record) => (
-                <Button
-                  icon={<InfoCircleOutlined />}
-                  onClick={() => {
-                    setContractResultText(null);
-                    setContractResult(null);
-                    setActiveSkill(record);
-                  }}
+          renderItem={(record) => {
+            const packageRecord = packageBySkillId[record.skill_id];
+            const isContractOk = packageRecord?.last_contract_ok;
+            const runtimeMode = packageRecord ? formatPackageRuntime(packageRecord.runtime_mode) : 'builtin';
+            
+            return (
+              <List.Item>
+                <Card 
+                  hoverable 
+                  className="flat-card h-full flex flex-col"
+                  bodyStyle={{ flex: 1, padding: '16px' }}
                 >
-                  查看详情
-                </Button>
-              ),
-            },
-          ]}
+                  <div className="flex justify-between items-start mb-3">
+                    <Space direction="vertical" size={0}>
+                      <Typography.Text strong className="text-base">{record.name}</Typography.Text>
+                      <Typography.Text type="secondary" className="text-xs font-mono">{record.skill_id}</Typography.Text>
+                    </Space>
+                    <Tag color={record.enabled ? 'green' : 'orange'}>{formatSkillStatus(record.status)}</Tag>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {record.tags.map(tag => <Tag key={tag} className="text-xs m-0">{tag}</Tag>)}
+                    <Tag color="purple" className="text-xs m-0">{runtimeMode}</Tag>
+                  </div>
+
+                  <div className="text-xs text-slate-500 flex flex-col gap-1 mb-4">
+                    <div className="flex justify-between">
+                      <span>合约状态:</span>
+                      <span className={isContractOk ? 'text-green-600' : 'text-red-500'}>
+                        {!packageRecord ? '内置 Skill' : (isContractOk ? '已通过' : '未通过')}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>审批人:</span>
+                      <span>{packageRecord?.approved_by ?? '未审批'}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-auto pt-3 border-t border-slate-100 text-right">
+                    <Button
+                      size="small"
+                      type="primary"
+                      icon={<InfoCircleOutlined />}
+                      onClick={() => {
+                        setContractResultText(null);
+                        setContractResult(null);
+                        setActiveSkill(record);
+                      }}
+                    >
+                      查看详情
+                    </Button>
+                  </div>
+                </Card>
+              </List.Item>
+            );
+          }}
         />
       </Card>
 

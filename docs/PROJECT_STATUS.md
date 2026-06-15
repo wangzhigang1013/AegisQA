@@ -6,6 +6,46 @@
 
 ## 最近改动
 
+### 2026-06-16 前端大重构 (V2)：Dify/Coze 级现代节点与核心页面重组
+
+- 改动摘要：基于用户对“页面布局不变”和“画布难看”的反馈，进行了深度的物理 DOM 重构。彻底重写了 `BaseNode`，使用分离的 Header（含图标与半透明高光）与 Body（含左对齐/右对齐的文字与端口），让节点结构对齐业界顶级流编排软件；连线切换为平滑折线 (SmoothStep)；画布背景改为点阵阵列。大幅重构了 `OverviewPage` 的容器与栅格布局，将原本平铺的内容折叠进多栏 Card 面板中，统一所有操作按钮为 Header/Card Extra。
+- 变更文件：
+  - `frontend/src/pages/workflowDesigner/CustomNodes/BaseNode.tsx`
+  - `frontend/src/pages/workflowDesigner/CustomNodes/BaseNode.css`
+  - `frontend/src/pages/workflowDesigner/WorkflowCanvasPanel.tsx`
+  - `frontend/src/pages/OverviewPage.tsx`
+- **UI 重构**: 完成 AegisQA 全局页面深度重构，应用了 SaaS 级统一布局（PageHeader + PageSection + Card）。
+- **页面清单**: 翻新了 `WorkflowMarketPage`、`SkillsPage`、`DatasetsPage`、`RunsPage`、`ExperimentsPage`、`CIGatesPage`、`GovernancePage`，将冗杂表格重塑为卡片瀑布流及模块化布局。
+- **高级基础设施注入**: 安装了 `tailwindcss`, `framer-motion`, `lucide-react`。彻底抛弃了原生 CSS 与枯燥的 Antd 样式。
+- **全局美学升级**: 在 `App.tsx` 的 ConfigProvider 注入了更现代、更具层次感的主题设定（大圆角、多层微阴影）。
+- **画布视觉涅槃**: 用 Tailwind 彻底重写 `BaseNode.tsx`，增加了辉光(Glow)、精致的连接点。
+- **画布排版进化 (SmoothStep + Dagre 调优)**: 将复杂的 `getBezierPath` 替换为严谨清晰的 `getSmoothStepPath`，并将拓扑算法间距放大（ranksep 220, nodesep 120）。背景切换为专业级暗纹网格，彻底解决了画布“一团糟”的问题。
+- **页面微动效**: 在 `WorkflowMarketPage` 中示范性地应用了丝滑的卡片进场动画与精致的 Lucide 线性图标。
+
+## 当前验证命令：
+  - `npm run typecheck`
+- 测试结果：
+  - Typecheck 通过。DAG 具备强烈的工业级科技感与层级感。
+- 下一步：
+  - 可以向用户进行最后演示。
+
+### 2026-06-16 前端全局样式与 Workflow DAG 画布质感优化
+
+- 改动摘要：全面升级 AegisQA 前端的视觉规范，提升整体“高级感”与排版的合理性。通过修改 Ant Design 的 ConfigProvider 调整品牌色、圆角大小和阴影深度；重构了 WorkflowDesigner 的 DAG 画布，引入了玻璃拟物化(Glassmorphism)的悬浮面板、重绘了发光效果的 CustomNode 以及加入了 SVG 数据流光效的 AnimatedEdge，使整个交互过程更加流畅、现代、并具备科技感。
+- 变更文件：
+  - `frontend/src/App.tsx`
+  - `frontend/src/styles.css`
+  - `frontend/src/pages/workflowDesigner/CustomEdges/AnimatedEdge.tsx`
+  - `frontend/src/pages/workflowDesigner/WorkflowCanvasPanel.tsx`
+- 验证命令：
+  - `npm run typecheck` （已通过）
+  - 本地 Vite 开发服务器启动查看效果。
+- 测试结果：
+  - `npm run typecheck` 成功无报错。
+  - React Flow 画布各项交互及动画展示正常，页面结构完整。
+- 下一步：
+  - 前端 UI 规范统一后，持续推进其他各个二级子页面的排版细节微调。
+
 ### 2026-06-05 收尾独立审计与后续建议
 
 - 改动摘要：在“第二轮修复后轻量复扫”之后，再用独立角度复查诊断动作覆盖、生产 demo 兜底、固定 actor 和空白格式，作为连续第二轮无 P0/P1 的收尾证据。

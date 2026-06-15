@@ -1,0 +1,17 @@
+.animated-flow {
+  stroke-dasharray: 6;
+  animation: dashdraw 1.5s linear infinite;
+  opacity: 0.85;
+  will-change: stroke-dashoffset;
+  transform: translateZ(0);
+}
+
+@keyframes dashdraw {
+  from {
+    stroke-dashoffset: 20;
+  }
+}
+
+.selected-edge {
+  filter: drop-shadow(0 0 6px rgba(99, 102, 241, 0.5));
+}

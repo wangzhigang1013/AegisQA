@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { api, formatApiError } from '../api/client';
+import { PageSection } from '../components/LayoutPrimitives';
 import { PageHeader } from '../components/PageHeader';
 import type { DatasetQualityDiagnosis, DatasetVersion } from '../types';
 
@@ -157,9 +158,11 @@ export function DatasetsPage() {
         showIcon
         message="字段路径是 Workflow 映射的起点"
         description={fieldMappingDescription}
+        className="mb-4"
       />
 
-      <Row gutter={[16, 16]}>
+      <PageSection title="数据上传与预览" testId="datasets-upload-section">
+        <Row gutter={[16, 16]}>
         <Col xs={24} lg={10}>
           <Card className="flat-card" title="上传数据">
             <Upload.Dragger
@@ -219,8 +222,10 @@ export function DatasetsPage() {
           </Card>
         </Col>
       </Row>
+      </PageSection>
 
-      <Card
+      <PageSection title="质量诊断" testId="datasets-quality-section">
+        <Card
         className="flat-card"
         title="字段治理诊断"
         extra={
@@ -288,7 +293,8 @@ export function DatasetsPage() {
         ) : (
           <Alert type="info" showIcon message="暂无可诊断的 Dataset Version，请先上传或物化数据集。" />
         )}
-      </Card>
+        </Card>
+      </PageSection>
 
       <Modal
         title="上传数据集文件"

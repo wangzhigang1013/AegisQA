@@ -4,6 +4,7 @@ import { Alert, Button, Card, Col, Form, Input, Modal, Row, Select, Space, Table
 import { useMemo, useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
+import { PageSection } from '../components/LayoutPrimitives';
 import { PageHeader } from '../components/PageHeader';
 import type { ExperimentRecord } from '../types';
 
@@ -67,8 +68,9 @@ export function ExperimentsPage() {
         primaryAction={<Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>生成实验快照</Button>}
       />
 
-      {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
+      {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} className="mb-4" /> : null}
 
+      <PageSection title="实验监控" testId="experiments-monitor-section">
       <Card className="flat-card" title="Baseline 对比" extra={<Button icon={<ReloadOutlined />} onClick={() => void experimentsQuery.refetch()}>刷新</Button>}>
         <Row gutter={[16, 16]}>
           <Col xs={24} lg={8}>
@@ -143,7 +145,9 @@ export function ExperimentsPage() {
           </Col>
         </Row>
       </Card>
+      </PageSection>
 
+      <PageSection title="诊断对比" testId="experiments-diagnosis-section">
       <Card className="flat-card" title="A/B 对比面板">
         <Row gutter={[16, 16]}>
           <Col xs={24} lg={12}>
@@ -180,7 +184,9 @@ export function ExperimentsPage() {
           </Col>
         </Row>
       </Card>
+      </PageSection>
 
+      <PageSection title="快照存档" testId="experiments-list-section">
       <Card className="flat-card" title="实验快照列表">
         <Table
           rowKey="experiment_id"
@@ -198,6 +204,7 @@ export function ExperimentsPage() {
           ]}
         />
       </Card>
+      </PageSection>
 
       <Modal
         title="从 Run 生成实验快照"

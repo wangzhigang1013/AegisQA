@@ -7,10 +7,12 @@ import {
 } from '@ant-design/icons';
 import {
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   ReactFlow,
   useReactFlow,
+  ConnectionLineType,
   type Connection,
   type Edge,
   type EdgeChange,
@@ -130,7 +132,8 @@ export function WorkflowCanvasPanel({
           type: 'animated',
           animated: true,
         }}
-        connectionLineStyle={{ stroke: '#3b82f6', strokeWidth: 2 }}
+        connectionLineType={ConnectionLineType.SmoothStep}
+        connectionLineStyle={{ stroke: '#818cf8', strokeWidth: 3 }}
         snapToGrid
         snapGrid={[20, 20]}
         minZoom={0.1}
@@ -141,12 +144,12 @@ export function WorkflowCanvasPanel({
         zoomOnDoubleClick={false}
         proOptions={{ hideAttribution: true }}
       >
-        {/* 背景网格 */}
         <Background
+          variant={BackgroundVariant.Lines}
           gap={24}
-          size={1.5}
+          size={1}
           color="#cbd5e1"
-          style={{ opacity: 0.6 }}
+          style={{ opacity: 0.5 }}
         />
 
         {/* 控制按钮 */}
@@ -156,12 +159,14 @@ export function WorkflowCanvasPanel({
           showInteractive={false}
           position="bottom-left"
           style={{
-            marginBottom: 16,
-            marginLeft: 16,
-            borderRadius: 8,
+            marginBottom: 24,
+            marginLeft: 24,
+            borderRadius: 12,
             overflow: 'hidden',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.1)',
-            border: '1px solid #e2e8f0',
+            boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.05)',
+            border: '1px solid rgba(226, 232, 240, 0.8)',
+            background: 'rgba(255, 255, 255, 0.8)',
+            backdropFilter: 'blur(8px)',
           }}
         />
 
@@ -173,8 +178,8 @@ export function WorkflowCanvasPanel({
           position="bottom-right"
           nodeColor={(node) => {
             switch (node.type) {
-              case 'source': return '#0ea5e9';
-              case 'output': return '#22c55e';
+              case 'source': return '#3b82f6';
+              case 'output': return '#10b981';
               case 'skill': return '#8b5cf6';
               case 'branch': return '#f59e0b';
               case 'join': return '#10b981';
@@ -183,14 +188,14 @@ export function WorkflowCanvasPanel({
             }
           }}
           style={{
-            marginBottom: 16,
-            marginRight: 16,
-            borderRadius: 8,
+            marginBottom: 24,
+            marginRight: 24,
+            borderRadius: 12,
             overflow: 'hidden',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.1)',
-            border: '1px solid #e2e8f0',
-            background: 'rgba(255,255,255,0.9)',
-            backdropFilter: 'blur(8px)',
+            boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.05)',
+            border: '1px solid rgba(226, 232, 240, 0.8)',
+            background: 'rgba(255, 255, 255, 0.85)',
+            backdropFilter: 'blur(12px)',
           }}
         />
       </ReactFlow>
