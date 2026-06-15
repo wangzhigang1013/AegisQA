@@ -1,6 +1,6 @@
-import { CheckCircleOutlined, InboxOutlined, InfoCircleOutlined, UploadOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, CopyOutlined, InboxOutlined, InfoCircleOutlined, SwapOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd';
+import { Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, Modal, Radio, Select, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd';
 import type { UploadFile } from 'antd';
 import { useMemo, useState } from 'react';
 
@@ -11,6 +11,8 @@ import type { SkillContractResult, SkillManifest, SkillPackageRecord, SkillVersi
 type UploadFormValues = {
   filename: string;
 };
+
+type ConflictStrategy = 'error' | 'replace' | 'new_version';
 
 export function SkillsPage() {
   const queryClient = useQueryClient();
@@ -23,6 +25,12 @@ export function SkillsPage() {
   const [contractResultText, setContractResultText] = useState<string | null>(null);
   const [contractResult, setContractResult] = useState<SkillContractResult | null>(null);
   const [form] = Form.useForm<UploadFormValues>();
+
+  // 冲突处理状态
+  const [conflictModalOpen, setConflictModalOpen] = useState(false);
+  const [conflictSkillId, setConflictSkillId] = useState<string | null>(null);
+  const [conflictStrategy, setConflictStrategy] = useState<ConflictStrategy>('error');
+  const [pendingUploadValues, setPendingUploadValues] = useState<UploadFormValues | null>(null);
 
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
   const packagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
@@ -43,33 +51,58 @@ export function SkillsPage() {
   }, [skillQuery, skills, statusFilter]);
 
   const uploadMutation = useMutation({
-    mutationFn: async (values: UploadFormValues) => {
+    mutationFn: async ({ values, strategy }: { values: UploadFormValues; strategy?: ConflictStrategy }) => {
       const selectedFile = getSelectedFile(uploadFile);
       if (!selectedFile) {
         throw new Error('请选择 zip 插件包。');
       }
       const content_base64 = await readFileBase64(selectedFile);
-      return api.uploadSkillPackage({ filename: values.filename || selectedFile.name, content_base64 });
+      return api.uploadSkillPackage({
+        filename: values.filename || selectedFile.name,
+        content_base64,
+        conflict_strategy: strategy || 'error',
+      });
     },
     onSuccess: async (record) => {
-      setNotice(`插件包已上传：${record.manifest.skill_id}，当前状态 ${record.status}`);
+      const actionText = conflictStrategy === 'replace' ? '已替换' : conflictStrategy === 'new_version' ? '已创建新版本' : '已上传';
+      setNotice(`插件包${actionText}：${record.manifest.skill_id}，当前状态 ${record.status}`);
       setUploadOpen(false);
       setUploadFile(null);
+      setConflictModalOpen(false);
+      setPendingUploadValues(null);
       form.resetFields();
       await queryClient.invalidateQueries({ queryKey: ['skills'] });
       await queryClient.invalidateQueries({ queryKey: ['skill-packages'] });
     },
-    onError: (error) => setNotice(`上传失败：${formatApiError(error)}`),
+    onError: (error: unknown) => {
+      const errorObj = error as { code?: string; message?: string; details?: { existing_skill_id?: string } };
+      if (errorObj?.code === 'SKILL_ALREADY_EXISTS') {
+        // 检测到冲突，显示冲突处理对话框
+        setConflictSkillId(errorObj.details?.existing_skill_id || null);
+        setConflictModalOpen(true);
+        setPendingUploadValues(form.getFieldsValue());
+      } else {
+        setNotice(`上传失败：${formatApiError(error)}`);
+      }
+    },
   });
+
+  // 处理冲突策略选择
+  const handleConflictResolve = () => {
+    if (pendingUploadValues) {
+      uploadMutation.mutate({ values: pendingUploadValues, strategy: conflictStrategy });
+    }
+  };
 
   const contractMutation = useMutation({
     mutationFn: (skillId: string) => api.contractTest(skillId),
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       const text = result.ok ? `合约测试通过：${result.skill_id}` : `合约测试失败：${result.message ?? result.error ?? '未知错误'}`;
       setContractResult(result);
       setContractResultText(text);
       setNotice(text);
-      void queryClient.invalidateQueries({ queryKey: ['skill-packages'] });
+      await queryClient.invalidateQueries({ queryKey: ['skills'] });
+      await queryClient.invalidateQueries({ queryKey: ['skill-packages'] });
     },
     onError: (error) => {
       setContractResult(null);
@@ -267,7 +300,7 @@ export function SkillsPage() {
           <Button key="submit" type="primary" loading={uploadMutation.isPending} disabled={!uploadFile} onClick={() => form.submit()}>提交上传</Button>,
         ]}
       >
-        <Form form={form} layout="vertical" onFinish={(values) => uploadMutation.mutate(values)}>
+        <Form form={form} layout="vertical" onFinish={(values) => uploadMutation.mutate({ values })}>
           <Alert
             type="info"
             showIcon
@@ -294,6 +327,80 @@ export function SkillsPage() {
             <p className="ant-upload-hint">脚本型示例：SKILL.md + skill.yaml + scripts/run.py；说明型示例：SKILL.md + skill.yaml + references/。</p>
           </Upload.Dragger>
         </Form>
+      </Modal>
+
+      {/* 冲突处理对话框 */}
+      <Modal
+        title="Skill 名称冲突"
+        open={conflictModalOpen}
+        onCancel={() => {
+          setConflictModalOpen(false);
+          setPendingUploadValues(null);
+        }}
+        footer={[
+          <Button key="cancel" onClick={() => {
+            setConflictModalOpen(false);
+            setPendingUploadValues(null);
+          }}>
+            取消
+          </Button>,
+          <Button
+            key="submit"
+            type="primary"
+            loading={uploadMutation.isPending}
+            onClick={handleConflictResolve}
+          >
+            确认{conflictStrategy === 'replace' ? '替换' : conflictStrategy === 'new_version' ? '创建新版本' : '上传'}
+          </Button>,
+        ]}
+      >
+        <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Alert
+            type="warning"
+            showIcon
+            message="已存在同名 Skill"
+            description={
+              <Space direction="vertical">
+                <Typography.Text>
+                  系统中已存在名为 <Typography.Text strong code>{conflictSkillId}</Typography.Text> 的 Skill。
+                </Typography.Text>
+                <Typography.Text type="secondary">
+                  请选择处理方式：
+                </Typography.Text>
+              </Space>
+            }
+          />
+          <Radio.Group
+            value={conflictStrategy}
+            onChange={(e) => setConflictStrategy(e.target.value)}
+            style={{ width: '100%' }}
+          >
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <Radio value="new_version" style={{ width: '100%' }}>
+                <Card size="small" hoverable style={{ marginLeft: 8 }}>
+                  <Space>
+                    <CopyOutlined style={{ fontSize: 24, color: '#1890ff' }} />
+                    <Space direction="vertical" size={0}>
+                      <Typography.Text strong>创建新版本</Typography.Text>
+                      <Typography.Text type="secondary">自动递增版本号，保留历史版本记录</Typography.Text>
+                    </Space>
+                  </Space>
+                </Card>
+              </Radio>
+              <Radio value="replace" style={{ width: '100%' }}>
+                <Card size="small" hoverable style={{ marginLeft: 8 }}>
+                  <Space>
+                    <SwapOutlined style={{ fontSize: 24, color: '#faad14' }} />
+                    <Space direction="vertical" size={0}>
+                      <Typography.Text strong>替换现有版本</Typography.Text>
+                      <Typography.Text type="secondary">覆盖当前版本，历史版本将被标记为已替换</Typography.Text>
+                    </Space>
+                  </Space>
+                </Card>
+              </Radio>
+            </Space>
+          </Radio.Group>
+        </Space>
       </Modal>
     </section>
   );

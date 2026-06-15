@@ -1,0 +1,82 @@
+skill_id: testdrive.evaluate_emotion@0.1.0
+name: 认可度评测
+version: 0.1.0
+description: 对算法识别的用户情感（满意/不满意/中立）进行评测，判断情感分类、关注点和观点是否正确。
+author: TestDrive QA
+tags: [testdrive, evaluation, script, llm]
+scenarios: [testdrive-qa, quality-check]
+permissions: [network:http, model:call, filesystem:skill_package_read]
+input_schema:
+  type: object
+  required: [record, ap_code, asr_text]
+  properties:
+    record:
+      type: object
+      description: "算法完整数据（从 get-algorithm-result 获取）"
+    ap_code:
+      type: string
+      description: "AP 预约单号"
+    asr_text:
+      type: string
+      description: "ASR 原文（从 get-asr 获取）"
+output_schema:
+  type: object
+  required: [results, task_count]
+  properties:
+    results:
+      type: array
+      items:
+        type: object
+        properties:
+          task_id:
+            type: string
+          item_key:
+            type: string
+          dimension:
+            type: string
+          judge:
+            type: string
+          confidence:
+            type: number
+          reason:
+            type: string
+          status:
+            type: string
+      description: "评测结果列表"
+    task_count:
+      type: integer
+      description: "总任务数"
+    correct_count:
+      type: integer
+      description: "正确数量"
+    incorrect_count:
+      type: integer
+      description: "不正确数量"
+    error:
+      type: string
+      description: "错误信息（失败时）"
+config_schema:
+  type: object
+  properties:
+    llm_provider:
+      type: string
+      default: "legacy"
+    model_api_key:
+      type: string
+      default: ""
+    model_api_base:
+      type: string
+      default: "https://api.deepseek.com"
+    model_name:
+      type: string
+      default: "deepseek-v4-flash"
+    timeout_seconds:
+      type: integer
+      default: 60
+example_input:
+  record: {}
+  ap_code: "AP2064694572415549476"
+  asr_text: "销售1：欢迎来看理想L6。|客户1：这个座椅很舒服。"
+example_config:
+  llm_provider: "legacy"
+  model_name: "deepseek-v4-flash"

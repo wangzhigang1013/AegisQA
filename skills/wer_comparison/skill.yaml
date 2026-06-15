@@ -1,0 +1,68 @@
+skill_id: asr.wer_comparison@1.0.0
+name: wer_comparison
+version: 1.0.0
+description: 对比两份 ASR 文本，计算字错率(WER)、内容词WER、字准率和字符召回率
+author: AegisQA
+tags:
+  - asr
+  - wer
+  - 评测
+  - 文本对比
+permissions: []
+
+input_schema:
+  type: object
+  required:
+    - reference
+    - hypothesis
+  properties:
+    reference:
+      type: string
+      description: 基准文本（参考答案）
+    hypothesis:
+      type: string
+      description: 被测文本（ASR 识别结果）
+
+output_schema:
+  type: object
+  properties:
+    wer:
+      type: number
+      description: 字错率 (Word Error Rate) 百分比
+    content_wer:
+      type: number
+      description: 内容词字错率（去除语气词后的 WER）
+    accuracy:
+      type: number
+      description: 字准率 (100 - WER)
+    coverage:
+      type: number
+      description: 字符召回率（匹配字符占比）
+    details:
+      type: object
+      properties:
+        reference_normalized:
+          type: string
+          description: 归一化后的基准文本
+        hypothesis_normalized:
+          type: string
+          description: 归一化后的被测文本
+
+config_schema:
+  type: object
+  properties:
+    enable_content_wer:
+      type: boolean
+      default: true
+      description: 是否计算内容词WER
+    normalize_equivalent_chars:
+      type: boolean
+      default: true
+      description: 是否归一化语义等价字（他/它/她等）
+
+example_input:
+  reference: "理想L9是一款非常好的车"
+  hypothesis: "理想L9是一款非常好的车"
+
+example_config:
+  enable_content_wer: true

@@ -1,0 +1,128 @@
+skill_id: asr.text_role_comparison@1.0.0
+name: text_role_comparison
+version: 1.0.0
+description: 文本角色对比 - 基于文本内容相似度对齐，评估 ASR 角色识别正确率
+author: AegisQA
+tags:
+  - asr
+  - 角色识别
+  - 评测
+  - 文本对齐
+  - 内容匹配
+permissions: []
+
+input_schema:
+  type: object
+  required:
+    - reference_segments
+    - hypothesis_segments
+  properties:
+    reference_segments:
+      type: array
+      description: 基准话段列表
+      items:
+        type: object
+        required:
+          - role
+          - text
+        properties:
+          role:
+            type: string
+            description: 角色标签（如：销售1、客户2）
+          text:
+            type: string
+            description: 话段文本
+    hypothesis_segments:
+      type: array
+      description: 被测话段列表
+      items:
+        type: object
+        required:
+          - role
+          - text
+        properties:
+          role:
+            type: string
+            description: 角色标签（如：销售1、客户2）
+          text:
+            type: string
+            description: 话段文本
+
+output_schema:
+  type: object
+  properties:
+    role_accuracy:
+      type: number
+      description: 角色识别准确率（百分比）
+    total_segments:
+      type: integer
+      description: 总话段数
+    matched_segments:
+      type: integer
+      description: 有效匹配话段数
+    correct_segments:
+      type: integer
+      description: 角色正确话段数
+    wrong_segments:
+      type: integer
+      description: 角色错误话段数
+    unmatched_segments:
+      type: integer
+      description: 未匹配话段数
+    skipped_segments:
+      type: integer
+      description: 跳过话段数（其他/未知角色）
+    avg_similarity:
+      type: number
+      description: 平均文本相似度
+    wrong_cases:
+      type: array
+      description: 错误案例列表
+      items:
+        type: object
+        properties:
+          hyp_index:
+            type: integer
+          hyp_role:
+            type: string
+          hyp_text:
+            type: string
+          ref_index:
+            type: integer
+          ref_role:
+            type: string
+          ref_text:
+            type: string
+          similarity:
+            type: number
+
+config_schema:
+  type: object
+  properties:
+    similarity_threshold:
+      type: number
+      default: 0.6
+      description: 文本相似度匹配阈值（低于此值视为无匹配）
+    normalize_roles:
+      type: boolean
+      default: true
+      description: 是否归一化角色标签（销售1→销售，客户2→客户）
+    normalize_text:
+      type: boolean
+      default: true
+      description: 是否归一化文本（去除标点、空格等）
+
+example_input:
+  reference_segments:
+    - role: "销售1"
+      text: "您好，欢迎来到理想汽车"
+    - role: "客户1"
+      text: "你好，我想看看L9"
+  hypothesis_segments:
+    - role: "销售1"
+      text: "您好，欢迎来到理想汽车"
+    - role: "客户1"
+      text: "你好，我想看看L9"
+
+example_config:
+  similarity_threshold: 0.6

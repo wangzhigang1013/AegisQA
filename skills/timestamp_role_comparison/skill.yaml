@@ -1,0 +1,156 @@
+skill_id: asr.timestamp_role_comparison@1.0.0
+name: timestamp_role_comparison
+version: 1.0.0
+description: 时间戳角色对比 - 基于时间戳 IoU 对齐，评估 ASR 角色识别正确率
+author: AegisQA
+tags:
+  - asr
+  - 角色识别
+  - 评测
+  - 时间戳对齐
+  - IoU
+permissions: []
+
+input_schema:
+  type: object
+  required:
+    - reference_segments
+    - hypothesis_segments
+  properties:
+    reference_segments:
+      type: array
+      description: 基准话段列表
+      items:
+        type: object
+        required:
+          - start
+          - end
+          - role
+          - text
+        properties:
+          start:
+            type: integer
+            description: 开始时间（毫秒）
+          end:
+            type: integer
+            description: 结束时间（毫秒）
+          role:
+            type: string
+            description: 角色标签（如：销售1、客户2）
+          text:
+            type: string
+            description: 话段文本
+    hypothesis_segments:
+      type: array
+      description: 被测话段列表
+      items:
+        type: object
+        required:
+          - start
+          - end
+          - role
+          - text
+        properties:
+          start:
+            type: integer
+            description: 开始时间（毫秒）
+          end:
+            type: integer
+            description: 结束时间（毫秒）
+          role:
+            type: string
+            description: 角色标签（如：销售1、客户2）
+          text:
+            type: string
+            description: 话段文本
+
+output_schema:
+  type: object
+  properties:
+    role_accuracy:
+      type: number
+      description: 角色识别准确率（百分比）
+    total_segments:
+      type: integer
+      description: 总话段数
+    matched_segments:
+      type: integer
+      description: 有效匹配话段数
+    correct_segments:
+      type: integer
+      description: 角色正确话段数
+    wrong_segments:
+      type: integer
+      description: 角色错误话段数
+    unmatched_segments:
+      type: integer
+      description: 未匹配话段数
+    skipped_segments:
+      type: integer
+      description: 跳过话段数（其他/未知角色）
+    avg_iou:
+      type: number
+      description: 平均 IoU 值
+    wrong_cases:
+      type: array
+      description: 错误案例列表
+      items:
+        type: object
+        properties:
+          hyp_start:
+            type: integer
+          hyp_end:
+            type: integer
+          hyp_role:
+            type: string
+          hyp_text:
+            type: string
+          ref_start:
+            type: integer
+          ref_end:
+            type: integer
+          ref_role:
+            type: string
+          ref_text:
+            type: string
+          iou:
+            type: number
+
+config_schema:
+  type: object
+  properties:
+    iou_threshold:
+      type: number
+      default: 0.5
+      description: IoU 匹配阈值（低于此值视为无匹配）
+    min_duration:
+      type: integer
+      default: 0
+      description: 最短话段时长过滤（毫秒）
+    normalize_roles:
+      type: boolean
+      default: true
+      description: 是否归一化角色标签（销售1→销售，客户2→客户）
+
+example_input:
+  reference_segments:
+    - start: 0
+      end: 1000
+      role: "销售1"
+      text: "您好，欢迎来到理想汽车"
+    - start: 1000
+      end: 2000
+      role: "客户1"
+      text: "你好，我想看看L9"
+  hypothesis_segments:
+    - start: 0
+      end: 1000
+      role: "销售1"
+      text: "您好，欢迎来到理想汽车"
+    - start: 1000
+      end: 2000
+      role: "客户1"
+      text: "你好，我想看看L9"
+
+example_config:
+  iou_threshold: 0.5

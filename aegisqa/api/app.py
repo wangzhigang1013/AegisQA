@@ -284,6 +284,7 @@ class SkillGovernanceRequest(BaseModel):
 class SkillPackageUploadRequest(BaseModel):
     filename: str
     content_base64: str
+    conflict_strategy: str = "error"  # error | replace | new_version
     actor: str = "api"
     role: str = "Skill Developer"
 
@@ -875,6 +876,8 @@ def _install_skill_package(
         raw = base64.b64decode(request.content_base64)
     except Exception as exc:  # noqa: BLE001 - API 边界需要返回稳定错误。
         raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包内容不是合法 base64。") from exc
+
+    # 解析 manifest 以获取 skill_id（在创建 package_id 之前）
     package_id = f"pkg-{uuid4().hex[:12]}"
     package_filename = _safe_skill_package_filename(request.filename)
     package_dir = store.path("uploaded_skill_packages", package_id, "package")
@@ -926,6 +929,54 @@ def _install_skill_package(
 
     manifest.enabled = False
     manifest.status = "pending_review"
+
+    # 冲突检测：检查是否已存在同名 skill_id
+    conflict_strategy = request.conflict_strategy or "error"
+    existing_package = _find_skill_package(store, manifest.skill_id)
+
+    # 调试：写入文件
+    with open("debug_conflict.log", "a") as f:
+        f.write(f"conflict_strategy={conflict_strategy}, skill_id={manifest.skill_id}, existing={existing_package is not None}\n")
+
+    if existing_package:
+        if conflict_strategy == "error":
+            raise AegisQAError(
+                "SKILL_ALREADY_EXISTS",
+                f"已存在同名 Skill：{manifest.skill_id}。请选择「替换」或「创建新版本」。",
+                details={
+                    "existing_skill_id": manifest.skill_id,
+                    "existing_package_id": existing_package.get("package_id"),
+                    "existing_status": existing_package.get("status"),
+                    "conflict_strategy": conflict_strategy,
+                },
+            )
+        elif conflict_strategy == "replace":
+            # 替换模式：保留原 package_id，更新记录
+            package_id = existing_package.get("package_id", package_id)
+            # 标记旧版本为已替换
+            existing_package["status"] = "replaced"
+            existing_package["replaced_at"] = _now()
+            existing_package["replaced_by"] = package_id
+            _save_record(store, "skill_packages", "package_id", existing_package)
+        elif conflict_strategy == "new_version":
+            # 新版本模式：自动递增版本号
+            base_id = _skill_base_id(manifest.skill_id)
+            existing_versions = [
+                record for record in _list_records(store, "skill_packages")
+                if _skill_base_id(str(record.get("manifest", {}).get("skill_id", ""))) == base_id
+            ]
+            # 找到最大版本号并递增
+            max_version = _find_max_version(existing_versions)
+            new_version = _increment_version(max_version)
+            manifest.skill_id = f"{base_id}@{new_version}"
+            manifest.version = new_version
+        else:
+            raise AegisQAError(
+                "INVALID_CONFLICT_STRATEGY",
+                f"不支持的冲突处理策略：{conflict_strategy}。",
+                details={"supported_strategies": ["error", "replace", "new_version"]},
+            )
+
     runtime_mode = _resolve_skill_package_runtime_mode(runtime_payload, package_dir)
     entrypoint: str | None = None
     handler_record_path: str | None = None
@@ -2353,6 +2404,59 @@ def _json_type(value: Any) -> str:
 
 def json_dumps(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False)
+
+
+def _find_max_version(records: list[dict[str, Any]]) -> str:
+    """从现有记录中找到最大版本号。"""
+    max_version = "0.0.0"
+    for record in records:
+        manifest = record.get("manifest", {})
+        version = str(manifest.get("version") or record.get("skill_version") or "0.0.0")
+        if _compare_versions(version, max_version) > 0:
+            max_version = version
+    return max_version
+
+
+def _increment_version(version: str) -> str:
+    """递增版本号（语义化版本）。"""
+    parts = version.split(".")
+    if len(parts) < 3:
+        parts.extend(["0"] * (3 - len(parts)))
+    try:
+        major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+        patch += 1
+        return f"{major}.{minor}.{patch}"
+    except (ValueError, IndexError):
+        # 如果版本号不是标准格式，使用时间戳后缀
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        return f"{version}.{timestamp}"
+
+
+def _compare_versions(v1: str, v2: str) -> int:
+    """比较两个版本号。返回 1 如果 v1 > v2，-1 如果 v1 < v2，0 如果相等。"""
+    def parse_version(v: str) -> tuple[int, ...]:
+        parts = []
+        for part in v.replace("-", ".").split("."):
+            try:
+                parts.append(int(part))
+            except ValueError:
+                parts.append(0)
+        return tuple(parts)
+
+    parsed1 = parse_version(v1)
+    parsed2 = parse_version(v2)
+
+    # 补齐长度
+    max_len = max(len(parsed1), len(parsed2))
+    padded1 = parsed1 + (0,) * (max_len - len(parsed1))
+    padded2 = parsed2 + (0,) * (max_len - len(parsed2))
+
+    if padded1 > padded2:
+        return 1
+    elif padded1 < padded2:
+        return -1
+    return 0
 
 
 app = create_app()

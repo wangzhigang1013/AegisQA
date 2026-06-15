@@ -65,6 +65,63 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
 
     @app.post("/skills/packages/upload")
     def upload_skill_package(request: SkillPackageUploadRequest) -> dict[str, Any]:
+        # 冲突检测：在调用 _install_skill_package 之前检查
+        from aegisqa.api.app import _find_skill_package, _list_records, _skill_base_id
+        from aegisqa.core.errors import AegisQAError
+        import base64, zipfile, io, yaml
+        from aegisqa.skills.base import SkillManifest
+
+        # 先解析 manifest 获取 skill_id
+        try:
+            raw = base64.b64decode(request.content_base64)
+        except Exception:
+            raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包内容不是合法 base64。")
+
+        # 解压到临时目录获取 manifest
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            zip_path = tmp_path / "package.zip"
+            zip_path.write_bytes(raw)
+            try:
+                with zipfile.ZipFile(zip_path) as archive:
+                    archive.extractall(tmp_path / "package")
+            except zipfile.BadZipFile:
+                raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包必须是合法 zip 文件。")
+
+            pkg_dir = tmp_path / "package"
+            # 查找 skill.yaml
+            manifest_path = None
+            for name in ["skill.yaml", "skill.yml", "skill.json"]:
+                candidate = pkg_dir / name
+                if candidate.exists():
+                    manifest_path = candidate
+                    break
+
+            if manifest_path:
+                manifest_payload = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+                manifest_payload.pop("runtime", None)
+                manifest = SkillManifest(**manifest_payload)
+                skill_id = manifest.skill_id
+            else:
+                skill_id = None
+
+        # 冲突检测
+        conflict_strategy = request.conflict_strategy or "error"
+        if skill_id and conflict_strategy == "error":
+            existing = _find_skill_package(ctx.store, skill_id)
+            if existing:
+                raise AegisQAError(
+                    "SKILL_ALREADY_EXISTS",
+                    f"已存在同名 Skill：{skill_id}。请选择「替换」或「创建新版本」。",
+                    details={
+                        "existing_skill_id": skill_id,
+                        "existing_package_id": existing.get("package_id"),
+                        "existing_status": existing.get("status"),
+                    },
+                )
+
         require_permission(
             ctx.access_control,
             ctx.audit_service,
@@ -80,7 +137,11 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             role=request.role,
             action="skill_package.upload",
             target=record["manifest"]["skill_id"],
-            detail={"filename": request.filename, "role": request.role},
+            detail={
+                "filename": request.filename,
+                "role": request.role,
+                "conflict_strategy": request.conflict_strategy,
+            },
         )
         return record
 

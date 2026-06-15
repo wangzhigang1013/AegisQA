@@ -1,0 +1,70 @@
+skill_id: testdrive.get_algorithm_result@0.1.0
+name: 试驾算法结果获取
+version: 0.1.0
+description: 根据 AP/AT/PATC 编号获取试驾算法 5 个模块的完整评测数据。
+author: TestDrive QA
+tags: [testdrive, algorithm, script]
+scenarios: [testdrive-qa, data-fetch]
+permissions: [network:http, filesystem:skill_package_read]
+input_schema:
+  type: object
+  required: [code]
+  properties:
+    code:
+      type: string
+      description: "AP/AT/PATC 编号（自动识别格式）。示例: AP2064694572415549476"
+    offline:
+      type: boolean
+      default: false
+      description: "是否仅使用缓存，默认 false"
+output_schema:
+  type: object
+  required: [found]
+  properties:
+    record:
+      type: object
+      description: "算法完整数据（含 5 个模块）"
+    task_id:
+      type: string
+      description: "试驾任务 ID"
+    ap_code:
+      type: string
+      description: "AP 预约单号"
+    at_code:
+      type: string
+      description: "AT 试驾单号"
+    vehicle_name:
+      type: string
+      description: "车型名称"
+    employee_id:
+      type: string
+      description: "销售员工 ID"
+    found:
+      type: boolean
+      description: "是否成功获取"
+    concern_count:
+      type: integer
+      description: "疑问回答质量条目数"
+    emotion_positive_count:
+      type: integer
+      description: "正面情感条目数"
+    emotion_negative_count:
+      type: integer
+      description: "负面情感条目数"
+    error:
+      type: string
+      description: "错误信息（失败时）"
+config_schema:
+  type: object
+  properties:
+    api_base:
+      type: string
+      default: "http://bcs-jedi-stub-service.prod.k8s.chehejia.com"
+      description: "试驾业务接口基础 URL"
+    cache_file:
+      type: string
+      default: ""
+      description: "本地缓存文件路径（可选）"
+example_input:
+  code: "AP2064694572415549476"
+example_config: {}

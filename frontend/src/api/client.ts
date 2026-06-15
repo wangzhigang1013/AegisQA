@@ -529,7 +529,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  uploadSkillPackage: (body: { filename: string; content_base64: string }) =>
+  uploadSkillPackage: (body: { filename: string; content_base64: string; conflict_strategy?: string }) =>
     request<SkillPackageRecord>('/skills/packages/upload', {
       method: 'POST',
       body: JSON.stringify(body),
