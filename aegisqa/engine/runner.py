@@ -310,8 +310,10 @@ class WorkflowRunner:
 
         # 从 task_config_snapshot 读取重试配置
         task_config = run.snapshot.get("task_config_snapshot", {})
-        max_retries = int(task_config.get("max_retries", 0)) if isinstance(task_config, dict) else 0
+        max_retries = int(task_config.get("max_retries", 1)) if isinstance(task_config, dict) else 1  # 默认重试 1 次
         retry_backoff_seconds = float(task_config.get("retry_backoff_seconds", 1.0)) if isinstance(task_config, dict) else 1.0
+        run_timeout_seconds = int(task_config.get("run_timeout_seconds", 3600)) if isinstance(task_config, dict) else 3600  # 默认 1 小时
+        run_started_monotonic = time.monotonic()
 
         # 检测是否有 DAG 结构，如果有则构建 DAG 执行器
         dag = None
@@ -326,6 +328,12 @@ class WorkflowRunner:
         processed_since_save = 0
         for item in run.items:
             self._merge_control_flags(run)
+            # Run-level 超时检查
+            if time.monotonic() - run_started_monotonic > run_timeout_seconds:
+                logger.warning("Run %s timed out after %ds", run_id, run_timeout_seconds)
+                run.status = "timeout"
+                run.finished_at = _now()
+                break
             if run.canceled or run.paused:
                 break
             if item.status == "succeeded":
@@ -354,7 +362,8 @@ class WorkflowRunner:
                 item.status = "pending"
                 item.steps = []
                 item.error = None
-                time.sleep(backoff)
+                # 可中断的 sleep: 分段等待，每 0.5s 检查取消信号
+                _interruptible_sleep(backoff, run)
 
             if item.status == "failed":
                 logger.warning("Run %s: item %s failed after %d attempts: %s",
@@ -380,7 +389,9 @@ class WorkflowRunner:
                 break
 
         all_succeeded = all(item.status == "succeeded" for item in run.items)
-        if run.canceled:
+        if run.status == "timeout":
+            logger.info("Run %s timed out", run_id)
+        elif run.canceled:
             run.status = "canceled"
             run.finished_at = _now()
             logger.info("Run %s canceled", run_id)
@@ -535,6 +546,9 @@ class WorkflowRunner:
         }
 
         for workflow_step in run.workflow.steps:
+            # Step-level 取消检查
+            if run.canceled or run.paused:
+                break
             skill = self.registry.get(workflow_step.skill_ref)
             step = RunItemStep(step_id=workflow_step.step_id, skill_ref=workflow_step.skill_ref, status="validating")
             item.steps.append(step)
@@ -556,6 +570,9 @@ class WorkflowRunner:
                 step.rate_limited_count = decision.rate_limited_count
                 step.rate_limit_wait_ms = decision.wait_ms
                 step.status = "rate_limited" if decision.rate_limited_count else "running"
+                # 实际执行速率限制等待
+                if decision.wait_ms > 0:
+                    _interruptible_sleep(decision.wait_ms / 1000.0, run)
 
                 cache_key = self._cache_key(workflow_step, skill.manifest.version, inputs, resolved_parameters.config)
                 step.cache_key = cache_key
@@ -886,6 +903,25 @@ def _execute_with_timeout(skill: Any, inputs: dict, config: dict, timeout_second
 
 def _now() -> str:
     return now_beijing_str()
+
+
+def _interruptible_sleep(seconds: float, run: RunRecord) -> None:
+    """可中断的 sleep: 分段等待，每 0.5s 检查取消/暂停信号。"""
+    elapsed = 0.0
+    while elapsed < seconds:
+        chunk = min(0.5, seconds - elapsed)
+        time.sleep(chunk)
+        elapsed += chunk
+        # 检查控制文件中的取消/暂停信号
+        try:
+            control_path = os.path.join("data", "aegisqa_store", "run_controls", f"{run.run_id}.json")
+            if os.path.exists(control_path):
+                with open(control_path) as f:
+                    control = json.load(f)
+                if control.get("cancel") or control.get("pause"):
+                    break
+        except Exception:
+            pass
 
 
 def _stable_hash(payload: Any) -> str:

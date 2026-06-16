@@ -359,6 +359,8 @@ class ModelGateway:
 
         try:
             with urlopen(request, timeout=self.config.timeout_seconds) as response:  # noqa: S310
+                chunk_timeout = 30  # 每个 chunk 最长 30s
+                response.fp.raw._sock.settimeout(chunk_timeout) if hasattr(response, 'fp') and hasattr(response.fp, 'raw') else None
                 for line in response:
                     line = line.decode("utf-8").strip()
                     if not line or line == "data: [DONE]":

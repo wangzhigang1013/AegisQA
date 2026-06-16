@@ -18,7 +18,12 @@ export function RunsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [createOpen, setCreateOpen] = useState(false);
   const [detailTask, setDetailTask] = useState<TaskRecord | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notices, setNotices] = useState<{ id: number; text: string; type: 'success' | 'error' }[]>([]);
+  const addNotice = (text: string, type: 'success' | 'error' = 'error') => {
+    const id = Date.now();
+    setNotices(prev => [...prev.slice(-2), { id, text, type }]); // 最多 3 条
+    setTimeout(() => setNotices(prev => prev.filter(n => n.id !== id)), 5000); // 5s 自动消失
+  };
   const [preflightResult, setPreflightResult] = useState<TaskPreflightResult | null>(null);
   const [taskPage, setTaskPage] = useState(1);
   const [taskStatusFilter, setTaskStatusFilter] = useState<string | undefined>();
@@ -49,13 +54,41 @@ export function RunsPage() {
   const hasActiveTask = tasks.some((task) => isLiveTaskStatus(task.status));
   const totalPages = Math.ceil((taskPagination?.total_items ?? tasks.length) / taskPageSize);
 
+  // 自适应轮询: running=1s, queued=3s, 连续无变化增加到 5s
   useEffect(() => {
     if (!hasActiveTask) return undefined;
-    const timer = window.setInterval(() => {
-      void queryClient.invalidateQueries({ queryKey: ['tasks'] });
-    }, 1000);
+    let consecutiveNoChange = 0;
+    let prevSnapshot = '';
+    const poll = () => {
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] }).then(() => {
+        const current = tasks.map(t => `${t.task_id}:${t.status}`).join(',');
+        if (current === prevSnapshot) {
+          consecutiveNoChange++;
+        } else {
+          consecutiveNoChange = 0;
+        }
+        prevSnapshot = current;
+      });
+    };
+    const hasRunning = tasks.some(t => t.status === 'running');
+    const baseInterval = hasRunning ? 1000 : 3000;
+    const interval = consecutiveNoChange >= 3 ? 5000 : baseInterval;
+    const timer = window.setInterval(poll, interval);
     return () => window.clearInterval(timer);
-  }, [hasActiveTask, queryClient]);
+  }, [hasActiveTask, queryClient, tasks]);
+
+  // 独立详情轮询: 不依赖分页列表，直接刷新详情
+  const detailPollQuery = useQuery({
+    queryKey: ['task-detail-poll', detailTask?.task_id],
+    queryFn: () => api.task(detailTask?.task_id ?? ''),
+    enabled: Boolean(detailTask) && isLiveTaskStatus(detailTask?.status ?? ''),
+    refetchInterval: 2000,
+  });
+  useEffect(() => {
+    if (detailPollQuery.data) {
+      setDetailTask(detailPollQuery.data);
+    }
+  }, [detailPollQuery.data]);
 
   useEffect(() => {
     if (!detailTask) return;
@@ -92,7 +125,7 @@ export function RunsPage() {
       setPreflightResult(result);
       setNotice(result.status === 'blocked' ? `Preflight 阻断：${result.summary}` : `Preflight 完成：${result.summary}`);
     },
-    onError: (error) => setNotice(`Preflight 失败：${formatApiError(error)}`),
+    onError: (error) => addNotice(`Preflight 失败：${formatApiError(error)}`),
   });
 
   const createTaskMutation = useMutation({
@@ -112,10 +145,10 @@ export function RunsPage() {
       setCreateOpen(false);
       setPreflightResult(null);
       setDetailTask(task);
-      setNotice(`任务已创建：${task.name}`);
+      addNotice(`任务已创建：, "success"${task.name}`);
       await queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
-    onError: (error) => setNotice(`创建失败：${formatApiError(error)}`),
+    onError: (error) => addNotice(`创建失败：${formatApiError(error)}`),
   });
 
   const taskActionMutation = useMutation({
@@ -129,10 +162,10 @@ export function RunsPage() {
     },
     onSuccess: async (task) => {
       setDetailTask(task);
-      setNotice(`任务状态已更新：${task.status}`);
+      addNotice(`任务状态已更新：, "success"${task.status}`);
       await queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
-    onError: (error) => setNotice(`操作失败：${formatApiError(error)}`),
+    onError: (error) => addNotice(`操作失败：${formatApiError(error)}`),
   });
 
   function triggerTaskAction(task: TaskRecord, action: TaskAction) {
@@ -152,12 +185,12 @@ export function RunsPage() {
         }
       />
 
-      {notice && (
-        <div className={`p-4 rounded-lg flex items-start gap-3 ${notice.includes('失败') ? 'bg-red-50 text-red-800 border border-red-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`}>
-          <div className="flex-1 text-sm font-medium">{notice}</div>
-          <button onClick={() => setNotice(null)} className="text-current opacity-70 hover:opacity-100">&times;</button>
+      {notices.map(n => (
+        <div key={n.id} className={`p-4 rounded-lg flex items-start gap-3 ${n.type === 'error' ? 'bg-red-50 text-red-800 border border-red-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`}>
+          <div className="flex-1 text-sm font-medium">{n.text}</div>
+          <button onClick={() => setNotices(prev => prev.filter(x => x.id !== n.id))} className="text-current opacity-70 hover:opacity-100">&times;</button>
         </div>
-      )}
+      ))}
 
       <PageSection title="任务列表" testId="runs-task-table-section">
         <ActionToolbar className="flex justify-between items-center mb-4" testId="runs-filter-toolbar">
@@ -349,7 +382,7 @@ function statusClasses(status: string): string {
 }
 
 function isLiveTaskStatus(status: string): boolean {
-  return status === 'running';
+  return status === 'running' || status === 'queued' || status === 'pausing';
 }
 
 function formatTime(value: string): string {

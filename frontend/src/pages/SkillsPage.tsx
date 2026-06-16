@@ -110,7 +110,10 @@ export function SkillsPage() {
   const contractMutation = useMutation({
     mutationFn: (skillId: string) => api.contractTest(skillId),
     onSuccess: async (result) => {
-      const text = result.ok ? `合约测试通过：${result.skill_id}` : `合约测试失败：${result.message ?? result.error ?? '未知错误'}`;
+      const retryInfo = result.retry_count > 0 ? ` (重试 ${result.retry_count} 次)` : '';
+      const text = result.ok
+        ? `合约测试通过：${result.skill_id}${retryInfo}，耗时 ${Math.round(result.latency_ms ?? 0)}ms`
+        : `合约测试失败：${result.message ?? result.error ?? '未知错误'}${retryInfo}`;
       setContractResult(result);
       setContractResultText(text);
       setNotice(text);
@@ -388,7 +391,7 @@ export function SkillsPage() {
               <div className="pt-4 border-t border-slate-100 flex justify-end">
                 <Button variant="default" className="flex items-center gap-2" disabled={contractMutation.isPending} onClick={() => contractMutation.mutate(activeSkill.skill_id)} title="会用示例输入和示例配置真实执行一次 Skill，并检查输入输出 schema。">
                   <CheckCircle className="w-4 h-4" />
-                  {contractMutation.isPending ? '运行中...' : '运行合约测试'}
+                  {contractMutation.isPending ? '运行中 (最长 30s)...' : '运行合约测试'}
                 </Button>
               </div>
             </div>

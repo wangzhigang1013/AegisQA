@@ -172,7 +172,11 @@ function WorkflowDesignerContent() {
       setConsoleTab(result.ok ? 'summary' : 'issues');
       if (!result.ok) focusFirstIssueNode(result.errors);
     },
-    onError: (error) => setConsoleText(error instanceof Error ? error.message : '校验请求失败'),
+    onError: (error) => {
+      const msg = error instanceof Error ? error.message : '校验请求失败';
+      setConsoleText(msg);
+      setPublishNotice({ type: 'error', message: '校验失败', description: msg });
+    },
   });
 
   const saveDraftMutation = useMutation({
@@ -191,7 +195,11 @@ function WorkflowDesignerContent() {
       queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
       await queryClient.invalidateQueries({ queryKey: ['workflow-drafts'] });
     },
-    onError: (error) => setConsoleText(error instanceof Error ? `保存失败：${error.message}` : '保存失败'),
+    onError: (error) => {
+      const msg = error instanceof Error ? error.message : '保存失败';
+      setConsoleText(`保存失败：${msg}`);
+      setPublishNotice({ type: 'error', message: '保存失败', description: msg });
+    },
   });
 
   const publishMutation = useMutation({
@@ -233,7 +241,11 @@ function WorkflowDesignerContent() {
       setConsoleText(`试运行完成：${run.run_id}，队列消息只携带 item_id。`);
       setConsoleTab('json');
     },
-    onError: (error) => setConsoleText(error instanceof Error ? `试运行失败：${error.message}` : '试运行失败'),
+    onError: (error) => {
+      const msg = error instanceof Error ? error.message : '试运行失败';
+      setConsoleText(`试运行失败：${msg}`);
+      setPublishNotice({ type: 'error', message: '试运行失败', description: msg });
+    },
   });
 
   function changeWorkflowName(nextName: string, markDirty = true) {
@@ -505,11 +517,31 @@ function WorkflowDesignerContent() {
         <PageHeader
           eyebrow="流程编排"
           title="Workflow 设计器"
-          description="草稿加载失败，请回到 Workflow 市场重新打开或复制草稿。"
+          description="草稿加载失败，请重试或返回列表。"
         />
-        <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg flex flex-col gap-2">
+        <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg flex flex-col gap-3">
           <span className="font-semibold">草稿加载失败</span>
           <span className="text-sm opacity-80">{formatApiError(routeDraftQuery.error)}</span>
+          <div className="flex gap-2 mt-2">
+            <button
+              className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+              onClick={() => routeDraftQuery.refetch()}
+            >
+              重试
+            </button>
+            <button
+              className="px-4 py-2 bg-white border border-red-300 text-red-700 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors"
+              onClick={() => navigate('/workflows')}
+            >
+              返回列表
+            </button>
+            <button
+              className="px-4 py-2 bg-white border border-red-300 text-red-700 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors"
+              onClick={() => navigate('/workflows/designer')}
+            >
+              新建草稿
+            </button>
+          </div>
         </div>
       </div>
     );

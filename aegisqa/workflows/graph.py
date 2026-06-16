@@ -174,6 +174,14 @@ class WorkflowGraphService:
                 errors.append(GraphIssue(code="SKILL_REF_REQUIRED", message="Skill 节点必须配置 skill_ref", node_id=node.node_id))
             if node.node_type != "skill" and node.skill_ref:
                 warnings.append(GraphIssue(code="STRUCTURAL_SKILL_REF_IGNORED", message="结构节点上的 skill_ref 不参与执行", node_id=node.node_id))
+            # 孤立节点检测: 没有任何连线的节点
+            has_edges = bool(incoming.get(node.node_id)) or bool(outgoing.get(node.node_id))
+            if not has_edges and node.node_type in EXECUTABLE_NODE_TYPES:
+                warnings.append(GraphIssue(
+                    code="ORPHAN_NODE",
+                    message=f"节点 '{node.node_id}' 没有连接到任何其他节点，将不会参与工作流执行。",
+                    node_id=node.node_id,
+                ))
             if len(incoming.get(node.node_id, [])) > 1 and node.node_type not in MULTI_INPUT_NODE_TYPES:
                 errors.append(
                     GraphIssue(
@@ -292,7 +300,7 @@ class WorkflowGraphService:
                             },
                         )
                     )
-                    return
+                    continue  # 收集所有类型错误后一次性返回
                 except MappingPathError as exc:
                     missing_path = _missing_path_from_error(str(exc))
                     upstream_issue = _disconnected_upstream_output_issue(graph, nodes_by_id, node, missing_path)

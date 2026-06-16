@@ -209,17 +209,23 @@ def _condition_matches(condition: str | None, context: dict[str, Any]) -> bool:
                 if op == "!=": return str_left != right_val
                 return False
 
-    # 处理正则匹配
+    # 处理正则匹配 (带 DoS 防护)
     if " matches " in text:
         import re
         left, pattern = text.split(" matches ", 1)
         left_path = left.strip()
         pattern = pattern.strip().strip('"').strip("'")
+        # 正则长度限制
+        if len(pattern) > 200:
+            raise ValueError(f"正则表达式过长 ({len(pattern)} 字符，最大 200)：{pattern[:50]}...")
         try:
             left_val = str(get_by_path(context, left_path))
         except MappingPathError:
             return False
-        return bool(re.search(pattern, left_val))
+        try:
+            return bool(re.search(pattern, left_val))
+        except re.error as exc:
+            raise ValueError(f"无效的正则表达式: {exc}") from exc
 
     raise ValueError(f"不支持的 DAG 条件表达式：{condition}")
 

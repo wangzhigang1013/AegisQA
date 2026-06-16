@@ -919,7 +919,8 @@ def _install_skill_package(
         runtime_payload = manifest_payload.pop("runtime", {}) or {}
         if not isinstance(runtime_payload, dict):
             raise AegisQAError("SKILL_PACKAGE_RUNTIME_INVALID", "runtime 必须是对象。")
-        _reject_unsupported_skill_package_dependencies(package_dir, runtime_payload)
+        dep_warnings = _reject_unsupported_skill_package_dependencies(package_dir, runtime_payload)
+        warnings.extend(dep_warnings)
         manifest = SkillManifest(**manifest_payload)
 
         # 检测 OpenAI Tool 格式，自动设置 entrypoint
@@ -1211,6 +1212,15 @@ def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> dict[str, 
                 details={"total_size_bytes": total_size, "max_total_size_bytes": MAX_SKILL_PACKAGE_TOTAL_BYTES},
             )
         member_payload = archive.read(member)
+        # 高风险安全检查 — 阻断上传
+        block_reason = _skill_package_security_block(filename, member, member_payload)
+        if block_reason:
+            raise AegisQAError(
+                "SKILL_PACKAGE_SECURITY_BLOCK",
+                block_reason,
+                status_code=400,
+                details={"filename": filename},
+            )
         warnings.extend(_skill_package_member_warnings(filename, member, member_payload))
         target = (destination / member.filename).resolve()
         if destination not in target.parents and target != destination:
@@ -1302,6 +1312,28 @@ def _skill_package_member_warnings(filename: str, member: zipfile.ZipInfo, paylo
     return warnings
 
 
+# 高风险模式 — 直接阻断上传
+_SKILL_PACKAGE_BLOCK_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
+    # 硬编码 API Key
+    (re.compile(r"""(?:api[_-]?key|secret|token)\s*=\s*['"][A-Za-z0-9_\-]{20,}['"]""", re.IGNORECASE), "SKILL_PACKAGE_HARDCODED_SECRET_BLOCK", "插件包含硬编码密钥，禁止上传。请改用平台 secret_ref 或环境变量。"),
+    # Shell 注入 with shell=True
+    (re.compile(r"""subprocess\.(?:call|run|Popen|check_output|check_call)\s*\(.*shell\s*=\s*True""", re.DOTALL), "SKILL_PACKAGE_SHELL_INJECTION_BLOCK", "插件包含 shell=True 的 subprocess 调用，存在命令注入风险。请改用 shell=False + 列表参数。"),
+    # os.system / os.popen
+    (re.compile(r"""\bos\.(?:system|popen)\s*\(""", re.IGNORECASE), "SKILL_PACKAGE_OS_SYSTEM_BLOCK", "插件包含 os.system/os.popen 调用，存在命令注入风险。请改用 subprocess.run。"),
+]
+
+
+def _skill_package_security_block(filename: str, member: zipfile.ZipInfo, payload: bytes) -> str | None:
+    """检查高风险安全模式，返回错误信息或 None。"""
+    text = _decode_skill_package_text(filename, payload)
+    if text is None:
+        return None
+    for pattern, code, message in _SKILL_PACKAGE_BLOCK_PATTERNS:
+        if pattern.search(text):
+            return f"[{code}] {message} (文件: {filename})"
+    return None
+
+
 def _decode_skill_package_text(filename: str, payload: bytes) -> str | None:
     suffix = Path(filename).suffix.lower()
     if suffix not in SKILL_PACKAGE_TEXT_SUFFIXES:
@@ -1312,23 +1344,24 @@ def _decode_skill_package_text(filename: str, payload: bytes) -> str | None:
         return None
 
 
-def _reject_unsupported_skill_package_dependencies(package_dir: Path, runtime_payload: dict[str, Any]) -> None:
-    """本地子进程运行时不安装第三方依赖，先在上传阶段给出稳定错误。"""
-
+def _reject_unsupported_skill_package_dependencies(package_dir: Path, runtime_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """检查依赖声明，返回警告列表而非阻断上传。"""
+    warnings: list[dict[str, Any]] = []
     dependencies = runtime_payload.get("dependencies")
     if dependencies:
-        raise AegisQAError(
-            "SKILL_PACKAGE_DEPENDENCIES_UNSUPPORTED",
-            "当前本地 Skill 包运行模式不支持声明第三方依赖；请移除 runtime.dependencies 后再上传。",
-            details={"field": "runtime.dependencies"},
-        )
+        warnings.append({
+            "code": "SKILL_PACKAGE_DEPENDENCIES_WARNING",
+            "message": f"插件声明了 {len(dependencies)} 个第三方依赖，本地运行时不会自动安装，请确保运行环境已包含这些依赖。",
+            "details": {"dependencies": list(dependencies.keys()) if isinstance(dependencies, dict) else dependencies},
+        })
     dependency_files = sorted(name for name in SKILL_PACKAGE_DEPENDENCY_FILES if (package_dir / name).exists())
     if dependency_files:
-        raise AegisQAError(
-            "SKILL_PACKAGE_DEPENDENCIES_UNSUPPORTED",
-            "当前本地 Skill 包运行模式不支持随包安装第三方依赖；请移除依赖文件后再上传。",
-            details={"files": dependency_files},
-        )
+        warnings.append({
+            "code": "SKILL_PACKAGE_DEPENDENCY_FILES_WARNING",
+            "message": f"插件包含依赖声明文件 ({', '.join(dependency_files)})，本地运行时不会自动安装依赖。",
+            "details": {"files": dependency_files},
+        })
+    return warnings
 
 
 def _first_existing(root: Path, names: list[str]) -> Path | None:
