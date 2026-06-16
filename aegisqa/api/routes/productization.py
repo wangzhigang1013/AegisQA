@@ -46,6 +46,7 @@ from aegisqa.api.app import (
 )
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
+from aegisqa.core.time import now_beijing
 from aegisqa.engine.runner import RunRecord, RunRequest
 from aegisqa.reports.aggregator import RunReport, aggregate_run_report, compare_reports
 from aegisqa.security.access import require_permission
