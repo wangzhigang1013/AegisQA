@@ -36,8 +36,13 @@ export function Col({ children, span, xs, sm, md, lg, xl, className = '' }: any)
 // 3. Empty
 export function Empty({ description }: any) {
   return (
-    <div className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl border border-dashed border-slate-300 w-full my-4">
-      <span className="text-slate-500 text-sm">{description || '暂无数据'}</span>
+    <div className="flex flex-col items-center justify-center p-20 w-full my-4 liquid-glass rounded-[2rem]">
+      <div className="w-16 h-16 mb-6 rounded-2xl bg-slate-50 border border-slate-100 shadow-sm flex items-center justify-center">
+        <svg className="w-8 h-8 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+        </svg>
+      </div>
+      <span className="text-slate-400 font-medium tracking-wide text-sm">{description || '此区域暂无数据'}</span>
     </div>
   );
 }
@@ -121,13 +126,19 @@ export function Table<T = any>({ columns, dataSource, rowKey = 'id', loading, pa
             {dataSource?.length ? dataSource.map((record: any, index: number) => {
               const key = typeof rowKey === 'function' ? rowKey(record) : (rowKey ? record[rowKey] : index);
               return (
-                <tr key={key || index} className="hover:bg-slate-50/80 transition-colors">
+                <motion.tr 
+                  key={key || index} 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.03, type: "spring", stiffness: 300, damping: 24 }}
+                  className="hover:bg-slate-50/80 transition-colors relative group"
+                >
                   {columns?.map((col: any, i: number) => (
                     <td key={i} className="px-5 py-4 text-slate-700">
                       {col.render ? col.render(record[col.dataIndex], record, index) : record[col.dataIndex]}
                     </td>
                   ))}
-                </tr>
+                </motion.tr>
               )
             }) : (
               <tr>

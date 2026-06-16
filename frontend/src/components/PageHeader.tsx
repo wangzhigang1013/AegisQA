@@ -43,7 +43,7 @@ export function PageHeader({ eyebrow, title, description, primaryAction, themeCo
         </div>
         
         {primaryAction && (
-          <div className="flex-shrink-0 w-full md:w-auto mt-4 md:mt-0 flex gap-3">
+          <div className="flex-shrink-0 w-full md:w-auto mt-4 md:mt-0 flex flex-wrap gap-3">
              {primaryAction}
           </div>
         )}

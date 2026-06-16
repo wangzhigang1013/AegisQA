@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Copy, Trash2, Edit3, Plus, Ban, Network } from 'lucide-react';
@@ -41,6 +41,13 @@ export function WorkflowMarketPage() {
   // For custom Popconfirm replacement
   const [draftToDelete, setDraftToDelete] = useState<string | null>(null);
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 12;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [workflowQuery, statusFilter]);
+
   const draftsStatus = statusFilter === 'deleted' ? 'deleted' : undefined;
   const draftsQuery = useQuery({ queryKey: ['workflow-drafts', draftsStatus ?? 'active'], queryFn: () => api.workflowDrafts(draftsStatus), refetchOnMount: 'always' });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
@@ -81,6 +88,10 @@ export function WorkflowMarketPage() {
       })
       .filter((row) => (query ? `${row.name} ${row.type} ${row.status}`.toLowerCase().includes(query) : true));
   }, [statusFilter, workflowDrafts, workflowQuery, workflowVersions]);
+
+  const paginatedRows = useMemo(() => {
+    return workflowRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  }, [workflowRows, currentPage, pageSize]);
 
   const createDraftMutation = useMutation({
     mutationFn: (name: string) => {
@@ -257,18 +268,18 @@ export function WorkflowMarketPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {workflowRows.map((record) => (
+                {paginatedRows.map((record) => (
                   <motion.div
                     key={record.key}
                     variants={{
                       hidden: { opacity: 0, y: 20 },
                       show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
                     }}
-                    className="h-full flex"
+                    className="h-full flex min-w-0"
                   >
-                    <Card className="flex-1 flex flex-col group p-6 hover:shadow-lg transition-shadow bg-white">
-                      <div className="flex justify-between items-start mb-6 gap-2">
-                        <div className="flex items-center gap-3 group-hover:translate-x-1 transition-transform overflow-hidden">
+                    <Card className="flex-1 flex flex-col group p-6 hover:shadow-lg transition-shadow liquid-glass min-w-0">
+                      <div className="flex justify-between items-start mb-6 gap-4 w-full min-w-0">
+                        <div className="flex items-center gap-3 group-hover:translate-x-1 transition-transform overflow-hidden min-w-0 flex-1">
                           <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-500 shadow-inner flex-shrink-0">
                             <Network className="w-6 h-6" />
                           </div>
@@ -279,14 +290,14 @@ export function WorkflowMarketPage() {
                         </span>
                       </div>
                       
-                      <div className="flex flex-col gap-1 w-full mb-6 text-sm font-medium text-slate-500">
-                        <div className="flex justify-between items-center bg-slate-50 px-3 py-2 rounded-lg">
-                          <span>版本：{record.version}</span>
-                          <span className="text-slate-700">{record.status}</span>
+                      <div className="flex flex-col gap-1 w-full mb-6 text-sm font-medium text-slate-500 min-w-0">
+                        <div className="flex justify-between items-center bg-slate-50 px-3 py-2 rounded-lg min-w-0 gap-2">
+                          <span className="truncate flex-1">版本：{record.version}</span>
+                          <span className="text-slate-700 truncate flex-shrink-0 max-w-[50%] text-right">{record.status}</span>
                         </div>
                       </div>
 
-                      <div className="mt-auto pt-4 border-t border-slate-100 flex flex-wrap gap-2">
+                      <div className="mt-auto pt-4 border-t border-slate-100 flex flex-wrap gap-2 min-w-0">
                         {record.draft && (
                           <>
                             <Button 
@@ -355,6 +366,37 @@ export function WorkflowMarketPage() {
                 ))}
               </div>
             )}
+
+            {workflowRows.length > pageSize && (
+              <div className="flex items-center justify-between mt-8 pt-4 border-t border-slate-200/50">
+                <div className="text-sm text-slate-500 font-medium">
+                  显示 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, workflowRows.length)} 条，共 {workflowRows.length} 条
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="h-8 rounded-full shadow-sm liquid-glass"
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    上一页
+                  </Button>
+                  <div className="text-sm font-bold text-slate-700 px-3">
+                    {currentPage} / {Math.ceil(workflowRows.length / pageSize)}
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="h-8 rounded-full shadow-sm liquid-glass"
+                    onClick={() => setCurrentPage(p => Math.min(Math.ceil(workflowRows.length / pageSize), p + 1))}
+                    disabled={currentPage === Math.ceil(workflowRows.length / pageSize)}
+                  >
+                    下一页
+                  </Button>
+                </div>
+              </div>
+            )}
           </motion.div>
         </div>
 
@@ -368,14 +410,14 @@ export function WorkflowMarketPage() {
             {workflowTemplates.map((template) => (
               <Card 
                 key={String(template.template_id)}
-                className="p-5 border-transparent hover:-translate-y-1 transition-transform hover:shadow-md bg-white"
+                className="p-5 border-transparent hover:-translate-y-1 transition-transform hover:shadow-md liquid-glass min-w-0"
               >
-                <div className="flex flex-col gap-3 w-full">
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-3 w-full min-w-0">
+                  <div className="flex items-center gap-2 min-w-0 w-full">
                     <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-500 flex items-center justify-center flex-shrink-0">
                       <Plus className="w-4 h-4" />
                     </div>
-                    <span className="text-base font-bold text-slate-800 line-clamp-1" title={String(template.name)}>{String(template.name)}</span>
+                    <span className="text-base font-bold text-slate-800 truncate flex-1" title={String(template.name)}>{String(template.name)}</span>
                   </div>
                   <p className="text-sm text-slate-500 line-clamp-2 min-h-[40px] m-0" title={String(template.description ?? '')}>
                     {String(template.description ?? '')}

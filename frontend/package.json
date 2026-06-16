@@ -13,6 +13,7 @@
     "rewrite": "node rewrite_reports.js"
   },
   "dependencies": {
+    "@fontsource/geist-sans": "^5.2.5",
     "@radix-ui/react-dialog": "^1.1.17",
     "@radix-ui/react-dropdown-menu": "^2.1.18",
     "@radix-ui/react-popover": "^1.1.17",

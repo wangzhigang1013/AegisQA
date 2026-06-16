@@ -1,6 +1,6 @@
 import { CheckCircle, Copy, Database, FlaskConical, Inbox, Info, ArrowLeftRight, Tag, Upload } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 
 import { api, formatApiError } from '../api/client';
@@ -31,6 +31,13 @@ export function SkillsPage() {
   const [contractResultText, setContractResultText] = useState<string | null>(null);
   const [contractResult, setContractResult] = useState<SkillContractResult | null>(null);
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 12;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [skillQuery, statusFilter]);
+
   // 冲突处理状态
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
   const [conflictSkillId, setConflictSkillId] = useState<string | null>(null);
@@ -54,6 +61,10 @@ export function SkillsPage() {
       return matchesStatus && matchesQuery;
     });
   }, [skillQuery, skills, statusFilter]);
+
+  const paginatedSkills = useMemo(() => {
+    return filteredSkills.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  }, [filteredSkills, currentPage, pageSize]);
 
   const uploadMutation = useMutation({
     mutationFn: async ({ values, strategy }: { values: { filename: string }; strategy?: ConflictStrategy }) => {
@@ -185,8 +196,9 @@ export function SkillsPage() {
         ) : filteredSkills.length === 0 ? (
           <div className="text-center py-12 text-slate-500 text-sm bg-slate-50 rounded-2xl border border-slate-100">暂无 Skill，请上传 Agent Skill 包并完成合约测试和审批。</div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
-            {filteredSkills.map((record) => {
+          <div className="flex flex-col gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+              {paginatedSkills.map((record) => {
               const packageRecord = packageBySkillId[record.skill_id];
               const isContractOk = packageRecord?.last_contract_ok;
               const runtimeMode = packageRecord ? formatPackageRuntime(packageRecord.runtime_mode) : 'builtin';
@@ -198,49 +210,49 @@ export function SkillsPage() {
                     hidden: { opacity: 0, y: 20 },
                     show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
                   }}
-                  className="h-full flex"
+                  className="h-full flex min-w-0"
                 >
-                  <Card className="flex-1 flex flex-col group p-6 hover:shadow-lg transition-shadow bg-white">
-                    <div className="flex justify-between items-start mb-5">
-                      <div className="flex gap-3 group-hover:translate-x-1 transition-transform">
-                        <div className="p-3 bg-violet-50 rounded-2xl text-violet-500 shadow-inner flex items-center justify-center">
+                  <Card className="flex-1 flex flex-col group p-6 hover:shadow-lg transition-shadow liquid-glass min-w-0">
+                    <div className="flex justify-between items-start mb-5 gap-4 w-full min-w-0">
+                      <div className="flex gap-3 group-hover:translate-x-1 transition-transform overflow-hidden min-w-0 flex-1">
+                        <div className="p-3 bg-violet-50 rounded-2xl text-violet-500 shadow-inner flex items-center justify-center flex-shrink-0">
                           <FlaskConical className="w-5 h-5" />
                         </div>
-                        <div className="flex flex-col">
-                          <span className="text-lg font-bold text-slate-800 leading-tight">{record.name}</span>
-                          <span className="text-xs font-mono text-slate-500 mt-1">{record.skill_id}</span>
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <span className="text-lg font-bold text-slate-800 leading-tight truncate" title={record.name}>{record.name}</span>
+                          <span className="text-xs font-mono text-slate-500 mt-1 truncate" title={record.skill_id}>{record.skill_id}</span>
                         </div>
                       </div>
-                      <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${record.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                      <span className={`px-2.5 py-1 text-xs font-semibold rounded-full flex-shrink-0 whitespace-nowrap ${record.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                         {formatSkillStatus(record.status)}
                       </span>
                     </div>
 
-                    <div className="flex flex-wrap gap-2 mb-5">
+                    <div className="flex flex-wrap gap-2 mb-5 min-w-0">
                       {record.tags.map(tag => (
                         <span key={tag} className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-md">{tag}</span>
                       ))}
                       <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-md font-medium">{runtimeMode}</span>
                     </div>
 
-                    <div className="text-sm text-slate-500 flex flex-col gap-2 mb-6 font-medium">
-                      <div className="flex justify-between bg-slate-50 px-3 py-2 rounded-lg items-center">
-                        <span>合约验证</span>
-                        <span className={isContractOk ? 'text-emerald-600 font-semibold' : 'text-red-500 font-semibold'}>
+                    <div className="text-sm text-slate-500 flex flex-col gap-2 mb-6 font-medium min-w-0">
+                      <div className="flex justify-between bg-slate-50 px-3 py-2 rounded-lg items-center min-w-0 gap-2">
+                        <span className="truncate flex-1">合约验证</span>
+                        <span className={`truncate flex-shrink-0 max-w-[50%] text-right ${isContractOk ? 'text-emerald-600 font-semibold' : 'text-red-500 font-semibold'}`}>
                           {!packageRecord ? '内置 Skill' : (isContractOk ? 'Pass' : 'Failed')}
                         </span>
                       </div>
-                      <div className="flex justify-between px-3">
-                        <span>审批人</span>
-                        <span>{packageRecord?.approved_by ?? '未审批'}</span>
+                      <div className="flex justify-between px-3 min-w-0 gap-2">
+                        <span className="truncate flex-1">审批人</span>
+                        <span className="truncate flex-shrink-0 max-w-[50%] text-right">{packageRecord?.approved_by ?? '未审批'}</span>
                       </div>
                     </div>
 
-                    <div className="mt-auto pt-4 border-t border-slate-100 flex justify-end">
+                    <div className="mt-auto pt-4 border-t border-slate-100 flex justify-end min-w-0">
                       <Button
                         variant="outline"
                         size="sm"
-                        className="rounded-full flex items-center gap-1.5"
+                        className="rounded-full shadow-sm flex items-center gap-1.5"
                         onClick={() => {
                           setContractResultText(null);
                           setContractResult(null);
@@ -254,6 +266,38 @@ export function SkillsPage() {
                 </motion.div>
               );
             })}
+            </div>
+
+            {filteredSkills.length > pageSize && (
+              <div className="flex items-center justify-between mt-8 pt-4 border-t border-slate-200/50">
+                <div className="text-sm text-slate-500 font-medium">
+                  显示 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, filteredSkills.length)} 条，共 {filteredSkills.length} 条
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="h-8 rounded-full shadow-sm liquid-glass"
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    上一页
+                  </Button>
+                  <div className="text-sm font-bold text-slate-700 px-3">
+                    {currentPage} / {Math.ceil(filteredSkills.length / pageSize)}
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="h-8 rounded-full shadow-sm liquid-glass"
+                    onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredSkills.length / pageSize), p + 1))}
+                    disabled={currentPage === Math.ceil(filteredSkills.length / pageSize)}
+                  >
+                    下一页
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </motion.div>

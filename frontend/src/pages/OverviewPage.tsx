@@ -124,7 +124,7 @@ export function OverviewPage() {
         {/* Main Activity */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           <motion.div variants={itemVariants} className="xl:col-span-2 h-full">
-            <Card className="h-full flex flex-col p-8">
+            <Card className="h-full flex flex-col p-8 liquid-glass">
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-bold tracking-tight text-slate-800 flex items-center gap-2">
                   <Activity className="w-6 h-6 text-slate-400" /> 最近评测任务
@@ -180,7 +180,7 @@ export function OverviewPage() {
           </motion.div>
 
           <motion.div variants={itemVariants} className="xl:col-span-1 h-full">
-            <Card className="h-full flex flex-col p-8">
+            <Card className="h-full flex flex-col p-8 liquid-glass">
               <h3 className="text-xl font-bold tracking-tight text-slate-800 flex items-center gap-2 mb-6">
                 ⚡ 待办事项
               </h3>
@@ -216,7 +216,7 @@ export function OverviewPage() {
         {/* Bottom Capabilities */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           <motion.div variants={itemVariants} className="h-full">
-            <Card className="h-full flex flex-col p-8">
+            <Card className="h-full flex flex-col p-8 liquid-glass">
               <h3 className="text-xl font-bold tracking-tight text-slate-800 flex items-center gap-2 mb-6">
                 📋 评测标准路径
               </h3>
@@ -239,7 +239,7 @@ export function OverviewPage() {
           </motion.div>
 
           <motion.div variants={itemVariants} className="h-full">
-            <Card className="h-full flex flex-col p-8">
+            <Card className="h-full flex flex-col p-8 liquid-glass">
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-bold tracking-tight text-slate-800 flex items-center gap-2">
                   🚀 平台进阶能力
@@ -256,7 +256,7 @@ export function OverviewPage() {
                     key={item.name}
                     whileHover={{ y: -4, scale: 1.02 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                    className="p-5 rounded-2xl border border-slate-100 bg-white shadow-sm flex flex-col"
+                    className="p-5 rounded-2xl border border-white/60 bg-white/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.6),0_4px_10px_-4px_rgba(0,0,0,0.03)] flex flex-col backdrop-blur-md"
                   >
                     <div className="flex justify-between items-center mb-3">
                       <div className="text-slate-700 w-6 h-6">{item.icon}</div>

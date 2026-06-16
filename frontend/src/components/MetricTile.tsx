@@ -29,24 +29,30 @@ export function MetricTile({ title, value, suffix, icon, tone, note, className }
       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
       className="h-full"
     >
-      <Card className={`h-full flex flex-col p-6 ${className ?? ''}`}>
+      <Card className={`h-full flex flex-col p-6 liquid-glass ${className ?? ''}`}>
         <div className="mb-4 flex justify-between items-center">
           <motion.div 
-            className={`w-12 h-12 rounded-2xl flex items-center justify-center ${toneMap[tone]}`}
+            className={`w-12 h-12 rounded-2xl flex items-center justify-center ${toneMap[tone]} relative overflow-hidden`}
             whileHover={{ rotate: 5, scale: 1.1 }}
             transition={{ type: 'spring', stiffness: 300 }}
           >
             {icon}
+            {/* Infinite Shimmer */}
+            <motion.div
+              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent"
+              animate={{ x: ['-150%', '150%'] }}
+              transition={{ repeat: Infinity, duration: 2, ease: "linear", repeatDelay: 1 }}
+            />
           </motion.div>
-          <div className="px-3 py-1 rounded-full bg-slate-100 text-slate-500 text-xs font-semibold uppercase tracking-wider">
+          <div className="px-3 py-1 rounded-full bg-slate-100 text-slate-500 text-xs font-semibold uppercase tracking-wider shadow-sm">
             {note}
           </div>
         </div>
         <div className="mt-auto">
-          <div className="text-sm font-semibold text-slate-500 mb-1">{title}</div>
-          <div className="text-[36px] font-bold tracking-tight text-slate-900 leading-none">
+          <div className="text-sm font-semibold text-slate-500 mb-1 tracking-tight">{title}</div>
+          <div className="text-[40px] font-bold tracking-tight text-slate-900 leading-none font-mono">
             {value}
-            {suffix && <span className="text-xl text-slate-400 ml-1">{suffix}</span>}
+            {suffix && <span className="text-xl text-slate-400 ml-1 font-sans">{suffix}</span>}
           </div>
         </div>
       </Card>
