@@ -1,33 +1,42 @@
-import { Card, Space } from 'antd';
-import type { CardProps, SpaceProps } from 'antd';
 import type { ReactNode } from 'react';
+import { Card } from './AntdShims';
 
 function joinClassNames(...items: Array<string | undefined>) {
   return items.filter(Boolean).join(' ');
 }
 
-type PageSectionProps = CardProps & {
+type PageSectionProps = {
+  title?: ReactNode;
+  extra?: ReactNode;
+  children: ReactNode;
+  className?: string;
   testId?: string;
 };
 
-export function PageSection({ children, className, testId, ...props }: PageSectionProps) {
+export function PageSection({ children, className, testId, title, extra, ...props }: PageSectionProps) {
   return (
-    <Card className={joinClassNames('flat-card', 'page-section', className)} data-testid={testId} {...props}>
+    <Card className={joinClassNames('page-section', className)} title={title} extra={extra} data-testid={testId} {...props}>
       {children}
     </Card>
   );
 }
 
-type ActionToolbarProps = SpaceProps & {
+type ActionToolbarProps = {
   children: ReactNode;
+  className?: string;
   testId?: string;
+  wrap?: boolean;
 };
 
-export function ActionToolbar({ children, className, testId, wrap, ...props }: ActionToolbarProps) {
+export function ActionToolbar({ children, className, testId, wrap = true, ...props }: ActionToolbarProps) {
   return (
-    <Space wrap={wrap ?? true} className={joinClassNames('action-toolbar', className)} data-testid={testId} {...props}>
+    <div 
+      className={joinClassNames('flex items-center gap-2', wrap ? 'flex-wrap' : '', className)} 
+      data-testid={testId} 
+      {...props}
+    >
       {children}
-    </Space>
+    </div>
   );
 }
 

@@ -1,7 +1,8 @@
 import {
-  DeploymentUnitOutlined,
-  SaveOutlined,
-} from '@ant-design/icons';
+  Share2,
+  Save,
+  Rocket
+} from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   addEdge,
@@ -12,9 +13,10 @@ import {
   type Connection,
   type Edge,
 } from '@xyflow/react';
-import { Alert, Button, Card, Col, Row, Space, Tag, Typography } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+
+import { Button } from '../components/ui/Button';
 
 import { ApiError, api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
@@ -269,7 +271,6 @@ function WorkflowDesignerContent() {
   }
 
   function isWorkflowGraph(value: unknown): value is WorkflowGraph {
-    // 路由深链可能遇到旧草稿、缓存脏数据或异常 API 响应；这里先拦截，避免整个画布白屏。
     if (!value || typeof value !== 'object') return false;
     const graph = value as Partial<WorkflowGraph>;
     return typeof graph.name === 'string' && Array.isArray(graph.nodes) && Array.isArray(graph.edges);
@@ -404,8 +405,6 @@ function WorkflowDesignerContent() {
       throw new Error('发布前校验失败，请查看错误与建议。');
     }
 
-    // 发布必须使用用户当前看到的画布快照。先保存当前名称、字段映射和参数，再发布草稿，
-    // 避免后端发布旧草稿导致名称回退或任务 Preflight 仍按旧字段检查。
     const draft = draftId
       ? await api.updateWorkflowDraft(draftId, { name: currentName, graph: currentGraph })
       : await api.createWorkflowDraft({ name: currentName, graph: currentGraph });
@@ -486,77 +485,111 @@ function WorkflowDesignerContent() {
   const isWaitingForRouteDraft = Boolean(routeDraftId && !routeDraftQuery.data && routeDraftQuery.isFetching);
   if (isWaitingForRouteDraft) {
     return (
-      <section className="page-stack">
+      <div className="flex flex-col gap-6 p-6">
         <PageHeader
           eyebrow="流程编排"
           title="Workflow 设计器"
           description="正在加载草稿快照，加载完成后再允许编辑，避免用户改动被后台刷新覆盖。"
         />
-        <Card className="flat-card" loading title="正在加载 Workflow 草稿" />
-      </section>
+        <div className="bg-white border rounded-lg p-12 text-center text-slate-500 shadow-sm">
+          <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin mx-auto mb-4" />
+          正在加载 Workflow 草稿...
+        </div>
+      </div>
     );
   }
 
   if (routeDraftId && routeDraftQuery.isError) {
     return (
-      <section className="page-stack">
+      <div className="flex flex-col gap-6 p-6">
         <PageHeader
           eyebrow="流程编排"
           title="Workflow 设计器"
           description="草稿加载失败，请回到 Workflow 市场重新打开或复制草稿。"
         />
-        <Alert type="error" showIcon message="草稿加载失败" description={formatApiError(routeDraftQuery.error)} />
-      </section>
+        <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg flex flex-col gap-2">
+          <span className="font-semibold">草稿加载失败</span>
+          <span className="text-sm opacity-80">{formatApiError(routeDraftQuery.error)}</span>
+        </div>
+      </div>
     );
   }
 
   return (
-    <div className="designer-fullscreen-layout">
-      {/* 顶部紧凑控制台 */}
-      <header className="designer-header">
-        <div className="designer-header-left">
-          <Typography.Title level={5} style={{ margin: 0 }}>Workflow 设计器</Typography.Title>
-          <Tag color={draftId ? 'blue' : 'default'}>草稿：{draftId ?? '未保存'}</Tag>
-          <Tag color={isDirty ? 'orange' : 'green'}>{isDirty ? '有修改' : '已保存'}</Tag>
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-slate-50 font-sans">
+      <header className="h-14 border-b bg-white flex items-center justify-between px-4 flex-shrink-0 z-10 shadow-sm">
+        <div className="flex items-center gap-3">
+          <h1 className="text-[15px] font-bold text-slate-800">Workflow 设计器</h1>
+          <span className={`px-2 py-0.5 text-xs font-medium rounded-md ${draftId ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
+            草稿：{draftId ?? '未保存'}
+          </span>
+          <span className={`px-2 py-0.5 text-xs font-medium rounded-md ${isDirty ? 'bg-orange-100 text-orange-700' : 'bg-emerald-100 text-emerald-700'}`}>
+            {isDirty ? '有修改' : '已保存'}
+          </span>
         </div>
-        <div className="designer-header-right">
-          {selectedDataset ? <Tag color="green">可试运行</Tag> : <Tag color="gold">无映射预览集</Tag>}
-          <Button icon={<SaveOutlined />} onClick={() => saveDraftMutation.mutate()} loading={saveDraftMutation.isPending}>保存</Button>
-          <Button type="primary" icon={<DeploymentUnitOutlined />} onClick={() => publishMutation.mutate()} loading={publishMutation.isPending}>发布</Button>
-          <Button onClick={() => navigate('/workflows')}>退出</Button>
+        <div className="flex items-center gap-3">
+          {selectedDataset ? (
+            <span className="px-2 py-0.5 text-xs font-medium rounded-md bg-emerald-100 text-emerald-700 border border-emerald-200">
+              可试运行
+            </span>
+          ) : (
+            <span className="px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-700 border border-amber-200">
+              无映射预览集
+            </span>
+          )}
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => saveDraftMutation.mutate()} 
+            disabled={saveDraftMutation.isPending}
+            className="flex items-center gap-1.5 font-medium"
+          >
+            <Save className="w-4 h-4" /> 保存
+          </Button>
+          <Button 
+            variant="default" 
+            size="sm" 
+            onClick={() => publishMutation.mutate()} 
+            disabled={publishMutation.isPending}
+            className="flex items-center gap-1.5 font-medium bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            <Rocket className="w-4 h-4" /> 发布
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => navigate('/workflows')}
+            className="font-medium"
+          >
+            退出
+          </Button>
         </div>
       </header>
 
-      {/* 警告区：保持原有的 Alert 机制，但不占用主布局高度 */}
       {(publishNotice || validationErrors.length > 0) && (
-        <div className="designer-notices">
+        <div className="flex-shrink-0 z-10">
           {publishNotice && (
-            <Alert
-              type={publishNotice.type}
-              showIcon
-              closable
-              message={publishNotice.message}
-              description={
-                publishNotice.type === 'success' ? (
-                  <Space wrap>
-                    <Typography.Text>{publishNotice.description}</Typography.Text>
-                    <Button size="small" type="primary" onClick={() => navigate('/runs')}>去创建任务</Button>
-                  </Space>
-                ) : publishNotice.description
-              }
-              onClose={() => setPublishNotice(null)}
-            />
+            <div className={`p-3 text-sm flex items-start gap-3 relative ${publishNotice.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-b border-emerald-200' : 'bg-red-50 text-red-800 border-b border-red-200'}`}>
+              <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-2">
+                <span className="font-semibold">{publishNotice.message}</span>
+                {publishNotice.description && <span>{publishNotice.description}</span>}
+                {publishNotice.type === 'success' && (
+                  <Button size="sm" variant="default" className="h-6 text-xs px-2 mt-1 sm:mt-0" onClick={() => navigate('/runs')}>去创建任务</Button>
+                )}
+              </div>
+              <button className="text-slate-400 hover:text-slate-600 p-1" onClick={() => setPublishNotice(null)}>&times;</button>
+            </div>
           )}
           {validationErrors.length > 0 && (
-            <InlineIssueSummary issues={validationErrors} onSelectNode={selectIssueNode} />
+            <div className="px-4 py-2 bg-white border-b border-slate-200">
+              <InlineIssueSummary issues={validationErrors} onSelectNode={selectIssueNode} />
+            </div>
           )}
         </div>
       )}
 
-      {/* 全屏主体 */}
-      <div className="designer-body">
-        {/* 左侧边栏：组件面板 */}
-        <div className="designer-sidebar-left">
+      <div className="flex-1 flex overflow-hidden">
+        <div className="w-[320px] flex-shrink-0 flex flex-col border-r border-slate-200 bg-white z-10 shadow-sm relative z-20">
           <SkillPalettePanel
             skills={paletteSkills}
             skillSearch={skillSearch}
@@ -567,8 +600,7 @@ function WorkflowDesignerContent() {
           />
         </div>
 
-        {/* 中间画板：主工作区 */}
-        <div className="designer-canvas">
+        <div className="flex-1 flex flex-col min-w-0 bg-slate-50/50 relative z-0">
           <WorkflowDraftLoaderPanel
             workflowDrafts={workflowDrafts}
             workflowVersions={workflowVersions}
@@ -613,42 +645,45 @@ function WorkflowDesignerContent() {
           />
         </div>
 
-        {/* 右侧边栏：配置与终端 */}
-        <div className="designer-sidebar-right">
-          <WorkflowInspectorPanel
-            selectedGraphNode={selectedGraphNode}
-            selectedEdgeId={selectedEdgeId}
-            selectedNodeIssues={selectedNodeIssues}
-            selectedSkill={selectedSkill}
-            skills={skills}
-            modelConnections={modelConnections}
-            fieldPathOptions={fieldPathOptions}
-            selectedOutgoingEdges={selectedOutgoingEdges}
-            connectableTargets={connectableTargets}
-            graph={graph}
-            datasetVersions={datasetVersions}
-            selectedDatasetVersion={selectedDatasetVersion}
-            onDatasetVersionChange={setSelectedDatasetVersion}
-            onDeleteSelected={deleteSelected}
-            onAutoLayout={autoLayout}
-            onDeleteEdge={deleteEdgeById}
-            onConnectToNode={connectSelectedNodeTo}
-            onUpdateNode={updateSelectedNode}
-            onUpdateAggregatorStrategy={updateAggregatorStrategy}
-            onConsoleTextChange={setConsoleText}
-          />
-          <WorkflowConsolePanel
-            graph={graph}
-            selectedDataset={selectedDataset}
-            consoleTab={consoleTab}
-            consoleText={consoleText}
-            consoleResult={consoleResult}
-            validateLoading={validateMutation.isPending}
-            dryRunLoading={dryRunMutation.isPending}
-            onConsoleTabChange={setConsoleTab}
-            onValidate={() => validateMutation.mutate()}
-            onDryRun={() => dryRunMutation.mutate()}
-          />
+        <div className="w-[360px] flex-shrink-0 flex flex-col bg-white border-l border-slate-200 shadow-sm z-10">
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <WorkflowInspectorPanel
+              selectedGraphNode={selectedGraphNode}
+              selectedEdgeId={selectedEdgeId}
+              selectedNodeIssues={selectedNodeIssues}
+              selectedSkill={selectedSkill}
+              skills={skills}
+              modelConnections={modelConnections}
+              fieldPathOptions={fieldPathOptions}
+              selectedOutgoingEdges={selectedOutgoingEdges}
+              connectableTargets={connectableTargets}
+              graph={graph}
+              datasetVersions={datasetVersions}
+              selectedDatasetVersion={selectedDatasetVersion}
+              onDatasetVersionChange={setSelectedDatasetVersion}
+              onDeleteSelected={deleteSelected}
+              onAutoLayout={autoLayout}
+              onDeleteEdge={deleteEdgeById}
+              onConnectToNode={connectSelectedNodeTo}
+              onUpdateNode={updateSelectedNode}
+              onUpdateAggregatorStrategy={updateAggregatorStrategy}
+              onConsoleTextChange={setConsoleText}
+            />
+          </div>
+          <div className="h-[250px] flex-shrink-0 border-t border-slate-200">
+            <WorkflowConsolePanel
+              graph={graph}
+              selectedDataset={selectedDataset}
+              consoleTab={consoleTab}
+              consoleText={consoleText}
+              consoleResult={consoleResult}
+              validateLoading={validateMutation.isPending}
+              dryRunLoading={dryRunMutation.isPending}
+              onConsoleTabChange={setConsoleTab}
+              onValidate={() => validateMutation.mutate()}
+              onDryRun={() => dryRunMutation.mutate()}
+            />
+          </div>
         </div>
       </div>
 

@@ -1,5 +1,5 @@
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import { AutoComplete, Button, Input, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Plus, Trash2 } from 'lucide-react';
+import { Button } from '../../components/ui/Button';
 
 type MappingRow = {
   id: string;
@@ -41,7 +41,7 @@ export function FieldMappingEditor({ title, value, pathOptions, onChange, addBut
   const requiredHelp = isOutputMapping
     ? '来自 output_schema.required，表示 Skill handler 必须返回该字段；是否写给下游由“输出写入”决定。'
     : '来自 input_schema.required，发布和执行前必须绑定到数据集字段或上游输出。';
-const firstOutputReference = rows[0] ? outputReference(rows[0].field) : `${nodeId || '节点ID'}.字段`;
+  const firstOutputReference = rows[0] ? outputReference(rows[0].field) : `${nodeId || '节点ID'}.字段`;
 
   function updateRow(row: MappingRow, patch: Partial<MappingRow>) {
     const nextRow = { ...row, ...patch };
@@ -58,89 +58,113 @@ const firstOutputReference = rows[0] ? outputReference(rows[0].field) : `${nodeI
     onChange({ ...(value ?? {}), [nextField]: isOutputMapping ? outputReference(nextField) : pathOptions[0] ?? '' });
   }
 
+  const listId = `mapping-paths-${nodeId || 'global'}`;
+
   return (
-    <Space direction="vertical" className="drawer-stack">
-      <Space direction="vertical" size={2}>
-        <Typography.Text strong>{title}</Typography.Text>
-        <Typography.Text type="secondary">{description ?? '从 row、context、metrics 中选择字段路径，避免手写 JSON 出错。'}</Typography.Text>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h4 className="font-semibold text-sm">{title}</h4>
+        <p className="text-slate-500 text-xs">{description ?? '从 row、context、metrics 中选择字段路径，避免手写 JSON 出错。'}</p>
         {isOutputMapping ? (
-          <Typography.Text type="secondary">Skill 必返输出表示 handler 会返回该字段；下游节点直接在输入绑定里选择 {firstOutputReference} 这类路径，不需要手写输出路径。</Typography.Text>
+          <p className="text-slate-500 text-xs">Skill 必返输出表示 handler 会返回该字段；下游节点直接在输入绑定里选择 {firstOutputReference} 这类路径，不需要手写输出路径。</p>
         ) : null}
         {!isOutputMapping && pathOptions.length > 80 ? (
-          <Typography.Text type="secondary">候选路径较多，输入关键词会搜索；下拉只展示最相关的前 80 条，也可以直接手写路径。</Typography.Text>
+          <p className="text-slate-500 text-xs">候选路径较多，输入关键词会搜索；下拉只展示最相关的前 80 条，也可以直接手写路径。</p>
         ) : null}
-      </Space>
-      <Table
-        rowKey="id"
-        size="small"
-        pagination={false}
-        dataSource={rows}
-        locale={{ emptyText: '暂无映射，请新增字段。' }}
-        columns={[
-          {
-            title: '字段',
-            dataIndex: 'field',
-            render: (_, row) => (
-              <Space direction="vertical" size={0}>
-                <Typography.Text>{fieldLabel} {row.field}</Typography.Text>
-                <Space size={4}>
-                  {row.required ? (
-                    <Tooltip title={requiredHelp}>
-                      <Tag color={isOutputMapping ? 'red' : 'volcano'}>{requiredLabel}</Tag>
-                    </Tooltip>
-                  ) : null}
-                  {row.fieldType ? <Typography.Text type="secondary">{row.fieldType}</Typography.Text> : null}
-                </Space>
-                {!row.fromSchema ? (
-                  <Input
-                    aria-label={`映射字段 ${row.field}`}
-                    value={row.field}
-                    onChange={(event) => updateRow(row, { field: event.target.value })}
-                    placeholder="例如 question"
-                  />
-                ) : null}
-              </Space>
-            ),
-          },
-          isOutputMapping
-            ? {
-                title: '下游引用',
-                dataIndex: 'path',
-                render: (_: unknown, row: MappingRow) => <Typography.Text>{`下游引用 ${outputReference(row.field)}`}</Typography.Text>,
-              }
-            : {
-                title: '路径',
-                dataIndex: 'path',
-                render: (_: unknown, row: MappingRow) => (
-                  <AutoComplete
-                    value={row.path}
-                    options={options}
-                    className="full-width-control"
-                    popupMatchSelectWidth={false}
-                    filterOption={(input, option) => String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())}
-                    // 字段路径既可能来自当前 Dataset，也可能来自用户刚设计的上游输出；允许自由输入，避免保存成只读模板。
-                    onChange={(path) => updateRow(row, { path })}
-                  >
-                    <Input aria-label={`字段路径 ${row.field}`} placeholder="搜索或输入 row/context/节点ID.字段" />
-                  </AutoComplete>
-                ),
-              },
-          {
-            title: '操作',
-            key: 'actions',
-            width: 72,
-            render: (_, row) => (
-              <Button danger icon={<DeleteOutlined />} aria-label={`删除映射 ${row.field}`} disabled={lockedBySchema && row.fromSchema} onClick={() => deleteRow(row)} />
-            ),
-          },
-        ]}
-      />
-      {lockedBySchema ? null : (
-        <Button icon={<PlusOutlined />} aria-label={`${title} ${addButtonLabel}`} onClick={addRow}>
-          {addButtonLabel}
+      </div>
+
+      <div className="border rounded-lg overflow-x-auto bg-white shadow-sm">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-slate-50 text-slate-700 border-b">
+            <tr>
+              <th className="px-4 py-2 font-medium w-1/2">字段</th>
+              <th className="px-4 py-2 font-medium w-1/2">{isOutputMapping ? '下游引用' : '路径'}</th>
+              <th className="px-4 py-2 font-medium w-12 text-center">操作</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="px-4 py-6 text-center text-slate-500">暂无映射，请新增字段。</td>
+              </tr>
+            ) : (
+              rows.map(row => (
+                <tr key={row.id}>
+                  <td className="px-4 py-3 align-top">
+                    <div className="flex flex-col gap-1">
+                      <span className="font-medium">{fieldLabel} {row.field}</span>
+                      <div className="flex items-center gap-2">
+                        {row.required && (
+                          <span 
+                            title={requiredHelp}
+                            className={`px-1.5 py-0.5 text-[10px] rounded font-medium ${isOutputMapping ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'} cursor-help`}
+                          >
+                            {requiredLabel}
+                          </span>
+                        )}
+                        {row.fieldType && <span className="text-xs text-slate-500">{row.fieldType}</span>}
+                      </div>
+                      {!row.fromSchema && (
+                        <input
+                          type="text"
+                          aria-label={`映射字段 ${row.field}`}
+                          className="mt-1 w-full border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          value={row.field}
+                          onChange={(event) => updateRow(row, { field: event.target.value })}
+                          placeholder="例如 question"
+                        />
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    {isOutputMapping ? (
+                      <span className="text-slate-600 bg-slate-50 px-2 py-1 rounded border border-slate-100 block break-all">
+                        下游引用 {outputReference(row.field)}
+                      </span>
+                    ) : (
+                      <>
+                        <input
+                          list={listId}
+                          type="text"
+                          aria-label={`字段路径 ${row.field}`}
+                          className="w-full border border-slate-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          value={row.path}
+                          onChange={(e) => updateRow(row, { path: e.target.value })}
+                          placeholder="搜索或输入 row/context/节点ID.字段"
+                        />
+                        <datalist id={listId}>
+                          {options.map(opt => <option key={opt.value} value={opt.value} />)}
+                        </datalist>
+                      </>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 align-top text-center">
+                    <button
+                      aria-label={`删除映射 ${row.field}`}
+                      disabled={lockedBySchema && row.fromSchema}
+                      onClick={() => deleteRow(row)}
+                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors disabled:opacity-30 disabled:hover:text-slate-400 disabled:hover:bg-transparent"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {!lockedBySchema && (
+        <Button 
+          variant="outline" 
+          onClick={addRow}
+          className="w-max flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" /> {addButtonLabel}
         </Button>
       )}
-    </Space>
+    </div>
   );
 }
 
@@ -164,7 +188,6 @@ function schemaPropertyType(config: unknown): string {
 }
 
 function buildSelectOptions(pathOptions: string[], rows: MappingRow[]) {
-  // Dataset 宽表可能有上百列；路径候选只保留当前已填路径和前 80 个候选，避免下拉遮挡画布。
   const selectedPaths = rows.map((row) => row.path).filter(Boolean);
   return [...new Set([...selectedPaths, ...pathOptions])].slice(0, 80).map((path) => ({ value: path, label: path }));
 }

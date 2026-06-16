@@ -1,17 +1,21 @@
-import { AppstoreOutlined, CheckCircleOutlined, CopyOutlined, DatabaseOutlined, ExperimentOutlined, InboxOutlined, InfoCircleOutlined, SwapOutlined, TagOutlined, UploadOutlined } from '@ant-design/icons';
+import { CheckCircle, Copy, Database, FlaskConical, Inbox, Info, ArrowLeftRight, Tag, Upload } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, List, Modal, Radio, Select, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd';
-import type { UploadFile } from 'antd';
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
+import { Button } from '../components/ui/Button';
+import { Card } from '../components/ui/Card';
+import { Input } from '../components/ui/Input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '../components/ui/Dialog';
 import type { SkillContractResult, SkillManifest, SkillPackageRecord, SkillVersionHistory, SkillVersionHistoryItem } from '../types';
-
-type UploadFormValues = {
-  filename: string;
-};
 
 type ConflictStrategy = 'error' | 'replace' | 'new_version';
 
@@ -19,19 +23,19 @@ export function SkillsPage() {
   const queryClient = useQueryClient();
   const [activeSkill, setActiveSkill] = useState<SkillManifest | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [uploadFile, setUploadFile] = useState<UploadFile | null>(null);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [filename, setFilename] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [skillQuery, setSkillQuery] = useState('');
   const [contractResultText, setContractResultText] = useState<string | null>(null);
   const [contractResult, setContractResult] = useState<SkillContractResult | null>(null);
-  const [form] = Form.useForm<UploadFormValues>();
 
   // 冲突处理状态
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
   const [conflictSkillId, setConflictSkillId] = useState<string | null>(null);
   const [conflictStrategy, setConflictStrategy] = useState<ConflictStrategy>('error');
-  const [pendingUploadValues, setPendingUploadValues] = useState<UploadFormValues | null>(null);
+  const [pendingUploadValues, setPendingUploadValues] = useState<{ filename: string } | null>(null);
 
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skills });
   const packagesQuery = useQuery({ queryKey: ['skill-packages'], queryFn: api.skillPackages });
@@ -52,14 +56,13 @@ export function SkillsPage() {
   }, [skillQuery, skills, statusFilter]);
 
   const uploadMutation = useMutation({
-    mutationFn: async ({ values, strategy }: { values: UploadFormValues; strategy?: ConflictStrategy }) => {
-      const selectedFile = getSelectedFile(uploadFile);
-      if (!selectedFile) {
+    mutationFn: async ({ values, strategy }: { values: { filename: string }; strategy?: ConflictStrategy }) => {
+      if (!uploadFile) {
         throw new Error('请选择 zip 插件包。');
       }
-      const content_base64 = await readFileBase64(selectedFile);
+      const content_base64 = await readFileBase64(uploadFile);
       return api.uploadSkillPackage({
-        filename: values.filename || selectedFile.name,
+        filename: values.filename || uploadFile.name,
         content_base64,
         conflict_strategy: strategy || 'error',
       });
@@ -69,26 +72,24 @@ export function SkillsPage() {
       setNotice(`插件包${actionText}：${record.manifest.skill_id}，当前状态 ${record.status}`);
       setUploadOpen(false);
       setUploadFile(null);
+      setFilename('');
       setConflictModalOpen(false);
       setPendingUploadValues(null);
-      form.resetFields();
       await queryClient.invalidateQueries({ queryKey: ['skills'] });
       await queryClient.invalidateQueries({ queryKey: ['skill-packages'] });
     },
     onError: (error: unknown) => {
       const errorObj = error as { code?: string; message?: string; details?: { existing_skill_id?: string } };
       if (errorObj?.code === 'SKILL_ALREADY_EXISTS') {
-        // 检测到冲突，显示冲突处理对话框
         setConflictSkillId(errorObj.details?.existing_skill_id || null);
         setConflictModalOpen(true);
-        setPendingUploadValues(form.getFieldsValue());
+        setPendingUploadValues({ filename });
       } else {
         setNotice(`上传失败：${formatApiError(error)}`);
       }
     },
   });
 
-  // 处理冲突策略选择
   const handleConflictResolve = () => {
     if (pendingUploadValues) {
       uploadMutation.mutate({ values: pendingUploadValues, strategy: conflictStrategy });
@@ -124,44 +125,51 @@ export function SkillsPage() {
   });
 
   return (
-    <section className="page-stack">
+    <section className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-6">
       <PageHeader
         eyebrow="能力市场"
         title="Skill 市场"
         description="上传、审批和管理可被 Workflow 引用的 Agent Skill 包。脚本型 Skill 直接跑参数逻辑，说明型 Skill 通过模型网关执行。"
         primaryAction={(
-          <Space wrap>
-            <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadOpen(true)}>上传 Agent Skill 包</Button>
-          </Space>
+          <Button variant="default" onClick={() => setUploadOpen(true)} className="flex items-center gap-2">
+            <Upload className="w-4 h-4" /> 上传 Agent Skill 包
+          </Button>
         )}
       />
 
-      {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
-      {skillsQuery.isError ? <Alert type="error" showIcon message={`Skill 列表加载失败：${formatApiError(skillsQuery.error)}`} /> : null}
+      {notice && (
+        <div className={`p-4 rounded-lg flex items-start gap-3 ${notice.includes('失败') ? 'bg-red-50 text-red-800 border border-red-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`}>
+          <div className="flex-1 text-sm font-medium">{notice}</div>
+          <button onClick={() => setNotice(null)} className="text-current opacity-70 hover:opacity-100">&times;</button>
+        </div>
+      )}
 
-      <div className="action-toolbar flex justify-between items-center mb-6">
-        <Space wrap>
-          <Input.Search
+      {skillsQuery.isError && (
+        <div className="p-4 rounded-lg bg-red-50 text-red-800 border border-red-200 text-sm font-medium">
+          Skill 列表加载失败：{formatApiError(skillsQuery.error)}
+        </div>
+      )}
+
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-2">
+        <div className="flex items-center gap-4 flex-wrap">
+          <Input
             placeholder="搜索 Skill 名称或 ID"
-            allowClear
-            className="wide-search"
-            style={{ width: 320 }}
-            onSearch={setSkillQuery}
-            onChange={(event) => setSkillQuery(event.target.value)}
+            className="w-80"
+            value={skillQuery}
+            onChange={(e) => setSkillQuery(e.target.value)}
           />
-          <Select
+          <select
             value={statusFilter}
-            onChange={setStatusFilter}
-            style={{ width: 140 }}
-            options={[
-              { value: 'all', label: '全部状态' },
-              { value: 'approved', label: '已审批' },
-              { value: 'pending_review', label: '审核中' },
-              { value: 'disabled', label: '已禁用' },
-              { value: 'deprecated', label: '已弃用' },
-            ]}
-          />
-        </Space>
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+          >
+            <option value="all">全部状态</option>
+            <option value="approved">已审批</option>
+            <option value="pending_review">审核中</option>
+            <option value="disabled">已禁用</option>
+            <option value="deprecated">已弃用</option>
+          </select>
+        </div>
       </div>
 
       <motion.div
@@ -172,51 +180,51 @@ export function SkillsPage() {
           show: { opacity: 1, transition: { staggerChildren: 0.05 } }
         }}
       >
-        <List
-          grid={{ gutter: 24, xs: 1, sm: 1, md: 2, xl: 3, xxl: 4 }}
-          pagination={{ pageSize: 12, position: 'bottom', align: 'center' }}
-          dataSource={filteredSkills}
-          loading={skillsQuery.isLoading}
-          locale={{ emptyText: <Empty description="暂无 Skill，请上传 Agent Skill 包并完成合约测试和审批。" /> }}
-          renderItem={(record) => {
-            const packageRecord = packageBySkillId[record.skill_id];
-            const isContractOk = packageRecord?.last_contract_ok;
-            const runtimeMode = packageRecord ? formatPackageRuntime(packageRecord.runtime_mode) : 'builtin';
-            
-            return (
-              <List.Item>
+        {skillsQuery.isLoading ? (
+          <div className="text-center py-12 text-slate-500 text-sm">加载中...</div>
+        ) : filteredSkills.length === 0 ? (
+          <div className="text-center py-12 text-slate-500 text-sm bg-slate-50 rounded-2xl border border-slate-100">暂无 Skill，请上传 Agent Skill 包并完成合约测试和审批。</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+            {filteredSkills.map((record) => {
+              const packageRecord = packageBySkillId[record.skill_id];
+              const isContractOk = packageRecord?.last_contract_ok;
+              const runtimeMode = packageRecord ? formatPackageRuntime(packageRecord.runtime_mode) : 'builtin';
+
+              return (
                 <motion.div
+                  key={record.skill_id}
                   variants={{
                     hidden: { opacity: 0, y: 20 },
                     show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
                   }}
-                  className="h-full"
+                  className="h-full flex"
                 >
-                  <Card 
-                    hoverable 
-                    className="flat-card h-full flex flex-col group border-transparent"
-                    bodyStyle={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column' }}
-                  >
+                  <Card className="flex-1 flex flex-col group p-6 hover:shadow-lg transition-shadow bg-white">
                     <div className="flex justify-between items-start mb-5">
-                      <Space className="group-hover:translate-x-1 transition-transform">
-                        <div className="p-3 bg-violet-50 rounded-2xl text-violet-500 shadow-inner">
-                          <ExperimentOutlined className="text-xl" />
+                      <div className="flex gap-3 group-hover:translate-x-1 transition-transform">
+                        <div className="p-3 bg-violet-50 rounded-2xl text-violet-500 shadow-inner flex items-center justify-center">
+                          <FlaskConical className="w-5 h-5" />
                         </div>
-                        <Space direction="vertical" size={0}>
-                          <Typography.Text strong className="text-lg text-slate-800">{record.name}</Typography.Text>
-                          <Typography.Text type="secondary" className="text-xs font-mono">{record.skill_id}</Typography.Text>
-                        </Space>
-                      </Space>
-                      <Tag color={record.enabled ? 'success' : 'warning'} className="rounded-full border-transparent px-3 py-1 font-semibold">{formatSkillStatus(record.status)}</Tag>
+                        <div className="flex flex-col">
+                          <span className="text-lg font-bold text-slate-800 leading-tight">{record.name}</span>
+                          <span className="text-xs font-mono text-slate-500 mt-1">{record.skill_id}</span>
+                        </div>
+                      </div>
+                      <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${record.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {formatSkillStatus(record.status)}
+                      </span>
                     </div>
-                    
+
                     <div className="flex flex-wrap gap-2 mb-5">
-                      {record.tags.map(tag => <Tag key={tag} className="text-xs m-0 border-slate-200">{tag}</Tag>)}
-                      <Tag color="purple" className="text-xs m-0 border-transparent">{runtimeMode}</Tag>
+                      {record.tags.map(tag => (
+                        <span key={tag} className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-md">{tag}</span>
+                      ))}
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-md font-medium">{runtimeMode}</span>
                     </div>
 
                     <div className="text-sm text-slate-500 flex flex-col gap-2 mb-6 font-medium">
-                      <div className="flex justify-between bg-slate-50 px-3 py-2 rounded-lg">
+                      <div className="flex justify-between bg-slate-50 px-3 py-2 rounded-lg items-center">
                         <span>合约验证</span>
                         <span className={isContractOk ? 'text-emerald-600 font-semibold' : 'text-red-500 font-semibold'}>
                           {!packageRecord ? '内置 Skill' : (isContractOk ? 'Pass' : 'Failed')}
@@ -230,197 +238,217 @@ export function SkillsPage() {
 
                     <div className="mt-auto pt-4 border-t border-slate-100 flex justify-end">
                       <Button
-                        size="small"
-                        shape="round"
-                        icon={<InfoCircleOutlined />}
+                        variant="outline"
+                        size="sm"
+                        className="rounded-full flex items-center gap-1.5"
                         onClick={() => {
                           setContractResultText(null);
                           setContractResult(null);
                           setActiveSkill(record);
                         }}
                       >
-                        配置与检查
+                        <Info className="w-4 h-4" /> 配置与检查
                       </Button>
                     </div>
                   </Card>
                 </motion.div>
-              </List.Item>
-            );
-          }}
-        />
+              );
+            })}
+          </div>
+        )}
       </motion.div>
 
-      <Drawer width={680} title={activeSkill?.name} open={Boolean(activeSkill)} onClose={() => setActiveSkill(null)}>
-        {activeSkill ? (
-          <Space direction="vertical" size="large" className="drawer-stack">
-            <Typography.Paragraph>{activeSkill.description}</Typography.Paragraph>
-            <Card size="small" title="合约测试做什么">
-              <Typography.Paragraph>
-                使用 Skill manifest 里的 example_input 和 example_config 执行一次 Skill，验证输入 schema、输出 schema、运行入口和返回结构是否正常。
-                脚本型会调用 runtime.entrypoint，说明型会读取 SKILL.md 和 references 后走统一模型网关。
-              </Typography.Paragraph>
-            </Card>
-            {packageBySkillId[activeSkill.skill_id] ? (
-              <>
-                <Card size="small" title="Agent Skill 包启用步骤">
-                  <Space direction="vertical">
-                    <Typography.Text>第 1 步：上传 zip 包，包内包含 SKILL.md，脚本型还需要 skill.yaml/skill.json 声明 schema 和 runtime.entrypoint。</Typography.Text>
-                    <Typography.Text>第 2 步：运行合约测试，确认 example_input、example_config 和输出 schema 能对齐。</Typography.Text>
-                    <Typography.Text>第 3 步：治理页审批启用</Typography.Text>
-                    <Typography.Text>第 4 步：Workflow 画布中搜索并添加</Typography.Text>
-                  </Space>
-                </Card>
-                <Card size="small" title="包运行方式">
-                  <Descriptions size="small" column={1}>
-                    <Descriptions.Item label="运行模式">{formatPackageRuntime(packageBySkillId[activeSkill.skill_id].runtime_mode)}</Descriptions.Item>
-                    <Descriptions.Item label="脚本入口">{packageBySkillId[activeSkill.skill_id].entrypoint ?? '-'}</Descriptions.Item>
-                    <Descriptions.Item label="SKILL.md">{packageBySkillId[activeSkill.skill_id].skill_md_path ?? '-'}</Descriptions.Item>
-                  </Descriptions>
-                </Card>
-                <Card size="small" title="插件审批状态">
-                  <Space wrap>
-                    <Tag color={packageBySkillId[activeSkill.skill_id].last_contract_ok ? 'green' : 'red'}>
-                      {packageBySkillId[activeSkill.skill_id].last_contract_ok ? '合约已通过' : '合约未通过'}
-                    </Tag>
-                    <Typography.Text>审批人：{packageBySkillId[activeSkill.skill_id].approved_by ?? '未审批'}</Typography.Text>
-                    <Typography.Text>审批时间：{packageBySkillId[activeSkill.skill_id].approved_at ?? '未审批'}</Typography.Text>
-                  </Space>
-                </Card>
-                <SkillVersionHistoryCard
-                  activeSkill={activeSkill}
-                  history={versionHistoryQuery.data}
-                  loading={versionHistoryQuery.isLoading}
-                  rollbackLoading={rollbackMutation.isPending}
-                  onRollback={(targetSkillId) => rollbackMutation.mutate({ sourceSkillId: activeSkill.skill_id, targetSkillId })}
+      <Dialog open={Boolean(activeSkill)} onOpenChange={(open) => !open && setActiveSkill(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{activeSkill?.name}</DialogTitle>
+          </DialogHeader>
+          {activeSkill && (
+            <div className="flex flex-col gap-6 py-4">
+              <p className="text-sm text-slate-700">{activeSkill.description}</p>
+              
+              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50">
+                <h4 className="text-sm font-bold text-slate-800 mb-2">合约测试做什么</h4>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  使用 Skill manifest 里的 example_input 和 example_config 执行一次 Skill，验证输入 schema、输出 schema、运行入口和返回结构是否正常。
+                  脚本型会调用 runtime.entrypoint，说明型会读取 SKILL.md 和 references 后走统一模型网关。
+                </p>
+              </div>
+
+              {packageBySkillId[activeSkill.skill_id] && (
+                <>
+                  <div className="border border-slate-200 rounded-xl p-4">
+                    <h4 className="text-sm font-bold text-slate-800 mb-2">Agent Skill 包启用步骤</h4>
+                    <div className="flex flex-col gap-1 text-xs text-slate-600">
+                      <span>第 1 步：上传 zip 包，包内包含 SKILL.md，脚本型还需要 skill.yaml/skill.json 声明 schema 和 runtime.entrypoint。</span>
+                      <span>第 2 步：运行合约测试，确认 example_input、example_config 和输出 schema 能对齐。</span>
+                      <span>第 3 步：治理页审批启用</span>
+                      <span>第 4 步：Workflow 画布中搜索并添加</span>
+                    </div>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-xl p-4">
+                    <h4 className="text-sm font-bold text-slate-800 mb-3">包运行方式</h4>
+                    <div className="grid grid-cols-[100px_1fr] gap-2 text-xs">
+                      <span className="text-slate-500 font-medium">运行模式</span>
+                      <span className="text-slate-800">{formatPackageRuntime(packageBySkillId[activeSkill.skill_id].runtime_mode)}</span>
+                      <span className="text-slate-500 font-medium">脚本入口</span>
+                      <span className="text-slate-800">{packageBySkillId[activeSkill.skill_id].entrypoint ?? '-'}</span>
+                      <span className="text-slate-500 font-medium">SKILL.md</span>
+                      <span className="text-slate-800">{packageBySkillId[activeSkill.skill_id].skill_md_path ?? '-'}</span>
+                    </div>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-xl p-4">
+                    <h4 className="text-sm font-bold text-slate-800 mb-3">插件审批状态</h4>
+                    <div className="flex flex-wrap gap-4 items-center text-xs">
+                      <span className={`px-2 py-1 rounded-md font-medium ${packageBySkillId[activeSkill.skill_id].last_contract_ok ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                        {packageBySkillId[activeSkill.skill_id].last_contract_ok ? '合约已通过' : '合约未通过'}
+                      </span>
+                      <span className="text-slate-600">审批人：{packageBySkillId[activeSkill.skill_id].approved_by ?? '未审批'}</span>
+                      <span className="text-slate-600">审批时间：{packageBySkillId[activeSkill.skill_id].approved_at ?? '未审批'}</span>
+                    </div>
+                  </div>
+
+                  <SkillVersionHistoryCard
+                    activeSkill={activeSkill}
+                    history={versionHistoryQuery.data}
+                    loading={versionHistoryQuery.isLoading}
+                    rollbackLoading={rollbackMutation.isPending}
+                    onRollback={(targetSkillId) => rollbackMutation.mutate({ sourceSkillId: activeSkill.skill_id, targetSkillId })}
+                  />
+                </>
+              )}
+
+              <div className="border border-slate-200 rounded-xl p-4">
+                <h4 className="text-sm font-bold text-slate-800 mb-2">输入 Schema</h4>
+                <pre className="text-[11px] bg-slate-50 p-3 rounded-lg overflow-x-auto text-slate-700 border border-slate-100">{JSON.stringify(activeSkill.input_schema, null, 2)}</pre>
+              </div>
+              <div className="border border-slate-200 rounded-xl p-4">
+                <h4 className="text-sm font-bold text-slate-800 mb-2">输出 Schema</h4>
+                <pre className="text-[11px] bg-slate-50 p-3 rounded-lg overflow-x-auto text-slate-700 border border-slate-100">{JSON.stringify(activeSkill.output_schema, null, 2)}</pre>
+              </div>
+              <div className="border border-slate-200 rounded-xl p-4">
+                <h4 className="text-sm font-bold text-slate-800 mb-2">配置 Schema</h4>
+                <pre className="text-[11px] bg-slate-50 p-3 rounded-lg overflow-x-auto text-slate-700 border border-slate-100">{JSON.stringify(activeSkill.config_schema, null, 2)}</pre>
+              </div>
+
+              {contractResultText && (
+                <div className={`p-3 rounded-lg text-sm font-medium ${contractResultText.includes('通过') ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                  {contractResultText}
+                </div>
+              )}
+              
+              {contractResult && <ContractResultCard result={contractResult} activeSkill={activeSkill} packageRecord={packageBySkillId[activeSkill.skill_id]} />}
+
+              <div className="pt-4 border-t border-slate-100 flex justify-end">
+                <Button variant="default" className="flex items-center gap-2" disabled={contractMutation.isPending} onClick={() => contractMutation.mutate(activeSkill.skill_id)} title="会用示例输入和示例配置真实执行一次 Skill，并检查输入输出 schema。">
+                  <CheckCircle className="w-4 h-4" />
+                  {contractMutation.isPending ? '运行中...' : '运行合约测试'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>上传 Agent Skill 包</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-4">
+            <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-xs border border-blue-100">
+              <strong className="block mb-1">zip 包格式</strong>
+              推荐包含 SKILL.md、skill.yaml 或 skill.json、scripts、references、assets。纯参数或脚本型 Skill 必须在 skill.yaml/skill.json 中声明 input_schema、output_schema、config_schema 和 runtime.mode=script；说明型 Skill 使用 runtime.mode=instruction_model。旧的 handler.py 插件仍兼容。
+            </div>
+            
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-slate-700">文件名</label>
+              <Input placeholder="echo_skill.zip" value={filename} onChange={(e) => setFilename(e.target.value)} />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-slate-700">选择文件</label>
+              <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 hover:border-indigo-400 transition-colors cursor-pointer relative">
+                <input
+                  type="file"
+                  accept=".zip"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setUploadFile(file);
+                      setFilename(file.name);
+                    }
+                  }}
                 />
-              </>
-            ) : null}
-            <Card size="small" title="输入 Schema"><pre>{JSON.stringify(activeSkill.input_schema, null, 2)}</pre></Card>
-            <Card size="small" title="输出 Schema"><pre>{JSON.stringify(activeSkill.output_schema, null, 2)}</pre></Card>
-            <Card size="small" title="配置 Schema"><pre>{JSON.stringify(activeSkill.config_schema, null, 2)}</pre></Card>
-            {contractResultText ? <Alert type={contractResultText.includes('通过') ? 'success' : 'error'} showIcon message={contractResultText} /> : null}
-            {contractResult ? <ContractResultCard result={contractResult} activeSkill={activeSkill} packageRecord={packageBySkillId[activeSkill.skill_id]} /> : null}
-            <Tooltip title="会用示例输入和示例配置真实执行一次 Skill，并检查输入输出 schema。">
-              <Button icon={<CheckCircleOutlined />} type="primary" loading={contractMutation.isPending} onClick={() => contractMutation.mutate(activeSkill.skill_id)}>
-                运行合约测试
-              </Button>
-            </Tooltip>
-          </Space>
-        ) : null}
-      </Drawer>
+                <Inbox className="w-10 h-10 text-indigo-400 mx-auto mb-3" />
+                <p className="text-sm font-medium text-slate-700 mb-1">
+                  {uploadFile ? uploadFile.name : '点击或拖拽文件到此处上传'}
+                </p>
+                <p className="text-xs text-slate-500">
+                  脚本型示例：SKILL.md + skill.yaml + scripts/run.py；说明型示例：SKILL.md + skill.yaml + references/。
+                </p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUploadOpen(false)}>取消</Button>
+            <Button variant="default" disabled={!uploadFile || uploadMutation.isPending} onClick={() => uploadMutation.mutate({ values: { filename } })}>
+              {uploadMutation.isPending ? '提交中...' : '提交上传'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <Modal
-        title="上传 Agent Skill 包"
-        open={uploadOpen}
-        forceRender
-        onCancel={() => setUploadOpen(false)}
-        footer={[
-          <Button key="cancel" onClick={() => setUploadOpen(false)}>取消</Button>,
-          <Button key="submit" type="primary" loading={uploadMutation.isPending} disabled={!uploadFile} onClick={() => form.submit()}>提交上传</Button>,
-        ]}
-      >
-        <Form form={form} layout="vertical" onFinish={(values) => uploadMutation.mutate({ values })}>
-          <Alert
-            type="info"
-            showIcon
-            message="zip 包格式"
-            description="推荐包含 SKILL.md、skill.yaml 或 skill.json、scripts、references、assets。纯参数或脚本型 Skill 必须在 skill.yaml/skill.json 中声明 input_schema、output_schema、config_schema 和 runtime.mode=script；说明型 Skill 使用 runtime.mode=instruction_model。旧的 handler.py 插件仍兼容。"
-            style={{ marginBottom: 16 }}
-          />
-          <Form.Item name="filename" label="文件名">
-            <Input placeholder="echo_skill.zip" />
-          </Form.Item>
-          <Upload.Dragger
-            accept=".zip"
-            beforeUpload={(file) => {
-              setUploadFile(file);
-              form.setFieldValue('filename', file.name);
-              return false;
-            }}
-            fileList={uploadFile ? [uploadFile] : []}
-            onRemove={() => setUploadFile(null)}
-            maxCount={1}
-          >
-            <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-            <p className="ant-upload-text">选择 Agent Skill zip 包</p>
-            <p className="ant-upload-hint">脚本型示例：SKILL.md + skill.yaml + scripts/run.py；说明型示例：SKILL.md + skill.yaml + references/。</p>
-          </Upload.Dragger>
-        </Form>
-      </Modal>
+      <Dialog open={conflictModalOpen} onOpenChange={(open) => !open && setConflictModalOpen(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Skill 名称冲突</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-6 py-4">
+            <div className="bg-amber-50 text-amber-800 p-4 rounded-xl text-sm border border-amber-200">
+              <div className="font-bold flex items-center gap-2 mb-2"><Info className="w-4 h-4" />已存在同名 Skill</div>
+              <p>系统中已存在名为 <code className="bg-amber-100 px-1 rounded">{conflictSkillId}</code> 的 Skill。</p>
+              <p className="text-amber-700 opacity-80 mt-1 text-xs">请选择处理方式：</p>
+            </div>
 
-      {/* 冲突处理对话框 */}
-      <Modal
-        title="Skill 名称冲突"
-        open={conflictModalOpen}
-        onCancel={() => {
-          setConflictModalOpen(false);
-          setPendingUploadValues(null);
-        }}
-        footer={[
-          <Button key="cancel" onClick={() => {
-            setConflictModalOpen(false);
-            setPendingUploadValues(null);
-          }}>
-            取消
-          </Button>,
-          <Button
-            key="submit"
-            type="primary"
-            loading={uploadMutation.isPending}
-            onClick={handleConflictResolve}
-          >
-            确认{conflictStrategy === 'replace' ? '替换' : conflictStrategy === 'new_version' ? '创建新版本' : '上传'}
-          </Button>,
-        ]}
-      >
-        <Space direction="vertical" size="large" style={{ width: '100%' }}>
-          <Alert
-            type="warning"
-            showIcon
-            message="已存在同名 Skill"
-            description={
-              <Space direction="vertical">
-                <Typography.Text>
-                  系统中已存在名为 <Typography.Text strong code>{conflictSkillId}</Typography.Text> 的 Skill。
-                </Typography.Text>
-                <Typography.Text type="secondary">
-                  请选择处理方式：
-                </Typography.Text>
-              </Space>
-            }
-          />
-          <Radio.Group
-            value={conflictStrategy}
-            onChange={(e) => setConflictStrategy(e.target.value)}
-            style={{ width: '100%' }}
-          >
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              <Radio value="new_version" style={{ width: '100%' }}>
-                <Card size="small" hoverable style={{ marginLeft: 8 }}>
-                  <Space>
-                    <CopyOutlined style={{ fontSize: 24, color: '#1890ff' }} />
-                    <Space direction="vertical" size={0}>
-                      <Typography.Text strong>创建新版本</Typography.Text>
-                      <Typography.Text type="secondary">自动递增版本号，保留历史版本记录</Typography.Text>
-                    </Space>
-                  </Space>
-                </Card>
-              </Radio>
-              <Radio value="replace" style={{ width: '100%' }}>
-                <Card size="small" hoverable style={{ marginLeft: 8 }}>
-                  <Space>
-                    <SwapOutlined style={{ fontSize: 24, color: '#faad14' }} />
-                    <Space direction="vertical" size={0}>
-                      <Typography.Text strong>替换现有版本</Typography.Text>
-                      <Typography.Text type="secondary">覆盖当前版本，历史版本将被标记为已替换</Typography.Text>
-                    </Space>
-                  </Space>
-                </Card>
-              </Radio>
-            </Space>
-          </Radio.Group>
-        </Space>
-      </Modal>
+            <div className="flex flex-col gap-3">
+              <label className={`flex gap-3 p-4 border rounded-xl cursor-pointer hover:border-indigo-400 transition-colors ${conflictStrategy === 'new_version' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white'}`}>
+                <input type="radio" name="conflict" value="new_version" checked={conflictStrategy === 'new_version'} onChange={() => setConflictStrategy('new_version')} className="mt-1" />
+                <div className="flex gap-3">
+                  <Copy className="w-6 h-6 text-indigo-500" />
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-slate-800">创建新版本</span>
+                    <span className="text-xs text-slate-500 mt-0.5">自动递增版本号，保留历史版本记录</span>
+                  </div>
+                </div>
+              </label>
+
+              <label className={`flex gap-3 p-4 border rounded-xl cursor-pointer hover:border-amber-400 transition-colors ${conflictStrategy === 'replace' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 bg-white'}`}>
+                <input type="radio" name="conflict" value="replace" checked={conflictStrategy === 'replace'} onChange={() => setConflictStrategy('replace')} className="mt-1" />
+                <div className="flex gap-3">
+                  <ArrowLeftRight className="w-6 h-6 text-amber-500" />
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-slate-800">替换现有版本</span>
+                    <span className="text-xs text-slate-500 mt-0.5">覆盖当前版本，历史版本将被标记为已替换</span>
+                  </div>
+                </div>
+              </label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setConflictModalOpen(false);
+              setPendingUploadValues(null);
+            }}>取消</Button>
+            <Button variant="default" disabled={uploadMutation.isPending} onClick={handleConflictResolve}>
+              确认{conflictStrategy === 'replace' ? '替换' : conflictStrategy === 'new_version' ? '创建新版本' : '上传'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -440,64 +468,96 @@ function SkillVersionHistoryCard({
 }) {
   const versions = history?.versions ?? [];
   const activeVersion = versions.find((item) => item.skill_id === activeSkill.skill_id);
+  
   return (
-    <Card size="small" title="版本历史">
-      <Space direction="vertical" className="drawer-stack">
-        <Descriptions size="small" column={1}>
-          <Descriptions.Item label="版本族">{history?.base_skill_id ?? activeSkill.skill_id.split('@')[0]}</Descriptions.Item>
-          <Descriptions.Item label="当前启用版本">{history?.latest_approved_skill_id ?? '-'}</Descriptions.Item>
-        </Descriptions>
-        <Table<SkillVersionHistoryItem>
-          size="small"
-          rowKey="skill_id"
-          loading={loading}
-          dataSource={versions}
-          pagination={false}
-          scroll={{ x: 760 }}
-          columns={[
-            { title: 'Skill ID', dataIndex: 'skill_id', render: (value) => <code>{value}</code> },
-            { title: '状态', dataIndex: 'status', render: (value, record) => <Tag color={record.enabled ? 'green' : 'orange'}>{formatSkillStatus(String(value))}</Tag> },
-            {
-              title: '差异',
-              render: (_, record) => (
-                <Space wrap>
-                  {record.diff_from_previous.length ? record.diff_from_previous.map((diff) => <Tag key={diff.field}>{diff.field}</Tag>) : <Tag>初始版本</Tag>}
-                </Space>
-              ),
-            },
-            {
-              title: '操作',
-              render: (_, record) => (
-                record.skill_id === activeSkill.skill_id ? <Tag>当前</Tag> : (
-                  <Button size="small" loading={rollbackLoading} onClick={() => onRollback(record.skill_id)}>
-                    回滚到此版本
-                  </Button>
-                )
-              ),
-            },
-          ]}
-        />
+    <div className="border border-slate-200 rounded-xl p-4 bg-white">
+      <h4 className="text-sm font-bold text-slate-800 mb-4">版本历史</h4>
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-[100px_1fr] gap-2 text-xs">
+          <span className="text-slate-500 font-medium">版本族</span>
+          <span className="text-slate-800">{history?.base_skill_id ?? activeSkill.skill_id.split('@')[0]}</span>
+          <span className="text-slate-500 font-medium">当前启用版本</span>
+          <span className="text-slate-800">{history?.latest_approved_skill_id ?? '-'}</span>
+        </div>
+
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-2 font-medium">Skill ID</th>
+                <th className="px-4 py-2 font-medium">状态</th>
+                <th className="px-4 py-2 font-medium">差异</th>
+                <th className="px-4 py-2 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {loading ? (
+                <tr><td colSpan={4} className="px-4 py-4 text-center text-slate-500">加载中...</td></tr>
+              ) : versions.length === 0 ? (
+                <tr><td colSpan={4} className="px-4 py-4 text-center text-slate-500">暂无版本历史</td></tr>
+              ) : (
+                versions.map(record => (
+                  <tr key={record.skill_id} className="hover:bg-slate-50">
+                    <td className="px-4 py-2"><code className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{record.skill_id}</code></td>
+                    <td className="px-4 py-2">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${record.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {formatSkillStatus(String(record.status))}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        {record.diff_from_previous.length ? record.diff_from_previous.map((diff) => (
+                          <span key={diff.field} className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{diff.field}</span>
+                        )) : <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">初始版本</span>}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2">
+                      {record.skill_id === activeSkill.skill_id ? (
+                        <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded-md text-[10px] font-bold">当前</span>
+                      ) : (
+                        <button
+                          disabled={rollbackLoading}
+                          onClick={() => onRollback(record.skill_id)}
+                          className="px-2 py-1 border border-slate-300 text-slate-600 rounded text-[10px] hover:bg-slate-100 transition-colors disabled:opacity-50"
+                        >
+                          回滚到此版本
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
         <LifecycleHistory title="合约测试历史" items={activeVersion?.contract_history ?? []} />
         <LifecycleHistory title="审批历史" items={activeVersion?.approval_history ?? []} />
-      </Space>
-    </Card>
+      </div>
+    </div>
   );
 }
 
 function LifecycleHistory({ title, items }: { title: string; items: Record<string, unknown>[] }) {
   return (
     <section>
-      <Typography.Title level={5}>{title}</Typography.Title>
+      <h5 className="text-xs font-bold text-slate-700 mb-2">{title}</h5>
       {items.length ? (
-        <Space direction="vertical" size="small">
+        <div className="flex flex-col gap-1 text-[11px] text-slate-600">
           {items.map((item, index) => (
-            <Typography.Text key={`${title}-${index}`}>
-              {String(item.created_at ?? '-')} / {String(item.action ?? (item.ok ? 'contract_passed' : 'contract_failed'))} / {String(item.actor ?? 'api')}
-            </Typography.Text>
+            <div key={`${title}-${index}`} className="flex gap-2">
+              <span className="text-slate-400">{String(item.created_at ?? '-')}</span>
+              <span>/</span>
+              <span className={item.ok ? 'text-emerald-600 font-medium' : 'text-red-500 font-medium'}>
+                {String(item.action ?? (item.ok ? 'contract_passed' : 'contract_failed'))}
+              </span>
+              <span>/</span>
+              <span className="text-slate-500">{String(item.actor ?? 'api')}</span>
+            </div>
           ))}
-        </Space>
+        </div>
       ) : (
-        <Typography.Text type="secondary">暂无记录</Typography.Text>
+        <div className="text-[11px] text-slate-400">暂无记录</div>
       )}
     </section>
   );
@@ -510,12 +570,6 @@ async function readFileBase64(file: File): Promise<string> {
     binary += String.fromCharCode(byte);
   }
   return btoa(binary);
-}
-
-function getSelectedFile(uploadFile: UploadFile | null): File | null {
-  // Ant Design Upload 的真实文件位置在不同触发路径下并不完全一致；
-  // 这里统一归一化，让拖拽区和弹窗上传共用一套提交逻辑。
-  return (uploadFile?.originFileObj ?? uploadFile ?? null) as File | null;
 }
 
 function indexPackagesBySkillId(packages: SkillPackageRecord[]): Record<string, SkillPackageRecord> {
@@ -546,26 +600,41 @@ function ContractResultCard({ result, activeSkill, packageRecord }: { result: Sk
   const errorCode = typeof (result as unknown as Record<string, unknown>).code === 'string' ? String((result as unknown as Record<string, unknown>).code) : result.error;
   const suggestion = contractSuggestion(packageRecord);
   return (
-    <Card size="small" title="合约测试结果">
-      <Space direction="vertical" className="drawer-stack">
-        <Descriptions size="small" column={1}>
-          <Descriptions.Item label="测试输入"><pre>{JSON.stringify(activeSkill.example_input, null, 2)}</pre></Descriptions.Item>
-          <Descriptions.Item label="测试配置"><pre>{JSON.stringify(activeSkill.example_config, null, 2)}</pre></Descriptions.Item>
-          <Descriptions.Item label="输出结果"><pre>{JSON.stringify(result.output ?? {}, null, 2)}</pre></Descriptions.Item>
-          <Descriptions.Item label="耗时">{result.latency_ms === undefined ? '-' : `${result.latency_ms.toFixed(2)} ms`}</Descriptions.Item>
-          {!result.ok ? <Descriptions.Item label="错误码">{errorCode ?? '-'}</Descriptions.Item> : null}
-          {!result.ok ? <Descriptions.Item label="错误信息">{result.message ?? result.error ?? '-'}</Descriptions.Item> : null}
-        </Descriptions>
-        {!result.ok ? (
-          <Alert
-            type="warning"
-            showIcon
-            message="修复建议"
-            description={suggestion}
-          />
-        ) : null}
-      </Space>
-    </Card>
+    <div className="border border-slate-200 rounded-xl p-4 bg-white">
+      <h4 className="text-sm font-bold text-slate-800 mb-4">合约测试结果</h4>
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-[80px_1fr] gap-x-4 gap-y-3 text-xs">
+          <span className="text-slate-500 font-medium pt-1">测试输入</span>
+          <pre className="bg-slate-50 p-2 rounded border border-slate-100 overflow-x-auto text-[10px] text-slate-700 m-0">{JSON.stringify(activeSkill.example_input, null, 2)}</pre>
+          
+          <span className="text-slate-500 font-medium pt-1">测试配置</span>
+          <pre className="bg-slate-50 p-2 rounded border border-slate-100 overflow-x-auto text-[10px] text-slate-700 m-0">{JSON.stringify(activeSkill.example_config, null, 2)}</pre>
+          
+          <span className="text-slate-500 font-medium pt-1">输出结果</span>
+          <pre className="bg-slate-50 p-2 rounded border border-slate-100 overflow-x-auto text-[10px] text-slate-700 m-0">{JSON.stringify(result.output ?? {}, null, 2)}</pre>
+          
+          <span className="text-slate-500 font-medium pt-1">耗时</span>
+          <span className="text-slate-800 pt-1">{result.latency_ms === undefined ? '-' : `${result.latency_ms.toFixed(2)} ms`}</span>
+          
+          {!result.ok && (
+            <>
+              <span className="text-slate-500 font-medium pt-1">错误码</span>
+              <span className="text-red-600 font-mono pt-1">{errorCode ?? '-'}</span>
+              
+              <span className="text-slate-500 font-medium pt-1">错误信息</span>
+              <span className="text-red-600 pt-1 break-words">{result.message ?? result.error ?? '-'}</span>
+            </>
+          )}
+        </div>
+        
+        {!result.ok && (
+          <div className="mt-2 bg-amber-50 text-amber-800 p-3 rounded-lg border border-amber-200 text-xs">
+            <strong className="block mb-1">修复建议</strong>
+            {suggestion}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

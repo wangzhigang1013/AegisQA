@@ -1,18 +1,15 @@
-import { ExperimentOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { FlaskConical, Plus, RefreshCw } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Form, Input, Modal, Row, Select, Space, Table, Tag, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageSection } from '../components/LayoutPrimitives';
 import { PageHeader } from '../components/PageHeader';
 import type { ExperimentRecord } from '../types';
-
-type ExperimentCreateValues = {
-  name: string;
-  run_id: string;
-  baseline_run_id?: string | null;
-};
+import { Button } from '../components/ui/Button';
+import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/Dialog';
+import { Input } from '../components/ui/Input';
 
 export function ExperimentsPage() {
   const queryClient = useQueryClient();
@@ -20,237 +17,379 @@ export function ExperimentsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedExperimentId, setSelectedExperimentId] = useState<string | null>(null);
   const [baselineExperimentId, setBaselineExperimentId] = useState<string | null>(null);
-  const [datasetFilter, setDatasetFilter] = useState<string | undefined>();
-  const [workflowFilter, setWorkflowFilter] = useState<string | undefined>();
-  const [form] = Form.useForm<ExperimentCreateValues>();
-  const selectedRunId = Form.useWatch('run_id', form);
-  const experimentName = Form.useWatch('name', form);
+  const [datasetFilter, setDatasetFilter] = useState<string>('');
+  const [workflowFilter, setWorkflowFilter] = useState<string>('');
+  
+  // Form state
+  const [experimentName, setExperimentName] = useState('');
+  const [selectedRunId, setSelectedRunId] = useState('');
+  const [baselineRunId, setBaselineRunId] = useState('');
 
   const allExperimentsQuery = useQuery({ queryKey: ['experiments', 'all'], queryFn: () => api.experiments() });
   const experimentsQuery = useQuery({
     queryKey: ['experiments', datasetFilter, workflowFilter],
-    queryFn: () => api.experiments({ dataset_id: datasetFilter, workflow_id: workflowFilter }),
+    queryFn: () => api.experiments({ 
+      dataset_id: datasetFilter || undefined, 
+      workflow_id: workflowFilter || undefined 
+    }),
   });
   const runsQuery = useQuery({ queryKey: ['runs', 'summary', 1, 100], queryFn: () => api.runsPage({ page: 1, pageSize: 100 }) });
+  
   const experiments = experimentsQuery.data ?? [];
   const allExperiments = allExperimentsQuery.data ?? experiments;
   const activeExperiment = experiments.find((item) => item.experiment_id === selectedExperimentId) ?? experiments[0];
   const selectedBaseline =
     allExperiments.find((item) => item.experiment_id === baselineExperimentId) ??
     allExperiments.find((item) => item.run_id === activeExperiment?.baseline_run_id);
+    
   const comparison = useMemo(() => buildComparison(activeExperiment, selectedBaseline), [activeExperiment, selectedBaseline]);
   const failureDistribution = useMemo(() => buildFailureDistribution(activeExperiment, selectedBaseline), [activeExperiment, selectedBaseline]);
 
   const createMutation = useMutation({
-    mutationFn: (values: ExperimentCreateValues) =>
+    mutationFn: () =>
       api.createExperimentFromRun({
-        name: values.name,
-        run_id: values.run_id,
-        baseline_run_id: values.baseline_run_id || null,
+        name: experimentName,
+        run_id: selectedRunId,
+        baseline_run_id: baselineRunId || null,
         tags: ['ui-created'],
       }),
     onSuccess: async (experiment) => {
       setNotice(`实验快照已生成：${experiment.name}`);
       setModalOpen(false);
-      form.resetFields();
+      setExperimentName('');
+      setSelectedRunId('');
+      setBaselineRunId('');
       setSelectedExperimentId(experiment.experiment_id);
       await queryClient.invalidateQueries({ queryKey: ['experiments'] });
     },
     onError: (error) => setNotice(`实验快照生成失败：${formatApiError(error)}`),
   });
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRunId || !experimentName) return;
+    createMutation.mutate();
+  };
+
   return (
-    <section className="page-stack">
+    <section className="page-stack flex flex-col gap-8">
       <PageHeader
         eyebrow="实验与对比"
         title="Experiment 实验中心"
         description="把正式 Run 固化为不可变实验快照，并和 baseline 对比通过率、失败样本与成本变化。"
-        primaryAction={<Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>生成实验快照</Button>}
+        primaryAction={
+          <Button onClick={() => setModalOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" /> 生成实验快照
+          </Button>
+        }
       />
 
-      {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} className="mb-4" /> : null}
+      {notice ? (
+        <div className={`p-4 rounded-xl mb-4 border ${notice.includes('失败') ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'} flex justify-between items-center`}>
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)} className="text-current opacity-70 hover:opacity-100">&times;</button>
+        </div>
+      ) : null}
 
       <PageSection title="实验监控" testId="experiments-monitor-section">
-      <Card className="flat-card" title="Baseline 对比" extra={<Button icon={<ReloadOutlined />} onClick={() => void experimentsQuery.refetch()}>刷新</Button>}>
-        <Row gutter={[16, 16]}>
-          <Col xs={24} lg={8}>
-            <Typography.Text type="secondary">Dataset 过滤</Typography.Text>
-            <Select
-              allowClear
-              className="full-width-control"
-              placeholder="按 Dataset 过滤"
-              value={datasetFilter}
-              onChange={setDatasetFilter}
-              options={uniqueOptions(allExperiments, 'dataset_id')}
-            />
-          </Col>
-          <Col xs={24} lg={8}>
-            <Typography.Text type="secondary">Workflow 过滤</Typography.Text>
-            <Select
-              allowClear
-              className="full-width-control"
-              placeholder="按 Workflow 过滤"
-              value={workflowFilter}
-              onChange={setWorkflowFilter}
-              options={uniqueOptions(allExperiments, 'workflow_id', (item) => item.workflow_name ?? item.workflow_id ?? '-')}
-            />
-          </Col>
-          <Col xs={24} lg={8}>
-            <Typography.Text type="secondary">过滤结果</Typography.Text>
-            <div>
-              <Tag color="blue">{experiments.length} 个实验快照</Tag>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Baseline 对比</CardTitle>
+            <Button variant="outline" size="sm" onClick={() => void experimentsQuery.refetch()}>
+              <RefreshCw className="mr-2 h-4 w-4" /> 刷新
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+              <div className="flex flex-col gap-2">
+                <span className="text-sm text-slate-500 font-medium">Dataset 过滤</span>
+                <select
+                  className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  value={datasetFilter}
+                  onChange={(e) => setDatasetFilter(e.target.value)}
+                >
+                  <option value="">按 Dataset 过滤 (所有)</option>
+                  {uniqueOptions(allExperiments, 'dataset_id').map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-2">
+                <span className="text-sm text-slate-500 font-medium">Workflow 过滤</span>
+                <select
+                  className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  value={workflowFilter}
+                  onChange={(e) => setWorkflowFilter(e.target.value)}
+                >
+                  <option value="">按 Workflow 过滤 (所有)</option>
+                  {uniqueOptions(allExperiments, 'workflow_id', (item) => item.workflow_name ?? item.workflow_id ?? '-').map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-2">
+                <span className="text-sm text-slate-500 font-medium">过滤结果</span>
+                <div>
+                  <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
+                    {experiments.length} 个实验快照
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <span className="text-sm text-slate-500 font-medium">当前实验</span>
+                <select
+                  className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  value={activeExperiment?.experiment_id || ''}
+                  onChange={(e) => setSelectedExperimentId(e.target.value)}
+                >
+                  {experiments.map((item) => (
+                    <option key={item.experiment_id} value={item.experiment_id}>{item.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-2">
+                <span className="text-sm text-slate-500 font-medium">Baseline</span>
+                <select
+                  className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  value={baselineExperimentId || ''}
+                  onChange={(e) => setBaselineExperimentId(e.target.value || null)}
+                >
+                  <option value="">选择 baseline 实验</option>
+                  {allExperiments.filter((item) => item.experiment_id !== activeExperiment?.experiment_id).map((item) => (
+                    <option key={item.experiment_id} value={item.experiment_id}>{item.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-2">
+                <span className="text-sm text-slate-500 font-medium">快照状态</span>
+                <div>
+                  <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${
+                    activeExperiment?.status === 'snapshotted' 
+                      ? 'bg-green-50 text-green-700 ring-green-600/20' 
+                      : 'bg-blue-50 text-blue-700 ring-blue-700/10'
+                  }`}>
+                    {activeExperiment?.status ?? '暂无实验'}
+                  </span>
+                </div>
+              </div>
             </div>
-          </Col>
-          <Col xs={24} lg={8}>
-            <Typography.Text type="secondary">当前实验</Typography.Text>
-            <Select
-              className="full-width-control"
-              placeholder="选择实验快照"
-              value={activeExperiment?.experiment_id}
-              onChange={setSelectedExperimentId}
-              options={experiments.map((item) => ({ value: item.experiment_id, label: item.name }))}
-            />
-          </Col>
-          <Col xs={24} lg={8}>
-            <Typography.Text type="secondary">Baseline</Typography.Text>
-            <Select
-              allowClear
-              className="full-width-control"
-              placeholder="选择 baseline 实验"
-              value={baselineExperimentId}
-              onChange={(value) => setBaselineExperimentId(value ?? null)}
-              options={allExperiments.filter((item) => item.experiment_id !== activeExperiment?.experiment_id).map((item) => ({ value: item.experiment_id, label: item.name }))}
-            />
-          </Col>
-          <Col xs={24} lg={8}>
-            <Typography.Text type="secondary">快照状态</Typography.Text>
-            <div>
-              <Tag color={activeExperiment?.status === 'snapshotted' ? 'green' : 'blue'}>{activeExperiment?.status ?? '暂无实验'}</Tag>
-            </div>
-          </Col>
-        </Row>
 
-        <Row gutter={[12, 12]} className="metric-row">
-          <Col xs={24} md={6}>
-            <ComparisonCard title="通过率变化" value={formatPercentDelta(comparison.passRateDelta)} />
-          </Col>
-          <Col xs={24} md={6}>
-            <ComparisonCard title="失败样本变化" value={formatNumberDelta(comparison.badcaseDelta)} />
-          </Col>
-          <Col xs={24} md={6}>
-            <ComparisonCard title="P95 耗时变化" value={formatLatencyDelta(comparison.latencyDelta)} />
-          </Col>
-          <Col xs={24} md={6}>
-            <ComparisonCard title="成本变化" value={formatCurrencyDelta(comparison.costDelta)} />
-          </Col>
-        </Row>
-      </Card>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <ComparisonCard title="通过率变化" value={formatPercentDelta(comparison.passRateDelta)} />
+              <ComparisonCard title="失败样本变化" value={formatNumberDelta(comparison.badcaseDelta)} />
+              <ComparisonCard title="P95 耗时变化" value={formatLatencyDelta(comparison.latencyDelta)} />
+              <ComparisonCard title="成本变化" value={formatCurrencyDelta(comparison.costDelta)} />
+            </div>
+          </CardContent>
+        </Card>
       </PageSection>
 
       <PageSection title="诊断对比" testId="experiments-diagnosis-section">
-      <Card className="flat-card" title="A/B 对比面板">
-        <Row gutter={[16, 16]}>
-          <Col xs={24} lg={12}>
-            <Card size="small" title="指标对比">
-              <Table
-                rowKey="metric"
-                size="small"
-                pagination={false}
-                dataSource={buildMetricRows(activeExperiment, selectedBaseline)}
-                columns={[
-                  { title: '指标', dataIndex: 'label' },
-                  { title: '当前实验', dataIndex: 'current' },
-                  { title: 'Baseline', dataIndex: 'baseline' },
-                  { title: '变化', dataIndex: 'delta' },
-                ]}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} lg={12}>
-            <Card size="small" title="失败分布对比">
-              <Table
-                rowKey="reason"
-                size="small"
-                pagination={false}
-                dataSource={failureDistribution}
-                columns={[
-                  { title: '失败原因', dataIndex: 'reason' },
-                  { title: '当前实验', dataIndex: 'current' },
-                  { title: 'Baseline', dataIndex: 'baseline' },
-                  { title: '变化', dataIndex: 'delta' },
-                ]}
-              />
-            </Card>
-          </Col>
-        </Row>
-      </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>A/B 对比面板</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="rounded-xl border border-slate-200 overflow-hidden">
+                <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 font-medium text-slate-700">
+                  指标对比
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-white border-b border-slate-200 text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3 font-medium">指标</th>
+                        <th className="px-4 py-3 font-medium">当前实验</th>
+                        <th className="px-4 py-3 font-medium">Baseline</th>
+                        <th className="px-4 py-3 font-medium">变化</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {buildMetricRows(activeExperiment, selectedBaseline).map((row) => (
+                        <tr key={row.metric} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-medium text-slate-900">{row.label}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.current}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.baseline}</td>
+                          <td className="px-4 py-3 font-medium">{row.delta}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 overflow-hidden">
+                <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 font-medium text-slate-700">
+                  失败分布对比
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-white border-b border-slate-200 text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3 font-medium">失败原因</th>
+                        <th className="px-4 py-3 font-medium">当前实验</th>
+                        <th className="px-4 py-3 font-medium">Baseline</th>
+                        <th className="px-4 py-3 font-medium">变化</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {failureDistribution.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-4 py-8 text-center text-slate-500">暂无数据</td>
+                        </tr>
+                      ) : failureDistribution.map((row) => (
+                        <tr key={row.reason} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-medium text-slate-900">{row.reason}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.current}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.baseline}</td>
+                          <td className="px-4 py-3 font-medium">{row.delta}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </PageSection>
 
       <PageSection title="快照存档" testId="experiments-list-section">
-      <Card className="flat-card" title="实验快照列表">
-        <Table
-          rowKey="experiment_id"
-          loading={experimentsQuery.isLoading}
-          dataSource={experiments}
-          pagination={{ pageSize: 8 }}
-          columns={[
-            { title: '实验名称', dataIndex: 'name', render: (value, record) => <Button type="link" onClick={() => setSelectedExperimentId(record.experiment_id)}>{value}</Button> },
-            { title: 'Run', dataIndex: 'run_id', render: (value) => <code>{value}</code> },
-            { title: 'Baseline Run', dataIndex: 'baseline_run_id', render: (value) => (value ? <code>{value}</code> : '-') },
-            { title: '通过率', render: (_, record) => formatPercent(record.metrics.pass_rate) },
-            { title: 'Badcase', render: (_, record) => record.metrics.badcase_count ?? 0 },
-            { title: '成本', render: (_, record) => formatCurrency(record.metrics.cost) },
-            { title: '标签', dataIndex: 'tags', render: (tags: string[]) => <Space wrap>{tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}</Space> },
-          ]}
-        />
-      </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>实验快照列表</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-xl border border-slate-200 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">实验名称</th>
+                      <th className="px-4 py-3 font-medium">Run</th>
+                      <th className="px-4 py-3 font-medium">Baseline Run</th>
+                      <th className="px-4 py-3 font-medium">通过率</th>
+                      <th className="px-4 py-3 font-medium">Badcase</th>
+                      <th className="px-4 py-3 font-medium">成本</th>
+                      <th className="px-4 py-3 font-medium">标签</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {experiments.map((record) => (
+                      <tr key={record.experiment_id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3">
+                          <button 
+                            className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                            onClick={() => setSelectedExperimentId(record.experiment_id)}
+                          >
+                            {record.name}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3"><code className="bg-slate-100 px-1.5 py-0.5 rounded text-xs text-slate-800">{record.run_id}</code></td>
+                        <td className="px-4 py-3">
+                          {record.baseline_run_id ? (
+                            <code className="bg-slate-100 px-1.5 py-0.5 rounded text-xs text-slate-800">{record.baseline_run_id}</code>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{formatPercent(record.metrics.pass_rate)}</td>
+                        <td className="px-4 py-3 text-slate-700">{record.metrics.badcase_count ?? 0}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatCurrency(record.metrics.cost)}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {record.tags?.map((tag) => (
+                              <span key={tag} className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {experiments.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                          {experimentsQuery.isLoading ? '加载中...' : '暂无数据'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </PageSection>
 
-      <Modal
-        title="从 Run 生成实验快照"
-        open={modalOpen}
-        forceRender
-        onCancel={() => setModalOpen(false)}
-        footer={[
-          <Button key="cancel" onClick={() => setModalOpen(false)}>取消</Button>,
-          <Button key="submit" type="primary" loading={createMutation.isPending} disabled={!selectedRunId || !experimentName} onClick={() => form.submit()}>确认生成</Button>,
-        ]}
-      >
-        <Form form={form} layout="vertical" onFinish={(values) => createMutation.mutate(values)}>
-          <Form.Item name="name" label="实验名称" rules={[{ required: true, message: '请输入实验名称' }]}>
-            <Input placeholder="例如：RAG v2 回归实验" />
-          </Form.Item>
-          <Form.Item name="run_id" label="选择 Run" rules={[{ required: true, message: '请选择 Run' }]}>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择已完成 Run"
-              options={(runsQuery.data?.items ?? []).map((run) => ({ value: run.run_id, label: `${run.run_id} / ${run.status}` }))}
-            />
-          </Form.Item>
-          <Form.Item name="baseline_run_id" label="Baseline Run">
-            <Select
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder="可选，用于生成 diff"
-              options={(runsQuery.data?.items ?? []).map((run) => ({ value: run.run_id, label: `${run.run_id} / ${run.status}` }))}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>从 Run 生成实验快照</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-6 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">实验名称 <span className="text-red-500">*</span></label>
+              <Input 
+                placeholder="例如：RAG v2 回归实验" 
+                value={experimentName} 
+                onChange={(e) => setExperimentName(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">选择 Run <span className="text-red-500">*</span></label>
+              <select
+                className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                value={selectedRunId}
+                onChange={(e) => setSelectedRunId(e.target.value)}
+                required
+              >
+                <option value="" disabled>选择已完成 Run</option>
+                {(runsQuery.data?.items ?? []).map((run) => (
+                  <option key={run.run_id} value={run.run_id}>{run.run_id} / {run.status}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Baseline Run</label>
+              <select
+                className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                value={baselineRunId}
+                onChange={(e) => setBaselineRunId(e.target.value)}
+              >
+                <option value="">可选，用于生成 diff</option>
+                {(runsQuery.data?.items ?? []).map((run) => (
+                  <option key={run.run_id} value={run.run_id}>{run.run_id} / {run.status}</option>
+                ))}
+              </select>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setModalOpen(false)}>取消</Button>
+              <Button type="submit" disabled={!selectedRunId || !experimentName || createMutation.isPending}>
+                {createMutation.isPending ? '生成中...' : '确认生成'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
 
 function ComparisonCard({ title, value }: { title: string; value: string }) {
   return (
-    <Card size="small">
-      <div className="metric-topline">
-        <span className="metric-icon"><ExperimentOutlined /></span>
-      </div>
-      <h3>{title}</h3>
-      <Typography.Title level={3}>{value}</Typography.Title>
+    <Card className="shadow-sm">
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-medium text-slate-500">{title}</h3>
+          <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+            <FlaskConical className="w-4 h-4" />
+          </div>
+        </div>
+        <div className="text-2xl font-bold text-slate-900">{value}</div>
+      </CardContent>
     </Card>
   );
 }

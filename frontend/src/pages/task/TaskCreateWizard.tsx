@@ -1,7 +1,9 @@
-import { Alert, Button, Checkbox, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useMemo } from 'react';
-
+import { useState, useMemo } from 'react';
+import { Info, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import type { DatasetSummary, TaskPreflightResult, WorkflowVersion } from '../../types';
+import { Dialog } from '../../components/ui/Dialog';
+import { Button } from '../../components/ui/Button';
+import { Modal } from '../../components/AntdShims';
 
 export type TaskCreateFormValues = {
   name: string;
@@ -35,178 +37,242 @@ export function TaskCreateWizard(props: TaskCreateWizardProps) {
 }
 
 function TaskCreateWizardContent({ open, loading, preflightLoading, preflightResult, datasets, workflows, onCancel, onPreflight, onSubmit }: TaskCreateWizardProps) {
-  const [form] = Form.useForm<TaskCreateFormValues>();
-  const watchedWorkflow = Form.useWatch('workflow_version_id', form);
-  const watchedDataset = Form.useWatch('dataset_version_id', form);
-  const allowBlockedPreflight = Form.useWatch('allow_blocked_preflight', form);
+  const [formValues, setFormValues] = useState<TaskCreateFormValues>({
+    name: '',
+    workflow_version_id: '',
+    dataset_version_id: '',
+    allow_blocked_preflight: false,
+  });
+
+  const updateForm = (updates: Partial<TaskCreateFormValues>) => {
+    setFormValues(prev => ({ ...prev, ...updates }));
+  };
+
   const datasetVersions = useMemo(
     () => datasets.flatMap((dataset) => dataset.versions.map((version) => ({ dataset, version }))),
     [datasets],
   );
+  
   const workflowOptions = useMemo(() => sortWorkflowsForSelection(workflows), [workflows]);
-  const selectedWorkflow = workflowOptions.find((workflow) => workflow.version_id === watchedWorkflow);
-  const selectedDatasetVersion = datasetVersions.find((item) => item.version.version_id === watchedDataset)?.version;
+  
+  const selectedWorkflow = workflowOptions.find((workflow) => workflow.version_id === formValues.workflow_version_id);
+  const selectedDatasetVersion = datasetVersions.find((item) => item.version.version_id === formValues.dataset_version_id)?.version;
+  
   const requiredRowFields = useMemo(() => collectRequiredRowFields(selectedWorkflow), [selectedWorkflow]);
   const datasetFields = useMemo(() => collectDatasetFields(selectedDatasetVersion), [selectedDatasetVersion]);
   const missingFields = useMemo(
     () => requiredRowFields.filter((field) => !datasetFields.includes(field)),
     [datasetFields, requiredRowFields],
   );
+
   const preflightMatchesSelection = Boolean(
     preflightResult
       && selectedDatasetVersion
-      && preflightResult.workflow_version_id === watchedWorkflow
+      && preflightResult.workflow_version_id === formValues.workflow_version_id
       && preflightResult.dataset_id === selectedDatasetVersion.dataset_id
       && preflightResult.dataset_version === selectedDatasetVersion.version,
   );
   const preflightCanContinue = Boolean(
     preflightMatchesSelection
       && preflightResult
-      && (preflightResult.status !== 'blocked' || allowBlockedPreflight),
+      && (preflightResult.status !== 'blocked' || formValues.allow_blocked_preflight),
   );
-  const createDisabled = !watchedWorkflow || !watchedDataset || !preflightCanContinue;
+  
+  const createDisabled = !formValues.workflow_version_id || !formValues.dataset_version_id || !preflightCanContinue;
 
-  async function runPreflight() {
-    try {
-      await form.validateFields([['dataset_version_id'], ['workflow_version_id']], { recursive: true });
-      onPreflight(form.getFieldsValue(true) as TaskCreateFormValues);
-    } catch {
-      // 表单会把缺失字段直接标在对应控件下，这里只阻止无效请求进入后端。
-    }
-  }
+  const handlePreflight = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!formValues.dataset_version_id || !formValues.workflow_version_id) return;
+    onPreflight(formValues);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (createDisabled) return;
+    onSubmit({
+      ...formValues,
+      allow_blocked_preflight: Boolean(preflightResult?.status === 'blocked' && formValues.allow_blocked_preflight),
+    });
+  };
 
   return (
     <Modal
-      title="创建任务"
       open={open}
       onCancel={onCancel}
-      width={720}
-      footer={[
-        <Button key="cancel" onClick={onCancel}>取消</Button>,
-        <Button
-          key="preflight"
-          loading={preflightLoading}
-          disabled={!watchedWorkflow || !watchedDataset}
-          onClick={() => void runPreflight()}
-        >
-          运行 Preflight
-        </Button>,
-        <Button
-          key="create"
-          type="primary"
-          loading={loading}
-          disabled={createDisabled}
-          onClick={() => form.submit()}
-        >
-          确认创建任务
-        </Button>,
-      ]}
+      title="创建任务"
     >
-      <Space direction="vertical" size="middle" className="drawer-stack">
-        <Typography.Text type="secondary">
+      <div className="space-y-6 mt-4">
+        <p className="text-sm text-gray-500">
           创建任务只固定一批数据和一个已发布 Workflow。Skill 的输入绑定、输出传递和运行参数都应在 Workflow 画布里配置并发布，任务创建阶段不再重复配置这些内容。
-        </Typography.Text>
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={{ allow_blocked_preflight: false }}
-          onFinish={(values) =>
-            onSubmit({
-              ...values,
-              // 强制创建只对 blocked Preflight 生效，避免用户重跑通过后仍带着旧风险标记提交。
-              allow_blocked_preflight: Boolean(preflightResult?.status === 'blocked' && values.allow_blocked_preflight),
-            })
-          }
-        >
-          <Form.Item name="name" label="任务名称" rules={[{ required: true, message: '请填写任务名称' }]}>
-            <Input placeholder="例如：RAG 回归评测 2026-05-31" />
-          </Form.Item>
-          <Form.Item name="dataset_version_id" label="Dataset Version" rules={[{ required: true, message: '请选择 Dataset' }]}>
-            <Select
-              aria-label="Dataset Version"
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择数据版本"
-              options={datasetVersions.map(({ version }) => ({ value: version.version_id, label: datasetOptionLabel(version) }))}
-            />
-          </Form.Item>
-          <Form.Item name="workflow_version_id" label="Workflow Version" rules={[{ required: true, message: '请选择 Workflow' }]}>
-            <Select
-              aria-label="Workflow Version"
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择已发布 Workflow"
-              options={workflowOptions.map((workflow) => ({ value: workflow.version_id, label: workflowOptionLabel(workflow) }))}
-            />
-          </Form.Item>
+        </p>
 
-          {selectedDatasetVersion ? (
-            <Alert
-              showIcon
-              type="info"
-              message="当前数据集字段"
-              description={datasetFields.length ? `可用于 Workflow 输入绑定：${datasetFields.map((field) => `row.${field}`).join('、')}` : '当前数据集没有可识别字段。'}
+        <form id="createTaskForm" onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">任务名称 <span className="text-red-500">*</span></label>
+            <input 
+              type="text"
+              required
+              className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              placeholder="例如：RAG 回归评测 2026-05-31" 
+              value={formValues.name}
+              onChange={(e) => updateForm({ name: e.target.value })}
             />
-          ) : null}
+          </div>
 
-          {selectedWorkflow ? (
-            <Alert
-              showIcon
-              type={missingFields.length ? 'warning' : 'success'}
-              message={missingFields.length ? 'Dataset 与 Workflow 字段不匹配' : 'Workflow 字段需求已匹配'}
-              description={
-                missingFields.length
-                  ? `当前 Workflow 版本读取 ${requiredFieldsLabel(requiredRowFields)}，但当前数据集缺少 ${requiredFieldsLabel(missingFields)}。如果你没有使用这些字段，请回 Workflow 画布确认输入绑定并重新发布，或在这里选择正确的新版本。`
-                  : `当前 Workflow 版本读取 ${requiredFieldsLabel(requiredRowFields)}。创建任务不会新增 question/reference 等默认字段，只按这个已发布版本的实际输入绑定预检。`
-              }
-            />
-          ) : null}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Dataset Version <span className="text-red-500">*</span></label>
+            <select 
+              required
+              className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              value={formValues.dataset_version_id}
+              onChange={(e) => updateForm({ dataset_version_id: e.target.value })}
+            >
+              <option value="">选择数据版本</option>
+              {datasetVersions.map(({ version }) => (
+                <option key={version.version_id} value={version.version_id}>{datasetOptionLabel(version)}</option>
+              ))}
+            </select>
+          </div>
 
-          {watchedWorkflow && watchedDataset && !preflightResult ? (
-            <Alert
-              showIcon
-              type="info"
-              message="请先运行 Preflight"
-              description="Preflight 会用当前 Dataset Version 和 Workflow Version 检查字段、Skill 审批状态和基础运行条件。"
-            />
-          ) : null}
-          {preflightResult && !preflightMatchesSelection ? (
-            <Alert
-              showIcon
-              type="warning"
-              message="Preflight 结果已过期"
-              description="Dataset 或 Workflow 已变化，请重新运行 Preflight。"
-            />
-          ) : null}
-          {preflightResult && preflightMatchesSelection ? (
-            <Space direction="vertical" className="full-width-control">
-              <Alert
-                showIcon
-                type={preflightResult.status === 'blocked' ? 'error' : preflightResult.status === 'warning' ? 'warning' : 'success'}
-                message={preflightTitle(preflightResult.status)}
-                description={preflightResult.summary}
-              />
-              {preflightResult.status === 'blocked' ? (
-                <Form.Item name="allow_blocked_preflight" valuePropName="checked">
-                  <Checkbox>我已确认 Preflight 阻断风险，仍要创建任务</Checkbox>
-                </Form.Item>
-              ) : null}
-              <Table
-                size="small"
-                pagination={false}
-                rowKey="check_id"
-                dataSource={preflightResult.checks}
-                columns={[
-                  { title: '检查项', dataIndex: 'title' },
-                  { title: '状态', dataIndex: 'status', render: (value) => <Tag color={preflightColor(String(value))}>{value}</Tag> },
-                  { title: '结果', dataIndex: 'message' },
-                  { title: '修复建议', dataIndex: 'recommendation', render: (value) => value || '-' },
-                ]}
-              />
-            </Space>
-          ) : null}
-        </Form>
-      </Space>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Workflow Version <span className="text-red-500">*</span></label>
+            <select 
+              required
+              className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              value={formValues.workflow_version_id}
+              onChange={(e) => updateForm({ workflow_version_id: e.target.value })}
+            >
+              <option value="">选择已发布 Workflow</option>
+              {workflowOptions.map((workflow) => (
+                <option key={workflow.version_id} value={workflow.version_id}>{workflowOptionLabel(workflow)}</option>
+              ))}
+            </select>
+          </div>
+
+          {selectedDatasetVersion && (
+            <div className="p-4 bg-blue-50 border border-blue-200 text-blue-800 rounded-md flex gap-3">
+              <Info className="w-5 h-5 flex-shrink-0 text-blue-500" />
+              <div>
+                <h4 className="font-medium">当前数据集字段</h4>
+                <p className="text-sm mt-1">{datasetFields.length ? `可用于 Workflow 输入绑定：${datasetFields.map((field) => `row.${field}`).join('、')}` : '当前数据集没有可识别字段。'}</p>
+              </div>
+            </div>
+          )}
+
+          {selectedWorkflow && (
+            <div className={`p-4 border rounded-md flex gap-3 ${missingFields.length ? 'bg-yellow-50 border-yellow-200 text-yellow-800' : 'bg-green-50 border-green-200 text-green-800'}`}>
+              {missingFields.length ? <AlertTriangle className="w-5 h-5 flex-shrink-0 text-yellow-500" /> : <CheckCircle className="w-5 h-5 flex-shrink-0 text-green-500" />}
+              <div>
+                <h4 className="font-medium">{missingFields.length ? 'Dataset 与 Workflow 字段不匹配' : 'Workflow 字段需求已匹配'}</h4>
+                <p className="text-sm mt-1">
+                  {missingFields.length
+                    ? `当前 Workflow 版本读取 ${requiredFieldsLabel(requiredRowFields)}，但当前数据集缺少 ${requiredFieldsLabel(missingFields)}。如果你没有使用这些字段，请回 Workflow 画布确认输入绑定并重新发布，或在这里选择正确的新版本。`
+                    : `当前 Workflow 版本读取 ${requiredFieldsLabel(requiredRowFields)}。创建任务不会新增 question/reference 等默认字段，只按这个已发布版本的实际输入绑定预检。`
+                  }
+                </p>
+              </div>
+            </div>
+          )}
+
+          {formValues.workflow_version_id && formValues.dataset_version_id && !preflightResult && (
+            <div className="p-4 bg-blue-50 border border-blue-200 text-blue-800 rounded-md flex gap-3">
+              <Info className="w-5 h-5 flex-shrink-0 text-blue-500" />
+              <div>
+                <h4 className="font-medium">请先运行 Preflight</h4>
+                <p className="text-sm mt-1">Preflight 会用当前 Dataset Version 和 Workflow Version 检查字段、Skill 审批状态和基础运行条件。</p>
+              </div>
+            </div>
+          )}
+
+          {preflightResult && !preflightMatchesSelection && (
+            <div className="p-4 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md flex gap-3">
+              <AlertTriangle className="w-5 h-5 flex-shrink-0 text-yellow-500" />
+              <div>
+                <h4 className="font-medium">Preflight 结果已过期</h4>
+                <p className="text-sm mt-1">Dataset 或 Workflow 已变化，请重新运行 Preflight。</p>
+              </div>
+            </div>
+          )}
+
+          {preflightResult && preflightMatchesSelection && (
+            <div className="space-y-4">
+              <div className={`p-4 border rounded-md flex gap-3 ${preflightResult.status === 'blocked' ? 'bg-red-50 border-red-200 text-red-800' : preflightResult.status === 'warning' ? 'bg-yellow-50 border-yellow-200 text-yellow-800' : 'bg-green-50 border-green-200 text-green-800'}`}>
+                {preflightResult.status === 'blocked' ? <XCircle className="w-5 h-5 flex-shrink-0 text-red-500" /> : preflightResult.status === 'warning' ? <AlertTriangle className="w-5 h-5 flex-shrink-0 text-yellow-500" /> : <CheckCircle className="w-5 h-5 flex-shrink-0 text-green-500" />}
+                <div>
+                  <h4 className="font-medium">{preflightTitle(preflightResult.status)}</h4>
+                  <p className="text-sm mt-1">{preflightResult.summary}</p>
+                </div>
+              </div>
+
+              {preflightResult.status === 'blocked' && (
+                <div className="flex items-center">
+                  <input 
+                    id="allow_blocked" 
+                    type="checkbox" 
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    checked={formValues.allow_blocked_preflight}
+                    onChange={(e) => updateForm({ allow_blocked_preflight: e.target.checked })}
+                  />
+                  <label htmlFor="allow_blocked" className="ml-2 block text-sm text-gray-900 font-medium">
+                    我已确认 Preflight 阻断风险，仍要创建任务
+                  </label>
+                </div>
+              )}
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 border">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">检查项</th>
+                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
+                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">结果</th>
+                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">修复建议</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {preflightResult.checks.map(check => (
+                      <tr key={check.check_id}>
+                        <td className="px-4 py-2 text-sm text-gray-900">{check.title}</td>
+                        <td className="px-4 py-2 text-sm whitespace-nowrap">
+                          <span className={`inline-block px-2 py-0.5 rounded text-xs ${
+                            check.status === 'passed' ? 'bg-green-100 text-green-800' : 
+                            check.status === 'warning' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'
+                          }`}>
+                            {check.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-600">{check.message}</td>
+                        <td className="px-4 py-2 text-sm text-gray-600">{check.recommendation || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </form>
+
+        <div className="mt-6 flex justify-end gap-3 pt-4 border-t">
+          <Button variant="outline" onClick={onCancel}>取消</Button>
+          <Button 
+            variant="outline" 
+            disabled={!formValues.workflow_version_id || !formValues.dataset_version_id} 
+            loading={preflightLoading} 
+            onClick={handlePreflight}
+          >
+            运行 Preflight
+          </Button>
+          <Button 
+            variant="default" 
+            type="submit" 
+            form="createTaskForm" 
+            disabled={createDisabled} 
+            loading={loading}
+          >
+            确认创建任务
+          </Button>
+        </div>
+      </div>
     </Modal>
   );
 }
@@ -215,12 +281,6 @@ function preflightTitle(status: string) {
   if (status === 'passed') return 'Preflight 通过';
   if (status === 'warning') return 'Preflight 有警告';
   return 'Preflight 阻断';
-}
-
-function preflightColor(status: string) {
-  if (status === 'passed') return 'green';
-  if (status === 'warning') return 'orange';
-  return 'red';
 }
 
 function sortWorkflowsForSelection(workflows: WorkflowVersion[]): WorkflowVersion[] {

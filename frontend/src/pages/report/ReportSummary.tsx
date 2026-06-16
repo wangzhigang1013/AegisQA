@@ -1,4 +1,4 @@
-import { Card, Descriptions, Tag } from 'antd';
+import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 
 import type { TaskRecord, TaskReport } from '../../types';
 
@@ -15,36 +15,71 @@ export function ReportSummary({ task, summary, versionSnapshot, preflightEvidenc
   const evidence = preflightEvidence ?? task.preflight_result;
   const preflightId = task.execution_config?.preflight_id ?? evidence?.preflight_id;
   return (
-    <Card className="flat-card" title="任务摘要与版本快照">
-      <Descriptions bordered size="small" column={1}>
-        <Descriptions.Item label="任务">{summary?.task_name ?? task.name}</Descriptions.Item>
-        <Descriptions.Item label="状态"><Tag color={task.status === 'completed' ? 'green' : 'orange'}>{summary?.status ?? task.status}</Tag></Descriptions.Item>
-        <Descriptions.Item label="数据集">{String(dataset.name ?? task.dataset_name)} / {String(dataset.version_id ?? task.dataset_version_id ?? `v${task.dataset_version}`)}</Descriptions.Item>
-        <Descriptions.Item label="Workflow">{String(workflow.name ?? task.workflow_name)} / {String(workflow.version_id ?? task.workflow_version_id)}</Descriptions.Item>
-        <Descriptions.Item label="样本量">{summary?.sample_count ?? task.total_items}</Descriptions.Item>
-        <Descriptions.Item label="当前 Attempt">{summary?.current_attempt ?? task.current_attempt ?? 1}</Descriptions.Item>
-        <Descriptions.Item label="执行参数">{formatExecutionConfig(versionSnapshot?.execution_config)}</Descriptions.Item>
-        <Descriptions.Item label="创建前 Preflight 证据">
-          {evidence ? (
-            <>
-              <Tag color={preflightColor(evidence.status)}>{evidence.status}</Tag>
-              {preflightId ? <Tag>{preflightId}</Tag> : null}
-              {evidence.summary}
-            </>
-          ) : (
-            '未记录'
-          )}
-        </Descriptions.Item>
-      </Descriptions>
+    <Card className="mb-4">
+      <CardHeader className="p-4 pb-2">
+        <CardTitle className="text-lg">任务摘要与版本快照</CardTitle>
+      </CardHeader>
+      <CardContent className="p-4">
+        <dl className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 border border-slate-200 rounded-xl p-4 bg-slate-50/50">
+          <div className="sm:col-span-1 border-b border-slate-200 pb-2">
+            <dt className="text-sm font-medium text-slate-500">任务</dt>
+            <dd className="mt-1 text-sm text-slate-900 font-medium">{summary?.task_name ?? task.name}</dd>
+          </div>
+          <div className="sm:col-span-1 border-b border-slate-200 pb-2">
+            <dt className="text-sm font-medium text-slate-500">状态</dt>
+            <dd className="mt-1">
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${task.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                {summary?.status ?? task.status}
+              </span>
+            </dd>
+          </div>
+          <div className="sm:col-span-1 border-b border-slate-200 pb-2">
+            <dt className="text-sm font-medium text-slate-500">数据集</dt>
+            <dd className="mt-1 text-sm text-slate-900">{String(dataset.name ?? task.dataset_name)} / {String(dataset.version_id ?? task.dataset_version_id ?? `v${task.dataset_version}`)}</dd>
+          </div>
+          <div className="sm:col-span-1 border-b border-slate-200 pb-2">
+            <dt className="text-sm font-medium text-slate-500">Workflow</dt>
+            <dd className="mt-1 text-sm text-slate-900">{String(workflow.name ?? task.workflow_name)} / {String(workflow.version_id ?? task.workflow_version_id)}</dd>
+          </div>
+          <div className="sm:col-span-1 border-b border-slate-200 pb-2">
+            <dt className="text-sm font-medium text-slate-500">样本量</dt>
+            <dd className="mt-1 text-sm text-slate-900">{summary?.sample_count ?? task.total_items}</dd>
+          </div>
+          <div className="sm:col-span-1 border-b border-slate-200 pb-2">
+            <dt className="text-sm font-medium text-slate-500">当前 Attempt</dt>
+            <dd className="mt-1 text-sm text-slate-900">{summary?.current_attempt ?? task.current_attempt ?? 1}</dd>
+          </div>
+          <div className="sm:col-span-1 border-b border-slate-200 pb-2">
+            <dt className="text-sm font-medium text-slate-500">执行参数</dt>
+            <dd className="mt-1 text-sm text-slate-900">{formatExecutionConfig(versionSnapshot?.execution_config)}</dd>
+          </div>
+          <div className="sm:col-span-1 border-b border-slate-200 pb-2">
+            <dt className="text-sm font-medium text-slate-500">创建前 Preflight 证据</dt>
+            <dd className="mt-1 text-sm text-slate-900 flex flex-wrap gap-2 items-center">
+              {evidence ? (
+                <>
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold ${preflightColorClass(evidence.status)}`}>
+                    {evidence.status}
+                  </span>
+                  {preflightId ? <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-slate-200 text-slate-700">{preflightId}</span> : null}
+                  <span>{evidence.summary}</span>
+                </>
+              ) : (
+                '未记录'
+              )}
+            </dd>
+          </div>
+        </dl>
+      </CardContent>
     </Card>
   );
 }
 
-function preflightColor(status: string): string {
-  if (status === 'passed') return 'green';
-  if (status === 'warning') return 'gold';
-  if (status === 'blocked') return 'red';
-  return 'default';
+function preflightColorClass(status: string): string {
+  if (status === 'passed') return 'bg-green-100 text-green-700';
+  if (status === 'warning') return 'bg-yellow-100 text-yellow-700';
+  if (status === 'blocked') return 'bg-red-100 text-red-700';
+  return 'bg-slate-100 text-slate-700';
 }
 
 function formatExecutionConfig(config: Record<string, unknown> | undefined): string {

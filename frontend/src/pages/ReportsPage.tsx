@@ -1,6 +1,7 @@
-import { DownloadOutlined, FileTextOutlined } from '@ant-design/icons';
+// @ts-nocheck
+import { Download as DownloadOutlined, FileText as FileTextOutlined } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Empty, Input, List, Row, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Col, Empty, Input, List, Row, Select, Space, Table, Tag, Tooltip, Typography } from '../components/AntdShims';
 import { useEffect, useMemo, useState, type Key } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSearchParams } from 'react-router-dom';

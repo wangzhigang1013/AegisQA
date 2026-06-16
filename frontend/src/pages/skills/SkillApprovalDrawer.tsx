@@ -1,7 +1,7 @@
-import { CheckCircleOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Descriptions, Drawer, Space, Tag, Typography } from 'antd';
-
+import { CheckCircle } from 'lucide-react';
 import type { SkillManifest, SkillPackageRecord } from '../../types';
+import { Modal, Button } from '../../components/AntdShims';
+import { Card } from '../../components/ui/Card';
 
 type SkillApprovalDrawerProps = {
   open: boolean;
@@ -19,46 +19,55 @@ export function SkillApprovalDrawer({ open, skill, packageRecord, loading = fals
   const packageSecurity = packageRecord?.package_security;
 
   return (
-    <Drawer width={760} title="Skill 审批详情" open={open} onClose={onClose}>
+    <Modal open={open} onCancel={onClose} title="Skill 审批详情">
       {skill ? (
-        <Space direction="vertical" size="large" className="drawer-stack">
-          {!canApprove ? <Alert type="warning" showIcon message="未通过合约测试不能启用" description="请先在 Skill 市场运行合约测试，确认输入输出 schema 和 handler 返回结构稳定后再审批。" /> : null}
+        <div className="space-y-6 mt-4 max-h-[80vh] overflow-y-auto pr-2">
+          {!canApprove && (
+            <div className="p-4 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md flex gap-3">
+              <div>
+                <h4 className="font-medium">未通过合约测试不能启用</h4>
+                <p className="text-sm mt-1">请先在 Skill 市场运行合约测试，确认输入输出 schema 和 handler 返回结构稳定后再审批。</p>
+              </div>
+            </div>
+          )}
 
-          <Descriptions bordered column={1} size="small">
-            <Descriptions.Item label="Skill ID"><code>{skill.skill_id}</code></Descriptions.Item>
-            <Descriptions.Item label="状态"><Tag color={skill.status === 'approved' ? 'green' : 'orange'}>{formatSkillStatus(skill.status)}</Tag></Descriptions.Item>
-            <Descriptions.Item label="运行方式">{packageRecord?.runtime_mode ?? '内置 Skill'}</Descriptions.Item>
-            <Descriptions.Item label="入口文件">{packageRecord?.entrypoint ?? '-'}</Descriptions.Item>
-            <Descriptions.Item label="权限声明">{renderPermissions(skill.permissions)}</Descriptions.Item>
-            <Descriptions.Item label="包大小">
-              {packageSecurity ? `${formatBytes(packageSecurity.total_size_bytes)} / ${packageSecurity.file_count} 个文件` : '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="单文件峰值">{packageSecurity ? formatBytes(packageSecurity.max_file_size_bytes) : '-'}</Descriptions.Item>
-            <Descriptions.Item label="合约测试"><Tag color={packageRecord?.last_contract_ok ? 'green' : packageRecord ? 'red' : 'default'}>{contractText}</Tag></Descriptions.Item>
-            <Descriptions.Item label="合约测试时间">{packageRecord?.last_contract_at ?? '未执行'}</Descriptions.Item>
-            <Descriptions.Item label="审批人">{packageRecord?.approved_by ?? '未审批'}</Descriptions.Item>
-            <Descriptions.Item label="审批时间">{packageRecord?.approved_at ?? '未审批'}</Descriptions.Item>
-          </Descriptions>
+          <div className="border border-gray-200 rounded-md overflow-hidden">
+            <dl className="divide-y divide-gray-200 text-sm">
+              <div className="flex bg-gray-50"><dt className="w-1/3 px-4 py-2 font-medium text-gray-500">Skill ID</dt><dd className="w-2/3 px-4 py-2"><code className="bg-gray-100 px-1 rounded">{skill.skill_id}</code></dd></div>
+              <div className="flex bg-white"><dt className="w-1/3 px-4 py-2 font-medium text-gray-500">状态</dt><dd className="w-2/3 px-4 py-2"><span className={`inline-block px-2 py-0.5 rounded text-xs ${skill.status === 'approved' ? 'bg-green-100 text-green-800' : 'bg-orange-100 text-orange-800'}`}>{formatSkillStatus(skill.status)}</span></dd></div>
+              <div className="flex bg-gray-50"><dt className="w-1/3 px-4 py-2 font-medium text-gray-500">运行方式</dt><dd className="w-2/3 px-4 py-2">{packageRecord?.runtime_mode ?? '内置 Skill'}</dd></div>
+              <div className="flex bg-white"><dt className="w-1/3 px-4 py-2 font-medium text-gray-500">入口文件</dt><dd className="w-2/3 px-4 py-2">{packageRecord?.entrypoint ?? '-'}</dd></div>
+              <div className="flex bg-gray-50"><dt className="w-1/3 px-4 py-2 font-medium text-gray-500">权限声明</dt><dd className="w-2/3 px-4 py-2">{renderPermissions(skill.permissions)}</dd></div>
+              <div className="flex bg-white"><dt className="w-1/3 px-4 py-2 font-medium text-gray-500">包大小</dt><dd className="w-2/3 px-4 py-2">{packageSecurity ? `${formatBytes(packageSecurity.total_size_bytes)} / ${packageSecurity.file_count} 个文件` : '-'}</dd></div>
+              <div className="flex bg-gray-50"><dt className="w-1/3 px-4 py-2 font-medium text-gray-500">单文件峰值</dt><dd className="w-2/3 px-4 py-2">{packageSecurity ? formatBytes(packageSecurity.max_file_size_bytes) : '-'}</dd></div>
+              <div className="flex bg-white"><dt className="w-1/3 px-4 py-2 font-medium text-gray-500">合约测试</dt><dd className="w-2/3 px-4 py-2"><span className={`inline-block px-2 py-0.5 rounded text-xs ${packageRecord?.last_contract_ok ? 'bg-green-100 text-green-800' : packageRecord ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}>{contractText}</span></dd></div>
+              <div className="flex bg-gray-50"><dt className="w-1/3 px-4 py-2 font-medium text-gray-500">合约测试时间</dt><dd className="w-2/3 px-4 py-2">{packageRecord?.last_contract_at ?? '未执行'}</dd></div>
+              <div className="flex bg-white"><dt className="w-1/3 px-4 py-2 font-medium text-gray-500">审批人</dt><dd className="w-2/3 px-4 py-2">{packageRecord?.approved_by ?? '未审批'}</dd></div>
+              <div className="flex bg-gray-50"><dt className="w-1/3 px-4 py-2 font-medium text-gray-500">审批时间</dt><dd className="w-2/3 px-4 py-2">{packageRecord?.approved_at ?? '未审批'}</dd></div>
+            </dl>
+          </div>
 
-          <Card size="small" title="Manifest">
-            <pre>{JSON.stringify(skill, null, 2)}</pre>
+          <Card title="Manifest">
+            <pre className="text-xs bg-gray-50 p-2 rounded overflow-x-auto">{JSON.stringify(skill, null, 2)}</pre>
           </Card>
-          <Card size="small" title="输入 Schema">
-            <pre>{JSON.stringify(skill.input_schema, null, 2)}</pre>
+          <Card title="输入 Schema">
+            <pre className="text-xs bg-gray-50 p-2 rounded overflow-x-auto">{JSON.stringify(skill.input_schema, null, 2)}</pre>
           </Card>
-          <Card size="small" title="输出 Schema">
-            <pre>{JSON.stringify(skill.output_schema, null, 2)}</pre>
+          <Card title="输出 Schema">
+            <pre className="text-xs bg-gray-50 p-2 rounded overflow-x-auto">{JSON.stringify(skill.output_schema, null, 2)}</pre>
           </Card>
-          <Card size="small" title="测试日志">
-            {packageRecord?.last_contract_result ? <pre>{JSON.stringify(packageRecord.last_contract_result, null, 2)}</pre> : <Typography.Text type="secondary">暂无合约测试日志</Typography.Text>}
+          <Card title="测试日志">
+            {packageRecord?.last_contract_result ? <pre className="text-xs bg-gray-50 p-2 rounded overflow-x-auto">{JSON.stringify(packageRecord.last_contract_result, null, 2)}</pre> : <p className="text-sm text-gray-500">暂无合约测试日志</p>}
           </Card>
 
-          <Button icon={<CheckCircleOutlined />} type="primary" disabled={!canApprove} loading={loading} onClick={() => onApprove(skill)}>
-            审批启用
-          </Button>
-        </Space>
+          <div className="flex justify-end pt-4 border-t">
+            <Button variant="primary" icon={<CheckCircle className="w-4 h-4" />} disabled={!canApprove} loading={loading} onClick={() => onApprove(skill)}>
+              审批启用
+            </Button>
+          </div>
+        </div>
       ) : null}
-    </Drawer>
+    </Modal>
   );
 }
 
@@ -73,9 +82,15 @@ function formatSkillStatus(status: string): string {
 
 function renderPermissions(permissions: string[]) {
   if (!permissions.length) {
-    return <Tag color="green">无额外权限</Tag>;
+    return <span className="inline-block px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs">无额外权限</span>;
   }
-  return permissions.map((item) => <Tag color={item.includes('network') ? 'red' : 'orange'} key={item}>{item}</Tag>);
+  return (
+    <div className="flex flex-wrap gap-1">
+      {permissions.map((item) => (
+        <span className={`inline-block px-2 py-0.5 rounded text-xs ${item.includes('network') ? 'bg-red-100 text-red-800' : 'bg-orange-100 text-orange-800'}`} key={item}>{item}</span>
+      ))}
+    </div>
+  );
 }
 
 function formatBytes(value: number): string {

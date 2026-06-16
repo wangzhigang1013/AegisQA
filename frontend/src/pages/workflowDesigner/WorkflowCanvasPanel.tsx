@@ -1,10 +1,4 @@
-import {
-  ApiOutlined,
-  DeleteOutlined,
-  ExpandOutlined,
-  RedoOutlined,
-  UndoOutlined,
-} from '@ant-design/icons';
+import { Network, Trash2, Maximize, Redo, Undo } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 import {
   Background,
@@ -19,7 +13,6 @@ import {
   type EdgeChange,
   type NodeChange,
 } from '@xyflow/react';
-import { Button, Space, Tooltip } from 'antd';
 import { useCallback } from 'react';
 
 import { customEdgeTypes } from './CustomEdges';
@@ -64,56 +57,48 @@ export function WorkflowCanvasPanel({
   }, [fitView]);
 
   return (
-    <div className="canvas-wrapper">
+    <div className="flex-1 h-full w-full relative bg-slate-50/50">
       {/* 工具栏 */}
-      <div className="canvas-toolbar">
-        <Space size={4}>
-          <Tooltip title="撤销 (Ctrl+Z)">
-            <Button
-              type="text"
-              icon={<UndoOutlined />}
-              disabled={!canUndo}
-              onClick={onUndo}
-              size="small"
-            />
-          </Tooltip>
-          <Tooltip title="重做 (Ctrl+Y)">
-            <Button
-              type="text"
-              icon={<RedoOutlined />}
-              disabled={!canRedo}
-              onClick={onRedo}
-              size="small"
-            />
-          </Tooltip>
-          <div className="toolbar-divider" />
-          <Tooltip title="自动布局">
-            <Button
-              type="text"
-              icon={<ApiOutlined />}
-              onClick={onAutoLayout}
-              size="small"
-            />
-          </Tooltip>
-          <Tooltip title="适应画布">
-            <Button
-              type="text"
-              icon={<ExpandOutlined />}
-              onClick={handleFitView}
-              size="small"
-            />
-          </Tooltip>
-          <div className="toolbar-divider" />
-          <Tooltip title="删除选中 (Delete)">
-            <Button
-              type="text"
-              icon={<DeleteOutlined />}
-              danger
-              onClick={onDeleteSelected}
-              size="small"
-            />
-          </Tooltip>
-        </Space>
+      <div className="absolute top-4 left-4 z-10 bg-white border border-slate-200 rounded-lg shadow-sm p-1.5 flex items-center gap-1">
+        <button
+          title="撤销 (Ctrl+Z)"
+          disabled={!canUndo}
+          onClick={onUndo}
+          className="p-1.5 rounded hover:bg-slate-100 text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+        >
+          <Undo className="w-4 h-4" />
+        </button>
+        <button
+          title="重做 (Ctrl+Y)"
+          disabled={!canRedo}
+          onClick={onRedo}
+          className="p-1.5 rounded hover:bg-slate-100 text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+        >
+          <Redo className="w-4 h-4" />
+        </button>
+        <div className="w-px h-4 bg-slate-200 mx-1" />
+        <button
+          title="自动布局"
+          onClick={onAutoLayout}
+          className="p-1.5 rounded hover:bg-slate-100 text-slate-700 transition-colors"
+        >
+          <Network className="w-4 h-4" />
+        </button>
+        <button
+          title="适应画布"
+          onClick={handleFitView}
+          className="p-1.5 rounded hover:bg-slate-100 text-slate-700 transition-colors"
+        >
+          <Maximize className="w-4 h-4" />
+        </button>
+        <div className="w-px h-4 bg-slate-200 mx-1" />
+        <button
+          title="删除选中 (Delete)"
+          onClick={onDeleteSelected}
+          className="p-1.5 rounded hover:bg-red-50 text-red-600 transition-colors"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
       </div>
 
       {/* 画布主体 */}

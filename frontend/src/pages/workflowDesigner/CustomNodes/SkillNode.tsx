@@ -1,4 +1,4 @@
-import { FunctionOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { Blocks, Zap } from 'lucide-react';
 import { type NodeProps } from '@xyflow/react';
 import { memo, useMemo } from 'react';
 
@@ -12,7 +12,7 @@ export const SkillNode = memo((props: NodeProps) => {
   const outputFields = graphNode?.output_mapping ? Object.keys(graphNode.output_mapping) : [];
 
   const isLLM = skillRef?.includes('llm') || skillRef?.includes('model');
-  const icon = isLLM ? <ThunderboltOutlined /> : <FunctionOutlined />;
+  const icon = isLLM ? <Zap className="w-4 h-4" /> : <Blocks className="w-4 h-4" />;
   const color = isLLM ? '#3b82f6' : '#8b5cf6';
   const gradient = isLLM
     ? 'linear-gradient(135deg, #3b82f6, #6366f1)'

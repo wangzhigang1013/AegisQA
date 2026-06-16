@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { Button, Result } from 'antd';
+import { Button } from './ui/Button';
 
 interface Props {
   children: ReactNode;
@@ -19,7 +19,6 @@ export class ChunkErrorBoundary extends Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error): State {
-    // 检查是否是 chunk 加载错误
     const isChunkError = error.name === 'ChunkLoadError' ||
       error.message.includes('Loading chunk') ||
       error.message.includes('Failed to fetch dynamically imported module');
@@ -52,25 +51,21 @@ export class ChunkErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError && this.state.error) {
       return (
-        <Result
-          status="warning"
-          title="页面加载失败"
-          subTitle={
-            this.state.retryCount < 3
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center text-amber-500 mb-6 text-2xl font-bold">!</div>
+          <h2 className="text-2xl font-bold text-slate-800 mb-2">页面加载失败</h2>
+          <p className="text-slate-500 mb-8 max-w-md">
+            {this.state.retryCount < 3
               ? `页面资源加载失败（已重试 ${this.state.retryCount} 次）。可能是网络问题，请稍后重试。`
-              : '页面资源加载多次失败，请刷新页面重试。'
-          }
-          extra={[
-            this.state.retryCount < 3 && (
-              <Button key="retry" onClick={this.handleRetry}>
-                重试
-              </Button>
-            ),
-            <Button key="reload" type="primary" onClick={this.handleReload}>
-              刷新页面
-            </Button>,
-          ].filter(Boolean)}
-        />
+              : '页面资源加载多次失败，请刷新页面重试。'}
+          </p>
+          <div className="flex gap-4">
+            {this.state.retryCount < 3 && (
+              <Button variant="outline" onClick={this.handleRetry}>重试</Button>
+            )}
+            <Button onClick={this.handleReload}>刷新页面</Button>
+          </div>
+        </div>
       );
     }
 

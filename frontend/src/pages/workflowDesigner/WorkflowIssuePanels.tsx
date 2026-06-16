@@ -1,4 +1,5 @@
-import { Alert, Button, Space, Typography } from 'antd';
+import { AlertCircle } from 'lucide-react';
+import { Button } from '../../components/ui/Button';
 
 import type { GraphIssue, GraphValidationResult } from '../../types';
 
@@ -11,69 +12,65 @@ export function validationErrorsFromResult(result: GraphValidationResult | Recor
 export function InlineIssueSummary({ issues, onSelectNode }: { issues: GraphIssue[]; onSelectNode: (issue: GraphIssue) => void }) {
   if (!issues.length) return null;
   return (
-    <Alert
-      type="warning"
-      showIcon
-      message="当前校验问题"
-      description={(
-        <Space direction="vertical" size={6}>
+    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3 items-start">
+      <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+      <div className="flex-1">
+        <h4 className="font-semibold text-amber-800 mb-2">当前校验问题</h4>
+        <div className="flex flex-col gap-2">
           {issues.slice(0, 3).map((issue) => (
-            <Space key={`${issue.code}-${issue.node_id ?? issue.message}`} wrap>
-              <Typography.Text>{issue.message}</Typography.Text>
-              {issue.node_id ? <Button size="small" onClick={() => onSelectNode(issue)}>定位节点 {issue.node_id}</Button> : null}
-            </Space>
+            <div key={`${issue.code}-${issue.node_id ?? issue.message}`} className="flex flex-wrap gap-2 items-center text-sm text-amber-900">
+              <span>{issue.message}</span>
+              {issue.node_id ? <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => onSelectNode(issue)}>定位节点 {issue.node_id}</Button> : null}
+            </div>
           ))}
-          {issues.length > 3 ? <Typography.Text type="secondary">还有 {issues.length - 3} 个问题，完整列表在页面底部 Console 的“错误与建议”。</Typography.Text> : null}
-        </Space>
-      )}
-    />
+          {issues.length > 3 ? <p className="text-xs text-amber-700/80">还有 {issues.length - 3} 个问题，完整列表在页面底部 Console 的“错误与建议”。</p> : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
 export function NodeIssuePanel({ issues }: { issues: GraphIssue[] }) {
   if (!issues.length) return null;
   return (
-    <Alert
-      type="warning"
-      showIcon
-      message="当前节点问题"
-      description={(
-        <Space direction="vertical" size={4}>
+    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3 items-start">
+      <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+      <div className="flex-1">
+        <h4 className="font-semibold text-amber-800 mb-2">当前节点问题</h4>
+        <div className="flex flex-col gap-2">
           {issues.map((issue) => (
-            <Space key={`${issue.code}-${issue.message}`} direction="vertical" size={2}>
-              <Typography.Text>{issue.message}</Typography.Text>
-              <Typography.Text type="secondary">{issueRepairSuggestion(issue)}</Typography.Text>
-            </Space>
+            <div key={`${issue.code}-${issue.message}`} className="flex flex-col gap-0.5 text-sm">
+              <span className="text-amber-900">{issue.message}</span>
+              <span className="text-amber-700/80 text-xs">{issueRepairSuggestion(issue)}</span>
+            </div>
           ))}
-        </Space>
-      )}
-    />
+        </div>
+      </div>
+    </div>
   );
 }
 
 export function IssueList({ result }: { result: GraphValidationResult | Record<string, unknown> | null }) {
   const errors = validationErrorsFromResult(result);
   if (!errors.length) {
-    return <Typography.Text type="secondary">暂无校验错误。校验通过后可继续发布或试运行。</Typography.Text>;
+    return <p className="text-slate-500 text-sm py-4">暂无校验错误。校验通过后可继续发布或试运行。</p>;
   }
   return (
-    <Space direction="vertical" className="drawer-stack">
+    <div className="flex flex-col gap-3">
       {errors.map((error) => (
-        <Alert
-          key={`${error.code}-${error.node_id ?? ''}-${error.message}`}
-          type="warning"
-          showIcon
-          message={error.code}
-          description={(
-            <Space direction="vertical" size={4}>
-              {error.node_id ? <Typography.Text type="secondary">节点：{error.node_id}</Typography.Text> : null}
-              <Typography.Text>{error.message}</Typography.Text>
-              <Typography.Text type="secondary">{issueRepairSuggestion(error)}</Typography.Text>
-            </Space>
-          )}
-        />
+        <div key={`${error.code}-${error.node_id ?? ''}-${error.message}`} className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3 items-start">
+          <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h4 className="font-semibold text-amber-800 mb-2">{error.code}</h4>
+            <div className="flex flex-col gap-1 text-sm">
+              {error.node_id ? <span className="text-amber-700/80 text-xs">节点：{error.node_id}</span> : null}
+              <span className="text-amber-900">{error.message}</span>
+              <span className="text-amber-700/80 text-xs">{issueRepairSuggestion(error)}</span>
+            </div>
+          </div>
+        </div>
       ))}
-    </Space>
+    </div>
   );
 }
 

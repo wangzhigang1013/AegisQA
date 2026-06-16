@@ -1,39 +1,53 @@
-import { CloudUploadOutlined, DatabaseOutlined, FieldStringOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Checkbox, Col, Descriptions, Drawer, Form, Input, Modal, Row, Select, Space, Table, Tag, Tooltip, Typography, Upload } from 'antd';
-import type { UploadFile } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  CloudUpload, 
+  Database, 
+  Network,
+  Wand2,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  FileJson,
+  X,
+  Activity,
+  Code
+} from 'lucide-react';
 
 import { api, formatApiError } from '../api/client';
-import { PageSection } from '../components/LayoutPrimitives';
-import { PageHeader } from '../components/PageHeader';
+import { Card } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '../components/ui/Dialog';
 import type { DatasetQualityDiagnosis, DatasetVersion } from '../types';
-
-type UploadFormValues = {
-  name: string;
-  label_field?: string;
-  answer_field?: string;
-  golden?: boolean;
-};
-
-type MaterializeFormValues = {
-  name: string;
-  rows: string;
-  label_field?: string;
-  golden?: boolean;
-};
 
 export function DatasetsPage() {
   const queryClient = useQueryClient();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [materializeOpen, setMaterializeOpen] = useState(false);
-  const [uploadFile, setUploadFile] = useState<UploadFile | null>(null);
+  
+  // Custom file state instead of Antd's UploadFile
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  
+  const [uploadForm, setUploadForm] = useState({ name: '', golden: false, label_field: '', answer_field: '' });
+  const [materializeForm, setMaterializeForm] = useState({
+    name: 'source_materialized_dataset',
+    rows: JSON.stringify([{ question: '示例问题', reference: '示例答案', expected_label: 'pass' }], null, 2),
+    label_field: 'expected_label',
+    golden: true,
+  });
+
   const [activeDataset, setActiveDataset] = useState<DatasetVersion | null>(null);
   const [lineageDataset, setLineageDataset] = useState<DatasetVersion | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [uploadForm] = Form.useForm<UploadFormValues>();
-  const [materializeForm] = Form.useForm<MaterializeFormValues>();
+  const [notice, setNotice] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [searchParams] = useSearchParams();
 
   const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: api.datasets });
@@ -42,6 +56,7 @@ export function DatasetsPage() {
     queryFn: () => api.datasetLineage(lineageDataset?.dataset_id ?? '', lineageDataset?.version ?? 0),
     enabled: Boolean(lineageDataset),
   });
+  
   const datasetVersions = useMemo(() => datasetsQuery.data?.flatMap((dataset) => dataset.versions) ?? [], [datasetsQuery.data]);
 
   useEffect(() => {
@@ -60,73 +75,66 @@ export function DatasetsPage() {
     queryFn: () => api.datasetQuality(previewDataset?.dataset_id ?? '', previewDataset?.version ?? 0),
     enabled: Boolean(previewDataset),
   });
+
   const previewRows = previewDataset
     ? Object.entries(previewDataset.field_schema).map(([field, type]) => ({
         key: field,
         path: `row.${field}`,
         type,
         example: String(previewDataset.preview[0]?.[field] ?? ''),
-        target: field === previewDataset.label_field ? 'Golden label' : 'Workflow 输入映射',
       }))
     : [];
-  const fieldMappingDescription = previewRows.length
-    ? `当前 Dataset Version 可映射字段：${previewRows.map((row) => row.path).join('、')}。Golden Dataset 需要明确 label_field。`
-    : '上传或物化后会生成字段路径，格式为 row.<字段名>；创建任务前请确认字段类型和 Golden 标签字段。';
 
   const uploadMutation = useMutation({
-    mutationFn: async (values: UploadFormValues) => {
-      const selectedFile = getSelectedFile(uploadFile);
-      if (!selectedFile) {
-        throw new Error('请先选择 CSV 或 JSONL 文件');
-      }
-      const content = await readFileText(selectedFile);
+    mutationFn: async () => {
+      if (!uploadFile) throw new Error('请先选择 CSV 或 JSONL 文件');
+      if (!uploadForm.name) throw new Error('请输入数据集名称');
+      
+      const content = await readFileText(uploadFile);
       return api.uploadDataset({
-        name: values.name,
-        filename: selectedFile.name,
+        name: uploadForm.name,
+        filename: uploadFile.name,
         content,
-        golden: values.golden,
-        label_field: values.label_field,
-        answer_field: values.answer_field,
+        golden: uploadForm.golden,
+        label_field: uploadForm.label_field || undefined,
+        answer_field: uploadForm.answer_field || undefined,
       });
     },
     onSuccess: async (dataset) => {
       setActiveDataset(dataset);
-      setNotice(`上传成功：${dataset.name} v${dataset.version}，共 ${dataset.row_count} 行。`);
+      setNotice({ type: 'success', message: `上传成功：${dataset.name} v${dataset.version}，共 ${dataset.row_count} 行。` });
       setUploadOpen(false);
       setUploadFile(null);
-      uploadForm.resetFields();
+      setUploadForm({ name: '', golden: false, label_field: '', answer_field: '' });
       await queryClient.invalidateQueries({ queryKey: ['datasets'] });
     },
-    onError: (error) => setNotice(`上传失败：${formatApiError(error)}`),
+    onError: (error) => setNotice({ type: 'error', message: `上传失败：${formatApiError(error)}` }),
   });
 
   const materializeMutation = useMutation({
-    mutationFn: (values: MaterializeFormValues) => {
-      const rows = JSON.parse(values.rows) as Record<string, unknown>[];
-      if (!Array.isArray(rows)) {
-        throw new Error('Source rows 必须是数组');
-      }
+    mutationFn: async () => {
+      if (!materializeForm.name) throw new Error('请输入数据集名称');
+      const rows = JSON.parse(materializeForm.rows) as Record<string, unknown>[];
+      if (!Array.isArray(rows)) throw new Error('Source rows 必须是数组');
       return api.materializeSource({
-        name: values.name,
+        name: materializeForm.name,
         rows,
-        golden: values.golden,
-        label_field: values.label_field,
+        golden: materializeForm.golden,
+        label_field: materializeForm.label_field || undefined,
       });
     },
     onSuccess: async (dataset) => {
       setActiveDataset(dataset);
-      setNotice(`物化成功：${dataset.name} v${dataset.version}，字段路径已生成。`);
+      setNotice({ type: 'success', message: `物化成功：${dataset.name} v${dataset.version}，字段路径已生成。` });
       setMaterializeOpen(false);
       await queryClient.invalidateQueries({ queryKey: ['datasets'] });
     },
-    onError: (error) => setNotice(`物化失败：${formatApiError(error)}`),
+    onError: (error) => setNotice({ type: 'error', message: `物化失败：${formatApiError(error)}` }),
   });
 
   const repairVersionMutation = useMutation({
     mutationFn: () => {
-      if (!previewDataset) {
-        throw new Error('请选择需要修复的数据集版本。');
-      }
+      if (!previewDataset) throw new Error('请选择需要修复的数据集版本。');
       return api.repairDatasetVersion(previewDataset.dataset_id, previewDataset.version, {
         drop_duplicate_rows: true,
         fill_missing: buildDefaultMissingValues(qualityQuery.data),
@@ -135,319 +143,351 @@ export function DatasetsPage() {
     },
     onSuccess: async (dataset) => {
       setActiveDataset(dataset);
-      setNotice(`已生成修复版 Dataset Version：${dataset.version_id}，共 ${dataset.row_count} 行。`);
+      setNotice({ type: 'success', message: `已生成修复版 Dataset Version：${dataset.version_id}，共 ${dataset.row_count} 行。` });
       await queryClient.invalidateQueries({ queryKey: ['datasets'] });
       await queryClient.invalidateQueries({ queryKey: ['dataset-quality'] });
     },
-    onError: (error) => setNotice(`生成修复版失败：${formatApiError(error)}`),
+    onError: (error) => setNotice({ type: 'error', message: `生成修复版失败：${formatApiError(error)}` }),
   });
 
+  const handleFileDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      setUploadFile(file);
+      setUploadForm(prev => ({ ...prev, name: file.name.replace(/\.(csv|jsonl)$/i, '') }));
+      setUploadOpen(true);
+    }
+  };
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setUploadFile(file);
+      setUploadForm(prev => ({ ...prev, name: file.name.replace(/\.(csv|jsonl)$/i, '') }));
+      setUploadOpen(true);
+    }
+  };
+
   return (
-    <section className="page-stack">
+    <div className="pb-10 max-w-7xl mx-auto">
+      <AnimatePresence>
+        {notice && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className={`mb-6 p-4 rounded-2xl border flex items-start gap-3 shadow-sm ${
+              notice.type === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-red-50 border-red-100 text-red-800'
+            }`}
+          >
+            {notice.type === 'success' ? <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" /> : <XCircle className="w-5 h-5 text-red-500 shrink-0" />}
+            <div className="font-medium flex-1 pt-0.5">{notice.message}</div>
+            <button onClick={() => setNotice(null)} className="p-1 rounded-lg hover:bg-black/5 transition-colors">
+              <X className="w-4 h-4 opacity-50" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-
-      {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
-
-      <Alert
-        type="info"
-        showIcon
-        message="字段路径是 Workflow 映射的起点"
-        description={fieldMappingDescription}
-        className="mb-4"
-      />
-
-      <div className="bg-gradient-to-br from-slate-800 via-slate-900 to-slate-900 rounded-3xl shadow-2xl p-6 mb-8 mt-2 relative overflow-hidden">
-        {/* 背景光晕 (与全局 PageHeader 一致) */}
-        <div className="absolute -top-32 -right-32 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div className="bg-gradient-to-br from-slate-800 via-slate-900 to-slate-900 rounded-[2rem] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.3)] p-8 md:p-10 mb-8 relative overflow-hidden">
+        <div className="absolute -top-32 -right-32 w-80 h-80 bg-blue-500/20 rounded-full blur-3xl pointer-events-none"></div>
         <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-slate-500/20 rounded-full blur-3xl pointer-events-none"></div>
 
-        <div className="relative z-10 flex flex-col lg:flex-row gap-8">
-          <div className="w-full lg:w-1/3 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center gap-4 mb-4">
-                <div className="p-4 bg-slate-700/50 rounded-2xl text-slate-400 shadow-inner border border-slate-600/50">
-                  <DatabaseOutlined className="text-3xl" />
-                </div>
-                <div>
-                  <Typography.Title level={4} className="m-0 text-white font-bold tracking-wide">数据中心</Typography.Title>
-                  <Typography.Text className="text-slate-400 text-sm">构建与管理评测集</Typography.Text>
-                </div>
+        <div className="relative z-10 flex flex-col lg:flex-row gap-10">
+          <div className="w-full lg:w-1/3 flex flex-col">
+            <div className="flex items-center gap-4 mb-5">
+              <div className="p-4 bg-slate-700/50 rounded-2xl text-blue-400 shadow-inner border border-slate-600/50">
+                <Database className="w-8 h-8" />
               </div>
-              <p className="text-slate-300 text-sm leading-relaxed mb-6 font-medium">
-                上传 CSV / JSONL 数据文件，生成具有严格类型校验的不可变 Dataset Version，为 Workflow 执行提供基准测试数据。
-              </p>
+              <div>
+                <h2 className="text-2xl font-bold text-white tracking-tight">数据中心</h2>
+                <p className="text-slate-400 text-sm mt-1">构建与管理评测集与 Golden 标签</p>
+              </div>
             </div>
             
-            <Form layout="vertical" className="compact-form w-full">
-              <Form.Item label={<span className="font-semibold text-white">活跃数据版本</span>} className="mb-2">
-                <Select
-                  placeholder="选择已上传数据集"
-                  size="large"
-                  loading={datasetsQuery.isLoading}
-                  value={previewDataset?.version_id}
-                  onChange={(versionId) => setActiveDataset(datasetVersions.find((item) => item.version_id === versionId) ?? null)}
-                  options={datasetVersions.map((dataset) => ({ value: dataset.version_id, label: `${dataset.name} v${dataset.version}` }))}
-                  className="w-full"
-                />
-              </Form.Item>
-              <div className="flex flex-wrap gap-3 mt-5">
-                <Button type="primary" shape="round" className="bg-blue-600 shadow-lg shadow-blue-500/30 border-none hover:bg-blue-500" onClick={() => setUploadOpen(true)}>创建新版本</Button>
-                <Button shape="round" className="bg-slate-700/50 border-slate-600/50 text-slate-300 hover:bg-slate-600/50 hover:border-slate-500/50 hover:text-white" onClick={() => setMaterializeOpen(true)}>虚拟物化</Button>
-                <Button shape="round" className="bg-transparent border-slate-600/50 text-slate-300 hover:text-white" disabled={!previewDataset} onClick={() => setLineageDataset(previewDataset)}>查看血缘</Button>
+            <div className="mt-auto">
+              <label className="text-white font-semibold text-sm mb-2 block">活跃数据版本</label>
+              <div className="relative">
+                <select 
+                  className="w-full appearance-none bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={previewDataset?.version_id ?? ''}
+                  onChange={(e) => setActiveDataset(datasetVersions.find((item) => item.version_id === e.target.value) ?? null)}
+                >
+                  {datasetVersions.map(d => (
+                    <option key={d.version_id} value={d.version_id}>{d.name} v{d.version}</option>
+                  ))}
+                  {datasetVersions.length === 0 && <option value="">暂无数据集</option>}
+                </select>
+                <div className="absolute inset-y-0 right-0 flex items-center px-4 pointer-events-none">
+                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                </div>
               </div>
-            </Form>
+
+              <div className="flex flex-wrap gap-3 mt-6">
+                <Button onClick={() => setUploadOpen(true)} className="bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-500/20 border-none rounded-xl">
+                  <CloudUpload className="w-4 h-4 mr-2" /> 新版本
+                </Button>
+                <Button variant="outline" onClick={() => setMaterializeOpen(true)} className="bg-slate-800/50 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 rounded-xl">
+                  <Code className="w-4 h-4 mr-2" /> 虚拟物化
+                </Button>
+                <Button variant="outline" onClick={() => setLineageDataset(previewDataset)} disabled={!previewDataset} className="bg-transparent border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl">
+                  <Network className="w-4 h-4 mr-2" /> 血缘
+                </Button>
+              </div>
+            </div>
           </div>
 
           <div className="w-full lg:w-2/3">
-            <Upload.Dragger
-              beforeUpload={(file) => {
-                setUploadFile(file);
-                setUploadOpen(true);
-                uploadForm.setFieldValue('name', file.name.replace(/\.(csv|jsonl)$/i, ''));
-                return false;
-              }}
-              fileList={uploadFile ? [uploadFile] : []}
-              onRemove={() => setUploadFile(null)}
-              maxCount={1}
-              className="bg-slate-900/30 backdrop-blur-sm border-2 border-dashed border-slate-600/50 hover:border-blue-500/50 transition-all rounded-3xl h-full py-10"
+            <label 
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleFileDrop}
+              className="cursor-pointer group flex flex-col items-center justify-center bg-slate-900/40 backdrop-blur-sm border-2 border-dashed border-slate-700 hover:border-blue-500 hover:bg-slate-800/50 transition-all rounded-[2rem] h-full py-16 px-6 text-center"
             >
-              <p className="ant-upload-drag-icon text-blue-400/80 mb-4">
-                <CloudUploadOutlined className="text-5xl" />
-              </p>
-              <p className="text-white font-semibold text-lg mb-2">拖拽 CSV 或 JSONL 文件至此</p>
-              <p className="text-slate-400 text-sm">上传后自动生成字段预览并检测数据质量</p>
-            </Upload.Dragger>
+              <div className="w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                <CloudUpload className="w-8 h-8 text-blue-400" />
+              </div>
+              <h3 className="text-white font-bold text-lg mb-2">拖拽 CSV 或 JSONL 文件至此</h3>
+              <p className="text-slate-400 text-sm max-w-sm">点击或拖拽文件进行上传。上传后将自动推断字段类型并进行数据质量扫描。</p>
+              <input type="file" className="hidden" accept=".csv,.jsonl" onChange={handleFileInput} />
+            </label>
           </div>
         </div>
       </div>
 
-      <Row gutter={[24, 24]} className="mb-8">
-        <Col xs={24} xl={10}>
-          <div className="bg-white rounded-3xl shadow-[0_4px_24px_-6px_rgba(0,0,0,0.04)] p-8 h-full flex flex-col border border-slate-100">
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <Typography.Title level={5} className="text-slate-800 m-0 font-bold">字段预览</Typography.Title>
-                <Typography.Text type="secondary" className="text-xs">检查字段映射与类型推断</Typography.Text>
-              </div>
-              <Tooltip title="字段类型错误会在 Workflow 发布或执行前触发 TYPE_MISMATCH。">
-                <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-400 hover:text-indigo-600 hover:bg-indigo-100 transition-colors cursor-pointer shadow-sm">
-                  <FieldStringOutlined className="text-lg" />
-                </div>
-              </Tooltip>
-            </div>
-            
-            <div className="flex-1 bg-slate-50/50 rounded-2xl border border-slate-100 overflow-hidden">
-              <Table
-                size="middle"
-                pagination={false}
-                dataSource={previewRows}
-                locale={{ emptyText: '暂无数据集。请先在上方数据中心上传文件或选择版本。' }}
-                columns={[
-                  { title: '字段路径', dataIndex: 'path', render: (path) => <code className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md text-xs font-mono border border-slate-200">{path}</code> },
-                  { title: '推断类型', dataIndex: 'type', render: (type) => <Tag color="blue" className="rounded-full px-2 py-0.5 font-medium border-transparent">{type}</Tag> },
-                  { title: '示例数据', dataIndex: 'example', render: (text) => <span className="text-slate-600 text-sm truncate max-w-[120px] block" title={text}>{text}</span> },
-                ]}
-              />
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+        {/* Fields Preview */}
+        <Card className="flex flex-col p-8 shadow-sm">
+          <div className="flex justify-between items-start mb-6">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800">字段推断预览</h3>
+              <p className="text-slate-500 text-sm mt-1">检查数据集的键名和自动推断的数据类型</p>
             </div>
           </div>
-        </Col>
-        
-        <Col xs={24} xl={14}>
-          <div className="bg-white rounded-3xl shadow-[0_4px_24px_-6px_rgba(0,0,0,0.04)] p-8 h-full flex flex-col border border-slate-100">
-            <div className="flex justify-between items-start mb-6">
-              <div>
-                <Typography.Title level={5} className="text-slate-800 m-0 font-bold">数据质量诊断</Typography.Title>
-                <Typography.Text type="secondary" className="text-xs">缺失值与重复样本分析</Typography.Text>
+          
+          <div className="flex-1 bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden">
+            {previewRows.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500">
+                      <th className="py-3 px-4 font-medium">路径</th>
+                      <th className="py-3 px-4 font-medium">类型</th>
+                      <th className="py-3 px-4 font-medium">示例</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewRows.map((row, i) => (
+                      <tr key={row.key} className={i !== previewRows.length - 1 ? "border-b border-slate-100" : ""}>
+                        <td className="py-3 px-4"><code className="bg-white px-2 py-1 rounded-md text-xs font-mono text-slate-700 border shadow-sm">{row.path}</code></td>
+                        <td className="py-3 px-4"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">{row.type}</span></td>
+                        <td className="py-3 px-4"><div className="truncate max-w-[200px] text-slate-600" title={row.example}>{row.example}</div></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <Button
-                type="primary"
-                shape="round"
-                className="bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/20 border-none"
-                disabled={!previewDataset || !qualityQuery.data}
-                loading={repairVersionMutation.isPending}
-                onClick={() => repairVersionMutation.mutate()}
-              >
-                生成修复版
-              </Button>
-            </div>
-            
-            <div className="flex-1">
-              {previewDataset ? (
-                <Space direction="vertical" className="w-full" size="middle">
-                  {qualityQuery.isError ? <Alert type="error" showIcon message="诊断加载失败" /> : null}
-                  {qualityQuery.data ? (
-                    <>
-                      <div className="grid grid-cols-3 gap-4 mb-2">
-                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
-                          <div className="text-xs text-slate-500 mb-1 font-medium">总样本数</div>
-                          <div className="text-2xl font-bold text-slate-800">{qualityQuery.data.summary.row_count}</div>
-                        </div>
-                        <div className="bg-orange-50/50 p-4 rounded-2xl border border-orange-100 text-center">
-                          <div className="text-xs text-orange-600/70 mb-1 font-medium">缺失字段</div>
-                          <div className="text-2xl font-bold text-orange-600">{qualityQuery.data.summary.fields_with_missing}</div>
-                        </div>
-                        <div className="bg-red-50/50 p-4 rounded-2xl border border-red-100 text-center">
-                          <div className="text-xs text-red-600/70 mb-1 font-medium">重复样本</div>
-                          <div className="text-2xl font-bold text-red-600">{qualityQuery.data.summary.duplicate_row_count}</div>
-                        </div>
-                      </div>
-                      
-                      <div className="bg-slate-50/50 rounded-2xl border border-slate-100 overflow-hidden">
-                        <Table
-                          size="small"
-                          rowKey="field"
-                          loading={qualityQuery.isLoading}
-                          dataSource={qualityQuery.data.fields}
-                          pagination={qualityQuery.data.fields.length > 5 ? { pageSize: 5, size: 'small' } : false}
-                          columns={[
-                            { title: '诊断字段', dataIndex: 'path', render: (value) => <code className="bg-slate-100 px-1.5 py-0.5 rounded text-xs text-slate-700">{value}</code> },
-                            { title: '覆盖率', dataIndex: 'coverage_rate', width: 100, render: (value) => <span className={`font-semibold ${Number(value) < 1 ? 'text-orange-500' : 'text-emerald-500'}`}>{formatPercent(Number(value))}</span> },
-                            { title: '缺失行', dataIndex: 'missing_count', width: 80, render: (value) => <span className={Number(value) > 0 ? 'text-red-500 font-medium' : 'text-slate-400'}>{value}</span> },
-                            { title: '治理建议', dataIndex: 'recommendation', render: (recommendation: DatasetQualityDiagnosis['fields'][number]['recommendation']) => (
-                                <span className={`text-xs ${recommendation.action === 'none' ? 'text-slate-400' : 'text-orange-600 font-medium bg-orange-50 px-2 py-1 rounded-md'}`}>{recommendation.message}</span>
-                            )},
-                          ]}
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <Alert type="info" showIcon message={qualityQuery.isLoading ? '正在扫描数据集缺失率和重复率...' : '选择数据集版本查看质量诊断'} className="rounded-xl border-slate-200 bg-slate-50 text-slate-600" />
-                  )}
-                </Space>
-              ) : (
-                <div className="h-48 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50">
-                  <Typography.Text type="secondary" className="font-medium">请在上方数据中心挂载数据集版本</Typography.Text>
-                </div>
-              )}
-            </div>
+            ) : (
+              <div className="p-12 text-center flex flex-col items-center">
+                <Database className="w-10 h-10 text-slate-300 mb-3" />
+                <p className="text-slate-500 font-medium">暂无数据</p>
+                <p className="text-slate-400 text-sm">请先选择或上传数据集</p>
+              </div>
+            )}
           </div>
-        </Col>
-      </Row>
+        </Card>
 
-      <Modal
-        title="上传数据集文件"
-        open={uploadOpen}
-        onCancel={() => setUploadOpen(false)}
-        footer={[
-          <Button key="cancel" onClick={() => setUploadOpen(false)}>取消</Button>,
-          <Button
-            key="submit"
-            type="primary"
-            loading={uploadMutation.isPending}
-            disabled={!uploadFile}
-            onClick={() => uploadForm.submit()}
-          >
-            提交上传
-          </Button>,
-        ]}
-      >
-        <Form form={uploadForm} layout="vertical" onFinish={(values) => uploadMutation.mutate(values)}>
-          <Upload.Dragger
-            beforeUpload={(file) => {
-              setUploadFile(file);
-              uploadForm.setFieldValue('name', file.name.replace(/\.(csv|jsonl)$/i, ''));
-              return false;
-            }}
-            fileList={uploadFile ? [uploadFile] : []}
-            onRemove={() => setUploadFile(null)}
-            maxCount={1}
-          >
-            <p className="ant-upload-text">拖入 CSV/JSONL，或点击选择文件</p>
-          </Upload.Dragger>
-          <Form.Item name="name" label="数据集名称" rules={[{ required: true, message: '请输入数据集名称' }]}>
-            <Input placeholder="例如：rag_regression_2026_05" />
-          </Form.Item>
-          <Form.Item name="golden" valuePropName="checked">
-            <Checkbox>标记为 Golden Dataset</Checkbox>
-          </Form.Item>
-          <Form.Item name="label_field" label="Golden 标签字段">
-            <Input placeholder="expected_label" />
-          </Form.Item>
-          <Form.Item name="answer_field" label="答案字段">
-            <Input placeholder="answer" />
-          </Form.Item>
-        </Form>
-      </Modal>
+        {/* Quality Diagnosis */}
+        <Card className="flex flex-col p-8 shadow-sm">
+          <div className="flex justify-between items-start mb-6">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800">质量诊断与治理</h3>
+              <p className="text-slate-500 text-sm mt-1">检测字段缺失、重复样本并生成修复版</p>
+            </div>
+            <Button
+              disabled={!previewDataset || !qualityQuery.data || repairVersionMutation.isPending}
+              onClick={() => repairVersionMutation.mutate()}
+              className="bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-500/20"
+            >
+              <Wand2 className="w-4 h-4 mr-2" /> 生成修复版
+            </Button>
+          </div>
 
-      <Modal
-        title="Source Skill 物化"
-        open={materializeOpen}
-        onCancel={() => setMaterializeOpen(false)}
-        onOk={() => materializeForm.submit()}
-        okText="提交物化"
-        confirmLoading={materializeMutation.isPending}
-      >
-        <Form
-          form={materializeForm}
-          layout="vertical"
-          initialValues={{
-            name: 'source_materialized_dataset',
-            rows: JSON.stringify([{ question: '示例问题', reference: '示例答案', expected_label: 'pass' }], null, 2),
-            label_field: 'expected_label',
-            golden: true,
-          }}
-          onFinish={(values) => materializeMutation.mutate(values)}
-        >
-          <Form.Item name="name" label="数据集名称" rules={[{ required: true, message: '请输入数据集名称' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="rows" label="Source rows JSON" rules={[{ required: true, message: '请输入 rows 数组' }]}>
-            <Input.TextArea rows={8} />
-          </Form.Item>
-          <Form.Item name="golden" valuePropName="checked">
-            <Checkbox>标记为 Golden Dataset</Checkbox>
-          </Form.Item>
-          <Form.Item name="label_field" label="Golden 标签字段">
-            <Input />
-          </Form.Item>
-        </Form>
-      </Modal>
+          <div className="flex-1">
+            {previewDataset && qualityQuery.data ? (
+              <div className="flex flex-col gap-6">
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-slate-50 rounded-2xl p-4 text-center border border-slate-100">
+                    <div className="text-slate-500 text-xs font-semibold mb-1 uppercase tracking-wider">总样本数</div>
+                    <div className="text-2xl font-bold text-slate-800">{qualityQuery.data.summary.row_count}</div>
+                  </div>
+                  <div className="bg-orange-50 rounded-2xl p-4 text-center border border-orange-100">
+                    <div className="text-orange-600/80 text-xs font-semibold mb-1 uppercase tracking-wider">缺失字段</div>
+                    <div className="text-2xl font-bold text-orange-600">{qualityQuery.data.summary.fields_with_missing}</div>
+                  </div>
+                  <div className="bg-red-50 rounded-2xl p-4 text-center border border-red-100">
+                    <div className="text-red-600/80 text-xs font-semibold mb-1 uppercase tracking-wider">重复样本</div>
+                    <div className="text-2xl font-bold text-red-600">{qualityQuery.data.summary.duplicate_row_count}</div>
+                  </div>
+                </div>
 
-      <Drawer title="数据血缘" width={720} open={Boolean(lineageDataset)} onClose={() => setLineageDataset(null)}>
-        {lineageQuery.data ? (
-          <Space direction="vertical" className="drawer-stack" size="large">
-            <Descriptions bordered size="small" column={1}>
-              <Descriptions.Item label="Dataset">{lineageQuery.data.name}</Descriptions.Item>
-              <Descriptions.Item label="版本">{lineageQuery.data.dataset_version_id}</Descriptions.Item>
-              <Descriptions.Item label="来源类型"><Tag color="blue">{lineageQuery.data.source.type}</Tag></Descriptions.Item>
-              {'filename' in lineageQuery.data.source.ref ? <Descriptions.Item label="文件名">{String(lineageQuery.data.source.ref.filename)}</Descriptions.Item> : null}
-              <Descriptions.Item label="来源参数"><Typography.Text code>{JSON.stringify(lineageQuery.data.source.ref)}</Typography.Text></Descriptions.Item>
-              <Descriptions.Item label="样本数">{lineageQuery.data.row_count}</Descriptions.Item>
-              <Descriptions.Item label="字段数">{lineageQuery.data.field_count}</Descriptions.Item>
-            </Descriptions>
-            <Card size="small" title="字段路径">
-              <Table
-                size="small"
-                rowKey="path"
-                pagination={false}
-                dataSource={Object.entries(lineageQuery.data.fields).map(([field, type]) => ({ field, path: `row.${field}`, type }))}
-                columns={[
-                  { title: '字段', dataIndex: 'field' },
-                  { title: '路径', dataIndex: 'path', render: (value) => <code>{value}</code> },
-                  { title: '类型', dataIndex: 'type', render: (value) => <Tag>{value}</Tag> },
-                ]}
+                <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-500">
+                        <th className="py-3 px-4 font-medium">路径</th>
+                        <th className="py-3 px-4 font-medium">覆盖率</th>
+                        <th className="py-3 px-4 font-medium">缺失数</th>
+                        <th className="py-3 px-4 font-medium">建议</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {qualityQuery.data.fields.slice(0, 5).map((field, i) => (
+                        <tr key={field.field} className={i !== 4 ? "border-b border-slate-100" : ""}>
+                          <td className="py-3 px-4"><code className="bg-white px-2 py-1 rounded text-xs font-mono text-slate-700 shadow-sm border border-slate-100">{field.path}</code></td>
+                          <td className="py-3 px-4 font-semibold text-slate-700">{formatPercent(field.coverage_rate)}</td>
+                          <td className="py-3 px-4">
+                            <span className={field.missing_count > 0 ? "text-red-500 font-bold" : "text-slate-400"}>{field.missing_count}</span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {field.recommendation.action !== 'none' ? (
+                              <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-orange-100 text-orange-800">{field.recommendation.message}</span>
+                            ) : (
+                              <span className="text-xs text-slate-400">良好</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="h-full min-h-[240px] flex flex-col items-center justify-center bg-slate-50 border-2 border-dashed border-slate-200 rounded-[2rem]">
+                <Activity className="w-10 h-10 text-slate-300 mb-3" />
+                <p className="text-slate-500 font-medium">等待诊断分析</p>
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* Upload Dialog */}
+      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>登记新数据集版本</DialogTitle>
+          </DialogHeader>
+          <div className="py-4 flex flex-col gap-4">
+            {uploadFile && (
+              <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl flex items-center gap-3">
+                <FileJson className="w-6 h-6 text-blue-500" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-blue-900 truncate">{uploadFile.name}</div>
+                  <div className="text-xs text-blue-600">{(uploadFile.size / 1024).toFixed(1)} KB</div>
+                </div>
+              </div>
+            )}
+            <div>
+              <label className="text-sm font-semibold text-slate-700 mb-1.5 block">数据集名称</label>
+              <Input 
+                value={uploadForm.name} 
+                onChange={(e) => setUploadForm(p => ({ ...p, name: e.target.value }))} 
+                placeholder="例如: evaluation_set_v1" 
               />
-            </Card>
-            <Card size="small" title="下游任务">
-              <Table
-                size="small"
-                rowKey="task_id"
-                pagination={false}
-                dataSource={lineageQuery.data.downstream_tasks}
-                columns={[
-                  { title: '任务', dataIndex: 'name' },
-                  { title: '状态', dataIndex: 'status', render: (value) => <Tag>{value}</Tag> },
-                  { title: 'Workflow Version', dataIndex: 'workflow_version_id' },
-                  { title: 'Run', dataIndex: 'run_id' },
-                ]}
+            </div>
+            <div className="flex items-center gap-2">
+              <input 
+                type="checkbox" 
+                id="golden-check" 
+                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                checked={uploadForm.golden}
+                onChange={(e) => setUploadForm(p => ({ ...p, golden: e.target.checked }))}
               />
-            </Card>
-          </Space>
-        ) : (
-          <Alert type="info" showIcon message={lineageQuery.isLoading ? '正在加载数据血缘。' : '请选择 Dataset Version 后查看血缘。'} />
-        )}
-      </Drawer>
-    </section>
+              <label htmlFor="golden-check" className="text-sm font-medium text-slate-700">标记为 Golden Dataset</label>
+            </div>
+            {uploadForm.golden && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="flex flex-col gap-4 overflow-hidden">
+                <div>
+                  <label className="text-sm font-semibold text-slate-700 mb-1.5 block">Golden 标签字段名</label>
+                  <Input 
+                    value={uploadForm.label_field} 
+                    onChange={(e) => setUploadForm(p => ({ ...p, label_field: e.target.value }))} 
+                    placeholder="例如: expected_label" 
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-semibold text-slate-700 mb-1.5 block">参考答案字段名</label>
+                  <Input 
+                    value={uploadForm.answer_field} 
+                    onChange={(e) => setUploadForm(p => ({ ...p, answer_field: e.target.value }))} 
+                    placeholder="例如: reference_answer" 
+                  />
+                </div>
+              </motion.div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUploadOpen(false)}>取消</Button>
+            <Button disabled={!uploadFile || !uploadForm.name || uploadMutation.isPending} onClick={() => uploadMutation.mutate()}>
+              {uploadMutation.isPending ? '上传中...' : '开始上传'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Materialize Dialog */}
+      <Dialog open={materializeOpen} onOpenChange={setMaterializeOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>代码块虚拟物化</DialogTitle>
+          </DialogHeader>
+          <div className="py-4 flex flex-col gap-4">
+            <div>
+              <label className="text-sm font-semibold text-slate-700 mb-1.5 block">物化名称</label>
+              <Input 
+                value={materializeForm.name} 
+                onChange={(e) => setMaterializeForm(p => ({ ...p, name: e.target.value }))} 
+              />
+            </div>
+            <div>
+              <label className="text-sm font-semibold text-slate-700 mb-1.5 block">数据结构 (JSON)</label>
+              <textarea 
+                className="w-full h-48 rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={materializeForm.rows}
+                onChange={(e) => setMaterializeForm(p => ({ ...p, rows: e.target.value }))}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <input 
+                type="checkbox" 
+                id="golden-mat-check" 
+                className="rounded border-slate-300 text-blue-600"
+                checked={materializeForm.golden}
+                onChange={(e) => setMaterializeForm(p => ({ ...p, golden: e.target.checked }))}
+              />
+              <label htmlFor="golden-mat-check" className="text-sm font-medium text-slate-700">标记为 Golden Dataset</label>
+            </div>
+            {materializeForm.golden && (
+              <div>
+                <label className="text-sm font-semibold text-slate-700 mb-1.5 block">Golden 标签字段名</label>
+                <Input 
+                  value={materializeForm.label_field} 
+                  onChange={(e) => setMaterializeForm(p => ({ ...p, label_field: e.target.value }))} 
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMaterializeOpen(false)}>取消</Button>
+            <Button disabled={!materializeForm.name || materializeMutation.isPending} onClick={() => materializeMutation.mutate()}>
+              {materializeMutation.isPending ? '执行中...' : '提交物化'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+    </div>
   );
 }
 
@@ -458,12 +498,6 @@ function readFileText(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('文件读取失败'));
     reader.readAsText(file, 'utf-8');
   });
-}
-
-function getSelectedFile(uploadFile: UploadFile | null): File | null {
-  // Ant Design 在真实浏览器和测试环境中可能分别把文件放在 originFileObj 或对象本身；
-  // 提交前统一归一化，避免“界面已选文件但提交认为未选择”的状态错位。
-  return (uploadFile?.originFileObj ?? uploadFile ?? null) as File | null;
 }
 
 function formatPercent(value: number): string {

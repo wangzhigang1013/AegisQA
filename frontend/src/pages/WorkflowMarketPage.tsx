@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Empty, Input, List, Modal, Popconfirm, Row, Select, Space, Tag, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -7,6 +6,16 @@ import { Copy, Trash2, Edit3, Plus, Ban, Network } from 'lucide-react';
 
 import { api } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
+import { Button } from '../components/ui/Button';
+import { Card } from '../components/ui/Card';
+import { Input } from '../components/ui/Input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '../components/ui/Dialog';
 import type { WorkflowDraftRecord, WorkflowGraph, WorkflowGraphEdge, WorkflowGraphNode, WorkflowVersion } from '../types';
 
 type WorkflowMarketRow = {
@@ -28,6 +37,10 @@ export function WorkflowMarketPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newWorkflowName, setNewWorkflowName] = useState('');
+  
+  // For custom Popconfirm replacement
+  const [draftToDelete, setDraftToDelete] = useState<string | null>(null);
+
   const draftsStatus = statusFilter === 'deleted' ? 'deleted' : undefined;
   const draftsQuery = useQuery({ queryKey: ['workflow-drafts', draftsStatus ?? 'active'], queryFn: () => api.workflowDrafts(draftsStatus), refetchOnMount: 'always' });
   const workflowsQuery = useQuery({ queryKey: ['workflows'], queryFn: api.workflows, refetchOnMount: 'always' });
@@ -35,6 +48,7 @@ export function WorkflowMarketPage() {
   const workflowDrafts = Array.isArray(draftsQuery.data) ? draftsQuery.data : [];
   const workflowVersions = Array.isArray(workflowsQuery.data) ? workflowsQuery.data : [];
   const workflowTemplates = Array.isArray(templatesQuery.data) ? templatesQuery.data : [];
+  
   const workflowRows = useMemo<WorkflowMarketRow[]>(() => {
     const rows: WorkflowMarketRow[] = [
       ...workflowDrafts.map((draft) => ({
@@ -104,6 +118,7 @@ export function WorkflowMarketPage() {
     mutationFn: (draftId: string) => api.deleteWorkflowDraft(draftId),
     onSuccess: async (draft) => {
       setNotice(`草稿已删除：${draft.name}。已发布 Workflow 和已有任务不受影响。`);
+      setDraftToDelete(null);
       await queryClient.invalidateQueries({ queryKey: ['workflow-drafts'] });
     },
   });
@@ -116,7 +131,6 @@ export function WorkflowMarketPage() {
   });
 
   function openDraft(draft: WorkflowDraftRecord) {
-    // 市场页已经拿到了草稿图，进入画布前先写入单草稿缓存，避免画布短暂显示默认模板后再被接口刷新覆盖。
     queryClient.setQueryData(['workflow-draft', draft.draft_id], draft);
     navigate(`/workflows/designer/${draft.draft_id}`);
   }
@@ -135,165 +149,240 @@ export function WorkflowMarketPage() {
   }
 
   return (
-    <section className="page-stack">
+    <section className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-6">
       <PageHeader
         eyebrow="流程资产"
         title="Workflow 资产市场"
         description="先选择或创建 Workflow，再进入画布编辑。已发布版本可直接用于创建任务。"
-        primaryAction={<Button type="primary" icon={<Plus className="w-4 h-4" />} loading={createDraftMutation.isPending} onClick={() => setIsCreateModalOpen(true)}>新建 Workflow</Button>}
+        primaryAction={
+          <Button variant="default" onClick={() => setIsCreateModalOpen(true)} className="flex items-center gap-2">
+            <Plus className="w-4 h-4" /> 新建 Workflow
+          </Button>
+        }
       />
 
-      {notice ? <Alert type="success" showIcon closable message={notice} onClose={() => setNotice(null)} /> : null}
+      {notice && (
+        <div className="p-4 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-start gap-3">
+          <div className="flex-1 text-sm font-medium">{notice}</div>
+          <button onClick={() => setNotice(null)} className="text-current opacity-70 hover:opacity-100">&times;</button>
+        </div>
+      )}
 
-      <Modal
-        title="新建 Workflow"
-        open={isCreateModalOpen}
-        okText="确认创建"
-        cancelText="取消"
-        confirmLoading={createDraftMutation.isPending}
-        onOk={() => createDraftMutation.mutate(newWorkflowName)}
-        onCancel={() => setIsCreateModalOpen(false)}
-      >
-        <Space direction="vertical" className="drawer-stack">
-          <Typography.Text type="secondary">填写后会同步写入草稿名称和 graph.name，进入画布后仍可继续修改。</Typography.Text>
-          <Input
-            aria-label="新建 Workflow 名称"
-            placeholder="例如：AP ASR 评测流程"
-            value={newWorkflowName}
-            onChange={(event) => setNewWorkflowName(event.target.value)}
-            onPressEnter={() => createDraftMutation.mutate(newWorkflowName)}
-          />
-        </Space>
-      </Modal>
+      <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>新建 Workflow</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-4">
+            <p className="text-sm text-slate-500">填写后会同步写入草稿名称和 graph.name，进入画布后仍可继续修改。</p>
+            <Input
+              aria-label="新建 Workflow 名称"
+              placeholder="例如：AP ASR 评测流程"
+              value={newWorkflowName}
+              onChange={(event) => setNewWorkflowName(event.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  createDraftMutation.mutate(newWorkflowName);
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateModalOpen(false)}>取消</Button>
+            <Button variant="default" disabled={createDraftMutation.isPending} onClick={() => createDraftMutation.mutate(newWorkflowName)}>
+              {createDraftMutation.isPending ? '创建中...' : '确认创建'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <div className="action-toolbar flex justify-between items-center mb-6">
-        <Space wrap>
-          <Select
+      {/* Popconfirm alternative Dialog */}
+      <Dialog open={draftToDelete !== null} onOpenChange={(open) => !open && setDraftToDelete(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>确认删除草稿？</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-slate-600">删除后将无法恢复，确定要删除吗？</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDraftToDelete(null)}>取消</Button>
+            <Button 
+              className="bg-red-600 hover:bg-red-700 text-white border-transparent"
+              disabled={deleteDraftMutation.isPending} 
+              onClick={() => draftToDelete && deleteDraftMutation.mutate(draftToDelete)}
+            >
+              {deleteDraftMutation.isPending ? '删除中...' : '确认删除'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-2">
+        <div className="flex items-center gap-4 flex-wrap">
+          <select
             aria-label="Workflow 状态筛选"
             value={statusFilter}
-            onChange={setStatusFilter}
-            style={{ width: 120 }}
-            options={[
-              { value: 'all', label: '全部状态' },
-              { value: 'draft', label: '草稿' },
-              { value: 'published', label: '已发布' },
-              { value: 'deleted', label: '已删除' },
-              { value: 'archived', label: '已归档' },
-            ]}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none w-32"
+          >
+            <option value="all">全部状态</option>
+            <option value="draft">草稿</option>
+            <option value="published">已发布</option>
+            <option value="deleted">已删除</option>
+            <option value="archived">已归档</option>
+          </select>
+          <Input 
+            placeholder="搜索 Workflow 名称" 
+            className="w-72" 
+            value={workflowQuery} 
+            onChange={(event) => setWorkflowQuery(event.target.value)} 
           />
-          <Input.Search allowClear placeholder="搜索 Workflow 名称" className="wide-search" style={{ width: 280 }} onSearch={setWorkflowQuery} onChange={(event) => setWorkflowQuery(event.target.value)} />
-        </Space>
+        </div>
       </div>
 
-      <Row gutter={[24, 24]}>
-        <Col xs={24} xl={18}>
-            <motion.div
-              initial="hidden"
-              animate="show"
-              variants={{
-                hidden: { opacity: 0 },
-                show: { opacity: 1, transition: { staggerChildren: 0.05 } }
-              }}
-            >
-              <List
-                grid={{ gutter: 24, xs: 1, sm: 1, md: 2, xl: 3 }}
-                pagination={{ pageSize: 12, position: 'bottom', align: 'center' }}
-                dataSource={workflowRows}
-                locale={{ emptyText: <Empty description="暂无 Workflow，点击右上角新建。" /> }}
-                renderItem={(record) => (
-                  <List.Item>
-                    <motion.div
-                      variants={{
-                        hidden: { opacity: 0, y: 20 },
-                        show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
-                      }}
-                      className="h-full"
-                    >
-                      <Card 
-                        hoverable 
-                        className="flat-card h-full flex flex-col group border-transparent"
-                        bodyStyle={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column' }}
-                      >
-                        <div className="flex justify-between items-start mb-6">
-                          <Space className="group-hover:translate-x-1 transition-transform">
-                            <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-500 shadow-inner">
-                              <Network className="w-6 h-6" />
-                            </div>
-                            <Typography.Text strong className="text-lg text-slate-800">{record.name}</Typography.Text>
-                          </Space>
-                          <Tag color={record.type === '草稿' ? 'processing' : 'success'} className="rounded-full border-transparent px-3 py-1 font-semibold">{record.type}</Tag>
-                        </div>
-                        
-                        <Space direction="vertical" size="small" className="w-full mb-6 text-sm font-medium text-slate-500">
-                          <div className="flex justify-between">
-                            <span>版本：{record.version}</span>
-                            <span>状态：{record.status}</span>
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+        <div className="xl:col-span-3">
+          <motion.div
+            initial="hidden"
+            animate="show"
+            variants={{
+              hidden: { opacity: 0 },
+              show: { opacity: 1, transition: { staggerChildren: 0.05 } }
+            }}
+          >
+            {workflowRows.length === 0 ? (
+              <div className="text-center py-12 text-slate-500 text-sm bg-slate-50 rounded-2xl border border-slate-100">
+                暂无 Workflow，点击右上角新建。
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {workflowRows.map((record) => (
+                  <motion.div
+                    key={record.key}
+                    variants={{
+                      hidden: { opacity: 0, y: 20 },
+                      show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
+                    }}
+                    className="h-full flex"
+                  >
+                    <Card className="flex-1 flex flex-col group p-6 hover:shadow-lg transition-shadow bg-white">
+                      <div className="flex justify-between items-start mb-6 gap-2">
+                        <div className="flex items-center gap-3 group-hover:translate-x-1 transition-transform overflow-hidden">
+                          <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-500 shadow-inner flex-shrink-0">
+                            <Network className="w-6 h-6" />
                           </div>
-                        </Space>
-
-                        <div className="mt-auto pt-4 border-t border-slate-100 flex flex-wrap gap-3">
-                          {record.draft && (
-                            <>
-                              <Button size="small" type="primary" shape="round" className="shadow-sm" icon={<Edit3 className="w-3.5 h-3.5" />} disabled={record.status === 'deleted'} onClick={() => openDraft(record.draft!)}>编辑草稿</Button>
-                              <Button size="small" shape="round" icon={<Copy className="w-3.5 h-3.5" />} loading={copyDraftMutation.isPending} onClick={() => copyDraftMutation.mutate(record.draft!)}>克隆</Button>
-                              <Popconfirm
-                                title="确认删除草稿？"
-                                onConfirm={() => deleteDraftMutation.mutate(record.draft!.draft_id)}
-                              >
-                                <Button size="small" shape="round" danger icon={<Trash2 className="w-3.5 h-3.5" />} disabled={record.status === 'deleted'} loading={deleteDraftMutation.isPending} />
-                              </Popconfirm>
-                            </>
-                          )}
-                          {record.workflow && (
-                            <>
-                              <Button
-                                size="small"
-                                type="primary"
-                                shape="round"
-                                className="shadow-sm"
-                                icon={<Edit3 className="w-3.5 h-3.5" />}
-                                loading={draftsQuery.isLoading}
-                                disabled={draftsQuery.isLoading || !linkedDraftForWorkflow(record.workflow)}
-                                onClick={() => openPublished(record.workflow!)}
-                              >
-                                编辑草稿
-                              </Button>
-                              <Button size="small" shape="round" icon={<Copy className="w-3.5 h-3.5" />} loading={copyPublishedMutation.isPending} onClick={() => copyPublishedMutation.mutate(record.workflow!)}>克隆版本</Button>
-                              <Button size="small" shape="round" danger icon={<Ban className="w-3.5 h-3.5" />} disabled={record.status === 'archived'} loading={archiveWorkflowMutation.isPending} onClick={() => archiveWorkflowMutation.mutate(record.workflow!.version_id)} />
-                            </>
-                          )}
+                          <span className="text-lg font-bold text-slate-800 truncate" title={record.name}>{record.name}</span>
                         </div>
-                      </Card>
-                    </motion.div>
-                  </List.Item>
-                )}
-              />
-            </motion.div>
-        </Col>
-        <Col xs={24} xl={6}>
-          <div className="mb-4">
-            <Typography.Title level={5} className="text-slate-700 m-0">快速模板</Typography.Title>
-            <Typography.Text type="secondary" className="text-xs">一键从预置结构创建新工作流</Typography.Text>
+                        <span className={`px-3 py-1 text-xs font-semibold rounded-full whitespace-nowrap ${record.type === '草稿' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          {record.type}
+                        </span>
+                      </div>
+                      
+                      <div className="flex flex-col gap-1 w-full mb-6 text-sm font-medium text-slate-500">
+                        <div className="flex justify-between items-center bg-slate-50 px-3 py-2 rounded-lg">
+                          <span>版本：{record.version}</span>
+                          <span className="text-slate-700">{record.status}</span>
+                        </div>
+                      </div>
+
+                      <div className="mt-auto pt-4 border-t border-slate-100 flex flex-wrap gap-2">
+                        {record.draft && (
+                          <>
+                            <Button 
+                              size="sm" 
+                              variant="default" 
+                              className="rounded-full shadow-sm flex items-center gap-1.5" 
+                              disabled={record.status === 'deleted'} 
+                              onClick={() => openDraft(record.draft!)}
+                            >
+                              <Edit3 className="w-3.5 h-3.5" /> 编辑草稿
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="rounded-full flex items-center gap-1.5" 
+                              disabled={copyDraftMutation.isPending} 
+                              onClick={() => copyDraftMutation.mutate(record.draft!)}
+                            >
+                              <Copy className="w-3.5 h-3.5" /> 克隆
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="rounded-full flex items-center gap-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 hover:border-red-300 disabled:opacity-50" 
+                              disabled={record.status === 'deleted' || deleteDraftMutation.isPending}
+                              onClick={() => setDraftToDelete(record.draft!.draft_id)}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" /> 
+                            </Button>
+                          </>
+                        )}
+                        {record.workflow && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="rounded-full shadow-sm flex items-center gap-1.5"
+                              disabled={draftsQuery.isLoading || !linkedDraftForWorkflow(record.workflow)}
+                              onClick={() => openPublished(record.workflow!)}
+                            >
+                              <Edit3 className="w-3.5 h-3.5" /> 编辑草稿
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="rounded-full flex items-center gap-1.5" 
+                              disabled={copyPublishedMutation.isPending} 
+                              onClick={() => copyPublishedMutation.mutate(record.workflow!)}
+                            >
+                              <Copy className="w-3.5 h-3.5" /> 克隆版本
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="rounded-full flex items-center gap-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 hover:border-red-300 disabled:opacity-50" 
+                              disabled={record.status === 'archived' || archiveWorkflowMutation.isPending} 
+                              onClick={() => archiveWorkflowMutation.mutate(record.workflow!.version_id)}
+                            >
+                              <Ban className="w-3.5 h-3.5" /> 
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </Card>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        </div>
+
+        <div className="xl:col-span-1 flex flex-col gap-4">
+          <div className="mb-2">
+            <h5 className="text-base font-bold text-slate-700 m-0">快速模板</h5>
+            <p className="text-xs text-slate-500 mt-1">一键从预置结构创建新工作流</p>
           </div>
-          <Space direction="vertical" className="drawer-stack w-full" size="middle">
+          
+          <div className="flex flex-col gap-4 w-full">
             {workflowTemplates.map((template) => (
               <Card 
                 key={String(template.template_id)}
-                className="flat-card border-transparent hover:-translate-y-1 transition-transform"
-                bodyStyle={{ padding: '20px' }}
+                className="p-5 border-transparent hover:-translate-y-1 transition-transform hover:shadow-md bg-white"
               >
-                <Space direction="vertical" size="small" className="w-full">
+                <div className="flex flex-col gap-3 w-full">
                   <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-500 flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-500 flex items-center justify-center flex-shrink-0">
                       <Plus className="w-4 h-4" />
                     </div>
-                    <Typography.Text strong className="text-base text-slate-800">{String(template.name)}</Typography.Text>
+                    <span className="text-base font-bold text-slate-800 line-clamp-1" title={String(template.name)}>{String(template.name)}</span>
                   </div>
-                  <Typography.Text type="secondary" className="text-sm line-clamp-2 min-h-[40px] mb-2">{String(template.description ?? '')}</Typography.Text>
+                  <p className="text-sm text-slate-500 line-clamp-2 min-h-[40px] m-0" title={String(template.description ?? '')}>
+                    {String(template.description ?? '')}
+                  </p>
                   <Button
-                    type="default"
-                    shape="round"
-                    className="w-full"
+                    variant="outline"
+                    className="w-full rounded-full"
                     onClick={() => {
                       const name = String(template.name);
                       api.createWorkflowDraft({ name, graph: graphFromTemplate(template, name) }).then((draft) => {
@@ -304,12 +393,12 @@ export function WorkflowMarketPage() {
                   >
                     从样例创建
                   </Button>
-                </Space>
+                </div>
               </Card>
             ))}
-          </Space>
-        </Col>
-      </Row>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }

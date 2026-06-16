@@ -1,5 +1,5 @@
-import { Alert, Input, InputNumber, Select, Space, Tag, Typography } from 'antd';
 import { useState } from 'react';
+import { AlertCircle } from 'lucide-react';
 
 import type { ModelGatewayConnection, SkillManifest } from '../../types';
 
@@ -25,11 +25,11 @@ export function SkillConfigEditor({ skill, value, modelConnections = [], onChang
   const entries = Object.entries(properties);
 
   if (!skill) {
-    return <Typography.Text type="secondary">当前节点未绑定 Skill，绑定后会展示可配置参数。</Typography.Text>;
+    return <p className="text-slate-500 text-sm">当前节点未绑定 Skill，绑定后会展示可配置参数。</p>;
   }
 
   if (!entries.length) {
-    return <Typography.Text type="secondary">当前 Skill 没有声明 config_schema，执行时只使用默认配置。</Typography.Text>;
+    return <p className="text-slate-500 text-sm">当前 Skill 没有声明 config_schema，执行时只使用默认配置。</p>;
   }
 
   function updateField(field: string, nextValue: unknown) {
@@ -38,24 +38,31 @@ export function SkillConfigEditor({ skill, value, modelConnections = [], onChang
   }
 
   return (
-    <Space direction="vertical" className="drawer-stack">
-      <Space direction="vertical" size={2}>
-        <Typography.Text strong>Skill 参数</Typography.Text>
-        <Typography.Text type="secondary">这些参数来自 Skill 的 config_schema，会随 Workflow 草稿和任务快照一起冻结。</Typography.Text>
-      </Space>
-      {jsonError ? <Alert type="error" showIcon message={jsonError} /> : null}
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h4 className="font-semibold text-sm">Skill 参数</h4>
+        <p className="text-slate-500 text-xs">这些参数来自 Skill 的 config_schema，会随 Workflow 草稿和任务快照一起冻结。</p>
+      </div>
+      
+      {jsonError ? (
+        <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded flex items-start gap-2 text-sm">
+          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span>{jsonError}</span>
+        </div>
+      ) : null}
+      
       {entries.map(([field, schema]) => (
-        <Space key={field} direction="vertical" size={4} className="drawer-stack">
-          <Space wrap>
-            <Typography.Text strong>{schema.title || field}</Typography.Text>
-            <Tag>{schemaTypeLabel(schema)}</Tag>
-            {required.has(field) ? <Tag color="red">必填</Tag> : null}
-          </Space>
-          {schema.description ? <Typography.Text type="secondary">{schema.description}</Typography.Text> : null}
+        <div key={field} className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-sm">{schema.title || field}</span>
+            <span className="px-2 py-0.5 text-xs rounded bg-slate-100 text-slate-600 border border-slate-200">{schemaTypeLabel(schema)}</span>
+            {required.has(field) ? <span className="px-2 py-0.5 text-xs rounded bg-red-100 text-red-700">必填</span> : null}
+          </div>
+          {schema.description ? <p className="text-slate-500 text-xs">{schema.description}</p> : null}
           {renderConfigControl(field, schema, value?.[field] ?? schema.default, updateField, setJsonError, modelConnections)}
-        </Space>
+        </div>
       ))}
-    </Space>
+    </div>
   );
 }
 
@@ -67,71 +74,82 @@ function renderConfigControl(
   setJsonError: (message: string | null) => void,
   modelConnections: ModelGatewayConnection[],
 ) {
+  const inputClass = "w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white";
+
   if (field === 'model_connection_id') {
     return (
-      <Select
+      <select
         aria-label={`Skill 参数 ${field}`}
-        allowClear
-        showSearch
-        className="full-width-control"
-        placeholder="选择模型连接别名"
-        value={value == null || value === '' ? undefined : String(value)}
-        onChange={(nextValue) => updateField(field, nextValue ?? '')}
-        optionFilterProp="label"
-        options={modelConnections.map((connection) => ({
-          value: connection.connection_id,
-          label: `${connection.name || connection.connection_id}（${connection.connection_id}）`,
-          disabled: !connection.enabled,
-        }))}
-      />
+        className={inputClass}
+        value={value == null || value === '' ? '' : String(value)}
+        onChange={(e) => updateField(field, e.target.value)}
+      >
+        <option value="">选择模型连接别名</option>
+        {modelConnections.map((connection) => (
+          <option 
+            key={connection.connection_id} 
+            value={connection.connection_id}
+            disabled={!connection.enabled}
+          >
+            {connection.name || connection.connection_id}（{connection.connection_id}）
+          </option>
+        ))}
+      </select>
     );
   }
 
   if (schema.enum?.length) {
     return (
-      <Select
+      <select
         aria-label={`Skill 参数 ${field}`}
-        className="full-width-control"
-        value={value as string | number | boolean | undefined}
-        onChange={(nextValue) => updateField(field, nextValue)}
-        options={schema.enum.map((item) => ({ value: item as string | number | boolean, label: String(item) }))}
-      />
+        className={inputClass}
+        value={value as string | number | undefined ?? ''}
+        onChange={(e) => updateField(field, e.target.value)}
+      >
+        {value === undefined && <option value="" disabled>请选择</option>}
+        {schema.enum.map((item) => (
+          <option key={String(item)} value={String(item)}>
+            {String(item)}
+          </option>
+        ))}
+      </select>
     );
   }
 
   const type = firstSchemaType(schema.type);
   if (type === 'number' || type === 'integer') {
     return (
-      <InputNumber
+      <input
+        type="number"
+        step={type === 'integer' ? '1' : 'any'}
         aria-label={`Skill 参数 ${field}`}
-        className="full-width-control"
-        value={typeof value === 'number' ? value : undefined}
-        precision={type === 'integer' ? 0 : undefined}
-        onChange={(nextValue) => updateField(field, nextValue ?? 0)}
+        className={inputClass}
+        value={value === undefined ? '' : Number(value)}
+        onChange={(e) => updateField(field, e.target.value ? Number(e.target.value) : 0)}
       />
     );
   }
 
   if (type === 'boolean') {
     return (
-      <Select
+      <select
         aria-label={`Skill 参数 ${field}`}
-        className="full-width-control"
-        value={Boolean(value)}
-        onChange={(nextValue) => updateField(field, nextValue)}
-        options={[
-          { value: true, label: 'true' },
-          { value: false, label: 'false' },
-        ]}
-      />
+        className={inputClass}
+        value={value === undefined ? '' : String(Boolean(value))}
+        onChange={(e) => updateField(field, e.target.value === 'true')}
+      >
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
     );
   }
 
   if (type === 'object' || type === 'array') {
     return (
-      <Input.TextArea
+      <textarea
         aria-label={`Skill 参数 ${field}`}
         rows={3}
+        className={`${inputClass} font-mono text-xs`}
         defaultValue={JSON.stringify(value ?? (type === 'array' ? [] : {}), null, 2)}
         onBlur={(event) => {
           try {
@@ -147,8 +165,10 @@ function renderConfigControl(
   }
 
   return (
-    <Input
+    <input
+      type="text"
       aria-label={`Skill 参数 ${field}`}
+      className={inputClass}
       value={value == null ? '' : String(value)}
       onChange={(event) => updateField(field, event.target.value)}
     />

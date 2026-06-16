@@ -1,6 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { memo, type ReactNode } from 'react';
-import { CheckCircle2, AlertCircle, AlertTriangle, Cpu, Zap, Activity } from 'lucide-react';
+import { CheckCircle2, AlertCircle, AlertTriangle, Cpu, Zap, Activity, Settings } from 'lucide-react';
 import './BaseNode.css';
 
 export interface PortConfig {
@@ -20,8 +20,9 @@ export interface BaseNodeData extends Record<string, unknown> {
   inputs?: PortConfig[];
   outputs?: PortConfig[];
   metrics?: {
-    latency?: string;
-    tokens?: string;
+    latency?: number;
+    total_tokens?: number;
+    cost?: number;
     cached?: boolean;
   };
   error?: string;

@@ -1,11 +1,12 @@
-import { CheckCircleOutlined, CheckOutlined, FileSearchOutlined, ReloadOutlined, RollbackOutlined, UserAddOutlined } from '@ant-design/icons';
+import { CheckCircle, Check, FileSearch, RefreshCw, Undo, UserPlus, XCircle } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Drawer, Form, Input, Modal, Progress, Select, Space, Table, Tag, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 
 import { api, formatApiError } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import type { RepairTaskPageResult, RepairTaskRecord, RepairTaskTree } from '../types';
+import { Modal, Button, Table, Row, Col, Card } from '../components/AntdShims';
+import { Input } from '../components/ui/Input';
 
 type ResolveValues = {
   resolution_note: string;
@@ -31,12 +32,10 @@ export function RepairTasksPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [repairPage, setRepairPage] = useState(1);
   const repairPageSize = 8;
-  const [resolveForm] = Form.useForm<ResolveValues>();
-  const [reopenForm] = Form.useForm<ReopenValues>();
-  const [assignForm] = Form.useForm<AssignValues>();
-  const resolutionNote = Form.useWatch('resolution_note', resolveForm);
-  const reopenReason = Form.useWatch('reason', reopenForm);
-  const assignOwner = Form.useWatch('owner', assignForm);
+  
+  const [resolveFormState, setResolveFormState] = useState<ResolveValues>({ resolution_note: '' });
+  const [reopenFormState, setReopenFormState] = useState<ReopenValues>({ reason: '' });
+  const [assignFormState, setAssignFormState] = useState<AssignValues>({ owner: '', due_at: '' });
 
   const repairTasksQuery = useQuery({
     queryKey: ['repair-tasks', sourceTaskId, statusFilter, repairPage, repairPageSize],
@@ -73,7 +72,7 @@ export function RepairTasksPage() {
     },
     onSuccess: async (record) => {
       setResolveTask(null);
-      resolveForm.resetFields();
+      setResolveFormState({ resolution_note: '' });
       setNotice(`修复任务已完成：${record.resolution_note ?? '已记录修复说明'}。`);
       await queryClient.invalidateQueries({ queryKey: ['repair-tasks'] });
       await queryClient.invalidateQueries({ queryKey: ['repair-task-tree'] });
@@ -88,7 +87,7 @@ export function RepairTasksPage() {
     },
     onSuccess: async (record) => {
       setAssignTask(null);
-      assignForm.resetFields();
+      setAssignFormState({ owner: '', due_at: '' });
       await queryClient.invalidateQueries({ queryKey: ['repair-tasks'] });
       await queryClient.invalidateQueries({ queryKey: ['repair-task-tree'] });
       mergeRepairTasks([record]);
@@ -104,7 +103,7 @@ export function RepairTasksPage() {
     },
     onSuccess: async (record) => {
       setReopenTask(null);
-      reopenForm.resetFields();
+      setReopenFormState({ reason: '' });
       setNotice(`修复任务已重开：${record.reopen_reason ?? '已记录重开原因'}。`);
       await queryClient.invalidateQueries({ queryKey: ['repair-tasks'] });
       await queryClient.invalidateQueries({ queryKey: ['repair-task-tree'] });
@@ -132,17 +131,17 @@ export function RepairTasksPage() {
 
   function openResolve(record: RepairTaskRecord) {
     setResolveTask(record);
-    resolveForm.setFieldsValue({ resolution_note: record.resolution_note ?? '' });
+    setResolveFormState({ resolution_note: record.resolution_note ?? '' });
   }
 
   function openReopen(record: RepairTaskRecord) {
     setReopenTask(record);
-    reopenForm.setFieldsValue({ reason: record.reopen_reason ?? '' });
+    setReopenFormState({ reason: record.reopen_reason ?? '' });
   }
 
   function openAssign(record: RepairTaskRecord) {
     setAssignTask(record);
-    assignForm.setFieldsValue({ owner: record.owner ?? '', due_at: record.due_at ?? '' });
+    setAssignFormState({ owner: record.owner ?? '', due_at: record.due_at ?? '' });
   }
 
   function mergeRepairTasks(updatedTasks: RepairTaskRecord[]) {
@@ -178,364 +177,256 @@ export function RepairTasksPage() {
   }
 
   return (
-    <section className="page-stack">
+    <section className="space-y-6">
       <PageHeader
         eyebrow="诊断闭环"
         title="修复任务工作台"
         description="把任务报告中的根因诊断沉淀为可领取、可完成、可重开的修复工作项，确保问题不会停在报告页面。"
         primaryAction={
-          <Space>
-            <Button href="/reports">回到报告中心</Button>
-            <Button icon={<ReloadOutlined />} onClick={() => void repairTasksQuery.refetch()}>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => window.location.href = '/reports'}>回到报告中心</Button>
+            <Button variant="outline" icon={<RefreshCw className="w-4 h-4" />} onClick={() => void repairTasksQuery.refetch()}>
               刷新
             </Button>
-          </Space>
+          </div>
         }
       />
 
-      {notice ? <Alert type={notice.includes('失败') ? 'error' : 'success'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
+      {notice && (
+        <div className={`flex items-center justify-between p-4 rounded-md border ${notice.includes('失败') ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-800'}`}>
+          <div className="flex items-center gap-2">
+            {notice.includes('失败') ? <XCircle className="w-5 h-5 text-red-500" /> : <CheckCircle className="w-5 h-5 text-green-500" />}
+            <span>{notice}</span>
+          </div>
+          <button onClick={() => setNotice(null)} className="text-gray-500 hover:text-gray-700">
+            <XCircle className="w-5 h-5" />
+          </button>
+        </div>
+      )}
 
-      <Card className="flat-card" title="筛选条件">
-        <Space wrap>
-          <Select
-            allowClear
-            className="wide-search"
+      <Card title="筛选条件">
+        <div className="flex flex-wrap gap-4 items-center">
+          <select 
+            className="w-48 border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
             aria-label="修复任务状态筛选"
-            placeholder="按状态筛选"
-            value={statusFilter}
-            onChange={(value) => {
-              setStatusFilter(value);
+            value={statusFilter ?? ''}
+            onChange={(e) => {
+              setStatusFilter(e.target.value || undefined);
               setRepairPage(1);
             }}
-            options={[
-              { value: 'open', label: '待处理' },
-              { value: 'in_progress', label: '处理中' },
-              { value: 'resolved', label: '已完成' },
-            ]}
-          />
-          <Select
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            className="wide-search"
+          >
+            <option value="">按状态筛选 (全部)</option>
+            <option value="open">待处理</option>
+            <option value="in_progress">处理中</option>
+            <option value="resolved">已完成</option>
+          </select>
+          
+          <select 
+            className="w-64 border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
             aria-label="修复任务来源任务筛选"
-            placeholder="按来源任务筛选"
-            value={sourceTaskId}
-            onChange={(value) => {
-              setSourceTaskId(value);
+            value={sourceTaskId ?? ''}
+            onChange={(e) => {
+              setSourceTaskId(e.target.value || undefined);
               setRepairPage(1);
             }}
-            options={(tasksQuery.data?.items ?? []).map((task) => ({ value: task.task_id, label: `${task.name} / ${task.status}` }))}
-          />
-          <Typography.Text type="secondary">
+          >
+            <option value="">按来源任务筛选 (全部)</option>
+            {(tasksQuery.data?.items ?? []).map((task) => (
+              <option key={task.task_id} value={task.task_id}>{task.name} / {task.status}</option>
+            ))}
+          </select>
+          
+          <span className="text-sm text-gray-500">
             当前展示 {repairPagination?.total_items ?? visibleRepairTasks.length} 个修复工作项。
-          </Typography.Text>
-        </Space>
+          </span>
+        </div>
       </Card>
 
-      <Card className="flat-card" title="修复任务列表">
-        <Table
-          rowKey="repair_task_id"
-          loading={repairTasksQuery.isLoading}
-          dataSource={visibleRepairTasks}
-          pagination={{
-            current: repairPagination?.page ?? repairPage,
-            pageSize: repairPagination?.page_size ?? repairPageSize,
-            total: repairPagination?.total_items ?? visibleRepairTasks.length,
-            showSizeChanger: false,
-            onChange: setRepairPage,
-          }}
-          columns={[
-            {
-              title: '修复任务',
-              dataIndex: 'title',
-              render: (value, record) => (
-                <Space direction="vertical" size={2}>
-                  <Typography.Text strong>{value}</Typography.Text>
-                  <Typography.Text type="secondary">{record.recommendation}</Typography.Text>
-                  {record.parent_repair_task_id ? <Tag color="purple">子任务</Tag> : null}
-                </Space>
-              ),
-            },
-            { title: '状态', dataIndex: 'status', width: 96, render: renderStatus },
-            { title: '根因', dataIndex: 'cause_type', width: 140, render: renderCauseType },
-            { title: '级别', dataIndex: 'severity', width: 90, render: renderSeverity },
-            { title: '影响样本', dataIndex: 'affected_items', width: 96 },
-            {
-              title: '证据',
-              dataIndex: 'evidence',
-              render: (items: string[]) => <Typography.Text>{items?.[0] ?? '-'}</Typography.Text>,
-            },
-            {
-              title: '动作历史',
-              dataIndex: 'action_history',
-              width: 180,
-              render: (items: RepairTaskRecord['action_history']) => (
-                <Space direction="vertical" size={2}>
-                  {items?.length ? items.map((item) => <Tag key={`${item.action}-${item.created_at ?? item.result_summary}`} color="blue">{item.action}</Tag>) : <Typography.Text type="secondary">未触发</Typography.Text>}
-                </Space>
-              ),
-            },
-            {
-              title: '推荐动作',
-              dataIndex: 'recommended_action',
-              width: 170,
-              render: (value, record) => (
-                <Space direction="vertical" size={2}>
-                  <Typography.Text>{value || record.next_actions?.[0] || '-'}</Typography.Text>
-                  {record.target_url ? <Button size="small" href={record.target_url}>打开入口</Button> : null}
-                </Space>
-              ),
-            },
-            {
-              title: '最近结果',
-              dataIndex: 'last_action_result',
-              width: 220,
-              render: (_, record) => <RecentActionResult record={record} />,
-            },
-            {
-              title: '来源任务',
-              dataIndex: 'source_task_id',
-              width: 160,
-              render: (value) => (
-                <Space direction="vertical" size={0}>
-                  <Typography.Text>{value}</Typography.Text>
-                  {taskNameById[String(value)] ? <Typography.Text type="secondary">{taskNameById[String(value)]}</Typography.Text> : null}
-                </Space>
-              ),
-            },
-            { title: '负责人', dataIndex: 'owner', width: 150, render: (_, record) => <RepairOwner record={record} onAssign={() => openAssign(record)} /> },
-            {
-              title: '操作',
-              fixed: 'right',
-              width: 300,
-              render: (_, record) => (
-                <Space wrap>
-                  <Button size="small" href={`/reports?task_id=${record.source_task_id}`}>
-                    查看报告
-                  </Button>
-                  <Button size="small" href={`/tasks/${record.source_task_id}/trace`}>
-                    Trace
-                  </Button>
-                  <Button size="small" onClick={() => setTreeTask(record)}>
-                    查看进度
-                  </Button>
-                  <Button
-                    size="small"
-                    aria-label={`指派修复任务：${record.title}`}
-                    onClick={() => openAssign(record)}
-                    disabled={record.status === 'resolved'}
-                  >
-                    指派
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<FileSearchOutlined />}
-                    loading={actionMutation.isPending}
-                    onClick={() => runAction(record, 'seed_annotation_queue')}
-                  >
-                    发起人工审核
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<CheckCircleOutlined />}
-                    loading={actionMutation.isPending}
-                    onClick={() => runAction(record, 'evaluate_ci_gate')}
-                  >
-                    CI Gate 复测
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<ReloadOutlined />}
-                    loading={actionMutation.isPending}
-                    onClick={() => runAction(record, 'retest_and_compare')}
-                  >
-                    复跑对比
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<FileSearchOutlined />}
-                    loading={actionMutation.isPending}
-                    onClick={() => runAction(record, 'generate_remediation_plan')}
-                  >
-                    生成建议
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<FileSearchOutlined />}
-                    loading={actionMutation.isPending}
-                    onClick={() => runAction(record, 'create_followup_repair_tasks')}
-                  >
-                    拆分子任务
-                  </Button>
-                  {hasRepairAction(record, 'fix_dataset_fields') ? (
-                    <Button
-                      size="small"
-                      icon={<FileSearchOutlined />}
-                      loading={actionMutation.isPending}
-                      onClick={() => runAction(record, 'fix_dataset_fields')}
-                    >
-                      字段修复计划
-                    </Button>
-                  ) : null}
-                  {hasRepairAction(record, 'plan_workflow_parameter_changes') ? (
-                    <Button
-                      size="small"
-                      icon={<FileSearchOutlined />}
-                      loading={actionMutation.isPending}
-                      onClick={() => runAction(record, 'plan_workflow_parameter_changes')}
-                    >
-                      参数 diff/回滚
-                    </Button>
-                  ) : null}
-                  {hasRepairAction(record, 'compare_prompt_skill_versions') ? (
-                    <Button
-                      size="small"
-                      icon={<FileSearchOutlined />}
-                      loading={actionMutation.isPending}
-                      onClick={() => runAction(record, 'compare_prompt_skill_versions')}
-                    >
-                      版本对比
-                    </Button>
-                  ) : null}
-                  {hasCandidateAction(record, 'create_prompt_skill_candidate') ? (
-                    <Button
-                      size="small"
-                      icon={<FileSearchOutlined />}
-                      loading={actionMutation.isPending}
-                      onClick={() => runAction(record, 'create_prompt_skill_candidate')}
-                    >
-                      沉淀候选
-                    </Button>
-                  ) : null}
-                  {hasCandidateAction(record, 'create_workflow_draft_from_version_diff') ? (
-                    <Button
-                      size="small"
-                      icon={<FileSearchOutlined />}
-                      loading={actionMutation.isPending}
-                      onClick={() => runAction(record, 'create_workflow_draft_from_version_diff')}
-                    >
-                      生成草稿
-                    </Button>
-                  ) : null}
-                  <Button size="small" href={`/reports?task_id=${record.source_task_id}&panel=parameter-governance`}>
-                    参数治理
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<UserAddOutlined />}
-                    disabled={record.status !== 'open'}
-                    loading={startMutation.isPending}
-                    onClick={() => startMutation.mutate(record)}
-                  >
-                    领取
-                  </Button>
-                  <Button
-                    size="small"
-                    type="primary"
-                    icon={<CheckOutlined />}
-                    disabled={record.status === 'resolved'}
-                    onClick={() => openResolve(record)}
-                  >
-                    完成
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<RollbackOutlined />}
-                    disabled={record.status !== 'resolved'}
-                    onClick={() => openReopen(record)}
-                  >
-                    重开
-                  </Button>
-                </Space>
-              ),
-            },
-          ]}
-        />
+      <Card title="修复任务列表" className="overflow-hidden">
+        <div className="overflow-x-auto -mx-4 -mb-4 mt-2">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">修复任务</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">状态</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-36">根因</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">级别</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">影响样本</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">证据</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">动作历史</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">推荐动作</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-56">最近结果</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-40">来源任务</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-40">负责人</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-64 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {visibleRepairTasks.map(record => (
+                <tr key={record.repair_task_id}>
+                  <td className="px-4 py-3 text-sm">
+                    <div className="flex flex-col gap-1">
+                      <span className="font-medium text-gray-900">{record.title}</span>
+                      <span className="text-gray-500 text-xs">{record.recommendation}</span>
+                      {record.parent_repair_task_id && <span className="inline-block w-max px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-xs mt-1">子任务</span>}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm">{renderStatus(record.status)}</td>
+                  <td className="px-4 py-3 text-sm">{renderCauseType(record.cause_type)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm">{renderSeverity(record.severity)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm">{record.affected_items}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{record.evidence?.[0] ?? '-'}</td>
+                  <td className="px-4 py-3 text-sm">
+                    <div className="flex flex-col gap-1">
+                      {record.action_history?.length ? record.action_history.map(item => (
+                        <span key={`${item.action}-${item.created_at ?? item.result_summary}`} className="inline-block w-max px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs">{item.action}</span>
+                      )) : <span className="text-gray-500">未触发</span>}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-gray-900">{record.recommended_action || record.next_actions?.[0] || '-'}</span>
+                      {record.target_url && <a href={record.target_url} className="text-blue-600 hover:underline text-xs">打开入口</a>}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm">
+                    <RecentActionResult record={record} />
+                  </td>
+                  <td className="px-4 py-3 text-sm">
+                    <div className="flex flex-col">
+                      <span className="text-gray-900">{record.source_task_id}</span>
+                      {taskNameById[String(record.source_task_id)] && <span className="text-gray-500 text-xs">{taskNameById[String(record.source_task_id)]}</span>}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm">
+                    <RepairOwner record={record} onAssign={() => openAssign(record)} />
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-right">
+                    <div className="flex flex-wrap gap-1 justify-end">
+                      <Button variant="outline" size="sm" onClick={() => window.location.href = `/reports?task_id=${record.source_task_id}`}>查看报告</Button>
+                      <Button variant="outline" size="sm" onClick={() => window.location.href = `/tasks/${record.source_task_id}/trace`}>Trace</Button>
+                      <Button variant="outline" size="sm" onClick={() => setTreeTask(record)}>查看进度</Button>
+                      <Button variant="outline" size="sm" onClick={() => openAssign(record)} disabled={record.status === 'resolved'}>指派</Button>
+                      <Button variant="outline" size="sm" icon={<FileSearch className="w-3 h-3" />} loading={actionMutation.isPending} onClick={() => runAction(record, 'seed_annotation_queue')}>人工审核</Button>
+                      <Button variant="outline" size="sm" icon={<CheckCircle className="w-3 h-3" />} loading={actionMutation.isPending} onClick={() => runAction(record, 'evaluate_ci_gate')}>CI Gate</Button>
+                      <Button variant="outline" size="sm" icon={<RefreshCw className="w-3 h-3" />} loading={actionMutation.isPending} onClick={() => runAction(record, 'retest_and_compare')}>复跑对比</Button>
+                      <Button variant="outline" size="sm" icon={<FileSearch className="w-3 h-3" />} loading={actionMutation.isPending} onClick={() => runAction(record, 'generate_remediation_plan')}>生成建议</Button>
+                      <Button variant="outline" size="sm" icon={<FileSearch className="w-3 h-3" />} loading={actionMutation.isPending} onClick={() => runAction(record, 'create_followup_repair_tasks')}>拆分任务</Button>
+                      
+                      {hasRepairAction(record, 'fix_dataset_fields') && <Button variant="outline" size="sm" icon={<FileSearch className="w-3 h-3" />} loading={actionMutation.isPending} onClick={() => runAction(record, 'fix_dataset_fields')}>字段修复</Button>}
+                      {hasRepairAction(record, 'plan_workflow_parameter_changes') && <Button variant="outline" size="sm" icon={<FileSearch className="w-3 h-3" />} loading={actionMutation.isPending} onClick={() => runAction(record, 'plan_workflow_parameter_changes')}>参数diff</Button>}
+                      {hasRepairAction(record, 'compare_prompt_skill_versions') && <Button variant="outline" size="sm" icon={<FileSearch className="w-3 h-3" />} loading={actionMutation.isPending} onClick={() => runAction(record, 'compare_prompt_skill_versions')}>版本对比</Button>}
+                      {hasCandidateAction(record, 'create_prompt_skill_candidate') && <Button variant="outline" size="sm" icon={<FileSearch className="w-3 h-3" />} loading={actionMutation.isPending} onClick={() => runAction(record, 'create_prompt_skill_candidate')}>沉淀候选</Button>}
+                      {hasCandidateAction(record, 'create_workflow_draft_from_version_diff') && <Button variant="outline" size="sm" icon={<FileSearch className="w-3 h-3" />} loading={actionMutation.isPending} onClick={() => runAction(record, 'create_workflow_draft_from_version_diff')}>生成草稿</Button>}
+                      
+                      <Button variant="outline" size="sm" onClick={() => window.location.href = `/reports?task_id=${record.source_task_id}&panel=parameter-governance`}>参数治理</Button>
+                      <Button variant="outline" size="sm" icon={<UserPlus className="w-3 h-3" />} disabled={record.status !== 'open'} loading={startMutation.isPending} onClick={() => startMutation.mutate(record)}>领取</Button>
+                      <Button variant="primary" size="sm" icon={<Check className="w-3 h-3" />} disabled={record.status === 'resolved'} onClick={() => openResolve(record)}>完成</Button>
+                      <Button variant="outline" size="sm" icon={<Undo className="w-3 h-3" />} disabled={record.status !== 'resolved'} onClick={() => openReopen(record)}>重开</Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {visibleRepairTasks.length === 0 && (
+                <tr><td colSpan={12} className="px-4 py-8 text-center text-sm text-gray-500">暂无修复任务</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </Card>
 
-      <Modal
-        title="完成修复任务"
-        open={Boolean(resolveTask)}
-        forceRender
-        onCancel={() => setResolveTask(null)}
-        footer={[
-          <Button key="cancel" onClick={() => setResolveTask(null)}>取消</Button>,
-          <Button
-            key="submit"
-            type="primary"
-            disabled={!resolutionNote}
-            loading={resolveMutation.isPending}
-            onClick={() => resolveForm.submit()}
+      <Modal open={Boolean(resolveTask)} onCancel={() => setResolveTask(null)} title="解决修复任务">
+        <div className="space-y-4 mt-4">
+          <p className="text-sm text-gray-500">修复任务：{resolveTask?.title}</p>
+          <form 
+            id="resolveForm"
+            onSubmit={(e) => {
+              e.preventDefault();
+              resolveMutation.mutate(resolveFormState);
+            }}
           >
-            确认完成
-          </Button>,
-        ]}
-      >
-        <Space direction="vertical" className="drawer-stack">
-          <Typography.Text type="secondary">修复任务：{resolveTask?.title}</Typography.Text>
-          <Form form={resolveForm} layout="vertical" onFinish={(values) => resolveMutation.mutate(values)}>
-            <Form.Item name="resolution_note" label="修复说明" rules={[{ required: true, message: '请填写修复说明' }]}>
-              <Input.TextArea rows={4} placeholder="说明本次修复做了什么、如何验证" />
-            </Form.Item>
-          </Form>
-        </Space>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">修复说明 <span className="text-red-500">*</span></label>
+              <textarea 
+                className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                rows={4}
+                placeholder="说明本次修复做了什么、如何验证"
+                value={resolveFormState.resolution_note}
+                onChange={(e) => setResolveFormState({ resolution_note: e.target.value })}
+                required
+              />
+            </div>
+            <div className="mt-6 flex justify-end gap-3 border-t pt-4">
+              <Button variant="outline" onClick={() => setResolveTask(null)}>取消</Button>
+              <Button variant="default" type="submit" disabled={!resolveFormState.resolution_note} loading={resolveMutation.isPending}>确认完成</Button>
+            </div>
+          </form>
+        </div>
       </Modal>
 
-      <Modal
-        title="重开修复任务"
-        open={Boolean(reopenTask)}
-        forceRender
-        onCancel={() => setReopenTask(null)}
-        footer={[
-          <Button key="cancel" onClick={() => setReopenTask(null)}>取消</Button>,
-          <Button
-            key="submit"
-            type="primary"
-            disabled={!reopenReason}
-            loading={reopenMutation.isPending}
-            onClick={() => reopenForm.submit()}
+      <Modal open={Boolean(reopenTask)} onCancel={() => setReopenTask(null)} title="重开修复任务">
+        <div className="space-y-4 mt-4">
+          <p className="text-sm text-gray-500">修复任务：{reopenTask?.title}</p>
+          <form 
+            id="reopenForm"
+            onSubmit={(e) => {
+              e.preventDefault();
+              reopenMutation.mutate(reopenFormState);
+            }}
           >
-            确认重开
-          </Button>,
-        ]}
-      >
-        <Form form={reopenForm} layout="vertical" onFinish={(values) => reopenMutation.mutate(values)}>
-          <Form.Item name="reason" label="重开原因" rules={[{ required: true, message: '请填写重开原因' }]}>
-            <Input.TextArea rows={4} placeholder="说明为什么复测失败或需要再次处理" />
-          </Form.Item>
-        </Form>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">重开原因 <span className="text-red-500">*</span></label>
+              <textarea 
+                className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                rows={4}
+                placeholder="说明为什么复测失败或需要再次处理"
+                value={reopenFormState.reason}
+                onChange={(e) => setReopenFormState({ reason: e.target.value })}
+                required
+              />
+            </div>
+            <div className="mt-6 flex justify-end gap-3 border-t pt-4">
+              <Button variant="outline" onClick={() => setReopenTask(null)}>取消</Button>
+              <Button variant="default" type="submit" disabled={!reopenFormState.reason} loading={reopenMutation.isPending}>确认重开</Button>
+            </div>
+          </form>
+        </div>
       </Modal>
 
-      <Modal
-        title="指派修复任务"
-        open={Boolean(assignTask)}
-        forceRender
-        onCancel={() => setAssignTask(null)}
-        footer={[
-          <Button key="cancel" onClick={() => setAssignTask(null)}>取消</Button>,
-          <Button
-            key="submit"
-            type="primary"
-            disabled={!assignOwner}
-            loading={assignMutation.isPending}
-            onClick={() => assignForm.submit()}
+      <Modal open={Boolean(assignTask)} onCancel={() => setAssignTask(null)} title="指派修复任务">
+        <div className="space-y-4 mt-4">
+          <p className="text-sm text-gray-500">修复任务：{assignTask?.title}</p>
+          <form 
+            id="assignForm"
+            onSubmit={(e) => {
+              e.preventDefault();
+              assignMutation.mutate(assignFormState);
+            }}
+            className="space-y-4"
           >
-            确认指派
-          </Button>,
-        ]}
-      >
-        <Space direction="vertical" className="drawer-stack">
-          <Typography.Text type="secondary">修复任务：{assignTask?.title}</Typography.Text>
-          <Form form={assignForm} layout="vertical" onFinish={(values) => assignMutation.mutate(values)}>
-            <Form.Item name="owner" label="负责人" rules={[{ required: true, message: '请填写负责人' }]}>
-              <Input placeholder="例如：dataset_owner" />
-            </Form.Item>
-            <Form.Item name="due_at" label="截止时间">
-              <Input placeholder="例如：2026-06-01T00:00:00+00:00" />
-            </Form.Item>
-          </Form>
-        </Space>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">负责人 <span className="text-red-500">*</span></label>
+              <Input 
+                placeholder="例如：dataset_owner" 
+                value={assignFormState.owner}
+                onChange={(e) => setAssignFormState({ ...assignFormState, owner: e.target.value })}
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">截止时间</label>
+              <Input 
+                placeholder="例如：2026-06-01T00:00:00+00:00" 
+                value={assignFormState.due_at ?? ''}
+                onChange={(e) => setAssignFormState({ ...assignFormState, due_at: e.target.value })}
+              />
+            </div>
+            <div className="mt-6 flex justify-end gap-3 border-t pt-4">
+              <Button variant="outline" onClick={() => setAssignTask(null)}>取消</Button>
+              <Button variant="default" type="submit" disabled={!assignFormState.owner} loading={assignMutation.isPending}>确认指派</Button>
+            </div>
+          </form>
+        </div>
       </Modal>
 
       <RepairTaskTreeDrawer
@@ -550,77 +441,77 @@ export function RepairTasksPage() {
 
 function renderStatus(status: string) {
   const colorMap: Record<string, string> = {
-    open: 'gold',
-    in_progress: 'blue',
-    resolved: 'green',
+    open: 'bg-yellow-100 text-yellow-800',
+    in_progress: 'bg-blue-100 text-blue-800',
+    resolved: 'bg-green-100 text-green-800',
   };
   const labelMap: Record<string, string> = {
     open: '待处理',
     in_progress: '处理中',
     resolved: '已完成',
   };
-  return <Tag color={colorMap[status] ?? 'default'}>{labelMap[status] ?? status}</Tag>;
+  return <span className={`inline-block px-2 py-0.5 rounded text-xs ${colorMap[status] ?? 'bg-gray-100 text-gray-800'}`}>{labelMap[status] ?? status}</span>;
 }
 
 function renderSeverity(value: string) {
-  const color = value === 'critical' ? 'red' : value === 'warning' ? 'orange' : 'blue';
-  return <Tag color={color}>{value}</Tag>;
+  const color = value === 'critical' ? 'bg-red-100 text-red-800' : value === 'warning' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800';
+  return <span className={`inline-block px-2 py-0.5 rounded text-xs ${color}`}>{value}</span>;
 }
 
 function RecentActionResult({ record }: { record: RepairTaskRecord }) {
   const fieldActions = extractFieldFixActions(record);
   if (fieldActions.length) {
     return (
-      <Space direction="vertical" size={2}>
-        <Typography.Text type="secondary">字段修复计划</Typography.Text>
+      <div className="flex flex-col gap-1 text-xs">
+        <span className="text-gray-500">字段修复计划</span>
         {fieldActions.slice(0, 3).map((item) => (
-          <Typography.Text key={`${item.field}-${item.action}`} type={item.required_by_workflow ? 'danger' : 'secondary'}>
+          <span key={`${item.field}-${item.action}`} className={item.required_by_workflow ? 'text-red-600' : 'text-gray-600'}>
             {item.field}：{item.recommendation}
-          </Typography.Text>
+          </span>
         ))}
-      </Space>
+      </div>
     );
   }
   const parameterDiffs = extractParameterDiffs(record);
   if (parameterDiffs.length) {
     return (
-      <Space direction="vertical" size={2}>
-        <Typography.Text type="secondary">参数 diff/回滚计划</Typography.Text>
+      <div className="flex flex-col gap-1 text-xs">
+        <span className="text-gray-500">参数 diff/回滚计划</span>
         {parameterDiffs.slice(0, 3).map((item) => (
-          <Typography.Text key={`${item.step_id}-${item.parameter}`} type={item.source === 'task_override' ? 'warning' : 'secondary'}>
+          <span key={`${item.step_id}-${item.parameter}`} className={item.source === 'task_override' ? 'text-orange-600' : 'text-gray-600'}>
             {item.step_id}.{item.parameter}：当前 {String(item.current_value_preview ?? '-')}，Workflow 默认 {String(item.workflow_value_preview ?? '-')}。{item.recommendation}
-          </Typography.Text>
+          </span>
         ))}
-      </Space>
+      </div>
     );
   }
   const versionDiffs = extractPromptSkillVersionDiffs(record);
   if (versionDiffs.length) {
     return (
-      <Space direction="vertical" size={2}>
-        <Typography.Text type="secondary">Prompt/Skill 版本对比</Typography.Text>
+      <div className="flex flex-col gap-1 text-xs">
+        <span className="text-gray-500">Prompt/Skill 版本对比</span>
         {versionDiffs.slice(0, 3).map((item) => (
-          <Typography.Text key={`${item.step_id}-${item.field}`} type={item.field === 'prompt_version' ? 'warning' : 'secondary'}>
+          <span key={`${item.step_id}-${item.field}`} className={item.field === 'prompt_version' ? 'text-orange-600' : 'text-gray-600'}>
             {item.step_id}.{item.field}：baseline {String(item.baseline_value ?? '-')}，当前 {String(item.current_value ?? '-')}。建议：{item.recommended_action}
-          </Typography.Text>
+          </span>
         ))}
-      </Space>
+      </div>
     );
   }
   const recommendations = extractRecommendations(record);
   if (recommendations.length) {
     return (
-      <Space direction="vertical" size={2}>
+      <div className="flex flex-col gap-1 text-xs">
         {recommendations.slice(0, 3).map((item) => (
-          <Typography.Text key={`${item.area}-${item.title}`} type="secondary">
+          <span key={`${item.area}-${item.title}`} className="text-gray-600">
             {item.title}
-          </Typography.Text>
+          </span>
         ))}
-      </Space>
+      </div>
     );
   }
   const summary = record.action_history?.[record.action_history.length - 1]?.result_summary;
-  return <Typography.Text type="secondary">{summary ?? '暂无结果'}</Typography.Text>;
+  return <span className="text-gray-500 text-xs">{summary ?? '暂无结果'}</span>;
 }
 
 function hasRepairAction(record: RepairTaskRecord, action: string) {
@@ -637,15 +528,15 @@ function hasCandidateAction(record: RepairTaskRecord, action: string) {
 
 function RepairOwner({ record, onAssign }: { record: RepairTaskRecord; onAssign: () => void }) {
   return (
-    <Space direction="vertical" size={0}>
-      <Typography.Text>{record.owner || '未领取'}</Typography.Text>
-      {record.due_at ? <Typography.Text type={record.overdue ? 'danger' : 'secondary'}>{record.overdue ? '已逾期' : '截止'}：{record.due_at}</Typography.Text> : null}
-      {record.status !== 'resolved' ? (
-        <Button size="small" aria-label={`快速指派负责人：${record.title}`} onClick={onAssign}>
+    <div className="flex flex-col gap-0.5">
+      <span className="text-gray-900">{record.owner || '未领取'}</span>
+      {record.due_at && <span className={`text-xs ${record.overdue ? 'text-red-500' : 'text-gray-500'}`}>{record.overdue ? '已逾期' : '截止'}：{record.due_at}</span>}
+      {record.status !== 'resolved' && (
+        <Button variant="outline" size="sm" onClick={onAssign} className="mt-1 w-max px-2 py-0">
           指派
         </Button>
-      ) : null}
-    </Space>
+      )}
+    </div>
   );
 }
 
@@ -662,64 +553,96 @@ function RepairTaskTreeDrawer({
 }) {
   const summary = tree?.summary;
   const percent = Math.round((summary?.completion_rate ?? 0) * 100);
+  
   return (
-    <Drawer title="修复树进度" width={720} open={open} onClose={onClose}>
-      <Space direction="vertical" className="drawer-stack">
-        <Typography.Text type="secondary">
+    <Modal open={open} onCancel={onClose} title="修复任务分支树">
+      <div className="space-y-6 mt-4 max-h-[80vh] overflow-y-auto">
+        <p className="text-sm text-gray-500">
           父任务：{tree?.repair_task.title ?? '加载中'}
-        </Typography.Text>
-        <Space wrap>
-          <Typography.Text strong>整体状态：{summary ? renderStatus(summary.overall_status) : '-'}</Typography.Text>
-          <Typography.Text>
-            已完成 {summary?.resolved_children ?? 0} / {summary?.total_children ?? 0}
-          </Typography.Text>
-          <Typography.Text type="secondary">阻塞子任务 {summary?.blocking_children.length ?? 0} 个</Typography.Text>
-          <Typography.Text type={(summary?.overdue_children ?? 0) > 0 ? 'danger' : 'secondary'}>
+        </p>
+        <div className="flex flex-wrap gap-4 items-center bg-gray-50 p-4 rounded-md border">
+          <span className="font-medium text-gray-900">整体状态：{summary ? renderStatus(summary.overall_status) : '-'}</span>
+          <span className="text-gray-700">已完成 {summary?.resolved_children ?? 0} / {summary?.total_children ?? 0}</span>
+          <span className="text-gray-500 text-sm">阻塞子任务 {summary?.blocking_children.length ?? 0} 个</span>
+          <span className={`text-sm ${(summary?.overdue_children ?? 0) > 0 ? 'text-red-600' : 'text-gray-500'}`}>
             逾期子任务 {summary?.overdue_children ?? 0} 个
-          </Typography.Text>
-        </Space>
-        <Progress percent={percent} status={percent === 100 ? 'success' : 'active'} />
+          </span>
+        </div>
+        
+        <div className="w-full bg-gray-200 rounded-full h-2.5">
+          <div 
+            className={`h-2.5 rounded-full ${percent === 100 ? 'bg-green-600' : 'bg-blue-600'}`} 
+            style={{ width: `${percent}%` }}
+          ></div>
+        </div>
 
-        <Typography.Title level={5}>下一步动作</Typography.Title>
-        <Table
-          size="small"
-          rowKey="repair_task_id"
-          loading={loading}
-          dataSource={summary?.next_actions ?? []}
-          pagination={false}
-          columns={[
-            { title: '子任务', dataIndex: 'title' },
-            { title: '状态', dataIndex: 'status', width: 110, render: renderStatus },
-            { title: '负责人', dataIndex: 'owner', width: 120, render: (value) => value || '未领取' },
-            { title: '截止时间', dataIndex: 'due_at', width: 210, render: (value, record) => value ? <Typography.Text type={record.overdue ? 'danger' : 'secondary'}>{value}</Typography.Text> : '-' },
-            { title: '推荐动作', dataIndex: 'recommended_action', width: 180 },
-            {
-              title: '入口',
-              dataIndex: 'target_url',
-              width: 120,
-              render: (value: string | null) => (value ? <Button size="small" href={value}>打开</Button> : '-'),
-            },
-          ]}
-        />
+        <div>
+          <h5 className="font-medium text-gray-900 mb-2">下一步动作</h5>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 border">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">子任务</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">负责人</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">截止时间</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">推荐动作</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">入口</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {loading ? (
+                  <tr><td colSpan={6} className="px-4 py-4 text-center text-sm text-gray-500">加载中...</td></tr>
+                ) : (summary?.next_actions ?? []).map(action => (
+                  <tr key={action.repair_task_id}>
+                    <td className="px-4 py-2 text-sm text-gray-900">{action.title}</td>
+                    <td className="px-4 py-2 text-sm">{renderStatus(action.status)}</td>
+                    <td className="px-4 py-2 text-sm text-gray-600">{action.owner || '未领取'}</td>
+                    <td className="px-4 py-2 text-sm">{action.due_at ? <span className={action.overdue ? 'text-red-500' : 'text-gray-500'}>{action.due_at}</span> : '-'}</td>
+                    <td className="px-4 py-2 text-sm text-gray-600">{action.recommended_action}</td>
+                    <td className="px-4 py-2 text-sm">
+                      {action.target_url ? <a href={action.target_url} className="text-blue-600 hover:underline">打开</a> : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-        <Typography.Title level={5}>子任务明细</Typography.Title>
-        <Table
-          size="small"
-          rowKey="repair_task_id"
-          loading={loading}
-          dataSource={tree?.children ?? []}
-          pagination={false}
-          columns={[
-            { title: '标题', dataIndex: 'title' },
-            { title: '状态', dataIndex: 'status', width: 110, render: renderStatus },
-            { title: '根因', dataIndex: 'cause_type', width: 140, render: renderCauseType },
-            { title: '推荐动作', dataIndex: 'recommended_action', width: 180, render: (value) => value || '-' },
-            { title: '负责人', dataIndex: 'owner', width: 120, render: (value) => value || '未领取' },
-            { title: '截止时间', dataIndex: 'due_at', width: 210, render: (value, record) => value ? <Typography.Text type={record.overdue ? 'danger' : 'secondary'}>{value}</Typography.Text> : '-' },
-          ]}
-        />
-      </Space>
-    </Drawer>
+        <div>
+          <h5 className="font-medium text-gray-900 mb-2">子任务明细</h5>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 border">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">标题</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">根因</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">推荐动作</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">负责人</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">截止时间</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {loading ? (
+                  <tr><td colSpan={6} className="px-4 py-4 text-center text-sm text-gray-500">加载中...</td></tr>
+                ) : (tree?.children ?? []).map(child => (
+                  <tr key={child.repair_task_id}>
+                    <td className="px-4 py-2 text-sm text-gray-900">{child.title}</td>
+                    <td className="px-4 py-2 text-sm">{renderStatus(child.status)}</td>
+                    <td className="px-4 py-2 text-sm text-gray-600">{renderCauseType(child.cause_type)}</td>
+                    <td className="px-4 py-2 text-sm text-gray-600">{child.recommended_action || '-'}</td>
+                    <td className="px-4 py-2 text-sm text-gray-600">{child.owner || '未领取'}</td>
+                    <td className="px-4 py-2 text-sm">{child.due_at ? <span className={child.overdue ? 'text-red-500' : 'text-gray-500'}>{child.due_at}</span> : '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

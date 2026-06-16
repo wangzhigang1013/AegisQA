@@ -1,5 +1,5 @@
-import { Button, Typography } from 'antd';
 import type { ReactNode } from 'react';
+import { Button } from './ui/Button';
 
 type ThemeColor = 'blue' | 'purple' | 'teal' | 'emerald' | 'orange' | 'slate';
 
@@ -25,7 +25,7 @@ export function PageHeader({ eyebrow, title, description, primaryAction, themeCo
   const theme = themeGradients[themeColor];
   
   return (
-    <div className={`bg-gradient-to-br ${theme.bg} rounded-3xl shadow-2xl p-8 mb-8 relative overflow-hidden`}>
+    <div className={`bg-gradient-to-br ${theme.bg} rounded-3xl shadow-[0_20px_40px_-15px_rgba(0,0,0,0.3)] p-8 mb-8 relative overflow-hidden`}>
       {/* 动态光晕 */}
       <div className={`absolute -top-32 -right-32 w-80 h-80 ${theme.glow1} rounded-full blur-3xl pointer-events-none`}></div>
       <div className={`absolute -bottom-24 -left-24 w-64 h-64 ${theme.glow2} rounded-full blur-3xl pointer-events-none`}></div>
@@ -36,26 +36,18 @@ export function PageHeader({ eyebrow, title, description, primaryAction, themeCo
             {icon || <div className="w-8 h-8 flex items-center justify-center text-2xl font-bold opacity-80">{title.charAt(0)}</div>}
           </div>
           <div>
-            <Typography.Text className={`text-xs font-bold uppercase tracking-wider mb-1 block ${theme.text}`}>{eyebrow}</Typography.Text>
-            <Typography.Title level={2} className="m-0 text-white font-bold tracking-tight mb-2" style={{ color: 'white' }}>{title}</Typography.Title>
-            <Typography.Text className="text-slate-300 text-sm leading-relaxed block">{description}</Typography.Text>
+            <span className={`text-xs font-bold uppercase tracking-wider mb-1 block ${theme.text}`}>{eyebrow}</span>
+            <h2 className="m-0 text-white font-bold tracking-tight mb-2 text-3xl">{title}</h2>
+            <p className="text-slate-300 text-sm leading-relaxed block m-0">{description}</p>
           </div>
         </div>
         
         {primaryAction && (
-          <div className="flex-shrink-0 w-full md:w-auto mt-4 md:mt-0">
+          <div className="flex-shrink-0 w-full md:w-auto mt-4 md:mt-0 flex gap-3">
              {primaryAction}
           </div>
         )}
       </div>
     </div>
-  );
-}
-
-export function HeaderButton({ children, ...props }: Parameters<typeof Button>[0]) {
-  return (
-    <Button type="primary" size="large" {...props}>
-      {children}
-    </Button>
   );
 }

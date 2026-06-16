@@ -1,22 +1,51 @@
-import { Card, Descriptions, Progress, Space, Tag } from 'antd';
-
+import { Card } from '../../components/ui/Card';
 import type { TaskRecord } from '../../types';
 
 export function TaskSnapshotPanel({ task }: { task: TaskRecord }) {
   return (
-    <Card size="small" title="任务快照">
-      <Space direction="vertical" className="full-width-control">
-        <Descriptions bordered column={1} size="small">
-          <Descriptions.Item label="数据源">{task.dataset_name} v{task.dataset_version}</Descriptions.Item>
-          <Descriptions.Item label="Workflow">{task.workflow_name}</Descriptions.Item>
-          <Descriptions.Item label="Run">{task.run_id}</Descriptions.Item>
-          <Descriptions.Item label="当前 Attempt">{task.current_attempt ?? 1}</Descriptions.Item>
-          <Descriptions.Item label="状态"><Tag>{task.status}</Tag></Descriptions.Item>
-          <Descriptions.Item label="Badcase">{task.badcase_count}</Descriptions.Item>
-          <Descriptions.Item label="执行参数">{formatExecutionConfig(task)}</Descriptions.Item>
-        </Descriptions>
-        <Progress percent={taskProgress(task)} />
-      </Space>
+    <Card title="任务快照">
+      <div className="space-y-4">
+        <div className="border border-gray-200 rounded-md overflow-hidden">
+          <dl className="divide-y divide-gray-200 text-sm">
+            <div className="flex bg-gray-50">
+              <dt className="w-1/3 px-4 py-2 font-medium text-gray-500">数据源</dt>
+              <dd className="w-2/3 px-4 py-2">{task.dataset_name} v{task.dataset_version}</dd>
+            </div>
+            <div className="flex bg-white">
+              <dt className="w-1/3 px-4 py-2 font-medium text-gray-500">Workflow</dt>
+              <dd className="w-2/3 px-4 py-2">{task.workflow_name}</dd>
+            </div>
+            <div className="flex bg-gray-50">
+              <dt className="w-1/3 px-4 py-2 font-medium text-gray-500">Run</dt>
+              <dd className="w-2/3 px-4 py-2">{task.run_id}</dd>
+            </div>
+            <div className="flex bg-white">
+              <dt className="w-1/3 px-4 py-2 font-medium text-gray-500">当前 Attempt</dt>
+              <dd className="w-2/3 px-4 py-2">{task.current_attempt ?? 1}</dd>
+            </div>
+            <div className="flex bg-gray-50">
+              <dt className="w-1/3 px-4 py-2 font-medium text-gray-500">状态</dt>
+              <dd className="w-2/3 px-4 py-2"><span className="inline-block px-2 py-0.5 bg-gray-100 border border-gray-200 rounded text-xs">{task.status}</span></dd>
+            </div>
+            <div className="flex bg-white">
+              <dt className="w-1/3 px-4 py-2 font-medium text-gray-500">Badcase</dt>
+              <dd className="w-2/3 px-4 py-2">{task.badcase_count}</dd>
+            </div>
+            <div className="flex bg-gray-50">
+              <dt className="w-1/3 px-4 py-2 font-medium text-gray-500">执行参数</dt>
+              <dd className="w-2/3 px-4 py-2">{formatExecutionConfig(task)}</dd>
+            </div>
+          </dl>
+        </div>
+        
+        <div className="w-full bg-gray-200 rounded-full h-2.5">
+          <div 
+            className="bg-blue-600 h-2.5 rounded-full" 
+            style={{ width: `${taskProgress(task)}%` }}
+            title={`进度：${taskProgress(task)}%`}
+          ></div>
+        </div>
+      </div>
     </Card>
   );
 }

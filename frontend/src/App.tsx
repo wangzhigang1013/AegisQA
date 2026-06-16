@@ -1,26 +1,25 @@
-import {
-  ApartmentOutlined,
-  AuditOutlined,
-  BarChartOutlined,
-  ControlOutlined,
-  DatabaseOutlined,
-  DeploymentUnitOutlined,
-  ExperimentOutlined,
-  FileSearchOutlined,
-  PlayCircleOutlined,
-  SafetyCertificateOutlined,
-  ToolOutlined,
-} from '@ant-design/icons';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ConfigProvider, Layout, Menu, theme } from 'antd';
-import type { MenuProps } from 'antd';
 import { lazy, Suspense, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { 
+  BarChart3, 
+  Database, 
+  FlaskConical, 
+  GitMerge, 
+  PlayCircle,
+  FileBarChart,
+  Wrench,
+  ShieldCheck,
+  SearchCode,
+  ShieldAlert
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 import { ChunkErrorBoundary } from './components/ChunkErrorBoundary';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './i18n';
 
+// Pages
 const OverviewPage = lazy(() => import('./pages/OverviewPage').then(({ OverviewPage }) => ({ default: OverviewPage })));
 const DatasetsPage = lazy(() => import('./pages/DatasetsPage').then(({ DatasetsPage }) => ({ default: DatasetsPage })));
 const SkillsPage = lazy(() => import('./pages/SkillsPage').then(({ SkillsPage }) => ({ default: SkillsPage })));
@@ -50,26 +49,35 @@ function createAppQueryClient() {
   });
 }
 
-const navItems: MenuProps['items'] = [
-  { type: 'group', label: '工作台', key: 'grp-workspace', children: [
-    { key: '/', icon: <BarChartOutlined />, label: <NavLink to="/">概览</NavLink> },
-    { key: '/datasets', icon: <DatabaseOutlined />, label: <NavLink to="/datasets">数据集</NavLink> },
-    { key: '/skills', icon: <ExperimentOutlined />, label: <NavLink to="/skills">Skill 市场</NavLink> },
-    { key: '/workflows', icon: <ApartmentOutlined />, label: <NavLink to="/workflows">Workflow</NavLink> },
-  ]},
-  { type: 'group', label: '评测', key: 'grp-evaluation', children: [
-    { key: '/runs', icon: <PlayCircleOutlined />, label: <NavLink to="/runs">执行中心</NavLink> },
-    { key: '/reports', icon: <BarChartOutlined />, label: <NavLink to="/reports">报告中心</NavLink> },
-    { key: '/repair-tasks', icon: <ToolOutlined />, label: <NavLink to="/repair-tasks">修复任务</NavLink> },
-    { key: '/experiments', icon: <ExperimentOutlined />, label: <NavLink to="/experiments">实验中心</NavLink> },
-    { key: '/ci-gates', icon: <ControlOutlined />, label: <NavLink to="/ci-gates">CI Gate</NavLink> },
-  ]},
-  { type: 'group', label: '治理', key: 'grp-governance', children: [
-    { key: '/annotation-queue', icon: <FileSearchOutlined />, label: <NavLink to="/annotation-queue">人工审核</NavLink> },
-    { key: '/candidate-assets', icon: <FileSearchOutlined />, label: <NavLink to="/candidate-assets">候选资产</NavLink> },
-    { key: '/judge', icon: <AuditOutlined />, label: <NavLink to="/judge">Judge 审计</NavLink> },
-    { key: '/governance', icon: <SafetyCertificateOutlined />, label: <NavLink to="/governance">治理与审计</NavLink> },
-  ]},
+const navConfig = [
+  {
+    group: '工作台',
+    items: [
+      { key: '/', icon: BarChart3, label: '概览', to: '/' },
+      { key: '/datasets', icon: Database, label: '数据集', to: '/datasets' },
+      { key: '/skills', icon: FlaskConical, label: 'Skill 市场', to: '/skills' },
+      { key: '/workflows', icon: GitMerge, label: 'Workflow', to: '/workflows' },
+    ]
+  },
+  {
+    group: '评测',
+    items: [
+      { key: '/runs', icon: PlayCircle, label: '执行中心', to: '/runs' },
+      { key: '/reports', icon: FileBarChart, label: '报告中心', to: '/reports' },
+      { key: '/repair-tasks', icon: Wrench, label: '修复任务', to: '/repair-tasks' },
+      { key: '/experiments', icon: FlaskConical, label: '实验中心', to: '/experiments' },
+      { key: '/ci-gates', icon: ShieldCheck, label: 'CI Gate', to: '/ci-gates' },
+    ]
+  },
+  {
+    group: '治理',
+    items: [
+      { key: '/annotation-queue', icon: SearchCode, label: '人工审核', to: '/annotation-queue' },
+      { key: '/candidate-assets', icon: SearchCode, label: '候选资产', to: '/candidate-assets' },
+      { key: '/judge', icon: ShieldAlert, label: 'Judge 审计', to: '/judge' },
+      { key: '/governance', icon: ShieldCheck, label: '治理与审计', to: '/governance' },
+    ]
+  }
 ];
 
 export function AppShell() {
@@ -78,142 +86,115 @@ export function AppShell() {
   const [queryClient] = useState(createAppQueryClient);
 
   return (
-    <ConfigProvider
-      theme={{
-        algorithm: theme.defaultAlgorithm,
-        token: {
-          colorPrimary: '#4f46e5', // Indigo 600 高级靛蓝
-          colorSuccess: '#10b981',
-          colorWarning: '#f59e0b',
-          colorError: '#ef4444',
-          colorInfo: '#4f46e5',
-          borderRadius: 8,
-          borderRadiusLG: 16,
-          borderRadiusSM: 6,
-          fontFamily: '"Outfit", "Inter", "Segoe UI", "Microsoft YaHei", sans-serif',
-          fontSize: 14,
-          colorBgContainer: '#ffffff',
-          colorBgLayout: '#f8fafc', // 极简灰白
-          colorBgElevated: '#ffffff',
-          colorBorder: '#e2e8f0',
-          colorBorderSecondary: '#f1f5f9',
-          colorText: '#0f172a',
-          colorTextSecondary: '#475569',
-          colorTextTertiary: '#94a3b8',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
-          boxShadowSecondary: '0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.02)',
-          motion: import.meta.env.MODE === 'test' ? false : undefined,
-        },
-        components: {
-          Menu: {
-            itemBg: 'transparent',
-            subMenuItemBg: 'transparent',
-            itemSelectedBg: 'rgba(79, 70, 229, 0.1)',
-            itemHoverBg: 'rgba(79, 70, 229, 0.04)',
-            itemSelectedColor: '#4f46e5',
-            itemColor: '#64748b',
-            itemHoverColor: '#0f172a',
-            itemActiveBg: 'rgba(79, 70, 229, 0.08)',
-            groupTitleColor: '#94a3b8',
-            fontSize: 14,
-            itemHeight: 46,
-            itemMarginBlock: 4,
-            itemMarginInline: 12,
-            itemBorderRadius: 10,
-            iconSize: 18,
-          },
-          Card: {
-            headerBg: 'transparent',
-            paddingLG: 24,
-            borderRadiusLG: 20, // 更柔和的大圆角
-            boxShadow: '0 4px 24px -6px rgba(0, 0, 0, 0.04)', // 极其高级的微弥散阴影
-            colorBorderSecondary: 'transparent', // 消除突兀的卡片边框
-          },
-          Table: {
-            headerBg: 'rgba(248, 250, 252, 0.6)', // 极度微弱的表头底色，毛玻璃感
-            headerColor: '#64748b',
-            rowHoverBg: '#f8fafc',
-            borderColor: 'transparent', // 彻底取消数据表之间的生硬边框
-            cellPaddingBlock: 18, // 呼吸感拉满
-            cellPaddingInline: 24,
-            headerBorderRadius: 12,
-          },
-          Button: {
-            borderRadius: 12, // App 级大圆角
-            controlHeight: 38,
-            fontWeight: 600,
-            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.02)', // 按钮基础浮雕感
-            primaryShadow: '0 4px 14px 0 rgba(79, 70, 229, 0.39)', // 主按钮紫光发光阴影
-          },
-          Input: {
-            borderRadius: 12,
-            controlHeight: 40,
-            colorBorder: '#e2e8f0',
-            hoverBorderColor: '#818cf8',
-            activeBorderColor: '#4f46e5',
-          },
-          Select: {
-            borderRadius: 12,
-            controlHeight: 40,
-          },
-          Tag: {
-            borderRadiusSM: 100, // 强制变为 Pill 胶囊形态
-            lineHeight: 2,
-          },
-          Statistic: {
-            titleFontSize: 13,
-            contentFontSize: 32, // 数据指标更加磅礴
-          },
-        },
-      }}
-    >
-      <QueryClientProvider client={queryClient}>
-        <Layout className="app-shell">
-          <Layout.Sider className="app-sider" width={252}>
-            <div className="brand">
-              <DeploymentUnitOutlined />
-              <div>
-                <strong>AegisQA</strong>
-                <span>AI 评测治理平台</span>
+    <QueryClientProvider client={queryClient}>
+      <div className="flex min-h-screen bg-background text-foreground font-sans selection:bg-primary selection:text-primary-foreground">
+        {/* Sidebar */}
+        <aside className="fixed inset-y-0 left-0 z-50 w-64 border-r border-border bg-white flex flex-col hidden md:flex">
+          <div className="flex h-16 items-center px-6 border-b border-border/40">
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold tracking-tight text-sm leading-tight">AegisQA</span>
+                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">AI 治理平台</span>
               </div>
             </div>
-            <Menu className="app-menu" mode="inline" selectedKeys={[selectedKey]} items={navItems} />
-            <div className="sider-footer">
-              <span>v0.1.0 · Local</span>
-            </div>
-          </Layout.Sider>
-          <Layout className="app-main">
-            <Layout.Content className="app-content">
-              <ErrorBoundary>
-                <ChunkErrorBoundary>
-                  <Suspense fallback={<div className="route-loading" role="status">正在加载页面...</div>}>
-                    <Routes>
-                  <Route path="/" element={<OverviewPage />} />
-                  <Route path="/datasets" element={<DatasetsPage />} />
-                  <Route path="/skills" element={<SkillsPage />} />
-                  <Route path="/workflow" element={<WorkflowMarketPage />} />
-                  <Route path="/workflows" element={<WorkflowMarketPage />} />
-                  <Route path="/workflows/designer" element={<WorkflowDesignerPage />} />
-                  <Route path="/workflows/designer/:draftId" element={<WorkflowDesignerPage />} />
-                  <Route path="/runs" element={<RunsPage />} />
-                  <Route path="/tasks/:taskId/trace" element={<TraceFlowPage />} />
-                  <Route path="/tasks/:taskId/trace-tree" element={<TraceTreePage />} />
-                  <Route path="/reports" element={<ReportsPage />} />
-                  <Route path="/repair-tasks" element={<RepairTasksPage />} />
-                  <Route path="/experiments" element={<ExperimentsPage />} />
-                  <Route path="/ci-gates" element={<CIGatesPage />} />
-                  <Route path="/annotation-queue" element={<AnnotationQueuePage />} />
-                  <Route path="/candidate-assets" element={<CandidateAssetsPage />} />
-                  <Route path="/judge" element={<JudgeAuditPage />} />
-                  <Route path="/governance" element={<GovernancePage />} />
-                </Routes>
-                  </Suspense>
-                </ChunkErrorBoundary>
-              </ErrorBoundary>
-            </Layout.Content>
-          </Layout>
-        </Layout>
-      </QueryClientProvider>
-    </ConfigProvider>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 py-6 space-y-8 custom-scrollbar">
+            {navConfig.map((group, i) => (
+              <div key={i}>
+                <h4 className="mb-3 px-2 text-xs font-semibold text-muted-foreground uppercase tracking-widest">{group.group}</h4>
+                <nav className="space-y-1">
+                  {group.items.map((item) => {
+                    const isActive = selectedKey === item.key;
+                    const Icon = item.icon;
+                    return (
+                      <NavLink
+                        key={item.key}
+                        to={item.to}
+                        className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 ${
+                          isActive
+                            ? 'bg-primary/5 text-primary'
+                            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                        }`}
+                      >
+                        <Icon className={`h-4 w-4 ${isActive ? 'text-primary' : ''}`} />
+                        {item.label}
+                        {isActive && (
+                          <motion.div
+                            layoutId="active-nav"
+                            className="absolute left-0 w-1 h-6 bg-primary rounded-r-full"
+                            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                          />
+                        )}
+                      </NavLink>
+                    );
+                  })}
+                </nav>
+              </div>
+            ))}
+          </div>
+          <div className="p-4 border-t border-border/40">
+            <div className="text-xs text-muted-foreground text-center font-medium">v0.1.0 · Local</div>
+          </div>
+        </aside>
+
+        {/* Main Content */}
+        <main className="flex-1 ml-0 md:ml-64 flex flex-col min-w-0 bg-[#f8fafc]">
+          <div className="flex-1 px-8 py-8 md:px-12 md:py-10 mx-auto w-full max-w-[1600px]">
+            <ErrorBoundary>
+              <ChunkErrorBoundary>
+                <Suspense fallback={
+                  <div className="h-[400px] w-full flex items-center justify-center">
+                    <div className="flex flex-col items-center gap-4">
+                      <motion.div 
+                        animate={{ rotate: 360 }}
+                        transition={{ repeat: Infinity, ease: "linear", duration: 1 }}
+                        className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent"
+                      />
+                      <span className="text-sm font-medium text-muted-foreground animate-pulse">Initializing Interface...</span>
+                    </div>
+                  </div>
+                }>
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={location.pathname}
+                      initial={{ opacity: 0, y: 10, filter: 'blur(4px)' }}
+                      animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                      exit={{ opacity: 0, y: -10, filter: 'blur(4px)' }}
+                      transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+                      className="h-full"
+                    >
+                      <Routes location={location}>
+                        <Route path="/" element={<OverviewPage />} />
+                        <Route path="/datasets" element={<DatasetsPage />} />
+                        <Route path="/skills" element={<SkillsPage />} />
+                        <Route path="/workflow" element={<WorkflowMarketPage />} />
+                        <Route path="/workflows" element={<WorkflowMarketPage />} />
+                        <Route path="/workflows/designer" element={<WorkflowDesignerPage />} />
+                        <Route path="/workflows/designer/:draftId" element={<WorkflowDesignerPage />} />
+                        <Route path="/runs" element={<RunsPage />} />
+                        <Route path="/tasks/:taskId/trace" element={<TraceFlowPage />} />
+                        <Route path="/tasks/:taskId/trace-tree" element={<TraceTreePage />} />
+                        <Route path="/reports" element={<ReportsPage />} />
+                        <Route path="/repair-tasks" element={<RepairTasksPage />} />
+                        <Route path="/experiments" element={<ExperimentsPage />} />
+                        <Route path="/ci-gates" element={<CIGatesPage />} />
+                        <Route path="/annotation-queue" element={<AnnotationQueuePage />} />
+                        <Route path="/candidate-assets" element={<CandidateAssetsPage />} />
+                        <Route path="/judge" element={<JudgeAuditPage />} />
+                        <Route path="/governance" element={<GovernancePage />} />
+                      </Routes>
+                    </motion.div>
+                  </AnimatePresence>
+                </Suspense>
+              </ChunkErrorBoundary>
+            </ErrorBoundary>
+          </div>
+        </main>
+      </div>
+    </QueryClientProvider>
   );
 }

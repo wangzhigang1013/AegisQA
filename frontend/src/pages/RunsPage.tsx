@@ -1,22 +1,13 @@
-import { DownloadOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Download, PlayCircle, RefreshCw } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Alert,
-  Button,
-  Empty,
-  Input,
-  Progress,
-  Select,
-  Space,
-  Table,
-  Tag,
-} from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { api, formatApiError } from '../api/client';
 import { ActionToolbar, DataTableShell, PageSection } from '../components/LayoutPrimitives';
 import { PageHeader } from '../components/PageHeader';
+import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
 import type { DatasetVersion, TaskPreflightResult, TaskRecord } from '../types';
 import { TaskCreateWizard, type TaskCreateFormValues } from './task/TaskCreateWizard';
 import { TaskActionButton, TaskOperationsDrawer, type TaskAction } from './task/TaskOperationsDrawer';
@@ -56,6 +47,7 @@ export function RunsPage() {
   const tasks = tasksQuery.data?.items ?? [];
   const taskPagination = tasksQuery.data?.pagination;
   const hasActiveTask = tasks.some((task) => isLiveTaskStatus(task.status));
+  const totalPages = Math.ceil((taskPagination?.total_items ?? tasks.length) / taskPageSize);
 
   useEffect(() => {
     if (!hasActiveTask) return undefined;
@@ -148,108 +140,171 @@ export function RunsPage() {
   }
 
   return (
-    <section className="page-stack">
+    <section className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-6">
       <PageHeader
         eyebrow="任务执行"
         title="执行中心"
         description="所有执行都围绕任务展开：一批数据绑定一个 Workflow，生成 Run、Trace、Badcase 和任务报告。"
-        primaryAction={<Button type="primary" icon={<PlayCircleOutlined />} onClick={() => setCreateOpen(true)}>创建任务</Button>}
+        primaryAction={
+          <Button variant="default" onClick={() => setCreateOpen(true)} className="flex items-center gap-2">
+            <PlayCircle className="w-4 h-4" /> 创建任务
+          </Button>
+        }
       />
 
-      {notice ? <Alert type={notice.includes('失败') ? 'error' : 'info'} showIcon message={notice} closable onClose={() => setNotice(null)} /> : null}
+      {notice && (
+        <div className={`p-4 rounded-lg flex items-start gap-3 ${notice.includes('失败') ? 'bg-red-50 text-red-800 border border-red-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`}>
+          <div className="flex-1 text-sm font-medium">{notice}</div>
+          <button onClick={() => setNotice(null)} className="text-current opacity-70 hover:opacity-100">&times;</button>
+        </div>
+      )}
 
       <PageSection title="任务列表" testId="runs-task-table-section">
-        <ActionToolbar className="section-actions" testId="runs-filter-toolbar">
-          <Input.Search
-            allowClear
-            aria-label="搜索任务"
-            placeholder="搜索任务名 / 数据源 / Workflow"
-            className="wide-search"
-            value={taskSearch}
-            onChange={(event) => {
-              setTaskSearch(event.target.value);
-              setTaskPage(1);
-            }}
-            onSearch={(value) => {
-              setTaskSearch(value);
-              setTaskPage(1);
-            }}
-          />
-          <Select
-            allowClear
-            aria-label="任务状态筛选"
-            placeholder="全部状态"
-            className="status-filter"
-            value={taskStatusFilter}
-            onChange={(value) => {
-              setTaskStatusFilter(value);
-              setTaskPage(1);
-            }}
-            options={[
-              { value: 'queued', label: 'queued' },
-              { value: 'running', label: 'running' },
-              { value: 'completed', label: 'completed' },
-              { value: 'failed', label: 'failed' },
-              { value: 'canceled', label: 'canceled' },
-            ]}
-          />
+        <ActionToolbar className="flex justify-between items-center mb-4" testId="runs-filter-toolbar">
+          <div className="flex items-center gap-4 flex-wrap">
+            <Input
+              aria-label="搜索任务"
+              placeholder="搜索任务名 / 数据源 / Workflow"
+              className="w-80"
+              value={taskSearch}
+              onChange={(event) => {
+                setTaskSearch(event.target.value);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  setTaskPage(1);
+                }
+              }}
+            />
+            <select
+              aria-label="任务状态筛选"
+              value={taskStatusFilter || ''}
+              onChange={(e) => {
+                setTaskStatusFilter(e.target.value || undefined);
+                setTaskPage(1);
+              }}
+              className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none w-40"
+            >
+              <option value="">全部状态</option>
+              <option value="queued">queued</option>
+              <option value="running">running</option>
+              <option value="completed">completed</option>
+              <option value="failed">failed</option>
+              <option value="canceled">canceled</option>
+            </select>
+          </div>
         </ActionToolbar>
+        
         <DataTableShell testId="runs-task-table-shell">
-          <Table
-            className="runs-task-table"
-            rowKey="task_id"
-            loading={tasksQuery.isLoading}
-            scroll={{ x: 1580 }}
-            pagination={{
-              current: taskPagination?.page ?? taskPage,
-              pageSize: taskPagination?.page_size ?? taskPageSize,
-              total: taskPagination?.total_items ?? tasks.length,
-              showSizeChanger: false,
-              onChange: (page) => setTaskPage(page),
-            }}
-            dataSource={tasks}
-            locale={{ emptyText: <Empty description="暂无任务。请先上传数据、发布 Workflow，然后创建任务。" /> }}
-            columns={[
-              {
-                title: '任务名',
-                dataIndex: 'name',
-                width: 220,
-                render: (value, record) => (
-                  <Button type="link" onClick={() => setDetailTask(record)}>
-                    {value}
-                  </Button>
-                ),
-              },
-              { title: '数据源', dataIndex: 'dataset_name', width: 180 },
-              { title: 'Workflow', dataIndex: 'workflow_name', width: 220 },
-              { title: '总数据量', dataIndex: 'total_items', width: 100 },
-              {
-                title: '已执行',
-                width: 160,
-                render: (_, record) => (
-                  <Space direction="vertical" size={2} className="task-progress-cell">
-                    <span>{record.completed_items} / {record.total_items}</span>
-                    <Progress percent={taskProgress(record)} size="small" showInfo={false} />
-                  </Space>
-                ),
-              },
-              { title: '失败数', dataIndex: 'failed_items', width: 90 },
-              { title: '通过率', dataIndex: 'pass_rate', width: 90, render: (value) => `${Math.round(Number(value ?? 0) * 100)}%` },
-              { title: '状态', dataIndex: 'status', width: 110, render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
-              { title: '创建时间', dataIndex: 'created_at', width: 190, render: (value) => formatTime(value) },
-              {
-                title: '操作',
-                width: 220,
-                render: (_, record) => (
-                  <Space>
-                    <TaskActionButton task={record} action="execute" loading={taskActionMutation.isPending} onClick={triggerTaskAction} icon={<PlayCircleOutlined />} label="执行" />
-                    <TaskActionButton task={record} action="retry" loading={taskActionMutation.isPending} onClick={triggerTaskAction} icon={<ReloadOutlined />} label="重试失败" />
-                    <Button icon={<DownloadOutlined />} onClick={() => setDetailTask(record)}>详情</Button>
-                  </Space>
-                ),
-              },
-            ]}
-          />
+          <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white shadow-sm">
+            <table className="w-full text-left text-sm whitespace-nowrap min-w-[1200px]">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-6 py-4 font-semibold text-slate-700">任务名</th>
+                  <th className="px-6 py-4 font-semibold text-slate-700">数据源</th>
+                  <th className="px-6 py-4 font-semibold text-slate-700">Workflow</th>
+                  <th className="px-6 py-4 font-semibold text-slate-700">总数据量</th>
+                  <th className="px-6 py-4 font-semibold text-slate-700 w-48">已执行</th>
+                  <th className="px-6 py-4 font-semibold text-slate-700">失败数</th>
+                  <th className="px-6 py-4 font-semibold text-slate-700">通过率</th>
+                  <th className="px-6 py-4 font-semibold text-slate-700">状态</th>
+                  <th className="px-6 py-4 font-semibold text-slate-700">创建时间</th>
+                  <th className="px-6 py-4 font-semibold text-slate-700 text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {tasksQuery.isLoading ? (
+                  <tr>
+                    <td colSpan={10} className="px-6 py-12 text-center text-slate-500">
+                      加载中...
+                    </td>
+                  </tr>
+                ) : tasks.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="px-6 py-12 text-center text-slate-500 bg-slate-50">
+                      暂无任务。请先上传数据、发布 Workflow，然后创建任务。
+                    </td>
+                  </tr>
+                ) : (
+                  tasks.map((record) => {
+                    const percent = taskProgress(record);
+                    return (
+                      <tr key={record.task_id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-3">
+                          <button 
+                            className="text-indigo-600 hover:text-indigo-800 font-medium hover:underline text-left" 
+                            onClick={() => setDetailTask(record)}
+                          >
+                            {record.name}
+                          </button>
+                        </td>
+                        <td className="px-6 py-3 text-slate-600">{record.dataset_name}</td>
+                        <td className="px-6 py-3 text-slate-600">{record.workflow_name}</td>
+                        <td className="px-6 py-3 text-slate-600">{record.total_items}</td>
+                        <td className="px-6 py-3">
+                          <div className="flex flex-col gap-1.5 w-full">
+                            <span className="text-xs text-slate-500">{record.completed_items} / {record.total_items}</span>
+                            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                              <div 
+                                className="bg-indigo-500 h-full rounded-full transition-all duration-300" 
+                                style={{ width: `${percent}%` }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-3 text-slate-600">{record.failed_items}</td>
+                        <td className="px-6 py-3 text-slate-600">{Math.round(Number(record.pass_rate ?? 0) * 100)}%</td>
+                        <td className="px-6 py-3">
+                          <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${statusClasses(record.status)}`}>
+                            {record.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-3 text-slate-500 text-xs">{formatTime(record.created_at)}</td>
+                        <td className="px-6 py-3 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <TaskActionButton task={record} action="execute" loading={taskActionMutation.isPending} onClick={triggerTaskAction} icon={<PlayCircle className="w-3.5 h-3.5" />} label="执行" />
+                            <TaskActionButton task={record} action="retry" loading={taskActionMutation.isPending} onClick={triggerTaskAction} icon={<RefreshCw className="w-3.5 h-3.5" />} label="重试失败" />
+                            <Button variant="outline" size="sm" className="h-8 text-xs flex items-center gap-1.5" onClick={() => setDetailTask(record)}>
+                              <Download className="w-3.5 h-3.5" /> 详情
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {!tasksQuery.isLoading && totalPages > 1 && (
+            <div className="flex justify-between items-center mt-4">
+              <span className="text-sm text-slate-500">
+                共 {taskPagination?.total_items ?? tasks.length} 条记录
+              </span>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  disabled={taskPage <= 1}
+                  onClick={() => setTaskPage(taskPage - 1)}
+                >
+                  上一页
+                </Button>
+                <div className="text-sm text-slate-600 px-2 font-medium">
+                  {taskPage} / {totalPages}
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  disabled={taskPage >= totalPages}
+                  onClick={() => setTaskPage(taskPage + 1)}
+                >
+                  下一页
+                </Button>
+              </div>
+            </div>
+          )}
         </DataTableShell>
       </PageSection>
 
@@ -285,12 +340,12 @@ export function RunsPage() {
   );
 }
 
-function statusColor(status: string): string {
-  if (status === 'completed') return 'green';
-  if (status === 'failed' || status === 'cancelled') return 'red';
-  if (status === 'running') return 'blue';
-  if (status === 'paused') return 'orange';
-  return 'default';
+function statusClasses(status: string): string {
+  if (status === 'completed') return 'bg-emerald-100 text-emerald-700';
+  if (status === 'failed' || status === 'cancelled') return 'bg-red-100 text-red-700';
+  if (status === 'running') return 'bg-blue-100 text-blue-700';
+  if (status === 'paused') return 'bg-amber-100 text-amber-700';
+  return 'bg-slate-100 text-slate-700';
 }
 
 function isLiveTaskStatus(status: string): boolean {

@@ -1,4 +1,4 @@
-import { BranchesOutlined } from '@ant-design/icons';
+import { GitBranch } from 'lucide-react';
 import { type NodeProps } from '@xyflow/react';
 import { memo } from 'react';
 
@@ -7,7 +7,7 @@ import { BaseNode, type BaseNodeData } from './BaseNode';
 export const BranchNode = memo((props: NodeProps) => {
   const nodeData: BaseNodeData = {
     ...(props.data as unknown as BaseNodeData),
-    icon: <BranchesOutlined />,
+    icon: <GitBranch className="w-4 h-4" />,
     color: '#f59e0b',
     gradient: 'linear-gradient(135deg, #f59e0b, #fbbf24)',
     inputs: [

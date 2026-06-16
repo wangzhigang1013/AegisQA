@@ -1,5 +1,5 @@
-import { ArrowRightOutlined, CheckCircleOutlined, CloseOutlined, DatabaseOutlined, ExperimentOutlined, FileDoneOutlined, PlayCircleOutlined } from '@ant-design/icons';
-import { Button, Card, Modal, Space, Steps, Typography } from 'antd';
+import { ArrowRight as ArrowRightOutlined, CheckCircle as CheckCircleOutlined, X as CloseOutlined, Database as DatabaseOutlined, FlaskConical as ExperimentOutlined, FileCheck as FileDoneOutlined, PlayCircle as PlayCircleOutlined } from 'lucide-react';
+import { Button, Card, Modal, Space, Steps, Typography } from './AntdShims';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 

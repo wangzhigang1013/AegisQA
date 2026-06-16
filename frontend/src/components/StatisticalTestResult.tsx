@@ -1,4 +1,4 @@
-import { Badge, Card, Descriptions, Progress, Tag, Typography } from 'antd';
+import { Badge, Card, Descriptions, Progress, Tag, Typography } from './AntdShims';
 import type { ReactNode } from 'react';
 
 const { Text } = Typography;
