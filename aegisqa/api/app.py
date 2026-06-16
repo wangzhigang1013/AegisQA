@@ -892,6 +892,8 @@ def _install_skill_package(
     except zipfile.BadZipFile as exc:
         raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包必须是合法 zip 文件。") from exc
 
+    warnings: list[dict[str, Any]] = list(package_security.get("warnings", []))
+
     package_dir = _detect_package_content_root(package_dir)
     manifest_path = _first_existing(package_dir, ["skill.yaml", "skill.yml", "skill.json"])
     skill_md_path = package_dir / "SKILL.md"

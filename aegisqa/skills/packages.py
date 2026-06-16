@@ -584,7 +584,11 @@ except TypeError:
 
 if result is None:
     result = {}
-if "output" not in result:
+if not isinstance(result, dict):
+    result = {"output": {"value": result}, "metrics": {}, "artifacts": {}, "logs": []}
+elif "output" not in result:
     result = {"output": result, "metrics": {}, "artifacts": {}, "logs": []}
+elif not isinstance(result.get("output"), dict):
+    result["output"] = {"value": result["output"]}
 print(json.dumps(result, ensure_ascii=False))
 """
