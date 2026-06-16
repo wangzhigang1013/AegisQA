@@ -72,22 +72,52 @@ class DAGWorkflowExecutor:
     def execute_row(self, workflow: DAGWorkflow, row: dict[str, Any]) -> dict[str, Any]:
         context: dict[str, Any] = {"row": row, "context": {}, "metrics": {}, "artifacts": {}, "errors": [], "steps": {}}
         steps_by_id = {step.step_id: step for step in workflow.steps}
+        failed_steps: set[str] = set()  # 追踪失败的步骤 ID
+        # 构建上游依赖映射: step_id -> set of upstream step_ids
+        upstream_map: dict[str, set[str]] = {}
+        for step in workflow.steps:
+            upstream = set()
+            for src_path in step.input_mapping.values():
+                # input_mapping 值格式如 "row.xxx" 或 "step_id.field"
+                parts = src_path.split(".")
+                if len(parts) >= 2 and parts[0] not in ("row", "context", "metrics", "artifacts"):
+                    upstream.add(parts[0])
+            upstream_map[step.step_id] = upstream
+
         for level_index, level in enumerate(workflow.execution_levels()):
             level_snapshot = deepcopy(context)
             with ThreadPoolExecutor(max_workers=min(self.max_workers, max(1, len(level)))) as pool:
-                futures = [pool.submit(self._run_step, steps_by_id[step_id], level_snapshot, level_index) for step_id in level]
-                for future in futures:
-                    step_id, result = future.result()
+                futures = {}
+                for step_id in level:
+                    # Fail-fast: 如果上游步骤已失败，跳过当前步骤
+                    upstream_deps = upstream_map.get(step_id, set())
+                    if upstream_deps & failed_steps:
+                        failed_upstream = upstream_deps & failed_steps
+                        context["steps"][step_id] = {
+                            "status": "skipped",
+                            "level": level_index,
+                            "writes": {},
+                            "reason": f"upstream_failed: {', '.join(sorted(failed_upstream))}",
+                        }
+                        failed_steps.add(step_id)
+                        context["errors"].append({
+                            "type": "UpstreamFailed",
+                            "message": f"步骤 '{step_id}' 因上游步骤失败而跳过: {', '.join(sorted(failed_upstream))}",
+                        })
+                        continue
+                    futures[step_id] = pool.submit(self._run_step, steps_by_id[step_id], level_snapshot, level_index)
+
+                for step_id, future in futures.items():
+                    _, result = future.result()
                     context["steps"][step_id] = result
                     if result["status"] == "succeeded":
-                        # DAG 执行器同样暴露 `step_id.field` 标准输出命名空间，
-                        # 让下游节点不必依赖手写 output_mapping 别名。
                         context[step_id] = result.get("output", {})
                         for target_path, value in result["writes"].items():
                             set_by_path(context, target_path, value)
                         context["metrics"].update(result.get("metrics", {}))
                     elif result["status"] == "failed":
                         context["errors"].append(result["error"])
+                        failed_steps.add(step_id)
         return context
 
     def _run_step(self, step: DAGWorkflowStep, context: dict[str, Any], level_index: int) -> tuple[str, dict[str, Any]]:

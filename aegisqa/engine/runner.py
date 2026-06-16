@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
 from aegisqa.core.time import now_beijing_str, now_beijing
 from typing import Any, Callable
@@ -14,6 +15,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from aegisqa.core.errors import AegisQAError
 from aegisqa.core.mapper import MappingPathError, TypeMismatchError, resolve_input_mapping, set_by_path, validate_json_schema
 from aegisqa.core.security import redact_secrets
 from aegisqa.datasets.service import DatasetRow, DatasetService
@@ -23,6 +25,10 @@ from aegisqa.skills.registry import SkillRegistry
 from aegisqa.storage.json_store import JsonStore
 from aegisqa.workflows.dag import DAGWorkflow, DAGWorkflowExecutor, DAGWorkflowStep
 from aegisqa.workflows.models import WorkflowVersion
+
+# 单步超时默认值 (秒)
+_DEFAULT_STEP_TIMEOUT_SECONDS = 120
+_STEP_TIMEOUT_ENV = "AEGISQA_STEP_TIMEOUT_SECONDS"
 
 logger = logging.getLogger(__name__)
 
@@ -569,7 +575,8 @@ class WorkflowRunner:
                     logger.debug("Step %s cache hit (key=%s)", workflow_step.step_id, cache_key[:16])
                 else:
                     step.called_skill = True
-                    result, latency_ms = skill.execute(inputs, resolved_parameters.config)
+                    step_timeout = _step_timeout_seconds(run)
+                    result, latency_ms = _execute_with_timeout(skill, inputs, resolved_parameters.config, step_timeout)
                     output = result.output
                     metrics = result.metrics
                     logs = result.logs
@@ -848,6 +855,33 @@ class WorkflowRunner:
             "ttl_seconds": 3600,
             "current_size": len(self._cache),
         }
+
+
+def _step_timeout_seconds(run: RunRecord) -> int:
+    """从环境变量或 task config 读取单步超时。"""
+    task_config = run.snapshot.get("task_config_snapshot", {}) if isinstance(run.snapshot, dict) else {}
+    configured = task_config.get("step_timeout_seconds")
+    if configured is not None:
+        return int(configured)
+    env_val = os.environ.get(_STEP_TIMEOUT_ENV)
+    if env_val:
+        return int(env_val)
+    return _DEFAULT_STEP_TIMEOUT_SECONDS
+
+
+def _execute_with_timeout(skill: Any, inputs: dict, config: dict, timeout_seconds: int):
+    """带超时的 Skill 执行。"""
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(skill.execute, inputs, config)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except FutureTimeoutError:
+            raise AegisQAError(
+                "SKILL_STEP_TIMEOUT",
+                f"Skill '{skill.manifest.skill_id}' 执行超时 ({timeout_seconds}s)。",
+                status_code=504,
+                details={"skill_id": skill.manifest.skill_id, "timeout_seconds": timeout_seconds},
+            )
 
 
 def _now() -> str:

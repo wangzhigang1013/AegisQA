@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import math
 import os
+import threading
+import time
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Generator
@@ -158,6 +160,9 @@ class ModelGateway:
             "timeout_seconds": self.config.timeout_seconds,
         }
 
+    _MAX_SAME_MODEL_RETRIES = 2  # 同模型最多重试 2 次 (共 3 次尝试)
+    _MAX_RATE_LIMIT_RETRIES = 3  # 429 最多重试 3 次
+
     def generate(
         self,
         *,
@@ -168,25 +173,43 @@ class ModelGateway:
         max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> ModelResponse:
-        """生成文本，支持 Fallback 链。"""
+        """生成文本，支持 Fallback 链 + 同模型重试 + 429 限流重试。"""
         selected_model = model or self.config.default_model
         models_to_try = [selected_model] + self.config.fallback_models
         last_error = None
 
         for try_model in models_to_try:
-            try:
-                return self._generate_with_provider(
-                    prompt=prompt, messages=messages, model=try_model,
-                    temperature=temperature, max_tokens=max_tokens,
-                    response_format=response_format,
-                )
-            except AegisQAError as exc:
-                last_error = exc
-                # 只有网络错误和 5xx 才尝试 fallback
-                status_code = exc.details.get("status_code", 0)
-                if isinstance(status_code, int) and status_code < 500:
-                    raise
-                continue
+            # 同模型重试循环
+            for attempt in range(self._MAX_SAME_MODEL_RETRIES + 1):
+                try:
+                    return self._generate_with_provider(
+                        prompt=prompt, messages=messages, model=try_model,
+                        temperature=temperature, max_tokens=max_tokens,
+                        response_format=response_format,
+                    )
+                except AegisQAError as exc:
+                    last_error = exc
+                    status_code = exc.details.get("status_code", 0)
+
+                    # 429 限流: 在当前模型内重试，不计入 fallback
+                    if status_code == 429:
+                        retry_after = exc.details.get("retry_after")
+                        wait = min(int(retry_after) if retry_after else 2 ** attempt, 30)
+                        time.sleep(wait)
+                        # 429 重试不消耗 attempt 次数，继续循环
+                        continue
+
+                    # 4xx (非429): 直接失败，不重试不 fallback
+                    if isinstance(status_code, int) and 400 <= status_code < 500:
+                        raise
+
+                    # 5xx/网络错误: 如果还有重试次数，继续
+                    if attempt < self._MAX_SAME_MODEL_RETRIES:
+                        time.sleep(2 ** attempt)  # 1s, 2s
+                        continue
+
+                    # 重试用尽，break 到下一个模型
+                    break
 
         # 所有模型都失败
         raise last_error or AegisQAError(
@@ -230,15 +253,17 @@ class ModelGateway:
             details={"provider": self.config.provider, "supported": ["mock", "openai_compatible", "anthropic"]},
         )
 
+    _key_lock = threading.Lock()
+
     def _rotate_api_key(self) -> None:
-        """轮询 API Key（round-robin）。"""
+        """轮询 API Key（round-robin），线程安全。"""
         if not self.config.api_keys:
             return
-        # 使用模块级变量追踪当前索引
-        global _api_key_rotation_index
         keys = self.config.api_keys
-        _api_key_rotation_index = (_api_key_rotation_index + 1) % len(keys)
-        self.config.api_key = keys[_api_key_rotation_index]
+        with self._key_lock:
+            global _api_key_rotation_index
+            _api_key_rotation_index = (_api_key_rotation_index + 1) % len(keys)
+            self.config.api_key = keys[_api_key_rotation_index]
 
     def generate_stream(
         self,
@@ -491,14 +516,17 @@ class ModelGateway:
         )
         try:
             with urlopen(request, timeout=self.config.timeout_seconds) as response:  # noqa: S310 - endpoint 来自受控部署配置。
-                data = json.loads(response.read().decode("utf-8"))
+                raw_body = response.read().decode("utf-8")
+                data = json.loads(raw_body)
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
+            # 429 限流: 提取 Retry-After header
+            retry_after = exc.headers.get("Retry-After") if hasattr(exc, "headers") else None
             raise AegisQAError(
                 "MODEL_GATEWAY_HTTP_ERROR",
                 f"模型网关请求失败：HTTP {exc.code}",
-                status_code=502,
-                details={"status_code": exc.code, "body": str(redact_secrets(body))[:1000]},
+                status_code=exc.code if exc.code >= 400 else 502,
+                details={"status_code": exc.code, "body": str(redact_secrets(body))[:1000], "retry_after": retry_after},
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
             raise AegisQAError(
@@ -506,6 +534,13 @@ class ModelGateway:
                 "模型网关请求网络失败或超时。",
                 status_code=502,
                 details={"error": str(redact_secrets(str(exc))), "timeout_seconds": self.config.timeout_seconds},
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise AegisQAError(
+                "MODEL_GATEWAY_INVALID_RESPONSE",
+                f"模型返回了非 JSON 响应：{str(exc)[:200]}",
+                status_code=502,
+                details={"raw_body": raw_body[:500] if 'raw_body' in dir() else ""},
             ) from exc
         choice = (data.get("choices") or [{}])[0]
         message = choice.get("message") or {}
@@ -585,14 +620,16 @@ class ModelGateway:
         )
         try:
             with urlopen(request, timeout=self.config.timeout_seconds) as response:  # noqa: S310
-                data = json.loads(response.read().decode("utf-8"))
+                raw_body = response.read().decode("utf-8")
+                data = json.loads(raw_body)
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
+            retry_after = exc.headers.get("Retry-After") if hasattr(exc, "headers") else None
             raise AegisQAError(
                 "MODEL_GATEWAY_HTTP_ERROR",
                 f"Anthropic API 请求失败：HTTP {exc.code}",
-                status_code=502,
-                details={"status_code": exc.code, "body": body[:1000]},
+                status_code=exc.code if exc.code >= 400 else 502,
+                details={"status_code": exc.code, "body": body[:1000], "retry_after": retry_after},
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
             raise AegisQAError(
@@ -600,6 +637,13 @@ class ModelGateway:
                 "Anthropic API 请求网络失败或超时。",
                 status_code=502,
                 details={"error": str(exc), "timeout_seconds": self.config.timeout_seconds},
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise AegisQAError(
+                "MODEL_GATEWAY_INVALID_RESPONSE",
+                f"Anthropic 返回了非 JSON 响应：{str(exc)[:200]}",
+                status_code=502,
+                details={"raw_body": raw_body[:500] if 'raw_body' in dir() else ""},
             ) from exc
 
         # 解析响应

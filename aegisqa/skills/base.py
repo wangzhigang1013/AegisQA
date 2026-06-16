@@ -74,19 +74,37 @@ class BaseSkill(ABC):
         validate_json_schema(result.output, self.manifest.output_schema)
         return result, latency_ms
 
+    _CONTRACT_TEST_MAX_RETRIES = 2  # 最多重试 2 次 (共 3 次尝试)
+
     def contract_test(self) -> dict[str, Any]:
-        """运行 Skill 合约测试。
+        """运行 Skill 合约测试，支持重试。
 
         合约测试使用 manifest 中的示例输入和配置，验证 schema 与返回结构是否一致。
+        对超时/网络/5xx 错误自动重试，参数错误等不重试。
         """
+        last_exc = None
+        for attempt in range(self._CONTRACT_TEST_MAX_RETRIES + 1):
+            try:
+                result, latency_ms = self.execute(self.manifest.example_input, self.manifest.example_config)
+                return {"ok": True, "latency_ms": latency_ms, "output": result.output, "metrics": result.metrics, "retry_count": attempt}
+            except Exception as exc:  # noqa: BLE001 - 合约测试需要把任意异常转成结构化结果。
+                last_exc = exc
+                # 判断是否可重试: 超时/网络错误/5xx 可重试，其他不重试
+                is_retryable = (
+                    isinstance(exc, (TimeoutError, ConnectionError, OSError))
+                    or (hasattr(exc, "code") and getattr(exc, "code") == "SKILL_CONTRACT_TIMEOUT")
+                    or (hasattr(exc, "code") and getattr(exc, "code") == "SKILL_PACKAGE_RUNTIME_ERROR")
+                )
+                if is_retryable and attempt < self._CONTRACT_TEST_MAX_RETRIES:
+                    import time
+                    time.sleep(2 ** attempt)  # 1s, 2s
+                    continue
+                break
 
-        try:
-            result, latency_ms = self.execute(self.manifest.example_input, self.manifest.example_config)
-        except Exception as exc:  # noqa: BLE001 - 合约测试需要把任意异常转成结构化结果。
-            payload = {"ok": False, "error": type(exc).__name__, "message": str(exc)}
-            if hasattr(exc, "code"):
-                payload["code"] = getattr(exc, "code")
-            if hasattr(exc, "details"):
-                payload["details"] = getattr(exc, "details")
-            return payload
-        return {"ok": True, "latency_ms": latency_ms, "output": result.output, "metrics": result.metrics}
+        # 所有重试用尽
+        payload: dict[str, Any] = {"ok": False, "error": type(last_exc).__name__, "message": str(last_exc), "retry_count": attempt}
+        if hasattr(last_exc, "code"):
+            payload["code"] = getattr(last_exc, "code")
+        if hasattr(last_exc, "details"):
+            payload["details"] = getattr(last_exc, "details")
+        return payload
