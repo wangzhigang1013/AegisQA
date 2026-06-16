@@ -1,17 +1,19 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { lazy, Suspense, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
-import { 
-  BarChart3, 
-  Database, 
-  FlaskConical, 
-  GitMerge, 
+import {
+  BarChart3,
+  Database,
+  FlaskConical,
+  GitMerge,
   PlayCircle,
   FileBarChart,
   Wrench,
   ShieldCheck,
   SearchCode,
-  ShieldAlert
+  ShieldAlert,
+  Plus,
+  Sparkles,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -36,6 +38,8 @@ const AnnotationQueuePage = lazy(() => import('./pages/AnnotationQueuePage').the
 const CandidateAssetsPage = lazy(() => import('./pages/CandidateAssetsPage').then(({ CandidateAssetsPage }) => ({ default: CandidateAssetsPage })));
 const JudgeAuditPage = lazy(() => import('./pages/JudgeAuditPage').then(({ JudgeAuditPage }) => ({ default: JudgeAuditPage })));
 const GovernancePage = lazy(() => import('./pages/GovernancePage').then(({ GovernancePage }) => ({ default: GovernancePage })));
+const SkillCreatePage = lazy(() => import('./pages/SkillCreatePage').then(({ SkillCreatePage }) => ({ default: SkillCreatePage })));
+const PlaygroundPage = lazy(() => import('./pages/PlaygroundPage').then(({ PlaygroundPage }) => ({ default: PlaygroundPage })));
 
 function createAppQueryClient() {
   return new QueryClient({
@@ -56,6 +60,8 @@ const navConfig = [
       { key: '/', icon: BarChart3, label: '概览', to: '/' },
       { key: '/datasets', icon: Database, label: '数据集', to: '/datasets' },
       { key: '/skills', icon: FlaskConical, label: 'Skill 市场', to: '/skills' },
+      { key: '/skills/create', icon: Plus, label: '创建 Skill', to: '/skills/create' },
+      { key: '/playground', icon: Sparkles, label: 'Playground', to: '/playground' },
       { key: '/workflows', icon: GitMerge, label: 'Workflow', to: '/workflows' },
     ]
   },
@@ -186,6 +192,8 @@ export function AppShell() {
                         <Route path="/candidate-assets" element={<CandidateAssetsPage />} />
                         <Route path="/judge" element={<JudgeAuditPage />} />
                         <Route path="/governance" element={<GovernancePage />} />
+                        <Route path="/skills/create" element={<SkillCreatePage />} />
+                        <Route path="/playground" element={<PlaygroundPage />} />
                       </Routes>
                     </motion.div>
                   </AnimatePresence>

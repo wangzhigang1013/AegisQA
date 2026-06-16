@@ -935,10 +935,6 @@ def _install_skill_package(
     conflict_strategy = request.conflict_strategy or "error"
     existing_package = _find_skill_package(store, manifest.skill_id)
 
-    # 调试：写入文件
-    with open("debug_conflict.log", "a") as f:
-        f.write(f"conflict_strategy={conflict_strategy}, skill_id={manifest.skill_id}, existing={existing_package is not None}\n")
-
     if existing_package:
         if conflict_strategy == "error":
             raise AegisQAError(

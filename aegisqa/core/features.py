@@ -5,12 +5,12 @@ from typing import Final
 
 
 FEATURE_FLAG_DEFAULTS: Final[dict[str, bool]] = {
-    "ci_gate": False,
-    "candidate_assets": False,
-    "repair_tasks": False,
-    "experiments": False,
-    "annotation_queue": False,
-    "judge_audit": False,
+    "ci_gate": True,
+    "candidate_assets": True,
+    "repair_tasks": True,
+    "experiments": True,
+    "annotation_queue": True,
+    "judge_audit": True,
 }
 
 FEATURE_ENV_PREFIX: Final = "AEGISQA_ENABLE_"
