@@ -19,6 +19,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 import { ChunkErrorBoundary } from './components/ChunkErrorBoundary';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastContainer } from './components/ui/Toast';
 import './i18n';
 
 // Pages
@@ -93,6 +94,7 @@ export function AppShell() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <ToastContainer />
       <div className="flex min-h-screen bg-background text-foreground font-sans selection:bg-primary selection:text-primary-foreground">
         {/* Sidebar */}
         <aside className="fixed inset-y-0 left-0 z-50 w-64 border-r border-border bg-white flex flex-col hidden md:flex">
