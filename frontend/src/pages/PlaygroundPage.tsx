@@ -159,12 +159,13 @@ export function PlaygroundPage() {
       };
       interpolate(parsedVars);
 
-      // Call real model gateway API
+      // Call real Playground API
       const selectedModel = model || connections[0]?.default_model || undefined;
       const connectionId = connections[0]?.connection_id || undefined;
 
-      const result = await api.testModelGateway({
+      const result = await api.playgroundExecute({
         prompt: interpolatedPrompt,
+        variables: parsedVars,
         model_connection_id: connectionId,
         model: selectedModel,
         temperature,
@@ -178,32 +179,22 @@ export function PlaygroundPage() {
       setTokens(result.usage?.total_tokens ?? 0);
       setIsStreaming(false);
 
-      // Judge if enabled — 调用真实 Judge
+      // Judge if enabled — 调用真实 Judge API
       if (enableJudge) {
         try {
-          const judgeInput = judgePrompt.replace('{{output}}', outputText);
-          const judgeResult = await api.testModelGateway({
-            prompt: judgeInput,
+          const judgeResult = await api.playgroundJudge({
+            output: outputText,
+            judge_prompt: judgePrompt,
             model_connection_id: connectionId,
             model: selectedModel,
-            temperature: 0,
-            max_tokens: 512,
           });
-          try {
-            const parsed = JSON.parse(judgeResult.response || '{}');
-            setJudgeResult({
-              score: parsed.score ?? 0,
-              label: parsed.label ?? 'unknown',
-              feedback: parsed.feedback ?? '',
-              dimensions: parsed.dimensions ?? [],
-            });
-          } catch {
-            setJudgeResult({
-              score: 0,
-              label: 'unknown',
-              feedback: judgeResult.response || '评判结果解析失败',
-              dimensions: [],
-            });
+          const parsed = judgeResult.result;
+          setJudgeResult({
+            score: (parsed.score as number) ?? 0,
+            label: (parsed.label as string) ?? 'unknown',
+            feedback: (parsed.feedback as string) ?? '',
+            dimensions: (parsed.dimensions as { name: string; score: number; comment: string }[]) ?? [],
+          });
           }
         } catch (e) {
           setJudgeResult({

@@ -7,6 +7,7 @@ from aegisqa.api.routes.experiments import register_experiment_routes
 from aegisqa.api.routes.governance import register_governance_routes
 from aegisqa.api.routes.judge import register_judge_routes
 from aegisqa.api.routes.models import register_model_routes
+from aegisqa.api.routes.playground import register_playground_routes
 from aegisqa.api.routes.productization import register_productization_routes
 from aegisqa.api.routes.repair_tasks import register_repair_task_routes
 from aegisqa.api.routes.reports import register_report_routes
@@ -25,6 +26,7 @@ __all__ = [
     "register_governance_routes",
     "register_judge_routes",
     "register_model_routes",
+    "register_playground_routes",
     "register_productization_routes",
     "register_repair_task_routes",
     "register_report_routes",

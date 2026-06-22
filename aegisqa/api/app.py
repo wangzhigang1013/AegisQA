@@ -739,6 +739,7 @@ def create_app(
         register_governance_routes,
         register_judge_routes,
         register_model_routes,
+        register_playground_routes,
         register_productization_routes,
         register_repair_task_routes,
         register_report_routes,
@@ -785,6 +786,7 @@ def create_app(
     register_productization_routes(app, route_context)
     register_judge_routes(app, route_context)
     register_experiment_routes(app, route_context)
+    register_playground_routes(app, route_context)
 
     return app
 

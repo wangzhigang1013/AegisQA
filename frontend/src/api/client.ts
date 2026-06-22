@@ -903,4 +903,28 @@ export const api = {
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<AuditEvent[]>(`/audit-events${suffix}`);
   },
+
+  // ── Playground ──────────────────────────────────────────
+  playgroundExecute: (body: {
+    prompt: string;
+    variables?: Record<string, unknown>;
+    model_connection_id?: string | null;
+    model?: string | null;
+    temperature?: number | null;
+    max_tokens?: number | null;
+  }) =>
+    request<{ output: string; model: string; provider: string; latency_ms: number; usage?: Record<string, unknown> }>('/playground/execute', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  playgroundJudge: (body: {
+    output: string;
+    judge_prompt: string;
+    model_connection_id?: string | null;
+    model?: string | null;
+  }) =>
+    request<{ result: Record<string, unknown>; model: string; latency_ms: number }>('/playground/judge', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 };
