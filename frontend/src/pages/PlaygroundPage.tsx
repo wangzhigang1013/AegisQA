@@ -195,7 +195,6 @@ export function PlaygroundPage() {
             feedback: (parsed.feedback as string) ?? '',
             dimensions: (parsed.dimensions as { name: string; score: number; comment: string }[]) ?? [],
           });
-          }
         } catch (e) {
           setJudgeResult({
             score: 0,
