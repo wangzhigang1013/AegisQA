@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import JSZip from 'jszip';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
@@ -165,63 +166,116 @@ export function SkillCreatePage() {
     tags: '',
   });
 
-  // Create mutation
+  // Create mutation — 生成真实 zip 包
   const createMutation = useMutation({
     mutationFn: async () => {
-      // Generate skill package based on mode
-      let skillContent: string;
-      let skillId: string;
-      let name: string;
-      let tags: string[];
+      // 字段校验
+      const form = mode === 'code' ? codeForm : mode === 'api' ? apiForm : instForm;
+      if (!form.name.trim()) throw new Error('请填写 Skill 名称');
+
+      const zip = new JSZip();
+      const skillId = `skill-${form.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`;
 
       if (mode === 'code') {
-        skillId = `skill-${codeForm.name.toLowerCase().replace(/\s+/g, '-')}`;
-        name = codeForm.name;
-        tags = codeForm.tags.split(',').map(t => t.trim()).filter(Boolean);
-        skillContent = generateCodeSkillPackage(codeForm);
+        // 代码模式: skill.yaml + handler.py
+        zip.file('skill.yaml', [
+          `skill_id: ${skillId}`,
+          `name: ${form.name}`,
+          `description: ${form.description || form.name}`,
+          `version: 0.1.0`,
+          `permissions: []`,
+          `runtime:`,
+          `  mode: script`,
+          `  handler: handler.py`,
+          `  function_name: run`,
+          `example_input:`,
+          `  text: hello`,
+          `example_config: {}`,
+        ].join('\n'));
+        zip.file('handler.py', codeForm.code);
       } else if (mode === 'api') {
-        skillId = `skill-${apiForm.name.toLowerCase().replace(/\s+/g, '-')}`;
-        name = apiForm.name;
-        tags = apiForm.tags.split(',').map(t => t.trim()).filter(Boolean);
-        skillContent = generateApiSkillPackage(apiForm);
+        // API 模式: skill.yaml + handler.py (调用外部 API)
+        let headers: Record<string, string> = {};
+        try { headers = JSON.parse(apiForm.headers || '{}'); } catch { /* ignore */ }
+        zip.file('skill.yaml', [
+          `skill_id: ${skillId}`,
+          `name: ${form.name}`,
+          `description: ${form.description || form.name}`,
+          `version: 0.1.0`,
+          `permissions: [network:http:request]`,
+          `runtime:`,
+          `  mode: script`,
+          `  handler: handler.py`,
+          `  function_name: run`,
+          `example_input:`,
+          `  text: hello`,
+          `example_config: {}`,
+        ].join('\n'));
+        zip.file('handler.py', [
+          `import json, urllib.request`,
+          ``,
+          `def run(input_data, config):`,
+          `    url = "${apiForm.url}"`,
+          `    headers = ${JSON.stringify(headers)}`,
+          `    body = json.dumps(input_data).encode()`,
+          `    req = urllib.request.Request(url, data=body, headers=headers, method="${apiForm.method}")`,
+          `    with urllib.request.urlopen(req, timeout=30) as resp:`,
+          `        return {"output": json.loads(resp.read())}`,
+        ].join('\n'));
       } else {
-        skillId = `skill-${instForm.name.toLowerCase().replace(/\s+/g, '-')}`;
-        name = instForm.name;
-        tags = instForm.tags.split(',').map(t => t.trim()).filter(Boolean);
-        skillContent = generateInstructionSkillPackage(instForm);
+        // 指令模式: SKILL.md
+        zip.file('SKILL.md', [
+          `---`,
+          `name: ${form.name}`,
+          `description: ${form.description || form.name}`,
+          `version: 0.1.0`,
+          `---`,
+          ``,
+          instForm.instruction,
+        ].join('\n'));
       }
 
-      // Upload as base64 zip
-      const response = await api.uploadSkillPackage({
+      // 生成 zip 的 base64
+      const zipBlob = await zip.generateAsync({ type: 'uint8array' });
+      const base64 = uint8ArrayToBase64(zipBlob);
+
+      return api.uploadSkillPackage({
         filename: `${skillId}.zip`,
-        content_base64: btoa(skillContent),
+        content_base64: base64,
         conflict_strategy: 'new_version',
       });
-
-      return response;
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['skills'] });
       queryClient.invalidateQueries({ queryKey: ['skill-packages'] });
-      navigate('/skills');
+      // 如果上传成功，自动运行合约测试
+      if (result?.skill_id) {
+        setUploadedSkillId(result.skill_id);
+        testMutation.mutate(result.skill_id);
+      }
     },
   });
 
-  // Test mutation
+  const [uploadedSkillId, setUploadedSkillId] = useState<string | null>(null);
+
+  // Test mutation — 调用真实合约测试 API
   const testMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (skillId: string) => {
       setTestStatus('loading');
-      // Simulate test - in real implementation, this would call the contract test API
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      return { success: true, output: '{"processed": true, "output": "TEST", "length": 4}' };
+      setTestResult(null);
+      return api.contractTest(skillId);
     },
-    onSuccess: (data) => {
-      setTestStatus('success');
-      setTestResult(data.output);
+    onSuccess: (result) => {
+      setTestStatus(result.ok ? 'success' : 'error');
+      setTestResult(
+        result.ok
+          ? `测试通过 (${result.latency_ms?.toFixed(0) ?? '?'}ms)\n${JSON.stringify(result.output, null, 2)}`
+          : `测试失败: ${result.message ?? result.error ?? '未知错误'}`
+      );
     },
-    onError: () => {
+    onError: (error) => {
       setTestStatus('error');
-      setTestResult('测试失败');
+      setTestResult(`测试失败: ${error instanceof Error ? error.message : '未知错误'}`);
     },
   });
 
@@ -232,33 +286,39 @@ export function SkillCreatePage() {
   ];
 
   return (
-    <div style={{ padding: '0 24px 24px' }}>
+    <div className="flex flex-col gap-8 w-full max-w-7xl mx-auto p-6 md:p-8">
       <PageHeader
         title="创建 Skill"
         subtitle="选择接入方式，让你的 SOP 快速接入评测平台"
       />
 
       {/* Mode selector */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-2">
         {modes.map(m => (
           <Card
             key={m.key}
             onClick={() => setMode(m.key)}
-            style={{
-              flex: 1,
-              cursor: 'pointer',
-              border: mode === m.key ? '2px solid #3b82f6' : '1px solid #e5e7eb',
-              background: mode === m.key ? '#eff6ff' : 'white',
-              transition: 'all 0.2s',
-            }}
+            className={`p-6 cursor-pointer transition-all duration-300 border shadow-sm group ${
+              mode === m.key 
+                ? 'bg-indigo-50/80 border-indigo-500 shadow-indigo-500/20 shadow-lg scale-[1.02]' 
+                : 'liquid-glass hover:bg-white/80 hover:border-indigo-300 hover:shadow-md'
+            }`}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-              <m.icon size={20} color={mode === m.key ? '#3b82f6' : '#6b7280'} />
-              <span style={{ fontWeight: 600, color: mode === m.key ? '#3b82f6' : '#1f2937' }}>
+            <div className="flex items-center gap-4 mb-3">
+              <div className={`p-3 rounded-xl transition-colors ${
+                mode === m.key ? 'bg-indigo-500 text-white shadow-md' : 'bg-white/80 text-slate-500 group-hover:bg-indigo-50 group-hover:text-indigo-500'
+              }`}>
+                <m.icon className="w-6 h-6" strokeWidth={mode === m.key ? 2.5 : 2} />
+              </div>
+              <span className={`text-lg font-bold ${
+                mode === m.key ? 'text-indigo-700' : 'text-slate-700'
+              }`}>
                 {m.label}
               </span>
             </div>
-            <div style={{ fontSize: 13, color: '#6b7280' }}>{m.desc}</div>
+            <div className={`text-sm font-medium ${mode === m.key ? 'text-indigo-600/80' : 'text-slate-500'}`}>
+              {m.desc}
+            </div>
           </Card>
         ))}
       </div>
@@ -294,53 +354,55 @@ export function SkillCreatePage() {
       </AnimatePresence>
 
       {/* Test & Create buttons */}
-      <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+      <div className="flex flex-wrap items-center justify-end gap-4 mt-8 pt-6 border-t border-slate-200/50">
+        <Button variant="ghost" onClick={() => navigate('/skills')} className="mr-auto font-semibold">
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          返回
+        </Button>
         <Button
-          onClick={() => testMutation.mutate()}
-          disabled={testStatus === 'loading'}
-          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          variant="outline"
+          onClick={() => {
+            if (uploadedSkillId) {
+              testMutation.mutate(uploadedSkillId);
+            } else {
+              createMutation.mutate(); // 先上传再自动测试
+            }
+          }}
+          disabled={testStatus === 'loading' || createMutation.isPending}
+          className="flex items-center gap-2 font-bold px-6 shadow-sm liquid-glass"
         >
-          {testStatus === 'loading' ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
-          测试运行
+          {testStatus === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" fill="currentColor" />}
+          {testStatus === 'loading' ? '测试中...' : '测试运行'}
         </Button>
         <Button
           variant="default"
           onClick={() => createMutation.mutate()}
           disabled={createMutation.isPending}
-          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          className="flex items-center gap-2 font-bold px-8 shadow-lg shadow-indigo-500/25"
         >
-          {createMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+          {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           创建 Skill
-        </Button>
-        <Button variant="ghost" onClick={() => navigate('/skills')}>
-          <ArrowLeft size={16} style={{ marginRight: 4 }} />
-          返回
         </Button>
       </div>
 
       {/* Test result */}
       {testResult && (
-        <Card style={{ marginTop: 16, background: testStatus === 'success' ? '#f0fdf4' : '#fef2f2' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Card className={`p-6 liquid-glass flex flex-col border ${testStatus === 'success' ? 'bg-emerald-50/50 border-emerald-200' : 'bg-rose-50/50 border-rose-200'}`}>
+          <div className="flex items-center gap-3 mb-4">
             {testStatus === 'success' ? (
-              <CheckCircle size={18} color="#22c55e" />
+              <CheckCircle className="w-6 h-6 text-emerald-500" />
             ) : (
-              <AlertCircle size={18} color="#ef4444" />
+              <AlertCircle className="w-6 h-6 text-rose-500" />
             )}
-            <span style={{ fontWeight: 600 }}>
+            <span className={`text-lg font-bold ${testStatus === 'success' ? 'text-emerald-700' : 'text-rose-700'}`}>
               {testStatus === 'success' ? '测试通过' : '测试失败'}
             </span>
           </div>
-          <pre style={{
-            background: '#1e293b',
-            color: '#e2e8f0',
-            padding: 12,
-            borderRadius: 8,
-            fontSize: 13,
-            overflow: 'auto',
-          }}>
-            {testResult}
-          </pre>
+          <div className="relative group/test-result">
+            <pre className="w-full max-h-[300px] p-5 font-mono text-sm leading-relaxed border border-slate-200/50 rounded-2xl bg-white/60 text-slate-800 resize-y focus:outline-none shadow-inner overflow-auto">
+              {testResult}
+            </pre>
+          </div>
         </Card>
       )}
 
@@ -361,66 +423,59 @@ export function SkillCreatePage() {
 
 function CodeForm({ form, onChange }: { form: CodeSkillForm; onChange: (f: CodeSkillForm) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16 }}>
+    <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-8">
       {/* Left: metadata */}
-      <Card>
-        <h3 style={{ fontWeight: 600, marginBottom: 16 }}>基本信息</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <label style={{ fontSize: 13, color: '#6b7280', marginBottom: 4, display: 'block' }}>Skill 名称</label>
+      <Card className="p-6 liquid-glass flex flex-col gap-5">
+        <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">基本信息</h3>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Skill 名称</label>
             <Input
               value={form.name}
               onChange={e => onChange({ ...form, name: e.target.value })}
               placeholder="如: 文本情感分析"
+              className="bg-white/60 border-slate-200/50 shadow-sm"
             />
           </div>
-          <div>
-            <label style={{ fontSize: 13, color: '#6b7280', marginBottom: 4, display: 'block' }}>描述</label>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">描述</label>
             <textarea
               value={form.description}
               onChange={e => onChange({ ...form, description: e.target.value })}
               placeholder="描述这个 Skill 的功能..."
-              style={{ width: '100%', minHeight: 80, padding: 8, border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, resize: 'vertical' }}
+              className="w-full min-h-[100px] p-3 text-sm border border-slate-200/50 rounded-xl bg-white/60 text-slate-800 resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition-all"
             />
           </div>
-          <div>
-            <label style={{ fontSize: 13, color: '#6b7280', marginBottom: 4, display: 'block' }}>标签 (逗号分隔)</label>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">标签 (逗号分隔)</label>
             <Input
               value={form.tags}
               onChange={e => onChange({ ...form, tags: e.target.value })}
               placeholder="nlp, sentiment, analysis"
+              className="bg-white/60 border-slate-200/50 shadow-sm"
             />
           </div>
         </div>
       </Card>
 
       {/* Right: code editor */}
-      <Card>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <h3 style={{ fontWeight: 600 }}>Python 代码</h3>
-          <span style={{ fontSize: 12, color: '#6b7280' }}>实现 run(input_data, config) 函数</span>
+      <Card className="p-6 liquid-glass flex flex-col group">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+            <Code className="w-5 h-5 text-indigo-500" /> Python 代码
+          </h3>
+          <span className="text-xs font-semibold text-slate-500 bg-white/60 px-3 py-1 rounded-full border border-slate-200/50">
+            实现 run(input_data, config)
+          </span>
         </div>
         <textarea
           value={form.code}
           onChange={e => onChange({ ...form, code: e.target.value })}
-          style={{
-            width: '100%',
-            minHeight: 400,
-            padding: 16,
-            fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
-            fontSize: 13,
-            lineHeight: 1.6,
-            border: '1px solid #d1d5db',
-            borderRadius: 8,
-            background: '#1e293b',
-            color: '#e2e8f0',
-            resize: 'vertical',
-            tabSize: 4,
-          }}
+          className="w-full min-h-[450px] p-5 font-mono text-sm leading-relaxed border border-slate-200/50 rounded-2xl bg-slate-900/90 text-indigo-50 resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-inner transition-all tab-size-4"
           spellCheck={false}
         />
-        <div style={{ marginTop: 8, fontSize: 12, color: '#9ca3af' }}>
-          <Zap size={12} style={{ display: 'inline', verticalAlign: 'middle' }} />{' '}
+        <div className="mt-4 text-xs font-semibold text-emerald-600 bg-emerald-50/80 px-4 py-2.5 rounded-xl border border-emerald-100 flex items-center gap-2">
+          <Zap className="w-4 h-4" />
           平台会自动推断 input_schema 和 output_schema，无需手动定义
         </div>
       </Card>
@@ -433,48 +488,52 @@ function CodeForm({ form, onChange }: { form: CodeSkillForm; onChange: (f: CodeS
 
 function ApiForm({ form, onChange }: { form: ApiSkillForm; onChange: (f: ApiSkillForm) => void }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16 }}>
+    <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-8">
       {/* Left: metadata */}
-      <Card>
-        <h3 style={{ fontWeight: 600, marginBottom: 16 }}>基本信息</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <label style={{ fontSize: 13, color: '#6b7280', marginBottom: 4, display: 'block' }}>Skill 名称</label>
+      <Card className="p-6 liquid-glass flex flex-col gap-5">
+        <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">基本信息</h3>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Skill 名称</label>
             <Input
               value={form.name}
               onChange={e => onChange({ ...form, name: e.target.value })}
               placeholder="如: 客服 SOP 检测"
+              className="bg-white/60 border-slate-200/50 shadow-sm"
             />
           </div>
-          <div>
-            <label style={{ fontSize: 13, color: '#6b7280', marginBottom: 4, display: 'block' }}>描述</label>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">描述</label>
             <textarea
               value={form.description}
               onChange={e => onChange({ ...form, description: e.target.value })}
               placeholder="描述这个 API 的功能..."
-              style={{ width: '100%', minHeight: 80, padding: 8, border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, resize: 'vertical' }}
+              className="w-full min-h-[100px] p-3 text-sm border border-slate-200/50 rounded-xl bg-white/60 text-slate-800 resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition-all"
             />
           </div>
-          <div>
-            <label style={{ fontSize: 13, color: '#6b7280', marginBottom: 4, display: 'block' }}>标签</label>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">标签</label>
             <Input
               value={form.tags}
               onChange={e => onChange({ ...form, tags: e.target.value })}
               placeholder="api, sop, customer-service"
+              className="bg-white/60 border-slate-200/50 shadow-sm"
             />
           </div>
         </div>
       </Card>
 
       {/* Right: API config */}
-      <Card>
-        <h3 style={{ fontWeight: 600, marginBottom: 16 }}>API 配置</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
+      <Card className="p-6 liquid-glass flex flex-col gap-5">
+        <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+          <Globe className="w-5 h-5 text-indigo-500" /> API 配置
+        </h3>
+        <div className="flex flex-col gap-5">
+          <div className="flex gap-3">
             <select
               value={form.method}
               onChange={e => onChange({ ...form, method: e.target.value as 'GET' | 'POST' | 'PUT' })}
-              style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, fontWeight: 600 }}
+              className="px-4 py-2 bg-white/60 border border-slate-200/50 rounded-xl text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all font-bold shadow-sm"
             >
               <option value="GET">GET</option>
               <option value="POST">POST</option>
@@ -484,47 +543,36 @@ function ApiForm({ form, onChange }: { form: ApiSkillForm; onChange: (f: ApiSkil
               value={form.url}
               onChange={e => onChange({ ...form, url: e.target.value })}
               placeholder="https://api.example.com/sop/evaluate"
-              style={{ flex: 1 }}
+              className="flex-1 bg-white/60 border-slate-200/50 shadow-sm font-mono text-sm"
             />
           </div>
 
-          <div>
-            <label style={{ fontSize: 13, color: '#6b7280', marginBottom: 4, display: 'block' }}>请求头 (JSON)</label>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">请求头 (JSON)</label>
             <textarea
               value={form.headers}
               onChange={e => onChange({ ...form, headers: e.target.value })}
-              style={{ width: '100%', minHeight: 60, padding: 8, fontFamily: 'monospace', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 6, resize: 'vertical' }}
+              className="w-full min-h-[80px] p-4 font-mono text-sm border border-slate-200/50 rounded-xl bg-white/60 text-slate-800 resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-inner transition-all"
             />
           </div>
 
-          <div>
-            <label style={{ fontSize: 13, color: '#6b7280', marginBottom: 4, display: 'block' }}>
-              请求体模板 (JSON，支持 {'{{input.field}}'} 变量)
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+              请求体模板 (JSON) <span className="bg-slate-100 px-2 py-0.5 rounded text-[10px]">支持 {'{{input.field}}'} 变量</span>
             </label>
             <textarea
               value={form.bodyTemplate}
               onChange={e => onChange({ ...form, bodyTemplate: e.target.value })}
-              style={{
-                width: '100%',
-                minHeight: 120,
-                padding: 12,
-                fontFamily: 'monospace',
-                fontSize: 13,
-                lineHeight: 1.6,
-                border: '1px solid #d1d5db',
-                borderRadius: 6,
-                background: '#f8fafc',
-                resize: 'vertical',
-              }}
+              className="w-full min-h-[160px] p-4 font-mono text-sm leading-relaxed border border-slate-200/50 rounded-xl bg-white/60 text-slate-800 resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-inner transition-all"
             />
           </div>
 
-          <div style={{ padding: 12, background: '#eff6ff', borderRadius: 8, fontSize: 13, color: '#1e40af' }}>
-            <strong>变量说明:</strong>
-            <ul style={{ margin: '4px 0 0 16px' }}>
-              <li><code>{'{{input.field}}'}</code> — 引用输入数据的字段</li>
-              <li><code>{'{{config.param}}'}</code> — 引用配置参数</li>
-              <li><code>{'${ENV_VAR}'}</code> — 引用环境变量 (如 API Key)</li>
+          <div className="bg-indigo-50/80 p-4 rounded-xl border border-indigo-100 text-sm text-indigo-800">
+            <strong className="block mb-2 font-bold">变量说明:</strong>
+            <ul className="list-disc pl-5 space-y-1 font-medium text-indigo-700/80">
+              <li><code className="bg-white/60 px-1.5 py-0.5 rounded text-indigo-900 border border-indigo-200/50">{'{{input.field}}'}</code> — 引用输入数据的字段</li>
+              <li><code className="bg-white/60 px-1.5 py-0.5 rounded text-indigo-900 border border-indigo-200/50">{'{{config.param}}'}</code> — 引用配置参数</li>
+              <li><code className="bg-white/60 px-1.5 py-0.5 rounded text-indigo-900 border border-indigo-200/50">{'${ENV_VAR}'}</code> — 引用环境变量 (如 API Key)</li>
             </ul>
           </div>
         </div>
@@ -546,66 +594,58 @@ function InstructionForm({
   onApplyTemplate: (key: string) => void;
 }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16 }}>
+    <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-8">
       {/* Left: metadata + templates */}
-      <Card>
-        <h3 style={{ fontWeight: 600, marginBottom: 16 }}>基本信息</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <label style={{ fontSize: 13, color: '#6b7280', marginBottom: 4, display: 'block' }}>Skill 名称</label>
+      <Card className="p-6 liquid-glass flex flex-col gap-5">
+        <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">基本信息</h3>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Skill 名称</label>
             <Input
               value={form.name}
               onChange={e => onChange({ ...form, name: e.target.value })}
               placeholder="如: 文本分类器"
+              className="bg-white/60 border-slate-200/50 shadow-sm"
             />
           </div>
-          <div>
-            <label style={{ fontSize: 13, color: '#6b7280', marginBottom: 4, display: 'block' }}>描述</label>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">描述</label>
             <textarea
               value={form.description}
               onChange={e => onChange({ ...form, description: e.target.value })}
               placeholder="描述这个 Skill 的功能..."
-              style={{ width: '100%', minHeight: 60, padding: 8, border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, resize: 'vertical' }}
+              className="w-full min-h-[80px] p-3 text-sm border border-slate-200/50 rounded-xl bg-white/60 text-slate-800 resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition-all"
             />
           </div>
-          <div>
-            <label style={{ fontSize: 13, color: '#6b7280', marginBottom: 4, display: 'block' }}>标签</label>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">标签</label>
             <Input
               value={form.tags}
               onChange={e => onChange({ ...form, tags: e.target.value })}
               placeholder="instruction, classify"
+              className="bg-white/60 border-slate-200/50 shadow-sm"
             />
           </div>
-          <div>
-            <label style={{ fontSize: 13, color: '#6b7280', marginBottom: 4, display: 'block' }}>模型 (可选)</label>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">模型 (可选)</label>
             <Input
               value={form.model}
               onChange={e => onChange({ ...form, model: e.target.value })}
               placeholder="留空则使用默认模型"
+              className="bg-white/60 border-slate-200/50 shadow-sm"
             />
           </div>
         </div>
 
         {/* Templates */}
-        <div style={{ marginTop: 20, borderTop: '1px solid #e5e7eb', paddingTop: 16 }}>
-          <h4 style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>快速模板</h4>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div className="mt-4 pt-5 border-t border-slate-200/50">
+          <h4 className="font-bold text-slate-700 mb-3 text-sm">快速模板</h4>
+          <div className="flex flex-col gap-2">
             {Object.entries(INSTRUCTION_TEMPLATES).map(([key, tpl]) => (
               <button
                 key={key}
                 onClick={() => onApplyTemplate(key)}
-                style={{
-                  textAlign: 'left',
-                  padding: '8px 12px',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: 6,
-                  background: 'white',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  transition: 'all 0.15s',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.borderColor = '#3b82f6', e.currentTarget.style.background = '#eff6ff')}
-                onMouseLeave={e => (e.currentTarget.style.borderColor = '#e5e7eb', e.currentTarget.style.background = 'white')}
+                className="text-left px-3.5 py-2.5 border border-slate-200/50 rounded-xl bg-white/60 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 font-medium text-sm text-slate-600 transition-all shadow-sm"
               >
                 {tpl.name}
               </button>
@@ -615,36 +655,30 @@ function InstructionForm({
       </Card>
 
       {/* Right: instruction editor */}
-      <Card>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <h3 style={{ fontWeight: 600 }}>指令内容</h3>
-          <span style={{ fontSize: 12, color: '#6b7280' }}>用自然语言描述你希望 AI 做什么</span>
+      <Card className="p-6 liquid-glass flex flex-col group">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+            <FileText className="w-5 h-5 text-indigo-500" /> 指令内容
+          </h3>
+          <span className="text-xs font-semibold text-slate-500 bg-white/60 px-3 py-1 rounded-full border border-slate-200/50">
+            用自然语言描述你希望 AI 做什么
+          </span>
         </div>
         <textarea
           value={form.instruction}
           onChange={e => onChange({ ...form, instruction: e.target.value })}
-          placeholder="请在这里编写你的指令...
+          placeholder={`请在这里编写你的指令...
 
 示例:
 请对以下文本进行情感分析，返回 JSON 格式:
 - label: positive/negative/neutral
 - confidence: 0-1 的置信度
-- reason: 判断原因"
-          style={{
-            width: '100%',
-            minHeight: 350,
-            padding: 16,
-            fontSize: 14,
-            lineHeight: 1.8,
-            border: '1px solid #d1d5db',
-            borderRadius: 8,
-            background: '#fafbfc',
-            resize: 'vertical',
-          }}
+- reason: 判断原因`}
+          className="w-full min-h-[400px] p-5 font-mono text-sm leading-relaxed border border-slate-200/50 rounded-2xl bg-white/60 text-slate-800 resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-inner transition-all"
         />
-        <div style={{ marginTop: 8, display: 'flex', gap: 16, fontSize: 12, color: '#9ca3af' }}>
-          <span>💡 提示: 在指令中明确输出格式 (如 JSON) 可以提高解析成功率</span>
-          <span>📝 支持 {'{{input.field}}'} 引用输入数据</span>
+        <div className="mt-4 flex flex-col gap-2 text-xs font-semibold text-slate-500 bg-white/40 p-4 rounded-xl border border-slate-100">
+          <span className="flex items-center gap-2"><span className="text-amber-500">💡</span> 提示: 在指令中明确输出格式 (如 JSON) 可以提高解析成功率</span>
+          <span className="flex items-center gap-2"><span className="text-emerald-500">📝</span> 支持 <code className="bg-white/80 border border-slate-200 px-1 rounded mx-0.5">{'{{input.field}}'}</code> 引用输入数据</span>
         </div>
       </Card>
     </div>
@@ -654,40 +688,11 @@ function InstructionForm({
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-function generateCodeSkillPackage(form: CodeSkillForm): string {
-  // In real implementation, this would generate a proper zip package
-  // For now, return a JSON representation
-  return JSON.stringify({
-    type: 'python_function',
-    name: form.name,
-    description: form.description,
-    code: form.code,
-    tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
-  });
-}
-
-function generateApiSkillPackage(form: ApiSkillForm): string {
-  return JSON.stringify({
-    type: 'rest_api',
-    name: form.name,
-    description: form.description,
-    config: {
-      url: form.url,
-      method: form.method,
-      headers: JSON.parse(form.headers || '{}'),
-      body_template: form.bodyTemplate,
-    },
-    tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
-  });
-}
-
-function generateInstructionSkillPackage(form: InstructionSkillForm): string {
-  return JSON.stringify({
-    type: 'instruction',
-    name: form.name,
-    description: form.description,
-    instruction: form.instruction,
-    model: form.model || undefined,
-    tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
-  });
+/** Uint8Array → base64 (兼容中文) */
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }

@@ -108,12 +108,18 @@ class DAGWorkflowExecutor:
                     futures[step_id] = pool.submit(self._run_step, steps_by_id[step_id], level_snapshot, level_index)
 
                 for step_id, future in futures.items():
-                    _, result = future.result()
+                    try:
+                        _, result = future.result()
+                    except Exception as exc:
+                        result = {"status": "failed", "level": level_index, "writes": {}, "error": {"type": type(exc).__name__, "message": str(exc)}}
                     context["steps"][step_id] = result
                     if result["status"] == "succeeded":
                         context[step_id] = result.get("output", {})
-                        for target_path, value in result["writes"].items():
-                            set_by_path(context, target_path, value)
+                        try:
+                            for target_path, value in result["writes"].items():
+                                set_by_path(context, target_path, value)
+                        except Exception as exc:
+                            context["errors"].append({"type": "MergeError", "message": f"步骤 '{step_id}' 输出合并失败: {exc}"})
                         context["metrics"].update(result.get("metrics", {}))
                     elif result["status"] == "failed":
                         context["errors"].append(result["error"])
@@ -160,13 +166,41 @@ def _condition_matches(condition: str | None, context: dict[str, Any]) -> bool:
 
     text = condition.strip()
 
-    # 处理 AND/OR 逻辑组合
-    if " AND " in text:
-        parts = text.split(" AND ", 1)
-        return _condition_matches(parts[0].strip(), context) and _condition_matches(parts[1].strip(), context)
-    if " OR " in text:
-        parts = text.split(" OR ", 1)
-        return _condition_matches(parts[0].strip(), context) or _condition_matches(parts[1].strip(), context)
+    # 处理括号分组: 从最内层括号开始求值
+    if text.startswith("(") and text.endswith(")"):
+        # 检查是否是完整的括号组 (不是中间有括号)
+        depth = 0
+        is_complete = True
+        for i, ch in enumerate(text):
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+            if depth == 0 and i < len(text) - 1:
+                is_complete = False
+                break
+        if is_complete:
+            return _condition_matches(text[1:-1].strip(), context)
+
+    # 处理 AND/OR 逻辑组合 (AND 优先级高于 OR)
+    # 先找最外层的 OR (不在括号内的)
+    depth = 0
+    for i in range(len(text) - 3):
+        if text[i] == '(':
+            depth += 1
+        elif text[i] == ')':
+            depth -= 1
+        elif depth == 0 and text[i:i+4] == ' OR ':
+            return _condition_matches(text[:i].strip(), context) or _condition_matches(text[i+4:].strip(), context)
+    # 再找最外层的 AND
+    depth = 0
+    for i in range(len(text) - 4):
+        if text[i] == '(':
+            depth += 1
+        elif text[i] == ')':
+            depth -= 1
+        elif depth == 0 and text[i:i+5] == ' AND ':
+            return _condition_matches(text[:i].strip(), context) and _condition_matches(text[i+5:].strip(), context)
 
     # 处理 exists/not exists
     if text.endswith(" not exists"):
@@ -184,15 +218,29 @@ def _condition_matches(condition: str | None, context: dict[str, Any]) -> bool:
             return False
         return True
 
-    # 处理比较运算
+    # 处理比较运算 (右操作数必须是数字或引号字符串)
     for op in [">=", "<=", "!=", "==", ">", "<"]:
         if f" {op} " in text:
             left, right = text.split(f" {op} ", 1)
             left_path = left.strip()
-            right_val = right.strip().strip('"').strip("'")
+            right_raw = right.strip()
+            right_val = right_raw.strip('"').strip("'")
+            # 验证右操作数是有效字面量 (数字或引号字符串)
+            is_quoted = (right_raw.startswith('"') and right_raw.endswith('"')) or (right_raw.startswith("'") and right_raw.endswith("'"))
+            is_number = False
+            try:
+                float(right_val)
+                is_number = True
+            except ValueError:
+                pass
+            if not is_quoted and not is_number:
+                continue  # 跳过，尝试下一个操作符
             try:
                 left_val = get_by_path(context, left_path)
             except MappingPathError:
+                return False
+            # None 值处理
+            if left_val is None:
                 return False
             try:
                 left_num = float(left_val)
@@ -291,8 +339,17 @@ def execute_subworkflow(
         "steps": {},
     }
 
-    # 执行子工作流步骤
-    for step in workflow.steps:
+    # 执行子工作流步骤 (按拓扑排序)
+    steps_by_id = {step.step_id: step for step in workflow.steps}
+    try:
+        dag = DAGWorkflow(steps=workflow.steps)
+        ordered_ids = dag.topological_order()
+    except ValueError:
+        ordered_ids = [step.step_id for step in workflow.steps]
+    for step_id in ordered_ids:
+        step = steps_by_id.get(step_id)
+        if not step:
+            continue
         skill = registry.get(step.skill_ref)
         if not skill:
             sub_context["errors"].append({"type": "SkillNotFound", "message": f"Skill {step.skill_ref} 不存在"})
@@ -309,9 +366,9 @@ def execute_subworkflow(
                 "latency_ms": latency_ms,
             }
             sub_context[step.step_id] = result.output
-            for target_path, value in step.output_mapping.items():
-                if value in result.output:
-                    set_by_path(sub_context, target_path, result.output[value])
+            for field, target_path in step.output_mapping.items():
+                if field in result.output:
+                    set_by_path(sub_context, target_path, result.output[field])
             sub_context["metrics"].update(result.metrics)
         except Exception as exc:
             sub_context["steps"][step.step_id] = {
@@ -360,7 +417,7 @@ def execute_loop(
     except MappingPathError:
         return []
 
-    if not isinstance(items, list):
+    if not isinstance(items, list) or not items:
         return []
 
     results = []
@@ -388,9 +445,9 @@ def execute_loop(
                 }
                 # 更新上下文供下一个子步骤使用
                 iter_context[substep.step_id] = result.output
-                for target_path, value in substep.output_mapping.items():
-                    if value in result.output:
-                        set_by_path(iter_context, target_path, result.output[value])
+                for field, target_path in substep.output_mapping.items():
+                    if field in result.output:
+                        set_by_path(iter_context, target_path, result.output[field])
             except Exception as exc:
                 iter_results[substep.step_id] = {
                     "status": "failed",
@@ -401,6 +458,9 @@ def execute_loop(
     with ThreadPoolExecutor(max_workers=min(max_workers, len(items))) as pool:
         futures = [pool.submit(run_iteration, item, i) for i, item in enumerate(items)]
         for future in futures:
-            results.append(future.result())
+            try:
+                results.append(future.result(timeout=120))
+            except Exception as exc:
+                results.append({"status": "failed", "error": {"type": type(exc).__name__, "message": str(exc)}})
 
     return results

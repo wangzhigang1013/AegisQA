@@ -29,6 +29,8 @@ import {
   Clock,
   Zap,
   ArrowRight,
+  Info,
+  Database,
 } from 'lucide-react';
 
 import { api, formatApiError } from '../api/client';
@@ -123,7 +125,7 @@ export function PlaygroundPage() {
   });
   const connections = Array.isArray(connectionsQuery.data) ? connectionsQuery.data : [];
 
-  // Execute mutation
+  // Execute mutation — 调用真实模型网关
   const executeMutation = useMutation({
     mutationFn: async () => {
       setIsStreaming(true);
@@ -157,66 +159,77 @@ export function PlaygroundPage() {
       };
       interpolate(parsedVars);
 
-      // Call model gateway
-      const selectedModel = model || connections[0]?.default_model || 'gpt-4';
-      const connectionId = connections[0]?.connection_id;
+      // Call real model gateway API
+      const selectedModel = model || connections[0]?.default_model || undefined;
+      const connectionId = connections[0]?.connection_id || undefined;
 
-      // Simulate streaming output (in real implementation, use SSE)
-      await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
-
-      const mockOutput = JSON.stringify({
-        label: 'positive',
-        confidence: 0.95,
-        reason: '文本表达了对产品的满意和正面评价',
-      }, null, 2);
-
-      // Simulate character-by-character streaming
-      for (let i = 0; i <= mockOutput.length; i++) {
-        await new Promise(resolve => setTimeout(resolve, 20));
-        setOutput(mockOutput.slice(0, i));
-      }
+      const result = await api.testModelGateway({
+        prompt: interpolatedPrompt,
+        model_connection_id: connectionId,
+        model: selectedModel,
+        temperature,
+        max_tokens: maxTokens,
+      });
 
       const elapsed = Date.now() - startTime;
+      const outputText = result.response || JSON.stringify(result, null, 2);
+      setOutput(outputText);
       setLatencyMs(elapsed);
-      setTokens(Math.floor(Math.random() * 200) + 50);
+      setTokens(result.usage?.total_tokens ?? 0);
       setIsStreaming(false);
 
-      // Judge if enabled
+      // Judge if enabled — 调用真实 Judge
       if (enableJudge) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        setJudgeResult({
-          score: 0.92,
-          label: 'pass',
-          feedback: '回答格式正确，情感判断准确，置信度合理',
-          dimensions: [
-            { name: 'accuracy', score: 0.95, comment: '情感判断正确' },
-            { name: 'completeness', score: 0.9, comment: '包含了所有必要字段' },
-            { name: 'format', score: 0.9, comment: 'JSON 格式正确' },
-          ],
-        });
+        try {
+          const judgeInput = judgePrompt.replace('{{output}}', outputText);
+          const judgeResult = await api.testModelGateway({
+            prompt: judgeInput,
+            model_connection_id: connectionId,
+            model: selectedModel,
+            temperature: 0,
+            max_tokens: 512,
+          });
+          try {
+            const parsed = JSON.parse(judgeResult.response || '{}');
+            setJudgeResult({
+              score: parsed.score ?? 0,
+              label: parsed.label ?? 'unknown',
+              feedback: parsed.feedback ?? '',
+              dimensions: parsed.dimensions ?? [],
+            });
+          } catch {
+            setJudgeResult({
+              score: 0,
+              label: 'unknown',
+              feedback: judgeResult.response || '评判结果解析失败',
+              dimensions: [],
+            });
+          }
+        } catch (e) {
+          setJudgeResult({
+            score: 0,
+            label: 'error',
+            feedback: e instanceof Error ? e.message : '评判失败',
+            dimensions: [],
+          });
+        }
       }
 
       // Save to version history
       const newVersion: PlaygroundVersion = {
         id: `v${versions.length + 1}`,
         prompt,
-        model: selectedModel,
+        model: selectedModel || 'default',
         temperature,
-        output: mockOutput,
-        judgeResult: enableJudge ? {
-          score: 0.92,
-          label: 'pass',
-          feedback: '回答格式正确',
-          dimensions: [],
-        } : undefined,
+        output: outputText,
         latencyMs: elapsed,
-        tokens: Math.floor(Math.random() * 200) + 50,
+        tokens: result.usage?.total_tokens ?? 0,
         timestamp: new Date().toLocaleString('zh-CN'),
       };
       setVersions(prev => [newVersion, ...prev]);
       setSelectedVersion(newVersion.id);
 
-      return mockOutput;
+      return outputText;
     },
   });
 
@@ -237,83 +250,73 @@ export function PlaygroundPage() {
   }, [navigate, prompt, model]);
 
   return (
-    <div style={{ padding: '0 24px 24px' }}>
+    <div className="flex flex-col gap-6 w-full max-w-[1600px] mx-auto p-6 md:p-8">
       <PageHeader
         title="Prompt Playground"
         subtitle="在线调试 Prompt，实时查看效果"
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
         {/* Left: Input */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="flex flex-col gap-6">
           {/* Prompt Editor */}
-          <Card>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <h3 style={{ fontWeight: 600 }}>Prompt 模板</h3>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <Button variant="ghost" onClick={() => setPrompt(DEFAULT_PROMPT)} style={{ fontSize: 12, padding: '4px 8px' }}>
-                  <RotateCcw size={12} style={{ marginRight: 4 }} />
+          <Card className="p-6 liquid-glass flex flex-col group">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-indigo-500" /> Prompt 模板
+              </h3>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={() => setPrompt(DEFAULT_PROMPT)} className="h-8 text-xs font-medium bg-white/50 hover:bg-white/80 text-slate-600 rounded-full px-3">
+                  <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
                   重置
                 </Button>
-                <Button variant="ghost" onClick={convertToSkill} style={{ fontSize: 12, padding: '4px 8px' }}>
-                  <ArrowRight size={12} style={{ marginRight: 4 }} />
+                <Button variant="ghost" onClick={convertToSkill} className="h-8 text-xs font-medium bg-white/50 hover:bg-white/80 text-indigo-600 rounded-full px-3">
+                  <ArrowRight className="w-3.5 h-3.5 mr-1.5" />
                   转为 Skill
                 </Button>
               </div>
             </div>
-            <textarea
-              value={prompt}
-              onChange={e => setPrompt(e.target.value)}
-              style={{
-                width: '100%',
-                minHeight: 250,
-                padding: 14,
-                fontFamily: "'JetBrains Mono', 'Consolas', monospace",
-                fontSize: 13,
-                lineHeight: 1.7,
-                border: '1px solid #d1d5db',
-                borderRadius: 8,
-                background: '#1e293b',
-                color: '#e2e8f0',
-                resize: 'vertical',
-              }}
-              spellCheck={false}
-            />
-            <div style={{ marginTop: 6, fontSize: 12, color: '#9ca3af' }}>
-              使用 {'{{input.field}}'} 插入变量，如 {'{{input.text}}'}
+            <div className="relative group/editor flex-1">
+              <textarea
+                value={prompt}
+                onChange={e => setPrompt(e.target.value)}
+                className="w-full min-h-[250px] p-5 font-mono text-sm leading-relaxed border border-slate-200/50 rounded-2xl bg-white/60 text-slate-800 resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-inner transition-all"
+                spellCheck={false}
+              />
+              <div className="absolute top-4 right-4 text-xs font-medium text-slate-400 bg-white/80 backdrop-blur px-2 py-1 rounded-lg opacity-0 group-hover/editor:opacity-100 transition-opacity pointer-events-none border border-slate-100">
+                支持 {'{{变量}}'}
+              </div>
+            </div>
+            <div className="mt-3 text-xs font-medium text-slate-500 flex items-center gap-1.5">
+              <Info className="w-4 h-4" /> 使用 <code className="bg-indigo-50 text-indigo-600 px-1 rounded mx-0.5">{'{{input.field}}'}</code> 插入变量，如 <code className="bg-indigo-50 text-indigo-600 px-1 rounded mx-0.5">{'{{input.text}}'}</code>
             </div>
           </Card>
 
           {/* Variables */}
-          <Card>
-            <h3 style={{ fontWeight: 600, marginBottom: 12 }}>变量</h3>
+          <Card className="p-6 liquid-glass flex flex-col">
+            <h3 className="font-bold text-slate-800 text-base mb-4 flex items-center gap-2">
+              <Database className="w-4 h-4 text-emerald-500" /> 变量 JSON
+            </h3>
             <textarea
               value={variables}
               onChange={e => setVariables(e.target.value)}
-              style={{
-                width: '100%',
-                minHeight: 100,
-                padding: 12,
-                fontFamily: 'monospace',
-                fontSize: 13,
-                border: '1px solid #d1d5db',
-                borderRadius: 6,
-                background: '#f8fafc',
-                resize: 'vertical',
-              }}
+              className="w-full min-h-[120px] p-4 font-mono text-sm border border-slate-200/50 rounded-xl bg-white/60 text-slate-800 resize-y focus:outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-inner transition-all"
+              spellCheck={false}
             />
           </Card>
 
           {/* Model Config */}
-          <Card>
-            <h3 style={{ fontWeight: 600, marginBottom: 12 }}>模型配置</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-              <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>模型</label>
+          <Card className="p-6 liquid-glass flex flex-col">
+            <h3 className="font-bold text-slate-800 text-base mb-4 flex items-center gap-2">
+              <Zap className="w-4 h-4 text-amber-500" /> 模型配置
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">模型</label>
                 <select
                   value={model}
                   onChange={e => setModel(e.target.value)}
-                  style={{ width: '100%', padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                  className="w-full px-3 py-2.5 bg-white/60 border border-slate-200/50 rounded-xl text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all font-medium shadow-sm"
                 >
                   <option value="">默认 ({connections[0]?.default_model || '未配置'})</option>
                   {connections.map(c => (
@@ -323,8 +326,8 @@ export function PlaygroundPage() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Temperature</label>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Temperature</label>
                 <input
                   type="number"
                   min={0}
@@ -332,52 +335,48 @@ export function PlaygroundPage() {
                   step={0.1}
                   value={temperature}
                   onChange={e => setTemperature(Number(e.target.value))}
-                  style={{ width: '100%', padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                  className="w-full px-3 py-2.5 bg-white/60 border border-slate-200/50 rounded-xl text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all font-medium shadow-sm"
                 />
               </div>
-              <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Max Tokens</label>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Max Tokens</label>
                 <input
                   type="number"
                   min={1}
                   max={8192}
                   value={maxTokens}
                   onChange={e => setMaxTokens(Number(e.target.value))}
-                  style={{ width: '100%', padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                  className="w-full px-3 py-2.5 bg-white/60 border border-slate-200/50 rounded-xl text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all font-medium shadow-sm"
                 />
               </div>
             </div>
           </Card>
 
           {/* Judge Config */}
-          <Card>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <h3 style={{ fontWeight: 600 }}>自动评判 (LLM-as-Judge)</h3>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+          <Card className="p-6 liquid-glass flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-rose-500" /> 自动评判 (LLM-as-Judge)
+              </h3>
+              <label className="flex items-center gap-2 text-sm font-semibold text-slate-600 cursor-pointer hover:text-indigo-600 transition-colors bg-white/50 px-3 py-1.5 rounded-full">
                 <input
                   type="checkbox"
                   checked={enableJudge}
                   onChange={e => setEnableJudge(e.target.checked)}
+                  className="rounded text-indigo-500 focus:ring-indigo-500/30 w-4 h-4 border-slate-300"
                 />
                 启用
               </label>
             </div>
             {enableJudge && (
-              <textarea
-                value={judgePrompt}
-                onChange={e => setJudgePrompt(e.target.value)}
-                style={{
-                  width: '100%',
-                  minHeight: 120,
-                  padding: 12,
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  border: '1px solid #d1d5db',
-                  borderRadius: 6,
-                  background: '#f8fafc',
-                  resize: 'vertical',
-                }}
-              />
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                <textarea
+                  value={judgePrompt}
+                  onChange={e => setJudgePrompt(e.target.value)}
+                  className="w-full min-h-[140px] p-4 font-mono text-sm border border-slate-200/50 rounded-xl bg-rose-50/30 text-slate-800 resize-y focus:outline-none focus:ring-2 focus:ring-rose-500/50 shadow-inner transition-all mt-2"
+                  spellCheck={false}
+                />
+              </motion.div>
             )}
           </Card>
 
@@ -386,59 +385,50 @@ export function PlaygroundPage() {
             variant="default"
             onClick={handleExecute}
             disabled={executeMutation.isPending || isStreaming}
-            style={{ width: '100%', padding: '12px 0', fontSize: 15, fontWeight: 600 }}
+            className="w-full py-4 text-base font-bold rounded-2xl shadow-lg hover:shadow-indigo-500/25 transition-all flex items-center justify-center gap-2"
           >
             {isStreaming ? (
               <>
-                <Loader2 size={18} className="animate-spin" style={{ marginRight: 8 }} />
+                <Loader2 className="w-5 h-5 animate-spin" />
                 执行中...
               </>
             ) : (
               <>
-                <Play size={18} style={{ marginRight: 8 }} />
-                运行
+                <Play className="w-5 h-5" fill="currentColor" />
+                运行 (Run)
               </>
             )}
           </Button>
         </div>
 
         {/* Right: Output */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="flex flex-col gap-6">
           {/* Output */}
-          <Card style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <h3 style={{ fontWeight: 600 }}>输出结果</h3>
+          <Card className="flex-1 p-6 liquid-glass flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+                <Database className="w-5 h-5 text-indigo-500" /> 输出结果
+              </h3>
               {output && (
-                <Button variant="ghost" onClick={() => navigator.clipboard.writeText(output)} style={{ fontSize: 12, padding: '4px 8px' }}>
-                  <Copy size={12} style={{ marginRight: 4 }} />
+                <Button variant="ghost" onClick={() => navigator.clipboard.writeText(output)} className="h-8 text-xs font-medium bg-white/50 hover:bg-white/80 text-slate-600 rounded-full px-3">
+                  <Copy className="w-3.5 h-3.5 mr-1.5" />
                   复制
                 </Button>
               )}
             </div>
-            <div style={{
-              minHeight: 200,
-              padding: 16,
-              fontFamily: 'monospace',
-              fontSize: 13,
-              lineHeight: 1.7,
-              background: output ? '#f0fdf4' : '#f8fafc',
-              border: '1px solid #d1d5db',
-              borderRadius: 8,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-all',
-            }}>
-              {output || (isStreaming ? '等待输出...' : '点击"运行"查看结果')}
-              {isStreaming && <span className="animate-pulse">▊</span>}
+            <div className={`flex-1 min-h-[300px] p-5 font-mono text-sm leading-relaxed border border-slate-200/50 rounded-2xl shadow-inner whitespace-pre-wrap break-all transition-colors ${output ? 'bg-indigo-50/40 text-slate-800' : 'bg-white/40 text-slate-400 flex items-center justify-center'}`}>
+              {output || (isStreaming ? '等待输出...' : '点击左侧 "运行" 查看大模型生成结果')}
+              {isStreaming && <span className="animate-pulse ml-1 text-indigo-500">▊</span>}
             </div>
 
             {/* Metrics */}
             {(latencyMs > 0 || tokens > 0) && (
-              <div style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 13, color: '#6b7280' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Clock size={14} /> {latencyMs}ms
+              <div className="flex items-center gap-6 mt-5 text-sm font-semibold text-slate-500 px-2">
+                <span className="flex items-center gap-1.5 bg-white/60 px-3 py-1.5 rounded-lg border border-slate-200/50 shadow-sm">
+                  <Clock className="w-4 h-4 text-slate-400" /> {latencyMs.toLocaleString()} ms
                 </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Zap size={14} /> {tokens} tokens
+                <span className="flex items-center gap-1.5 bg-white/60 px-3 py-1.5 rounded-lg border border-slate-200/50 shadow-sm">
+                  <Zap className="w-4 h-4 text-amber-500" /> {tokens.toLocaleString()} tokens
                 </span>
               </div>
             )}
@@ -446,50 +436,37 @@ export function PlaygroundPage() {
 
           {/* Judge Result */}
           {enableJudge && judgeResult && (
-            <Card>
-              <h3 style={{ fontWeight: 600, marginBottom: 12 }}>评判结果</h3>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                <div style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: '50%',
-                  background: judgeResult.score >= 0.8 ? '#dcfce7' : '#fef2f2',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 18,
-                  fontWeight: 700,
-                  color: judgeResult.score >= 0.8 ? '#16a34a' : '#dc2626',
-                }}>
+            <Card className={`p-6 liquid-glass flex flex-col border ${judgeResult.score >= 0.8 ? 'border-emerald-200 bg-emerald-50/30' : 'border-rose-200 bg-rose-50/30'}`}>
+              <h3 className="font-bold text-slate-800 text-base mb-5 flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-slate-500" /> 评判结果
+              </h3>
+              <div className="flex items-center gap-5 mb-6">
+                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-black shadow-inner border ${judgeResult.score >= 0.8 ? 'bg-emerald-100 text-emerald-600 border-emerald-200' : 'bg-rose-100 text-rose-600 border-rose-200'}`}>
                   {Math.round(judgeResult.score * 100)}
                 </div>
-                <div>
-                  <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <div className={`font-bold flex items-center gap-2 text-base ${judgeResult.label === 'pass' ? 'text-emerald-700' : 'text-rose-700'}`}>
                     {judgeResult.label === 'pass' ? (
-                      <CheckCircle size={16} color="#22c55e" />
+                      <><CheckCircle className="w-5 h-5" /> 评测通过 (Pass)</>
                     ) : (
-                      <AlertCircle size={16} color="#ef4444" />
+                      <><AlertCircle className="w-5 h-5" /> 评测未通过 (Fail)</>
                     )}
-                    {judgeResult.label === 'pass' ? '通过' : '未通过'}
                   </div>
-                  <div style={{ fontSize: 13, color: '#6b7280', marginTop: 2 }}>{judgeResult.feedback}</div>
+                  <div className="text-sm font-medium text-slate-600 leading-relaxed bg-white/60 p-2.5 rounded-lg border border-slate-200/50 shadow-sm">{judgeResult.feedback}</div>
                 </div>
               </div>
               {judgeResult.dimensions.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div className="flex flex-col gap-3">
                   {judgeResult.dimensions.map(dim => (
-                    <div key={dim.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ width: 90, fontSize: 12, color: '#6b7280' }}>{dim.name}</span>
-                      <div style={{ flex: 1, height: 6, background: '#e5e7eb', borderRadius: 3 }}>
-                        <div style={{
+                    <div key={dim.name} className="flex items-center gap-3 bg-white/40 p-2 rounded-lg border border-slate-100">
+                      <span className="w-28 text-xs font-bold text-slate-500 uppercase tracking-wider">{dim.name}</span>
+                      <div className="flex-1 h-2.5 bg-slate-200/60 rounded-full overflow-hidden shadow-inner">
+                        <div className="h-full rounded-full transition-all duration-1000 ease-out" style={{
                           width: `${dim.score * 100}%`,
-                          height: '100%',
-                          background: dim.score >= 0.8 ? '#22c55e' : dim.score >= 0.6 ? '#f59e0b' : '#ef4444',
-                          borderRadius: 3,
-                          transition: 'width 0.3s',
+                          background: dim.score >= 0.8 ? '#10b981' : dim.score >= 0.6 ? '#f59e0b' : '#ef4444',
                         }} />
                       </div>
-                      <span style={{ width: 36, fontSize: 12, fontWeight: 600, textAlign: 'right' }}>
+                      <span className="w-8 text-sm font-bold text-slate-700 text-right">
                         {Math.round(dim.score * 100)}
                       </span>
                     </div>
@@ -500,19 +477,19 @@ export function PlaygroundPage() {
           )}
 
           {/* Version History */}
-          <Card>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <h3 style={{ fontWeight: 600 }}>
-                <GitBranch size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6 }} />
+          <Card className="p-6 liquid-glass flex flex-col max-h-[400px]">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                <GitBranch className="w-4 h-4 text-indigo-500" />
                 版本历史 ({versions.length})
               </h3>
             </div>
             {versions.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 20, color: '#9ca3af', fontSize: 13 }}>
+              <div className="flex-1 flex items-center justify-center text-sm font-medium text-slate-400 bg-white/30 rounded-xl border border-slate-100 min-h-[120px]">
                 运行后会自动保存版本
               </div>
             ) : (
-              <div style={{ maxHeight: 250, overflow: 'auto' }}>
+              <div className="flex flex-col gap-2 overflow-y-auto pr-2 custom-scrollbar">
                 {versions.map(v => (
                   <div
                     key={v.id}
@@ -525,26 +502,18 @@ export function PlaygroundPage() {
                       if (v.latencyMs) setLatencyMs(v.latencyMs);
                       if (v.tokens) setTokens(v.tokens);
                     }}
-                    style={{
-                      padding: '10px 12px',
-                      border: selectedVersion === v.id ? '1px solid #3b82f6' : '1px solid #e5e7eb',
-                      borderRadius: 6,
-                      marginBottom: 6,
-                      cursor: 'pointer',
-                      background: selectedVersion === v.id ? '#eff6ff' : 'white',
-                      transition: 'all 0.15s',
-                    }}
+                    className={`p-3.5 rounded-xl cursor-pointer transition-all border shadow-sm ${selectedVersion === v.id ? 'bg-indigo-50 border-indigo-200' : 'bg-white/60 border-slate-200/50 hover:bg-white'}`}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>{v.id}</span>
-                      <span style={{ fontSize: 11, color: '#9ca3af' }}>{v.timestamp}</span>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`font-bold text-sm ${selectedVersion === v.id ? 'text-indigo-700' : 'text-slate-700'}`}>{v.id}</span>
+                      <span className="text-xs font-medium text-slate-400">{v.timestamp}</span>
                     </div>
-                    <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: 12, color: '#6b7280' }}>
-                      <span>{v.model}</span>
+                    <div className="flex items-center gap-3 text-xs font-semibold text-slate-500">
+                      <span className="bg-white/60 px-2 py-0.5 rounded border border-slate-100">{v.model}</span>
                       {v.latencyMs && <span>{v.latencyMs}ms</span>}
-                      {v.tokens && <span>{v.tokens} tokens</span>}
+                      {v.tokens && <span>{v.tokens}t</span>}
                       {v.judgeResult && (
-                        <span style={{ color: v.judgeResult.score >= 0.8 ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
+                        <span className={`px-2 py-0.5 rounded border ${v.judgeResult.score >= 0.8 ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-rose-50 text-rose-600 border-rose-100'}`}>
                           {Math.round(v.judgeResult.score * 100)}分
                         </span>
                       )}

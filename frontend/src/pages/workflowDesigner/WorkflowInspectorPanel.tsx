@@ -117,11 +117,13 @@ export function WorkflowInspectorPanel({
                   <div className="flex flex-col gap-4">
                     <div className="flex flex-col gap-1.5">
                       <label className="text-sm text-slate-500">节点 ID</label>
-                      <input 
-                        type="text" 
-                        className={inputClass} 
-                        value={selectedGraphNode.node_id} 
-                        onChange={(e) => onUpdateNode({ node_id: e.target.value })} 
+                      <input
+                        type="text"
+                        className={inputClass}
+                        value={selectedGraphNode.node_id}
+                        readOnly
+                        title="节点 ID 创建后不可修改，修改会导致连线丢失"
+                        style={{ opacity: 0.7, cursor: 'not-allowed' }}
                       />
                     </div>
                     <div className="flex flex-col gap-1.5">
