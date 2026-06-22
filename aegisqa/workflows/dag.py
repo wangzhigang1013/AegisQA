@@ -80,7 +80,7 @@ class DAGWorkflowExecutor:
             for src_path in step.input_mapping.values():
                 # input_mapping 值格式如 "row.xxx" 或 "step_id.field"
                 parts = src_path.split(".")
-                if len(parts) >= 2 and parts[0] not in ("row", "context", "metrics", "artifacts"):
+                if len(parts) >= 2 and parts[0] not in ("row", "context", "metrics", "artifacts", "steps"):
                     upstream.add(parts[0])
             upstream_map[step.step_id] = upstream
 

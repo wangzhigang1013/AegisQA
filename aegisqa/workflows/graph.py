@@ -315,7 +315,7 @@ class WorkflowGraphService:
                                 details={"missing_path": missing_path} if missing_path else {},
                             )
                         )
-                    return
+                    continue  # 收集所有映射路径错误后一次性返回
 
                 # 校验阶段不调用真实 Skill，而是用 schema 占位输出驱动下游类型检查。
                 # 这样前端能在发布前发现映射问题，同时不会产生外部调用成本或副作用。
@@ -458,4 +458,5 @@ def _placeholder_for_schema(schema: dict[str, Any]) -> Any:
         return []
     if expected == "object":
         return {}
-    return None
+    # 未知类型返回空字符串占位，避免下游 None 类型误报
+    return "__schema_unknown__"

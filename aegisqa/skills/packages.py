@@ -567,18 +567,29 @@ config = payload.get("config", {})
 func = getattr(module, function_name)
 
 # 尝试多种调用方式以支持不同函数签名
+# 仅捕获参数数量不匹配的 TypeError，其他 TypeError (如函数体内的类型错误) 直接抛出
+def _is_signature_error(exc: TypeError) -> bool:
+    msg = str(exc).lower()
+    return "positional argument" in msg or "takes" in msg or "missing" in msg or "unexpected" in msg
+
 try:
     # 方式1: 标准 AegisQA 签名 func(inputs, config)
     result = func(inputs, config)
-except TypeError:
+except TypeError as e:
+    if not _is_signature_error(e):
+        raise
     try:
         # 方式2: OpenAI Tool 风格 func(**inputs)
         result = func(**inputs)
-    except TypeError:
+    except TypeError as e2:
+        if not _is_signature_error(e2):
+            raise
         try:
             # 方式3: 单参数 func(inputs)
             result = func(inputs)
-        except TypeError:
+        except TypeError as e3:
+            if not _is_signature_error(e3):
+                raise
             # 方式4: 无参数 func()
             result = func()
 

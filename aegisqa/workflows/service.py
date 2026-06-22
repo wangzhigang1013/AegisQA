@@ -68,4 +68,5 @@ class WorkflowService:
 
 
 def _safe(value: str) -> str:
-    return value.replace(":", "_").replace("/", "_")
+    import re
+    return re.sub(r'[^\w\-.]', '_', value)

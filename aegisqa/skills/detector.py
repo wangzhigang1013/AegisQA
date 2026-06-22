@@ -494,10 +494,13 @@ def _detect_instruction(package_dir: Path) -> SkillDetectionResult | None:
     """检测纯指令型 Skill（只有 SKILL.md）。"""
     skill_md = package_dir / "SKILL.md"
     if skill_md.exists():
+        content = skill_md.read_text(encoding="utf-8", errors="ignore").strip()
+        if len(content) < 10:
+            return None  # 空或过短的 SKILL.md 不视为有效指令
         return SkillDetectionResult(
             skill_type=SkillType.INSTRUCTION,
             confidence=0.7,
-            metadata={"has_skill_md": True},
+            metadata={"has_skill_md": True, "content_length": len(content)},
         )
 
     return None

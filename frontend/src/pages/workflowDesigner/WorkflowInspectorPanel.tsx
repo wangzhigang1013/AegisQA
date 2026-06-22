@@ -163,13 +163,16 @@ export function WorkflowInspectorPanel({
                     </div>
                     <div className="flex flex-col gap-1.5">
                       <label className="text-sm text-slate-500">条件表达式</label>
-                      <input 
-                        type="text" 
-                        className={inputClass} 
+                      <input
+                        type="text"
+                        className={inputClass}
                         placeholder="例如 metrics.score > 0.6"
-                        value={selectedGraphNode.condition ?? ''} 
-                        onChange={(e) => onUpdateNode({ condition: e.target.value })} 
+                        value={selectedGraphNode.condition ?? ''}
+                        onChange={(e) => onUpdateNode({ condition: e.target.value })}
                       />
+                      <div className="text-xs text-slate-400 leading-relaxed">
+                        支持: <code>path exists</code> / <code>path == "value"</code> / <code>path {'>'} 0.5</code> / <code>A AND B</code> / <code>A OR B</code> / <code>(A OR B) AND C</code>
+                      </div>
                     </div>
                     
                     {selectedGraphNode.node_type === 'aggregator' && (

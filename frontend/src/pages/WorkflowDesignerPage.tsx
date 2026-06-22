@@ -659,6 +659,13 @@ function WorkflowDesignerContent() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={(connection: Connection) => {
+              // 防止重复连线
+              const source = connection.source ?? '';
+              const target = connection.target ?? '';
+              if (source && target) {
+                const exists = edges.some(e => e.source === source && e.target === target);
+                if (exists) return;
+              }
               rememberGraph();
               updateEdges((current) => addEdge({ ...connection, markerEnd: { type: MarkerType.ArrowClosed } }, current));
             }}

@@ -172,6 +172,9 @@ export function SkillCreatePage() {
       // 字段校验
       const form = mode === 'code' ? codeForm : mode === 'api' ? apiForm : instForm;
       if (!form.name.trim()) throw new Error('请填写 Skill 名称');
+      if (mode === 'code' && !codeForm.code.trim()) throw new Error('请编写 Python 代码');
+      if (mode === 'api' && !apiForm.url.trim()) throw new Error('请填写 API URL');
+      if (mode === 'instruction' && !instForm.instruction.trim()) throw new Error('请编写指令内容');
 
       const zip = new JSZip();
       const skillId = `skill-${form.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`;
