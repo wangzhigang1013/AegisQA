@@ -38,9 +38,9 @@ class WorkflowService:
 
     def archive(self, version_id: str) -> WorkflowVersion:
         workflow = self.get(version_id)
-        workflow.status = "archived"
-        self._save(workflow)
-        return workflow
+        archived = workflow.model_copy(update={"status": "archived"})
+        self._save(archived)
+        return archived
 
     def get(self, version_id: str) -> WorkflowVersion:
         if self.workflow_repository:

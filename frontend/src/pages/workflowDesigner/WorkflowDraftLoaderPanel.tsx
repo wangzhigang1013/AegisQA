@@ -81,11 +81,10 @@ export function WorkflowDraftLoaderPanel({
             <select
               aria-label="加载已有流程"
               className="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              value=""
               onChange={(e) => {
                 if (e.target.value) onLoadWorkflow(e.target.value);
-                e.target.value = '';
               }}
-              defaultValue=""
             >
               <option value="" disabled>选择草稿、已发布版本或模板</option>
               <optgroup label="草稿">

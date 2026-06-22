@@ -27,23 +27,8 @@ class DAGWorkflow(BaseModel):
     name: str
     steps: list[DAGWorkflowStep]
 
-    def topological_order(self) -> list[str]:
-        remaining = {step.step_id: set(step.depends_on) for step in self.steps}
-        ordered: list[str] = []
-        while remaining:
-            ready = sorted(step_id for step_id, deps in remaining.items() if not deps)
-            if not ready:
-                raise ValueError("DAG 存在循环依赖")
-            for step_id in ready:
-                ordered.append(step_id)
-                remaining.pop(step_id)
-                for deps in remaining.values():
-                    deps.discard(step_id)
-        return ordered
-
     def execution_levels(self) -> list[list[str]]:
         """按依赖关系计算可并行执行的层级。"""
-
         remaining = {step.step_id: set(step.depends_on) for step in self.steps}
         levels: list[list[str]] = []
         while remaining:
@@ -56,6 +41,10 @@ class DAGWorkflow(BaseModel):
                 for deps in remaining.values():
                     deps.discard(step_id)
         return levels
+
+    def topological_order(self) -> list[str]:
+        """返回拓扑排序的扁平列表。"""
+        return [step_id for level in self.execution_levels() for step_id in level]
 
 
 class DAGWorkflowExecutor:

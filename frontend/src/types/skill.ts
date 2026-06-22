@@ -24,6 +24,8 @@ export type SkillContractResult = {
   metrics?: Record<string, unknown>;
   error?: string;
   message?: string;
+  code?: string;
+  retry_count?: number;
 };
 
 export type SkillPackageSecurity = {

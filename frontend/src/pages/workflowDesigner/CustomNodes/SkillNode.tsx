@@ -18,19 +18,24 @@ export const SkillNode = memo((props: NodeProps) => {
     ? 'linear-gradient(135deg, #3b82f6, #6366f1)'
     : 'linear-gradient(135deg, #8b5cf6, #a78bfa)';
 
+  const inputKey = JSON.stringify(inputFields);
+  const outputKey = JSON.stringify(outputFields);
+
   const inputs: PortConfig[] = useMemo(() => {
     if (inputFields.length) {
       return inputFields.map((field) => ({ id: field, label: field, type: 'input' as const }));
     }
     return [{ id: 'input', label: '输入', type: 'input' as const }];
-  }, [inputFields]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputKey]);
 
   const outputs: PortConfig[] = useMemo(() => {
     if (outputFields.length) {
       return outputFields.map((field) => ({ id: field, label: field, type: 'output' as const }));
     }
     return [{ id: 'output', label: '输出', type: 'output' as const }];
-  }, [outputFields]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outputKey]);
 
   const nodeData: BaseNodeData = {
     ...baseData,

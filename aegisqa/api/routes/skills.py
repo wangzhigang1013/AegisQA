@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import base64
+import io
+import zipfile
 from typing import Any
 
+import yaml
 from fastapi import FastAPI
 from pydantic import BaseModel
 
@@ -20,6 +24,7 @@ from aegisqa.api.app import (
     _update_skill_package_status,
 )
 from aegisqa.api.routes.context import RouteContext
+from aegisqa.core.errors import AegisQAError
 from aegisqa.security.access import require_permission
 from aegisqa.skills.agent_skills import (
     agent_skill_ids_from_store,
@@ -66,10 +71,6 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
     @app.post("/skills/packages/upload")
     def upload_skill_package(request: SkillPackageUploadRequest) -> dict[str, Any]:
         # 冲突检测：在调用 _install_skill_package 之前检查
-        from aegisqa.api.app import _find_skill_package, _list_records, _skill_base_id
-        from aegisqa.core.errors import AegisQAError
-        import base64, zipfile, io, yaml
-        from aegisqa.skills.base import SkillManifest
 
         # 先解析 manifest 获取 skill_id
         try:

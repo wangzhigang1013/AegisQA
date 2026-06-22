@@ -4,7 +4,7 @@ export type WorkflowGraphNode = {
   label?: string;
   skill_ref?: string;
   condition?: string;
-  input_mapping?: Record<string, string>;
+  input_mapping: Record<string, string>;
   output_mapping?: Record<string, string>;
   config?: Record<string, unknown>;
   cacheable?: boolean;
@@ -15,6 +15,7 @@ export type WorkflowGraphEdge = {
   source: string;
   target: string;
   condition?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type WorkflowGraph = {
