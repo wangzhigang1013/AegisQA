@@ -1,6 +1,6 @@
 import { Download, PlayCircle, RefreshCw } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { api, formatApiError } from '../api/client';
@@ -55,24 +55,23 @@ export function RunsPage() {
   const totalPages = Math.ceil((taskPagination?.total_items ?? tasks.length) / taskPageSize);
 
   // 自适应轮询: running=1s, queued=3s, 连续无变化增加到 5s
+  const snapshotRef = useRef({ consecutiveNoChange: 0, prevSnapshot: '' });
   useEffect(() => {
     if (!hasActiveTask) return undefined;
-    let consecutiveNoChange = 0;
-    let prevSnapshot = '';
     const poll = () => {
       void queryClient.invalidateQueries({ queryKey: ['tasks'] }).then(() => {
         const current = tasks.map(t => `${t.task_id}:${t.status}`).join(',');
-        if (current === prevSnapshot) {
-          consecutiveNoChange++;
+        if (current === snapshotRef.current.prevSnapshot) {
+          snapshotRef.current.consecutiveNoChange++;
         } else {
-          consecutiveNoChange = 0;
+          snapshotRef.current.consecutiveNoChange = 0;
         }
-        prevSnapshot = current;
+        snapshotRef.current.prevSnapshot = current;
       });
     };
     const hasRunning = tasks.some(t => t.status === 'running');
     const baseInterval = hasRunning ? 1000 : 3000;
-    const interval = consecutiveNoChange >= 3 ? 5000 : baseInterval;
+    const interval = snapshotRef.current.consecutiveNoChange >= 3 ? 5000 : baseInterval;
     const timer = window.setInterval(poll, interval);
     return () => window.clearInterval(timer);
   }, [hasActiveTask, queryClient, tasks]);

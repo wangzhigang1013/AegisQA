@@ -16,7 +16,7 @@ import {
   DialogFooter,
 } from '../components/ui/Dialog';
 import type { SkillContractResult, SkillManifest, SkillPackageRecord, SkillVersionHistory, SkillVersionHistoryItem } from '../types';
-import { isMoreCanonicalPackage } from '../lib/skillPackageUtils';
+import { isMoreCanonicalPackage, indexPackagesBySkillId, formatSkillStatus } from '../lib/skillPackageUtils';
 
 type ConflictStrategy = 'error' | 'replace' | 'new_version';
 
@@ -618,27 +618,6 @@ async function readFileBase64(file: File): Promise<string> {
     binary += String.fromCharCode(byte);
   }
   return btoa(binary);
-}
-
-function indexPackagesBySkillId(packages: SkillPackageRecord[]): Record<string, SkillPackageRecord> {
-  // 见 src/lib/skillPackageUtils.ts：与后端 _find_skill_package 对齐，取「未被替换且最新」的记录。
-  return packages.reduce<Record<string, SkillPackageRecord>>((index, item) => {
-    const skillId = item.manifest.skill_id;
-    const current = index[skillId];
-    if (!current || isMoreCanonicalPackage(item, current)) {
-      index[skillId] = item;
-    }
-    return index;
-  }, {});
-}
-
-function formatSkillStatus(status: string): string {
-  return {
-    approved: '已启用',
-    pending_review: '待审批',
-    disabled: '已禁用',
-    deprecated: '已废弃',
-  }[status] ?? status;
 }
 
 function formatPackageRuntime(runtimeMode?: string): string {

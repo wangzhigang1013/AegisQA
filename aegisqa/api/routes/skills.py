@@ -12,16 +12,17 @@ from pydantic import BaseModel
 from aegisqa.api.app import (
     SkillGovernanceRequest,
     SkillPackageUploadRequest,
-    _find_skill_package,
-    _install_skill_package,
-    _mark_skill_package_approved,
-    _now,
     _list_records,
-    _record_skill_package_contract_result,
-    _record_skill_package_lifecycle_event,
-    _save_record,
-    _skill_base_id,
-    _update_skill_package_status,
+    _now,
+)
+from aegisqa.skills.package_manager import (
+    find_skill_package,
+    install_skill_package,
+    mark_skill_package_approved,
+    record_skill_package_contract_result,
+    record_skill_package_lifecycle_event,
+    skill_base_id,
+    update_skill_package_status,
 )
 from aegisqa.api.routes.context import RouteContext
 from aegisqa.core.errors import AegisQAError
@@ -144,7 +145,7 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
         # 冲突检测
         conflict_strategy = request.conflict_strategy or "error"
         if skill_id and conflict_strategy == "error":
-            existing = _find_skill_package(ctx.store, skill_id)
+            existing = find_skill_package(ctx.store, skill_id)
             if existing:
                 raise AegisQAError(
                     "SKILL_ALREADY_EXISTS",
@@ -165,7 +166,7 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             target=request.filename,
             actor=request.actor,
         )
-        record = _install_skill_package(ctx.store, ctx.registry, ctx.artifact_store, request)
+        record = install_skill_package(ctx.store, ctx.registry, ctx.artifact_store, request.filename, request.content_base64, request.conflict_strategy, request.actor, request.role)
         detail = {
             "filename": request.filename,
             "role": request.role,
@@ -196,7 +197,7 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             actor=actor,
         )
         result = ctx.registry.get(skill_id).contract_test()
-        _record_skill_package_contract_result(ctx.store, skill_id, result, actor=actor)
+        record_skill_package_contract_result(ctx.store, skill_id, result, actor=actor)
         update_agent_skill_contract_result(ctx.store, skill_id, result)
         return {"skill_id": skill_id, **result}
 
@@ -215,17 +216,17 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             target=skill_id,
             actor=request.actor,
         )
-        source_package = _find_skill_package(ctx.store, skill_id)
-        target_package = _find_skill_package(ctx.store, request.target_skill_id)
+        source_package = find_skill_package(ctx.store, skill_id)
+        target_package = find_skill_package(ctx.store, request.target_skill_id)
         if not source_package or not target_package:
             raise ValueError("回滚只能在已上传的 Skill 包版本之间执行。")
-        if _skill_base_id(skill_id) != _skill_base_id(request.target_skill_id):
+        if skill_base_id(skill_id) != skill_base_id(request.target_skill_id):
             raise ValueError("只能回滚到同一 Skill 版本族。")
         if not target_package.get("last_contract_ok"):
             raise ValueError("目标版本必须先通过合约测试。")
         target_manifest = ctx.registry.approve(request.target_skill_id)
-        _update_skill_package_status(ctx.store, target_manifest)
-        _record_skill_package_lifecycle_event(
+        update_skill_package_status(ctx.store, target_manifest)
+        record_skill_package_lifecycle_event(
             ctx.store,
             request.target_skill_id,
             action="rollback_target",
@@ -235,8 +236,8 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             target_skill_id=skill_id,
         )
         source_manifest = ctx.registry.deprecate(skill_id, reason=request.reason)
-        _update_skill_package_status(ctx.store, source_manifest)
-        _record_skill_package_lifecycle_event(
+        update_skill_package_status(ctx.store, source_manifest)
+        record_skill_package_lifecycle_event(
             ctx.store,
             skill_id,
             action="rollback_source",
@@ -266,8 +267,8 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             actor=request.actor,
         )
         manifest = ctx.registry.disable(skill_id, reason=request.reason)
-        _update_skill_package_status(ctx.store, manifest)
-        _record_skill_package_lifecycle_event(ctx.store, manifest.skill_id, action="disable", actor=request.actor, role=request.role, reason=request.reason)
+        update_skill_package_status(ctx.store, manifest)
+        record_skill_package_lifecycle_event(ctx.store, manifest.skill_id, action="disable", actor=request.actor, role=request.role, reason=request.reason)
         update_agent_skill_status(ctx.store, manifest)
         ctx.audit_service.record(
             actor=request.actor,
@@ -291,16 +292,16 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             target=skill_id,
             actor=actor,
         )
-        package = _find_skill_package(ctx.store, skill_id)
+        package = find_skill_package(ctx.store, skill_id)
         if package and not package.get("last_contract_ok"):
             raise ValueError("插件包必须先通过合约测试，才能审批启用。")
         agent_skill = find_agent_skill_record(ctx.store, skill_id)
         if agent_skill and not agent_skill.get("last_contract_ok"):
             raise ValueError("Agent Skill 必须先通过合约测试，才能审批启用。")
         manifest = ctx.registry.approve(skill_id)
-        _update_skill_package_status(ctx.store, manifest)
+        update_skill_package_status(ctx.store, manifest)
         update_agent_skill_status(ctx.store, manifest)
-        _mark_skill_package_approved(ctx.store, manifest.skill_id, request.reason if request else "", actor=actor, role=role)
+        mark_skill_package_approved(ctx.store, manifest.skill_id, request.reason if request else "", actor=actor, role=role)
         mark_agent_skill_approved(ctx.store, manifest.skill_id, request.reason if request else "")
         ctx.audit_service.record(
             actor=actor,
@@ -323,8 +324,8 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             actor=request.actor,
         )
         manifest = ctx.registry.deprecate(skill_id, reason=request.reason)
-        _update_skill_package_status(ctx.store, manifest)
-        _record_skill_package_lifecycle_event(ctx.store, manifest.skill_id, action="deprecate", actor=request.actor, role=request.role, reason=request.reason)
+        update_skill_package_status(ctx.store, manifest)
+        record_skill_package_lifecycle_event(ctx.store, manifest.skill_id, action="deprecate", actor=request.actor, role=request.role, reason=request.reason)
         update_agent_skill_status(ctx.store, manifest)
         ctx.audit_service.record(
             actor=request.actor,
@@ -344,7 +345,7 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
 
         # 查找包根目录
         package_root = None
-        package_record = _find_skill_package(ctx.store, skill_id)
+        package_record = find_skill_package(ctx.store, skill_id)
         if package_record and package_record.get("package_dir"):
             from pathlib import Path
             package_root = Path(package_record["package_dir"])
@@ -430,7 +431,7 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             )
 
             # 安装包
-            record = _install_skill_package(ctx.store, ctx.registry, ctx.artifact_store, upload_request)
+            record = install_skill_package(ctx.store, ctx.registry, ctx.artifact_store, upload_request.filename, upload_request.content_base64, upload_request.conflict_strategy, upload_request.actor, upload_request.role)
 
         ctx.audit_service.record(
             actor=request.actor,
@@ -466,7 +467,7 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
                     continue
 
                 package_root = None
-                package_record = _find_skill_package(ctx.store, skill_id)
+                package_record = find_skill_package(ctx.store, skill_id)
                 if package_record and package_record.get("package_dir"):
                     from pathlib import Path
                     package_root = Path(package_record["package_dir"])
@@ -520,7 +521,7 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
                     role=pkg.role,
                     actor=pkg.actor,
                 )
-                record = _install_skill_package(ctx.store, ctx.registry, ctx.artifact_store, upload_request)
+                record = install_skill_package(ctx.store, ctx.registry, ctx.artifact_store, upload_request.filename, upload_request.content_base64, upload_request.conflict_strategy, upload_request.actor, upload_request.role)
 
                 ctx.audit_service.record(
                     actor=pkg.actor,
@@ -543,11 +544,11 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
 
 
 def _build_skill_version_history(ctx: RouteContext, skill_id: str) -> dict[str, Any]:
-    base_skill_id = _skill_base_id(skill_id)
+    base_skill_id = skill_base_id(skill_id)
     records = [
         _normalise_skill_version_record(record)
         for record in _list_records(ctx.store, "skill_packages")
-        if _skill_base_id(str(record.get("manifest", {}).get("skill_id") or "")) == base_skill_id
+        if skill_base_id(str(record.get("manifest", {}).get("skill_id") or "")) == base_skill_id
     ]
     records.sort(key=lambda item: _version_sort_key(str(item.get("version") or item.get("skill_version") or "")))
     previous_manifest: dict[str, Any] | None = None
@@ -585,7 +586,7 @@ def _build_skill_version_history(ctx: RouteContext, skill_id: str) -> dict[str, 
 def _normalise_skill_version_record(record: dict[str, Any]) -> dict[str, Any]:
     manifest = record.get("manifest") if isinstance(record.get("manifest"), dict) else {}
     if "base_skill_id" not in record:
-        record["base_skill_id"] = _skill_base_id(str(manifest.get("skill_id") or ""))
+        record["base_skill_id"] = skill_base_id(str(manifest.get("skill_id") or ""))
     if "skill_version" not in record:
         record["skill_version"] = str(manifest.get("version") or "")
     record.setdefault("contract_history", [])
