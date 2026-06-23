@@ -24,7 +24,7 @@ export function SkillPalettePanel({
   onAddStructureNode,
 }: SkillPalettePanelProps) {
   return (
-    <Card className="shadow-none border-0 h-full flex flex-col rounded-none">
+    <Card className="shadow-none border-0 flex-1 min-h-0 flex flex-col rounded-none">
       <CardHeader className="pb-4 pt-6 px-6">
         <CardTitle className="text-lg">Skill Palette</CardTitle>
       </CardHeader>
@@ -42,38 +42,62 @@ export function SkillPalettePanel({
           {skills.length ? (
             skills.map((skill) => {
               const disabled = !skill.enabled || skill.status !== 'approved';
-              return (
-                <div key={skill.skill_id} className="border rounded-lg p-4 flex flex-col gap-2 shadow-sm bg-white">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-sm">{skill.name}</span>
-                    <span className={`px-2 py-0.5 text-xs rounded font-medium ${disabled ? 'bg-orange-100 text-orange-800' : 'bg-green-100 text-green-800'}`}>
-                      {skill.status}
-                    </span>
+                return (
+                  <div 
+                    key={skill.skill_id} 
+                    className="group border border-slate-200 rounded-xl p-3 flex flex-col gap-2.5 bg-white transition-all hover:border-blue-300 hover:shadow-md"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="font-semibold text-sm text-slate-800 truncate" title={skill.name}>
+                        {skill.name}
+                      </h4>
+                      <span className={`flex-shrink-0 px-2 py-0.5 text-[10px] rounded-full font-medium ${
+                        disabled ? 'bg-orange-100 text-orange-800 border border-orange-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                      }`}>
+                        {skill.status === 'approved' ? 'Approved' : skill.status}
+                      </span>
+                    </div>
+                    
+                    {skill.description && (
+                      <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed" title={skill.description}>
+                        {skill.description}
+                      </p>
+                    )}
+                    
+                    <div className="flex items-center gap-3 text-[11px] text-slate-400 font-medium">
+                      <div className="flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                        输入 {schemaFieldCount(skill.input_schema)}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                        输出 {schemaFieldCount(skill.output_schema)}
+                      </div>
+                    </div>
+
+                    {disabled && <p className="text-[10px] text-orange-600 bg-orange-50 px-2 py-1 rounded">⚠️ Skill 暂未发布或被禁用</p>}
+                    
+                    <div className="flex gap-2 mt-1">
+                      <Button 
+                        size="sm" 
+                        variant="default" 
+                        disabled={disabled} 
+                        onClick={() => onAddSkill(skill)}
+                        className="flex-1 h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-all"
+                      >
+                        <Plus className="w-3.5 h-3.5 mr-1" /> 添加
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        onClick={() => onShowSkill(skill)}
+                        className="h-7 text-xs px-3 border-slate-200 hover:bg-slate-50 text-slate-600"
+                      >
+                        详情
+                      </Button>
+                    </div>
                   </div>
-                  <p className="text-xs text-slate-500">{skill.description}</p>
-                  <p className="text-xs text-slate-500">输入 {schemaFieldCount(skill.input_schema)} / 输出 {schemaFieldCount(skill.output_schema)}</p>
-                  {disabled && <p className="text-xs text-slate-500">请先在 Skill 市场运行合约测试并审批启用</p>}
-                  <div className="flex gap-2 mt-2">
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
-                      disabled={disabled} 
-                      onClick={() => onAddSkill(skill)}
-                      className="flex items-center gap-1 flex-1 justify-center h-8 text-xs"
-                    >
-                      <Plus className="w-3 h-3" /> 添加 {skill.name}
-                    </Button>
-                    <Button 
-                      size="sm" 
-                      variant="ghost" 
-                      onClick={() => onShowSkill(skill)}
-                      className="h-8 text-xs px-3"
-                    >
-                      查看详情
-                    </Button>
-                  </div>
-                </div>
-              );
+                );
             })
           ) : (
             <div className="py-8 text-center text-sm text-slate-500 flex flex-col items-center gap-2">

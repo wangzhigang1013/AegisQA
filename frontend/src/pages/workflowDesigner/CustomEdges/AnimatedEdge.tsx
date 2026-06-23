@@ -12,6 +12,7 @@ export const AnimatedEdge = memo(({
   targetPosition,
   style = {},
   selected,
+  markerEnd,
 }: any) => {
   const [edgePath] = getSmoothStepPath({
     sourceX,
@@ -29,10 +30,11 @@ export const AnimatedEdge = memo(({
         id={id}
         className={`react-flow__edge-path ${selected ? 'selected-edge' : ''}`}
         d={edgePath}
+        markerEnd={markerEnd}
         style={{
           ...style,
           strokeWidth: selected ? 3 : 2,
-          stroke: selected ? "#4f46e5" : "#e2e8f0",
+          stroke: selected ? "#4f46e5" : "#64748b",
         }}
       />
       {/* 流动的粒子光圈 */}

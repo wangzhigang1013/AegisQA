@@ -32,12 +32,15 @@ export function graphNodeToFlowNode(graphNode: WorkflowGraphNode, position: { x:
     id: graphNode.node_id,
     type: graphNode.node_type || 'skill',
     position,
-    data: { label: formatNodeLabel(graphNode), graphNode },
+    data: { ...formatNodeData(graphNode), graphNode },
   };
 }
 
 export function graphToNodes(graph: WorkflowGraph): FlowNode[] {
-  return graph.nodes.map((graphNode, index) => graphNodeToFlowNode(graphNode, { x: 80 + (index % 4) * 250, y: 100 + Math.floor(index / 4) * 160 }));
+  return graph.nodes.map((graphNode, index) => {
+    const position = (graphNode.metadata?.position as { x: number; y: number }) || { x: 80 + (index % 4) * 250, y: 100 + Math.floor(index / 4) * 160 };
+    return graphNodeToFlowNode(graphNode, position);
+  });
 }
 
 export function graphToEdges(graph: WorkflowGraph): Edge[] {
@@ -46,8 +49,14 @@ export function graphToEdges(graph: WorkflowGraph): Edge[] {
     source: edge.source,
     target: edge.target,
     label: edge.condition,
-    markerEnd: { type: MarkerType.ArrowClosed },
-    animated: Boolean(edge.condition),
+    markerEnd: { 
+      type: MarkerType.ArrowClosed,
+      width: 20,
+      height: 20,
+      color: '#64748b'
+    },
+    animated: true,
+    style: { strokeWidth: 2, stroke: '#64748b' },
   }));
 }
 
@@ -55,7 +64,11 @@ export function buildWorkflowGraph(name: string, nodes: FlowNode[], edges: Edge[
   // 画布当前状态是唯一事实来源；保存、试运行、发布都必须从这里生成后端 payload。
   return {
     name,
-    nodes: nodes.map((node) => ({ ...node.data.graphNode, node_id: node.id })),
+    nodes: nodes.map((node) => ({ 
+      ...node.data.graphNode, 
+      node_id: node.id,
+      metadata: { ...(node.data.graphNode.metadata || {}), position: node.position }
+    })),
     edges: edges.map((edge) => ({ source: edge.source, target: edge.target, condition: typeof edge.label === 'string' ? edge.label : undefined })),
   };
 }
@@ -154,8 +167,11 @@ export function parseJsonObjectField(value: string, field: string): { ok: true; 
   }
 }
 
-export function formatNodeLabel(node: WorkflowGraphNode): string {
-  return `${node.label || node.node_id}\n${node.skill_ref || nodeTypeLabel[node.node_type]}`;
+export function formatNodeData(node: WorkflowGraphNode): { label: string; subtitle: string } {
+  return {
+    label: node.label || node.node_id,
+    subtitle: node.skill_ref || nodeTypeLabel[node.node_type] || '',
+  };
 }
 
 export function edgeId(source: string, target: string): string {

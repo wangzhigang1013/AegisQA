@@ -26,7 +26,7 @@ import {
   buildAvailableFieldPaths,
   buildWorkflowGraph,
   edgeId,
-  formatNodeLabel,
+  formatNodeData,
   graphNodeToFlowNode,
   graphToEdges,
   graphToNodes,
@@ -37,7 +37,6 @@ import {
 import { SkillDetailDrawer } from './workflowDesigner/SkillDetailDrawer';
 import { SkillPalettePanel } from './workflowDesigner/SkillPalettePanel';
 import { WorkflowCanvasPanel } from './workflowDesigner/WorkflowCanvasPanel';
-import { WorkflowConsolePanel } from './workflowDesigner/WorkflowConsolePanel';
 import { WorkflowDraftLoaderPanel } from './workflowDesigner/WorkflowDraftLoaderPanel';
 import { WorkflowInspectorPanel } from './workflowDesigner/WorkflowInspectorPanel';
 import { InlineIssueSummary, validationErrorsFromResult } from './workflowDesigner/WorkflowIssuePanels';
@@ -279,7 +278,7 @@ function WorkflowDesignerContent() {
     setLastSavedAt(nextSavedAt);
     setPublishNotice(null);
     setConsoleResult(nextGraph);
-    setConsoleText(`已加载流程：${nextGraph.name}`);
+    setConsoleText(`已加载：${nextGraph.name}`);
   }
 
   function isWorkflowGraph(value: unknown): value is WorkflowGraph {
@@ -385,7 +384,7 @@ function WorkflowDesignerContent() {
       current.map((node) => {
         if (node.id !== selectedNodeId) return node;
         const nextGraphNode = { ...node.data.graphNode, ...patch };
-        return { ...node, data: { label: formatNodeLabel(nextGraphNode), graphNode: nextGraphNode } };
+        return { ...node, data: { ...formatNodeData(nextGraphNode), graphNode: nextGraphNode } };
       }),
     );
   }
@@ -548,7 +547,7 @@ function WorkflowDesignerContent() {
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-slate-50 font-sans">
+    <div className="flex-1 w-full flex flex-col overflow-hidden bg-slate-50 font-sans">
       <header className="h-14 border-b bg-white flex items-center justify-between px-4 flex-shrink-0 z-10 shadow-sm">
         <div className="flex items-center gap-3">
           <h1 className="text-[15px] font-bold text-slate-800">Workflow 设计器</h1>
@@ -620,8 +619,8 @@ function WorkflowDesignerContent() {
         </div>
       )}
 
-      <div className="flex-1 flex overflow-hidden">
-        <div className="w-[320px] flex-shrink-0 flex flex-col border-r border-slate-200 bg-white z-10 shadow-sm relative z-20">
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        <div className="w-[320px] flex-shrink-0 flex flex-col border-r border-slate-200 bg-white z-10 shadow-sm relative z-20 min-h-0">
           <SkillPalettePanel
             skills={paletteSkills}
             skillSearch={skillSearch}
@@ -659,15 +658,29 @@ function WorkflowDesignerContent() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={(connection: Connection) => {
-              // 防止重复连线
+              // 防重复与防自环
               const source = connection.source ?? '';
               const target = connection.target ?? '';
+              if (source === target) return;
+              
               if (source && target) {
-                const exists = edges.some(e => e.source === source && e.target === target);
+                const exists = edges.some(
+                  e => (e.source === source && e.target === target) || (e.source === target && e.target === source)
+                );
                 if (exists) return;
               }
               rememberGraph();
-              updateEdges((current) => addEdge({ ...connection, markerEnd: { type: MarkerType.ArrowClosed } }, current));
+              updateEdges((current) => addEdge({ 
+                ...connection, 
+                markerEnd: { 
+                  type: MarkerType.ArrowClosed,
+                  width: 20,
+                  height: 20,
+                  color: '#64748b'
+                },
+                animated: true,
+                style: { strokeWidth: 2, stroke: '#64748b' }
+              }, current));
             }}
             onNodeSelect={(nodeId) => {
               setSelectedNodeId(nodeId);
@@ -684,8 +697,8 @@ function WorkflowDesignerContent() {
           />
         </div>
 
-        <div className="w-[360px] flex-shrink-0 flex flex-col bg-white border-l border-slate-200 shadow-sm z-10">
-          <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="w-[360px] flex-shrink-0 flex flex-col bg-white border-l border-slate-200 shadow-sm z-10 min-h-0">
+          <div className="flex-1 flex flex-col min-h-0">
             <WorkflowInspectorPanel
               selectedGraphNode={selectedGraphNode}
               selectedEdgeId={selectedEdgeId}
@@ -699,19 +712,6 @@ function WorkflowDesignerContent() {
               graph={graph}
               datasetVersions={datasetVersions}
               selectedDatasetVersion={selectedDatasetVersion}
-              onDatasetVersionChange={setSelectedDatasetVersion}
-              onDeleteSelected={deleteSelected}
-              onAutoLayout={autoLayout}
-              onDeleteEdge={deleteEdgeById}
-              onConnectToNode={connectSelectedNodeTo}
-              onUpdateNode={updateSelectedNode}
-              onUpdateAggregatorStrategy={updateAggregatorStrategy}
-              onConsoleTextChange={setConsoleText}
-            />
-          </div>
-          <div className="h-[250px] flex-shrink-0 border-t border-slate-200">
-            <WorkflowConsolePanel
-              graph={graph}
               selectedDataset={selectedDataset}
               consoleTab={consoleTab}
               consoleText={consoleText}
@@ -721,6 +721,14 @@ function WorkflowDesignerContent() {
               onConsoleTabChange={setConsoleTab}
               onValidate={() => validateMutation.mutate()}
               onDryRun={() => dryRunMutation.mutate()}
+              onDatasetVersionChange={setSelectedDatasetVersion}
+              onDeleteSelected={deleteSelected}
+              onAutoLayout={autoLayout}
+              onDeleteEdge={deleteEdgeById}
+              onConnectToNode={connectSelectedNodeTo}
+              onUpdateNode={updateSelectedNode}
+              onUpdateAggregatorStrategy={updateAggregatorStrategy}
+              onConsoleTextChange={setConsoleText}
             />
           </div>
         </div>

@@ -46,16 +46,10 @@ const StatusIcon = ({ status }: { status: string }) => {
 
 export const BaseNode = memo(({ data, selected }: NodeProps) => {
   const nodeData = data as unknown as BaseNodeData;
-  const { label, subtitle, status = 'idle', icon, color = '#3b82f6', gradient, inputs, outputs, metrics, error } = nodeData;
+  const { label, subtitle, status = 'idle', icon, color = '#3b82f6', gradient, inputs, outputs, metrics, error, nodeType } = nodeData;
 
   return (
     <div className={`aegis-node-card ${selected ? 'selected' : ''}`}>
-      {/* 顶部优雅的彩色饰条 */}
-      <div 
-        className="aegis-node-decor" 
-        style={{ background: gradient || color || '#e2e8f0' }} 
-      />
-      
       {/* Header 区域 */}
       <div className="aegis-node-header">
         <div 
@@ -74,17 +68,11 @@ export const BaseNode = memo(({ data, selected }: NodeProps) => {
         <StatusIcon status={status} />
       </div>
 
-      {/* Body / Ports Area */}
+      {/* 节点内容区 (Ports) */}
       <div className="aegis-node-body">
-        {/* 输入端点 */}
+        {/* 输入字段展示（仅文本，无连接点） */}
         {inputs?.map((port) => (
           <div key={port.id} className="aegis-node-port-row">
-            <Handle
-              type="target"
-              position={Position.Left}
-              id={port.id}
-              className="aegis-handle input"
-            />
             <span className="aegis-node-port-label">{port.label}</span>
           </div>
         ))}
@@ -94,19 +82,29 @@ export const BaseNode = memo(({ data, selected }: NodeProps) => {
           <div style={{ height: '1px', backgroundColor: '#f1f5f9', margin: '4px 14px' }} />
         )}
 
-        {/* 输出端点 */}
+        {/* 输出字段展示（仅文本，无连接点） */}
         {outputs?.map((port) => (
           <div key={port.id} className="aegis-node-port-row" style={{ justifyContent: 'flex-end' }}>
             <span className="aegis-node-port-label">{port.label}</span>
-            <Handle
-              type="source"
-              position={Position.Right}
-              id={port.id}
-              className="aegis-handle output"
-            />
           </div>
         ))}
       </div>
+
+      {/* 极简的全局输入输出连接点 (Global Handles) */}
+      {nodeType !== 'source' && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="aegis-handle input"
+        />
+      )}
+      {nodeType !== 'output' && (
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="aegis-handle output"
+        />
+      )}
 
       {/* Footer / Metrics & Errors */}
       {(metrics || error) && (

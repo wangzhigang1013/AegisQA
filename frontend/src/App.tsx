@@ -89,13 +89,19 @@ const navConfig = [
 
 export function AppShell() {
   const location = useLocation();
-  const selectedKey = `/${location.pathname.split('/')[1]}`.replace(/\/$/, '') || '/';
+  // Find the longest matching prefix from navConfig keys
+  const navKeys = navConfig.flatMap(g => g.items.map(i => i.key)).sort((a, b) => b.length - a.length);
+  const selectedKey = navKeys.find(key => location.pathname === key || location.pathname.startsWith(`${key}/`)) || '/';
   const [queryClient] = useState(createAppQueryClient);
+
+  const isFullScreenRoute = location.pathname.startsWith('/workflows/designer');
 
   return (
     <QueryClientProvider client={queryClient}>
       <ToastContainer />
-      <div className="flex min-h-screen bg-background text-foreground font-sans selection:bg-primary selection:text-primary-foreground">
+      <div className={`flex bg-background text-foreground font-sans selection:bg-primary selection:text-primary-foreground ${
+        isFullScreenRoute ? "h-screen overflow-hidden" : "min-h-screen"
+      }`}>
         {/* Sidebar */}
         <aside className="fixed inset-y-0 left-0 z-50 w-64 border-r border-border bg-white flex flex-col hidden md:flex">
           <div className="flex h-16 items-center px-6 border-b border-border/40">
@@ -150,20 +156,13 @@ export function AppShell() {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 ml-0 md:ml-64 flex flex-col min-w-0 bg-[#f8fafc]">
-          <div className="flex-1 px-8 py-8 md:px-12 md:py-10 mx-auto w-full max-w-[1600px]">
+        <main className="flex-1 ml-0 md:ml-64 flex flex-col min-w-0 min-h-0 bg-[#f8fafc]">
+          <div className={isFullScreenRoute ? "flex-1 w-full h-full flex flex-col min-h-0" : "flex-1 px-8 py-8 md:px-12 md:py-10 mx-auto w-full max-w-[1600px]"}>
             <ErrorBoundary>
               <ChunkErrorBoundary>
                 <Suspense fallback={
                   <div className="h-[400px] w-full flex items-center justify-center">
-                    <div className="flex flex-col items-center gap-4">
-                      <motion.div 
-                        animate={{ rotate: 360 }}
-                        transition={{ repeat: Infinity, ease: "linear", duration: 1 }}
-                        className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent"
-                      />
-                      <span className="text-sm font-medium text-muted-foreground animate-pulse">Initializing Interface...</span>
-                    </div>
+                    <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin" />
                   </div>
                 }>
                   <AnimatePresence mode="wait">
@@ -173,7 +172,7 @@ export function AppShell() {
                       animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
                       exit={{ opacity: 0, y: -10, filter: 'blur(4px)' }}
                       transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-                      className="h-full"
+                      className={isFullScreenRoute ? "flex-1 w-full flex flex-col min-h-0" : "h-full"}
                     >
                       <Routes location={location}>
                         <Route path="/" element={<OverviewPage />} />

@@ -1,5 +1,5 @@
 import { Network, Trash2, Plus, ChevronDown, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Edge } from '@xyflow/react';
 
 import { Button } from '../../components/ui/Button';
@@ -11,6 +11,8 @@ import { edgeId, nodeTypeLabel, parseJsonObjectField, type FlowNode } from './gr
 import { NodeIssuePanel } from './WorkflowIssuePanels';
 import { ParameterPreviewPanel } from './ParameterPreviewPanel';
 import { SkillConfigEditor } from './SkillConfigEditor';
+import { WorkflowConsolePanel } from './WorkflowConsolePanel';
+import type { GraphValidationResult } from '../../types';
 
 type DatasetVersionOption = {
   dataset: DatasetSummary;
@@ -38,6 +40,15 @@ type WorkflowInspectorPanelProps = {
   onUpdateNode: (patch: Partial<WorkflowGraphNode>) => void;
   onUpdateAggregatorStrategy: (strategy: string) => void;
   onConsoleTextChange: (text: string) => void;
+  selectedDataset: DatasetVersion | null;
+  consoleTab: string;
+  consoleText: string;
+  consoleResult: GraphValidationResult | Record<string, unknown> | null;
+  validateLoading: boolean;
+  dryRunLoading: boolean;
+  onConsoleTabChange: (tab: string) => void;
+  onValidate: () => void;
+  onDryRun: () => void;
 };
 
 export function WorkflowInspectorPanel({
@@ -61,43 +72,79 @@ export function WorkflowInspectorPanel({
   onUpdateNode,
   onUpdateAggregatorStrategy,
   onConsoleTextChange,
+  selectedDataset,
+  consoleTab,
+  consoleText,
+  consoleResult,
+  validateLoading,
+  dryRunLoading,
+  onConsoleTabChange,
+  onValidate,
+  onDryRun,
 }: WorkflowInspectorPanelProps) {
   const [activeTab, setActiveTab] = useState('basic');
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
+  useEffect(() => {
+    if (!selectedGraphNode && activeTab !== 'console') {
+      setActiveTab('console');
+    }
+  }, [selectedGraphNode, activeTab]);
+
   const inputClass = "w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white";
 
   return (
-    <Card className="shadow-none border-0 h-full flex flex-col rounded-none border-l border-slate-200">
+    <Card className="shadow-none border-0 flex-1 min-h-0 flex flex-col rounded-none border-l border-slate-200">
       <CardHeader className="py-4 px-6 border-b border-slate-100">
-        <CardTitle className="text-lg">节点 Inspector</CardTitle>
+        <CardTitle className="text-lg">配置与调试</CardTitle>
       </CardHeader>
-      <CardContent className="flex-1 overflow-y-auto px-6 py-4 flex flex-col">
-        {selectedGraphNode ? (
-          <div className="flex flex-col gap-6 h-full">
-            <NodeIssuePanel issues={selectedNodeIssues} />
-            
-            <div className="flex border-b border-slate-200">
-              {[
-                { key: 'basic', label: '基础配置' },
-                { key: 'edges', label: '连线' },
-                { key: 'parameters', label: '参数预览' },
-              ].map(tab => (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
-                    activeTab === tab.key 
-                      ? 'border-blue-500 text-blue-600' 
-                      : 'border-transparent text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+      
+      <div className="flex border-b border-slate-200 px-6 pt-2 bg-slate-50/50">
+        {[
+          { key: 'basic', label: '配置', disabled: !selectedGraphNode },
+          { key: 'edges', label: '连线', disabled: !selectedGraphNode },
+          { key: 'parameters', label: '参数预览', disabled: !selectedGraphNode },
+          { key: 'console', label: '运行测试', disabled: false },
+        ].map(tab => (
+          <button
+            key={tab.key}
+            disabled={tab.disabled}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              activeTab === tab.key 
+                ? 'border-blue-500 text-blue-600' 
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-            <div className="flex-1 overflow-y-auto min-h-0 pt-2 pb-6">
+      <CardContent className="flex-1 min-h-0 overflow-y-auto px-6 py-4 flex flex-col">
+        {activeTab === 'console' && (
+          <WorkflowConsolePanel
+            graph={graph}
+            selectedDataset={selectedDataset}
+            consoleTab={consoleTab}
+            consoleText={consoleText}
+            consoleResult={consoleResult}
+            validateLoading={validateLoading}
+            dryRunLoading={dryRunLoading}
+            onConsoleTabChange={onConsoleTabChange}
+            onValidate={onValidate}
+            onDryRun={onDryRun}
+          />
+        )}
+        {activeTab !== 'console' && !selectedGraphNode && (
+          <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+            请在画布中选择一个节点
+          </div>
+        )}
+        {activeTab !== 'console' && selectedGraphNode && (
+          <div className="flex flex-col gap-6">
+            <NodeIssuePanel issues={selectedNodeIssues} />
+            <div className="pt-2 pb-6 flex flex-col gap-6">
               {activeTab === 'basic' && (
                 <div className="flex flex-col gap-6">
                   <div className="flex flex-col gap-3">
@@ -320,9 +367,10 @@ export function WorkflowInspectorPanel({
               )}
             </div>
           </div>
-        ) : (
+        )}
+        {activeTab !== 'console' && !selectedGraphNode && (
           <div className="bg-blue-50 border border-blue-200 text-blue-800 p-4 rounded-lg text-sm text-center">
-            {selectedEdgeId ? `当前选中连线：${selectedEdgeId}` : '请选择节点后编辑配置。'}
+            {selectedEdgeId ? `当前选中连线：${selectedEdgeId}` : '请选择节点以编辑属性'}
           </div>
         )}
       </CardContent>

@@ -25,7 +25,10 @@ export function PageHeader({ eyebrow, title, description, primaryAction, themeCo
   const theme = themeGradients[themeColor];
   
   return (
-    <div className={`bg-gradient-to-br ${theme.bg} rounded-3xl shadow-[0_20px_40px_-15px_rgba(0,0,0,0.3)] p-8 mb-8 relative overflow-hidden`}>
+    <div 
+      className={`bg-gradient-to-br ${theme.bg} rounded-3xl shadow-[0_20px_40px_-15px_rgba(0,0,0,0.3)] p-8 mb-8 relative overflow-hidden`}
+      style={{ '--primary': '0 0% 100%', '--primary-foreground': '240 10% 10%' } as React.CSSProperties}
+    >
       {/* 动态光晕 */}
       <div className={`absolute -top-32 -right-32 w-80 h-80 ${theme.glow1} rounded-full blur-3xl pointer-events-none`}></div>
       <div className={`absolute -bottom-24 -left-24 w-64 h-64 ${theme.glow2} rounded-full blur-3xl pointer-events-none`}></div>

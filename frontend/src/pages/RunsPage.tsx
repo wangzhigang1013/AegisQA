@@ -97,11 +97,21 @@ export function RunsPage() {
     }
   }, [detailTask, tasks]);
 
+  const lastOpenedTaskId = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!taskDetailQuery.data) return;
-    if (detailTask?.task_id === taskDetailQuery.data.task_id) return;
-    setDetailTask(taskDetailQuery.data);
-  }, [detailTask?.task_id, taskDetailQuery.data]);
+    if (!detailTaskIdFromQuery) {
+      lastOpenedTaskId.current = null;
+      return;
+    }
+    if (taskDetailQuery.data && lastOpenedTaskId.current !== detailTaskIdFromQuery) {
+      // Ensure the fetched data actually matches the current URL before opening
+      if (taskDetailQuery.data.task_id === detailTaskIdFromQuery) {
+        setDetailTask(taskDetailQuery.data);
+        lastOpenedTaskId.current = detailTaskIdFromQuery;
+      }
+    }
+  }, [detailTaskIdFromQuery, taskDetailQuery.data]);
 
   function resolveDatasetVersion(values: TaskCreateFormValues): DatasetVersion {
     const datasetVersion = datasetVersions.find((item) => item.version.version_id === values.dataset_version_id)?.version;

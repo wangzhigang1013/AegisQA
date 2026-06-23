@@ -35,13 +35,13 @@ export function TraceFlowPage() {
     queryFn: () => api.taskTraceFlow(taskId ?? '', { page: tracePage, pageSize: tracePageSize }),
     enabled: Boolean(taskId),
   });
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [selectedItemIndex, setSelectedItemIndex] = useState<number>(0);
   const traceFlow = traceQuery.data;
   const returnTaskId = searchParams.get('return_task_id') || taskId;
   const selectedItem = useMemo(() => {
     if (!traceFlow?.items.length) return null;
-    return traceFlow.items.find((item) => item.item_id === selectedItemId) ?? traceFlow.items[0];
-  }, [selectedItemId, traceFlow?.items]);
+    return traceFlow.items[selectedItemIndex] ?? traceFlow.items[0];
+  }, [selectedItemIndex, traceFlow?.items]);
   const [stepDebug, setStepDebug] = useState<StepDebugState | null>(null);
 
   const [activeTab, setActiveTab] = useState<string>('row');
@@ -181,15 +181,15 @@ export function TraceFlowPage() {
                     </div>
                   )}
                   <div className="divide-y divide-slate-100">
-                    {traceFlow.items.map((item) => (
+                    {traceFlow.items.map((item, index) => (
                       <div 
-                        key={item.item_id}
-                        className={`p-4 cursor-pointer hover:bg-slate-50 transition-colors ${item.item_id === selectedItem?.item_id ? 'bg-blue-50 border-l-4 border-blue-500' : 'border-l-4 border-transparent'}`}
-                        onClick={() => setSelectedItemId(item.item_id)}
+                        key={item.item_id || index}
+                        className={`p-4 cursor-pointer hover:bg-slate-50 transition-colors ${index === selectedItemIndex ? 'bg-blue-50 border-l-4 border-blue-500' : 'border-l-4 border-transparent'}`}
+                        onClick={() => setSelectedItemIndex(index)}
                       >
                         <div className="flex justify-between items-start mb-1">
                           <span className="font-semibold text-slate-800 text-sm truncate">{item.item_id}</span>
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium shrink-0 ml-2 ${item.badcase.is_badcase ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium shrink-0 ml-2 ${item.badcase?.is_badcase ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                             {item.status}
                           </span>
                         </div>
@@ -203,7 +203,7 @@ export function TraceFlowPage() {
                         className="px-2 py-1 bg-white border border-slate-200 rounded text-xs hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
                         disabled={tracePage <= 1}
                         onClick={() => {
-                          setSelectedItemId(null);
+                          setSelectedItemIndex(0);
                           setTracePage(tracePage - 1);
                         }}
                       >
@@ -216,7 +216,7 @@ export function TraceFlowPage() {
                         className="px-2 py-1 bg-white border border-slate-200 rounded text-xs hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
                         disabled={tracePage >= Math.ceil(traceFlow.pagination.total_items / traceFlow.pagination.page_size)}
                         onClick={() => {
-                          setSelectedItemId(null);
+                          setSelectedItemIndex(0);
                           setTracePage(tracePage + 1);
                         }}
                       >

@@ -53,7 +53,7 @@ export function WorkflowCanvasPanel({
   const { fitView } = useReactFlow();
 
   const handleFitView = useCallback(() => {
-    fitView({ padding: 0.15, duration: 300 });
+    fitView({ padding: 0.15, duration: 300, maxZoom: 1 });
   }, [fitView]);
 
   return (
@@ -113,7 +113,9 @@ export function WorkflowCanvasPanel({
         onNodeClick={(_, node) => onNodeSelect(node.id)}
         onEdgeClick={(_, edge) => onEdgeSelect(edge.id)}
         fitView
-        fitViewOptions={{ padding: 0.15 }}
+        fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
+        minZoom={0.1}
+        maxZoom={1.5}
         defaultEdgeOptions={{
           type: 'animated',
           animated: true,
@@ -122,8 +124,6 @@ export function WorkflowCanvasPanel({
         connectionLineStyle={{ stroke: '#818cf8', strokeWidth: 3 }}
         snapToGrid
         snapGrid={[20, 20]}
-        minZoom={0.1}
-        maxZoom={3}
         deleteKeyCode={['Delete', 'Backspace']}
         selectionOnDrag
         panOnScroll

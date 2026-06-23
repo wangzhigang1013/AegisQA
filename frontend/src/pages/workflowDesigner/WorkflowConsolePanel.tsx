@@ -31,25 +31,25 @@ export function WorkflowConsolePanel({
   onDryRun,
 }: WorkflowConsolePanelProps) {
   return (
-    <Card className="shadow-none border-0 h-full flex flex-col rounded-none">
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-lg">校验、试运行与输出结果</CardTitle>
+    <div className="flex flex-col h-full gap-4">
+      <div className="flex flex-row items-center justify-between pb-4 border-b border-slate-100">
+        <h3 className="font-bold text-slate-800">校验与试运行</h3>
         <div className="flex gap-2 flex-wrap">
           <Button disabled={validateLoading} onClick={onValidate} className="flex items-center gap-2" variant="outline" size="sm">
-            <CheckCircle className="w-4 h-4" /> 校验当前画布
+            <CheckCircle className="w-4 h-4" /> 校验当前图
           </Button>
           <Button 
             disabled={!selectedDataset || dryRunLoading} 
             onClick={onDryRun} 
             className="flex items-center gap-2"
-            title={!selectedDataset ? '请选择映射预览数据集' : '试运行完成后会直接切到 JSON 结果'}
+            title={!selectedDataset ? '请选择数据集版本' : '生成并执行当前图 JSON'}
             size="sm"
           >
-            <PlayCircle className="w-4 h-4" /> 试运行并查看结果
+            <PlayCircle className="w-4 h-4" /> 运行全图
           </Button>
         </div>
-      </CardHeader>
-      <CardContent className="flex-1 flex flex-col overflow-hidden px-6 pb-6 pt-0">
+      </div>
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
         <div className="flex border-b mb-4">
           {[
             { key: 'summary', label: '结果' },
@@ -90,7 +90,7 @@ export function WorkflowConsolePanel({
             </pre>
           )}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

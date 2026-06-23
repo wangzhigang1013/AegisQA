@@ -1,5 +1,6 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+import { createPortal } from 'react-dom';
+import { motion, usePresence } from 'framer-motion';
 import { Info, AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { Card as UICard, CardTitle as UICardTitle } from './ui/Card';
 import { Button as UIButton } from './ui/Button';
@@ -189,9 +190,17 @@ export const Typography = {
 
 // 12. Modal
 export function Modal({ open, title, onCancel, onOk, children, width, footer }: any) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+  const [isPresent, safeToRemove] = usePresence();
+  
+  React.useEffect(() => {
+    if (!isPresent && safeToRemove) {
+      safeToRemove();
+    }
+  }, [isPresent, safeToRemove]);
+
+  if (!open || !isPresent) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full flex flex-col" style={{ maxWidth: width || 520 }}>
         <div className="p-6 pb-4 border-b border-slate-100 flex justify-between items-center">
           <h2 className="text-lg font-bold text-slate-800">{title}</h2>
@@ -200,14 +209,14 @@ export function Modal({ open, title, onCancel, onOk, children, width, footer }: 
         <div className="p-6 overflow-y-auto max-h-[70vh]">
           {children}
         </div>
-        {footer !== null && (
+        {footer ? (
           <div className="p-6 pt-4 border-t border-slate-100 flex justify-end gap-2">
-            <UIButton variant="outline" onClick={onCancel}>取消</UIButton>
-            <UIButton onClick={onOk}>确定</UIButton>
+            {footer}
           </div>
-        )}
+        ) : null}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
