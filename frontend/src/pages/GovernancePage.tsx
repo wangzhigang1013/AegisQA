@@ -7,6 +7,7 @@ import { PageSection } from '../components/LayoutPrimitives';
 import { PageHeader } from '../components/PageHeader';
 import { SkillApprovalDrawer } from './skills/SkillApprovalDrawer';
 import type { ModelGatewayConfig, ModelGatewayConnection, ModelGatewayTestResult, RuntimeStatus, RuntimeStatusComponent, SkillManifest, SkillPackageRecord } from '../types';
+import { isMoreCanonicalPackage } from '../lib/skillPackageUtils';
 import { Button } from '../components/ui/Button';
 import { Card, Modal, Table } from '../components/AntdShims';
 import { Input } from '../components/ui/Input';
@@ -1054,8 +1055,13 @@ export function GovernancePage() {
 }
 
 function indexPackagesBySkillId(packages: SkillPackageRecord[]): Record<string, SkillPackageRecord> {
+  // 见 src/lib/skillPackageUtils.ts：与后端 _find_skill_package 对齐，取「未被替换且最新」的记录。
   return packages.reduce<Record<string, SkillPackageRecord>>((index, item) => {
-    index[item.manifest.skill_id] = item;
+    const skillId = item.manifest.skill_id;
+    const current = index[skillId];
+    if (!current || isMoreCanonicalPackage(item, current)) {
+      index[skillId] = item;
+    }
     return index;
   }, {});
 }

@@ -11,6 +11,7 @@ import base64
 from dataclasses import asdict
 from datetime import datetime, timezone
 import json
+import logging
 from math import ceil
 import os
 from pathlib import Path, PurePosixPath
@@ -822,6 +823,49 @@ def _now() -> str:
     return now_beijing_str()
 
 
+logger = logging.getLogger("aegisqa.api")
+
+
+# Skill 包生命周期状态的合法枚举。所有写入 skill_packages 的 status 都必须命中其一，
+# 防止上游误传（拼写错误、空字符串）把记录写成无法被治理流程识别的脏数据。
+# 与 SkillManifest.status 默认值及 registry 的 promote/deprecate 写入值保持一致。
+VALID_SKILL_PACKAGE_STATUSES: frozenset[str] = frozenset(
+    {"pending_review", "approved", "deprecated", "replaced", "rejected", "draft"}
+)
+
+
+def _validate_skill_package_status(status: str) -> str:
+    """校验并返回合法 status；非法值记录日志后回退到 pending_review，避免脏数据落盘。"""
+    if status in VALID_SKILL_PACKAGE_STATUSES:
+        return status
+    logger.warning("invalid skill_package status=%r fallback=pending_review", status)
+    return "pending_review"
+
+
+def _ensure_no_concurrent_overwrite(
+    store: JsonStore, skill_id: str, package_id: str | None, written_updated_at: str
+) -> None:
+    """乐观锁收尾：写盘后重读记录，确认 updated_at 仍是本次写入的值。
+
+    JSON/SQLite 存储不支持原生 CAS，这里用「写后重读比对」做尽力而为的并发覆盖检测：
+    若并发请求在本次写入后又更新了同一记录，重读到的 updated_at 会与刚写入的不一致，
+    此时记录日志告警（而非抛错），避免在治理类写链路里把并发竞争放大成用户可见的 500。
+    """
+    if package_id is None:
+        return
+    current = _find_skill_package(store, skill_id)
+    if not current:
+        return
+    if current.get("package_id") != package_id:
+        # 写盘后代表记录已切换（例如被 replace），属正常流程，不告警。
+        return
+    if str(current.get("updated_at", "")) != written_updated_at:
+        logger.warning(
+            "skill_package concurrent overwrite detected skill_id=%s package_id=%s",
+            skill_id, package_id,
+        )
+
+
 def _save_workflow_draft(store: JsonStore, draft: dict[str, Any]) -> None:
     store.write_json(["workflow_drafts", f"{draft['draft_id']}.json"], draft)
 
@@ -939,9 +983,16 @@ def _install_skill_package(
     # 冲突检测：检查是否已存在同名 skill_id
     conflict_strategy = request.conflict_strategy or "error"
     existing_package = _find_skill_package(store, manifest.skill_id)
+    # replace 时需要「先标记为已替换」的旧记录，留到新记录写入成功后再落盘，
+    # 避免出现「旧已 replaced、新不存在」的悬挂中间态。
+    replaced_package: dict[str, Any] | None = None
 
     if existing_package:
         if conflict_strategy == "error":
+            # 清理已创建的临时目录，避免孤儿文件累积。
+            import shutil
+            package_root = store.path("uploaded_skill_packages", package_id)
+            shutil.rmtree(package_root, ignore_errors=True)
             raise AegisQAError(
                 "SKILL_ALREADY_EXISTS",
                 f"已存在同名 Skill：{manifest.skill_id}。请选择「替换」或「创建新版本」。",
@@ -953,13 +1004,10 @@ def _install_skill_package(
                 },
             )
         elif conflict_strategy == "replace":
-            # 替换模式：保留原 package_id，更新记录
-            package_id = existing_package.get("package_id", package_id)
-            # 标记旧版本为已替换
-            existing_package["status"] = "replaced"
-            existing_package["replaced_at"] = _now()
-            existing_package["replaced_by"] = package_id
-            _save_record(store, "skill_packages", "package_id", existing_package)
+            # 替换模式：保留旧记录作为历史版本（标记为 replaced），新记录用新 package_id。
+            # 这里只先记录要替换的旧包，真正的「标记 replaced」放到新记录写入成功之后，
+            # 保证存储不会停留在「旧已废弃、新未落盘」的不一致状态。
+            replaced_package = existing_package
         elif conflict_strategy == "new_version":
             # 新版本模式：自动递增版本号
             base_id = _skill_base_id(manifest.skill_id)
@@ -1025,7 +1073,10 @@ def _install_skill_package(
         "runtime_mode": runtime_mode,
         "entrypoint": entrypoint,
         "artifact": asdict(artifact),
-        "package_security": package_security,
+        # package_security 是 zip 扫描阶段产出的安全摘要；这里把 manifest 依赖声明扫描
+        # 产出的 warnings（runtime.dependencies / requirements.txt 等）合并进去，让前端
+        # 和测试能在同一处看到完整的安全告警，而不是只看到 zip 级别的告警。
+        "package_security": {**package_security, "warnings": warnings},
         "base_skill_id": _skill_base_id(manifest.skill_id),
         "skill_version": _skill_version_label(manifest),
         "last_contract_ok": False,
@@ -1040,6 +1091,27 @@ def _install_skill_package(
         "updated_at": _now(),
     }
     _save_record(store, "skill_packages", "package_id", record)
+
+    # 新记录已落盘成功后，再把旧包标记为已替换。
+    # 这样即便在此处之前崩溃，旧记录仍是「pending_review/approved」的可用状态，
+    # 不会出现「旧已 replaced、新未写入」的悬挂中间态（这正是历史脏数据的成因）。
+    if replaced_package is not None:
+        replaced_package["status"] = "replaced"
+        replaced_package["replaced_at"] = _now()
+        replaced_package["replaced_by"] = record["package_id"]
+        _save_record(store, "skill_packages", "package_id", replaced_package)
+
+        # 清理被替换包的本地制品目录，避免孤儿文件随 replace 操作累积浪费磁盘。
+        replaced_package_id = replaced_package.get("package_id")
+        if replaced_package_id:
+            import shutil
+            replaced_package_root = store.path("uploaded_skill_packages", str(replaced_package_id))
+            shutil.rmtree(replaced_package_root, ignore_errors=True)
+
+    # 把 replace 上下文挂在 record 上，供调用方（如 skills.py）写审计日志时使用。
+    if replaced_package is not None:
+        record["_replaced_package_id"] = replaced_package.get("package_id")
+
     return record
 
 
@@ -1068,20 +1140,37 @@ def _load_skill_packages(store: JsonStore, registry: SkillRegistry) -> None:
 
 
 def _find_skill_package(store: JsonStore, skill_id: str) -> dict[str, Any] | None:
-    for record in _list_records(store, "skill_packages"):
-        if record.get("manifest", {}).get("skill_id") == skill_id:
-            return record
-    return None
+    # 同一个 skill_id 在历史里可能存在多条 package 记录：被替换/被废弃的旧版本仍会保留在列表中。
+    # 合约测试、审批等治理动作要写到「真正生效」的那条记录上，否则前端展示的记录（最新未替换）
+    # 会和后端写入的记录错位，出现「合约测试通过但页面仍显示未通过」的假象。
+    #
+    # 性能：用 SkillPackageRepository 维护的 skill_id 内存索引缩小扫描范围，避免每次都
+    # `_list_records` 全量扫盘（upload/合约/审批/回滚链路会反复调用）。命中索引后只是
+    # 该 skill_id 下少数几条历史记录的过滤，行为与全量扫描完全一致。
+    repositories = _repositories_for_store(store)
+    skill_packages = repositories.skill_packages
+    candidates = skill_packages.find_by_skill_id(skill_id)
+    if not candidates:
+        return None
+    active = [record for record in candidates if record.get("status") != "replaced"]
+    pool = active if active else candidates
+    # list_json 已按 updated_at 倒序返回；这里再做一次稳健排序，避免不同存储后端排序差异。
+    pool.sort(key=lambda record: str(record.get("updated_at") or ""), reverse=True)
+    return pool[0]
 
 
 def _update_skill_package_status(store: JsonStore, manifest: SkillManifest) -> None:
     package = _find_skill_package(store, manifest.skill_id)
     if not package:
         return
-    package["status"] = manifest.status
+    # 枚举校验：拒绝把 status 写成空串或未定义值，避免治理流程读不到合法状态。
+    package["status"] = _validate_skill_package_status(manifest.status)
     package["manifest"] = manifest.model_dump(mode="json")
+    # 乐观锁：写盘后重读比对 updated_at，尽力检测并发覆盖。
     package["updated_at"] = _now()
+    written_updated_at = str(package["updated_at"])
     _save_record(store, "skill_packages", "package_id", package)
+    _ensure_no_concurrent_overwrite(store, manifest.skill_id, package.get("package_id"), written_updated_at)
 
 
 def _mark_skill_package_approved(store: JsonStore, skill_id: str, approval_note: str, *, actor: str = "api", role: str | None = None) -> None:
@@ -1854,11 +1943,19 @@ def _build_score_analytics(
     """
 
     trend: list[dict[str, Any]] = []
+    skipped_count = 0
     for task in sorted(tasks, key=lambda item: str(item.get("created_at", ""))):
         try:
             run = runner.get_run(str(task["run_id"]))
             report = aggregate_run_report(run)
-        except Exception:  # noqa: BLE001 - 趋势页不能因为单条历史损坏导致整体不可用。
+        except Exception as exc:  # noqa: BLE001 - 趋势页不能因为单条历史损坏导致整体不可用。
+            # 之前是「吞掉就 continue」，单条历史损坏完全无感知。这里改为记录跳过计数 + 落日志，
+            # 让趋势数据缺失可在排查时被发现，但仍然不中断聚合。
+            skipped_count += 1
+            logger.info(
+                "score_analytics skip task=%s reason=%s",
+                task.get("task_id"), exc,
+            )
             continue
         budget_status = _build_budget_status(task, report)
         trend.append(
@@ -1889,6 +1986,7 @@ def _build_score_analytics(
     payload: dict[str, Any] = {
         "summary": {
             "task_count": task_count,
+            "skipped_count": skipped_count,
             "average_pass_rate": average_pass_rate,
             "latest_pass_rate": trend[-1]["pass_rate"] if trend else 0.0,
             "badcase_count": sum(int(item["badcase_count"]) for item in trend),
@@ -1937,6 +2035,10 @@ def _build_judge_audit_trends(audits: list[StoredJudgeAudit]) -> dict[str, Any]:
             }
             for audit in items
         ]
+        # 防御性编码：理论上 grouped 里每个 profile 至少有一条审计记录，series 不会为空，
+        # 但存储损坏或数据迁移场景下可能出现空列表，跳过而非抛 IndexError。
+        if not series:
+            continue
         latest = series[-1]
         profile = {
             "profile_id": profile_id,
@@ -1946,12 +2048,15 @@ def _build_judge_audit_trends(audits: list[StoredJudgeAudit]) -> dict[str, Any]:
             "series": series,
         }
         profiles.append(profile)
-        if latest["cohen_kappa"] < 0.6 or latest["accuracy"] < 0.8:
+        # cohen_kappa / accuracy 可能为 None（存储异常或计算失败），跳过比较避免 TypeError。
+        kappa = latest["cohen_kappa"]
+        accuracy = latest["accuracy"]
+        if (kappa is not None and kappa < 0.6) or (accuracy is not None and accuracy < 0.8):
             low_consistency.append(
                 {
                     "profile_id": profile_id,
-                    "accuracy": latest["accuracy"],
-                    "cohen_kappa": latest["cohen_kappa"],
+                    "accuracy": accuracy,
+                    "cohen_kappa": kappa,
                     "message": "该 Judge Profile 最近一次审计一致性偏低，建议复核 rubric、阈值和错判样本。",
                 }
             )
@@ -2354,13 +2459,10 @@ def _needs_annotation(item: dict[str, Any], *, strategy: str) -> bool:
 
 
 def _find_task_by_run_id(store: JsonStore, run_id: str) -> dict[str, Any] | None:
-    for task in _list_records(store, "tasks"):
-        if task.get("run_id") == run_id:
-            return task
-        for attempt in task.get("attempts", []):
-            if attempt.get("run_id") == run_id:
-                return task
-    return None
+    # 性能：用 TaskRepository 维护的 run_id 内存索引缩小扫描范围，避免每次都
+    # `_list_records` 全量扫盘（任务执行、报告生成等链路会反复调用）。
+    repositories = _repositories_for_store(store)
+    return repositories.tasks.find_by_run_id(run_id)
 
 
 def _build_annotation_task(run_id: str, item: dict[str, Any], *, assignee: str | None, source_task: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2468,27 +2570,23 @@ def _increment_version(version: str) -> str:
 
 
 def _compare_versions(v1: str, v2: str) -> int:
-    """比较两个版本号。返回 1 如果 v1 > v2，-1 如果 v1 < v2，0 如果相等。"""
-    def parse_version(v: str) -> tuple[int, ...]:
-        parts = []
-        for part in v.replace("-", ".").split("."):
-            try:
-                parts.append(int(part))
-            except ValueError:
-                parts.append(0)
-        return tuple(parts)
+    """比较两个版本号。返回 1 如果 v1 > v2，-1 如果 v1 < v2，0 如果相等。
 
-    parsed1 = parse_version(v1)
-    parsed2 = parse_version(v2)
+    使用 packaging.version.Version 做语义化比较，正确处理预发布版本、
+    构建元数据等自定义字符串拆分逻辑无法覆盖的边界情况。
+    """
+    from packaging.version import InvalidVersion, Version
 
-    # 补齐长度
-    max_len = max(len(parsed1), len(parsed2))
-    padded1 = parsed1 + (0,) * (max_len - len(parsed1))
-    padded2 = parsed2 + (0,) * (max_len - len(parsed2))
+    try:
+        parsed1 = Version(v1)
+        parsed2 = Version(v2)
+    except InvalidVersion:
+        # 降级到字符串比较，确保非标准版本号不会导致 500。
+        return (v1 > v2) - (v1 < v2)
 
-    if padded1 > padded2:
+    if parsed1 > parsed2:
         return 1
-    elif padded1 < padded2:
+    if parsed1 < parsed2:
         return -1
     return 0
 

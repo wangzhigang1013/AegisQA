@@ -4,7 +4,9 @@ export type WorkflowGraphNode = {
   label?: string;
   skill_ref?: string;
   condition?: string;
-  input_mapping: Record<string, string>;
+  // source/output/branch 等节点没有输入映射；只有 skill 等消费节点才会填 input_mapping，
+  // 所以这里设为可选，避免类型系统强迫所有节点都带空对象。
+  input_mapping?: Record<string, string>;
   output_mapping?: Record<string, string>;
   config?: Record<string, unknown>;
   cacheable?: boolean;

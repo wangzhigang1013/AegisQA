@@ -16,6 +16,7 @@ import {
   DialogFooter,
 } from '../components/ui/Dialog';
 import type { SkillContractResult, SkillManifest, SkillPackageRecord, SkillVersionHistory, SkillVersionHistoryItem } from '../types';
+import { isMoreCanonicalPackage } from '../lib/skillPackageUtils';
 
 type ConflictStrategy = 'error' | 'replace' | 'new_version';
 
@@ -110,7 +111,7 @@ export function SkillsPage() {
   const contractMutation = useMutation({
     mutationFn: (skillId: string) => api.contractTest(skillId),
     onSuccess: async (result) => {
-      const retryInfo = result.retry_count > 0 ? ` (重试 ${result.retry_count} 次)` : '';
+      const retryInfo = (result.retry_count ?? 0) > 0 ? ` (重试 ${result.retry_count} 次)` : '';
       const text = result.ok
         ? `合约测试通过：${result.skill_id}${retryInfo}，耗时 ${Math.round(result.latency_ms ?? 0)}ms`
         : `合约测试失败：${result.message ?? result.error ?? '未知错误'}${retryInfo}`;
@@ -620,8 +621,13 @@ async function readFileBase64(file: File): Promise<string> {
 }
 
 function indexPackagesBySkillId(packages: SkillPackageRecord[]): Record<string, SkillPackageRecord> {
+  // 见 src/lib/skillPackageUtils.ts：与后端 _find_skill_package 对齐，取「未被替换且最新」的记录。
   return packages.reduce<Record<string, SkillPackageRecord>>((index, item) => {
-    index[item.manifest.skill_id] = item;
+    const skillId = item.manifest.skill_id;
+    const current = index[skillId];
+    if (!current || isMoreCanonicalPackage(item, current)) {
+      index[skillId] = item;
+    }
     return index;
   }, {});
 }
@@ -661,7 +667,7 @@ function ContractResultCard({ result, activeSkill, packageRecord }: { result: Sk
           <pre className="bg-slate-50 p-2 rounded border border-slate-100 overflow-x-auto text-[10px] text-slate-700 m-0">{JSON.stringify(result.output ?? {}, null, 2)}</pre>
           
           <span className="text-slate-500 font-medium pt-1">耗时</span>
-          <span className="text-slate-800 pt-1">{result.latency_ms === undefined ? '-' : `${result.latency_ms.toFixed(2)} ms`}</span>
+          <span className="text-slate-800 pt-1">{result.latency_ms == null ? '-' : `${Number(result.latency_ms).toFixed(2)} ms`}</span>
           
           {!result.ok && (
             <>

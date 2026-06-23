@@ -73,15 +73,95 @@ class AuditEventRepository:
         return list(self.store.iter_jsonl(self.stream_parts))
 
 
+class SkillPackageRepository(JsonDocumentRepository):
+    """skill_packages 集合的 Repository，额外维护 skill_id → 记录 的内存索引。
+
+    `_find_skill_package` 之前每次都 `_list_records` 全量扫盘，在 upload / 合约测试 /
+    审批 / 回滚等链路里会被反复调用，记录数大时是明显的 O(n·m) 热点。这里在写入时
+    让索引失效、在查找时惰性重建，把按 skill_id 查找的扫描范围从「全部记录」缩小到
+    「该 skill_id 下的少数几条历史记录」，行为与全量扫描完全一致。
+
+    父类是 frozen dataclass，这里用 object.__setattr__ 维护可变的索引缓存。
+    """
+
+    def __init__(self, store: DocumentStore) -> None:
+        super().__init__(store, "skill_packages", "package_id")
+        object.__setattr__(self, "_skill_id_index", None)
+
+    def save(self, record: dict[str, Any]) -> dict[str, Any]:
+        result = super().save(record)
+        # 写入后让索引失效，下次 find_by_skill_id 按最新数据重建。
+        object.__setattr__(self, "_skill_id_index", None)
+        return result
+
+    def _ensure_index(self) -> dict[str, list[dict[str, Any]]]:
+        index = getattr(self, "_skill_id_index", None)
+        if index is None:
+            index: dict[str, list[dict[str, Any]]] = {}
+            for record in self.list():
+                skill_id = record.get("manifest", {}).get("skill_id")
+                if skill_id:
+                    index.setdefault(str(skill_id), []).append(record)
+            object.__setattr__(self, "_skill_id_index", index)
+        return index
+
+    def find_by_skill_id(self, skill_id: str) -> list[dict[str, Any]]:
+        """返回该 skill_id 下的所有历史记录（可能为空列表）。"""
+        return list(self._ensure_index().get(skill_id, []))
+
+
+class TaskRepository(JsonDocumentRepository):
+    """tasks 集合的 Repository，额外维护 run_id → 记录 的内存索引。
+
+    `_find_task_by_run_id` 之前全量扫盘，在任务执行、报告生成等链路里会被反复调用。
+    这里用与 SkillPackageRepository 相同的惰性索引模式，把按 run_id 查找的扫描范围
+    从「全部记录」缩小到「该 run_id 对应的单条任务」，行为与全量扫描完全一致。
+
+    一个 task 可能有多个 attempts，每个 attempt 有独立的 run_id，所以索引值是列表。
+    """
+
+    def __init__(self, store: DocumentStore) -> None:
+        super().__init__(store, "tasks", "task_id")
+        object.__setattr__(self, "_run_id_index", None)
+
+    def save(self, record: dict[str, Any]) -> dict[str, Any]:
+        result = super().save(record)
+        # 写入后让索引失效，下次 find_by_run_id 按最新数据重建。
+        object.__setattr__(self, "_run_id_index", None)
+        return result
+
+    def _ensure_index(self) -> dict[str, list[dict[str, Any]]]:
+        index = getattr(self, "_run_id_index", None)
+        if index is None:
+            index: dict[str, list[dict[str, Any]]] = {}
+            for record in self.list():
+                # 主 run_id
+                run_id = record.get("run_id")
+                if run_id:
+                    index.setdefault(str(run_id), []).append(record)
+                # attempts 里的 run_id
+                for attempt in record.get("attempts", []):
+                    attempt_run_id = attempt.get("run_id")
+                    if attempt_run_id:
+                        index.setdefault(str(attempt_run_id), []).append(record)
+            object.__setattr__(self, "_run_id_index", index)
+        return index
+
+    def find_by_run_id(self, run_id: str) -> dict[str, Any] | None:
+        """返回该 run_id 对应的任务（可能为 None）。"""
+        results = self._ensure_index().get(run_id, [])
+        return results[0] if results else None
+
+
 class RepositoryRegistry:
     """集中暴露当前生产化优先级要求的一组核心 Repository。"""
 
     def __init__(self, store: DocumentStore) -> None:
         self.store = store
-        self.tasks = JsonDocumentRepository(store, "tasks", "task_id")
+        self.tasks = TaskRepository(store)
         self.runs = JsonDocumentRepository(store, "runs", "run_id")
         self.workflows = JsonDocumentRepository(store, "workflows", "version_id", _safe_workflow_version_id)
-        self.skill_packages = JsonDocumentRepository(store, "skill_packages", "package_id")
+        self.skill_packages = SkillPackageRepository(store)
         self.audit_events = AuditEventRepository(store)
 
     def collection(self, collection: str, id_key: str) -> JsonDocumentRepository:

@@ -205,7 +205,10 @@ def test_skill_package_manifest_must_declare_permissions(tmp_path) -> None:
     assert response.json()["code"] == "SKILL_PACKAGE_PERMISSIONS_REQUIRED"
 
 
-def test_skill_package_rejects_dependency_declarations_in_local_runtime(tmp_path) -> None:
+def test_skill_package_warns_about_dependency_declarations_in_local_runtime(tmp_path) -> None:
+    # 产品意图：依赖声明（runtime.dependencies / requirements.txt）在本地运行时不会自动安装，
+    # 因此上传不做硬拦截，只在 package_security.warnings 里提示「需要自行安装」。
+    # 之前这里断言 400 + SKILL_PACKAGE_DEPENDENCIES_UNSUPPORTED 与实现不符，会一直红灯。
     client = TestClient(create_app(store_root=tmp_path / "store"))
 
     runtime_dependencies = client.post(
@@ -218,8 +221,10 @@ def test_skill_package_rejects_dependency_declarations_in_local_runtime(tmp_path
             ),
         },
     )
-    assert runtime_dependencies.status_code == 400
-    assert runtime_dependencies.json()["code"] == "SKILL_PACKAGE_DEPENDENCIES_UNSUPPORTED"
+    assert runtime_dependencies.status_code == 200
+    dep_warnings = [item for item in runtime_dependencies.json()["package_security"]["warnings"]
+                     if item["code"] == "SKILL_PACKAGE_DEPENDENCIES_WARNING"]
+    assert dep_warnings, "runtime.dependencies 应当产生一条依赖警告"
 
     requirements_file = client.post(
         "/skills/packages/upload",
@@ -231,8 +236,10 @@ def test_skill_package_rejects_dependency_declarations_in_local_runtime(tmp_path
             ),
         },
     )
-    assert requirements_file.status_code == 400
-    assert requirements_file.json()["code"] == "SKILL_PACKAGE_DEPENDENCIES_UNSUPPORTED"
+    assert requirements_file.status_code == 200
+    file_warnings = [item for item in requirements_file.json()["package_security"]["warnings"]
+                     if item["code"] == "SKILL_PACKAGE_DEPENDENCY_FILES_WARNING"]
+    assert file_warnings, "requirements.txt 应当产生一条依赖文件警告"
 
 
 def test_script_skill_cannot_read_files_outside_package_root(tmp_path) -> None:

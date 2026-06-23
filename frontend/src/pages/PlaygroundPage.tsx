@@ -173,10 +173,15 @@ export function PlaygroundPage() {
       });
 
       const elapsed = Date.now() - startTime;
-      const outputText = result.response || JSON.stringify(result, null, 2);
-      setOutput(outputText);
+      // playgroundExecute 返回 { output, model, provider, latency_ms, usage }，
+      // 这里取 output 作为展示文本；之前误用 result.response 永远命中 fallback 的 JSON。
+      const outputText = result.output ?? '';
+      const fallback = outputText || JSON.stringify(result, null, 2);
+      setOutput(fallback);
       setLatencyMs(elapsed);
-      setTokens(result.usage?.total_tokens ?? 0);
+      // usage 是 Record<string, unknown>，total_tokens 需要强转成 number 才能进 state。
+      const tokenCount = Number(result.usage?.total_tokens);
+      setTokens(Number.isFinite(tokenCount) ? tokenCount : 0);
       setIsStreaming(false);
 
       // Judge if enabled — 调用真实 Judge API
@@ -190,10 +195,16 @@ export function PlaygroundPage() {
           });
           const parsed = judgeResult.result;
           setJudgeResult({
-            score: (parsed.score as number) ?? 0,
-            label: (parsed.label as string) ?? 'unknown',
-            feedback: (parsed.feedback as string) ?? '',
-            dimensions: (parsed.dimensions as { name: string; score: number; comment: string }[]) ?? [],
+            score: Number(parsed.score) || 0,
+            label: typeof parsed.label === 'string' ? parsed.label : 'unknown',
+            feedback: typeof parsed.feedback === 'string' ? parsed.feedback : '',
+            dimensions: Array.isArray(parsed.dimensions)
+              ? parsed.dimensions.map((d: Record<string, unknown>) => ({
+                  name: String(d.name ?? ''),
+                  score: Number(d.score) || 0,
+                  comment: String(d.comment ?? ''),
+                }))
+              : [],
           });
         } catch (e) {
           setJudgeResult({
@@ -213,7 +224,7 @@ export function PlaygroundPage() {
         temperature,
         output: outputText,
         latencyMs: elapsed,
-        tokens: result.usage?.total_tokens ?? 0,
+        tokens: Number.isFinite(Number(result.usage?.total_tokens)) ? Number(result.usage?.total_tokens) : 0,
         timestamp: new Date().toLocaleString('zh-CN'),
       };
       setVersions(prev => [newVersion, ...prev]);
@@ -242,8 +253,9 @@ export function PlaygroundPage() {
   return (
     <div className="flex flex-col gap-6 w-full max-w-[1600px] mx-auto p-6 md:p-8">
       <PageHeader
+        eyebrow="Playground"
         title="Prompt Playground"
-        subtitle="在线调试 Prompt，实时查看效果"
+        description="在线调试 Prompt，实时查看效果"
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">

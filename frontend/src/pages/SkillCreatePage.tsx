@@ -248,13 +248,19 @@ export function SkillCreatePage() {
         conflict_strategy: 'new_version',
       });
     },
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['skills'] });
-      queryClient.invalidateQueries({ queryKey: ['skill-packages'] });
-      // 如果上传成功，自动运行合约测试
-      if (result?.skill_id) {
-        setUploadedSkillId(result.skill_id);
-        testMutation.mutate(result.skill_id);
+    onSuccess: async (result) => {
+      // 等缓存刷新完成再触发合约测试，避免测试读到旧的 package 状态（如 stale last_contract_ok）。
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['skills'] }),
+        queryClient.invalidateQueries({ queryKey: ['skill-packages'] }),
+      ]);
+      // 如果上传成功，自动运行合约测试。
+      // uploadSkillPackage 返回 SkillPackageRecord，skill_id 在 manifest 下而不是顶层，
+      // 之前直接读 result.skill_id 永远拿不到值，导致上传后自动合约测试的链路是断的。
+      const uploadedSkillId = result?.manifest?.skill_id;
+      if (uploadedSkillId) {
+        setUploadedSkillId(uploadedSkillId);
+        testMutation.mutate(uploadedSkillId);
       }
     },
   });
@@ -291,8 +297,9 @@ export function SkillCreatePage() {
   return (
     <div className="flex flex-col gap-8 w-full max-w-7xl mx-auto p-6 md:p-8">
       <PageHeader
+        eyebrow="能力接入"
         title="创建 Skill"
-        subtitle="选择接入方式，让你的 SOP 快速接入评测平台"
+        description="选择接入方式，让你的 SOP 快速接入评测平台"
       />
 
       {/* Mode selector */}

@@ -123,7 +123,10 @@ export function RunsPage() {
     },
     onSuccess: (result) => {
       setPreflightResult(result);
-      setNotice(result.status === 'blocked' ? `Preflight 阻断：${result.summary}` : `Preflight 完成：${result.summary}`);
+      addNotice(
+        result.status === 'blocked' ? `Preflight 阻断：${result.summary}` : `Preflight 完成：${result.summary}`,
+        result.status === 'blocked' ? 'error' : 'success',
+      );
     },
     onError: (error) => addNotice(`Preflight 失败：${formatApiError(error)}`),
   });
@@ -145,7 +148,7 @@ export function RunsPage() {
       setCreateOpen(false);
       setPreflightResult(null);
       setDetailTask(task);
-      addNotice(`任务已创建：, "success"${task.name}`);
+      addNotice(`任务已创建：${task.name}`, 'success');
       await queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
     onError: (error) => addNotice(`创建失败：${formatApiError(error)}`),
@@ -162,7 +165,7 @@ export function RunsPage() {
     },
     onSuccess: async (task) => {
       setDetailTask(task);
-      addNotice(`任务状态已更新：, "success"${task.status}`);
+      addNotice(`任务状态已更新：${task.status}`, 'success');
       await queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
     onError: (error) => addNotice(`操作失败：${formatApiError(error)}`),

@@ -50,19 +50,52 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
         skills = ctx.registry.list_skills()
         settings = ctx.store.read_json(["settings", "skill_market.json"], default={}) or {}
         if not settings.get("hide_builtin_skills"):
-            return skills
+            # 按 skill_packages 的 updated_at 倒序排列，最新上传/更新的排在最前面。
+            # 内置 Skill（无 package 记录）按 skill_id 排序，排在最后。
+            from aegisqa.api.app import _list_records
+
+            packages = _list_records(ctx.store, "skill_packages")
+            # 构建 skill_id → 最新 updated_at 的映射（跳过已被替换的记录）。
+            updated_at_by_skill: dict[str, str] = {}
+            for record in packages:
+                if record.get("status") == "replaced":
+                    continue
+                sid = str(record.get("manifest", {}).get("skill_id", ""))
+                ts = str(record.get("updated_at") or record.get("created_at") or "")
+                if sid and (sid not in updated_at_by_skill or ts > updated_at_by_skill[sid]):
+                    updated_at_by_skill[sid] = ts
+            return sorted(
+                skills,
+                key=lambda s: updated_at_by_skill.get(s.skill_id, ""),
+                reverse=True,
+            )
 
         # 清空本地 Skill 市场时不能删除代码里的内置 Skill，否则测试和历史 Workflow
         # 回放都会受影响；这里仅按当前 store 的上传插件记录过滤展示层。
         from aegisqa.api.app import _list_records
 
+        packages = _list_records(ctx.store, "skill_packages")
         package_skill_ids = {
             str(record.get("manifest", {}).get("skill_id"))
-            for record in _list_records(ctx.store, "skill_packages")
+            for record in packages
             if record.get("manifest", {}).get("skill_id")
         }
         visible_skill_ids = package_skill_ids | agent_skill_ids_from_store(ctx.store)
-        return [skill for skill in skills if skill.skill_id in visible_skill_ids]
+        # 同样按 updated_at 倒序排列。
+        updated_at_by_skill: dict[str, str] = {}
+        for record in packages:
+            if record.get("status") == "replaced":
+                continue
+            sid = str(record.get("manifest", {}).get("skill_id", ""))
+            ts = str(record.get("updated_at") or record.get("created_at") or "")
+            if sid and (sid not in updated_at_by_skill or ts > updated_at_by_skill[sid]):
+                updated_at_by_skill[sid] = ts
+        visible_skills = [skill for skill in skills if skill.skill_id in visible_skill_ids]
+        return sorted(
+            visible_skills,
+            key=lambda s: updated_at_by_skill.get(s.skill_id, ""),
+            reverse=True,
+        )
 
     @app.get("/skills/packages")
     def list_skill_packages() -> list[dict[str, Any]]:
@@ -133,16 +166,21 @@ def register_skill_routes(app: FastAPI, ctx: RouteContext) -> None:
             actor=request.actor,
         )
         record = _install_skill_package(ctx.store, ctx.registry, ctx.artifact_store, request)
+        detail = {
+            "filename": request.filename,
+            "role": request.role,
+            "conflict_strategy": request.conflict_strategy,
+        }
+        # replace 操作记录旧包 ID，便于审计追溯。
+        replaced_package_id = record.pop("_replaced_package_id", None)
+        if replaced_package_id:
+            detail["replaced_package_id"] = replaced_package_id
         ctx.audit_service.record(
             actor=request.actor,
             role=request.role,
             action="skill_package.upload",
             target=record["manifest"]["skill_id"],
-            detail={
-                "filename": request.filename,
-                "role": request.role,
-                "conflict_strategy": request.conflict_strategy,
-            },
+            detail=detail,
         )
         return record
 
