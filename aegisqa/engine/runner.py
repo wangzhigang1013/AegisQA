@@ -10,7 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
 from aegisqa.core.time import now_beijing_str, now_beijing
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -363,7 +363,7 @@ class WorkflowRunner:
                 item.steps = []
                 item.error = None
                 # 可中断的 sleep: 分段等待，每 0.5s 检查取消信号
-                _interruptible_sleep(backoff, run)
+                _interruptible_sleep(backoff, run, self.store.root)
 
             if item.status == "failed":
                 logger.warning("Run %s: item %s failed after %d attempts: %s",
@@ -572,7 +572,7 @@ class WorkflowRunner:
                 step.status = "rate_limited" if decision.rate_limited_count else "running"
                 # 实际执行速率限制等待
                 if decision.wait_ms > 0:
-                    _interruptible_sleep(decision.wait_ms / 1000.0, run)
+                    _interruptible_sleep(decision.wait_ms / 1000.0, run, self.store.root)
 
                 cache_key = self._cache_key(workflow_step, skill.manifest.version, inputs, resolved_parameters.config)
                 step.cache_key = cache_key
@@ -905,7 +905,7 @@ def _now() -> str:
     return now_beijing_str()
 
 
-def _interruptible_sleep(seconds: float, run: RunRecord) -> None:
+def _interruptible_sleep(seconds: float, run: RunRecord, store_root: str | None = None) -> None:
     """可中断的 sleep: 分段等待，每 0.5s 检查取消/暂停信号。"""
     elapsed = 0.0
     while elapsed < seconds:
@@ -914,7 +914,8 @@ def _interruptible_sleep(seconds: float, run: RunRecord) -> None:
         elapsed += chunk
         # 检查控制文件中的取消/暂停信号
         try:
-            control_path = os.path.join("data", "aegisqa_store", "run_controls", f"{run.run_id}.json")
+            control_dir = store_root or os.path.join("data", "aegisqa_store")
+            control_path = os.path.join(control_dir, "run_controls", f"{run.run_id}.json")
             if os.path.exists(control_path):
                 with open(control_path) as f:
                     control = json.load(f)

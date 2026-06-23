@@ -620,9 +620,9 @@ def install_skill_package(
             replaced_package = existing_package
         elif conflict_strategy == "new_version":
             base_id = skill_base_id(manifest.skill_id)
-            from aegisqa.api.app import _list_records
+            all_packages = _repositories_for_store(store).collection("skill_packages", "package_id").list()
             existing_versions = [
-                record for record in _list_records(store, "skill_packages")
+                record for record in all_packages
                 if skill_base_id(str(record.get("manifest", {}).get("skill_id", ""))) == base_id
             ]
             max_version = find_max_version(existing_versions)
