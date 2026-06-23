@@ -53,6 +53,48 @@ from aegisqa.storage.artifacts import ArtifactStore, LocalArtifactStore
 from aegisqa.storage.json_store import JsonStore
 from aegisqa.storage.mysql_store import ConnectionFactory, MySQLStore
 from aegisqa.storage.repositories import RepositoryRegistry
+from aegisqa.skills.package_manager import (
+    install_skill_package as _install_skill_package_new,
+    find_skill_package as _find_skill_package_new,
+    update_skill_package_status as _update_skill_package_status_new,
+    mark_skill_package_approved as _mark_skill_package_approved_new,
+    record_skill_package_contract_result as _record_skill_package_contract_result_new,
+    record_skill_package_lifecycle_event as _record_skill_package_lifecycle_event_new,
+    skill_base_id as _skill_base_id_new,
+    skill_version_label as _skill_version_label_new,
+    validate_skill_package_status as _validate_skill_package_status_new,
+    ensure_no_concurrent_overwrite as _ensure_no_concurrent_overwrite_new,
+    safe_skill_package_filename as _safe_skill_package_filename_new,
+    safe_extract_zip as _safe_extract_zip_new,
+    detect_package_content_root as _detect_package_content_root_new,
+    first_existing as _first_existing_new,
+    resolve_skill_package_runtime_mode as _resolve_skill_package_runtime_mode_new,
+    reject_unsupported_skill_package_dependencies as _reject_unsupported_skill_package_dependencies_new,
+    find_max_version as _find_max_version_new,
+    increment_version as _increment_version_new,
+    compare_versions as _compare_versions_new,
+)
+from aegisqa.reports.task_report_builder import (
+    build_task_report_summary as _build_task_report_summary_new,
+    build_task_report_version_snapshot as _build_task_report_version_snapshot_new,
+    build_step_distribution as _build_step_distribution_new,
+    build_judge_score_distribution as _build_judge_score_distribution_new,
+    build_parameter_governance as _build_parameter_governance_new,
+    build_quality_decision as _build_quality_decision_new,
+    build_budget_status as _build_budget_status_new,
+    build_score_analytics as _build_score_analytics_new,
+    build_judge_audit_trends as _build_judge_audit_trends_new,
+    build_experiment_snapshot as _build_experiment_snapshot_new,
+    build_trace_tree as _build_trace_tree_new,
+    build_annotation_task as _build_annotation_task_new,
+    badcase_reason_distribution as _badcase_reason_distribution_new,
+    estimate_report_cost as _estimate_report_cost_new,
+    metric_number as _metric_number_new,
+    is_number as _is_number_new,
+    numeric_delta as _numeric_delta_new,
+    budget_cost_basis_label as _budget_cost_basis_label_new,
+    detect_score_regressions as _detect_score_regressions_new,
+)
 from aegisqa.api.schemas.requests import (
     DatasetFromPathRequest,
     DatasetUploadRequest,
@@ -505,34 +547,14 @@ VALID_SKILL_PACKAGE_STATUSES: frozenset[str] = frozenset(
 
 def _validate_skill_package_status(status: str) -> str:
     """校验并返回合法 status；非法值记录日志后回退到 pending_review，避免脏数据落盘。"""
-    if status in VALID_SKILL_PACKAGE_STATUSES:
-        return status
-    logger.warning("invalid skill_package status=%r fallback=pending_review", status)
-    return "pending_review"
+    return _validate_skill_package_status_new(status)
 
 
 def _ensure_no_concurrent_overwrite(
     store: JsonStore, skill_id: str, package_id: str | None, written_updated_at: str
 ) -> None:
-    """乐观锁收尾：写盘后重读记录，确认 updated_at 仍是本次写入的值。
-
-    JSON/SQLite 存储不支持原生 CAS，这里用「写后重读比对」做尽力而为的并发覆盖检测：
-    若并发请求在本次写入后又更新了同一记录，重读到的 updated_at 会与刚写入的不一致，
-    此时记录日志告警（而非抛错），避免在治理类写链路里把并发竞争放大成用户可见的 500。
-    """
-    if package_id is None:
-        return
-    current = _find_skill_package(store, skill_id)
-    if not current:
-        return
-    if current.get("package_id") != package_id:
-        # 写盘后代表记录已切换（例如被 replace），属正常流程，不告警。
-        return
-    if str(current.get("updated_at", "")) != written_updated_at:
-        logger.warning(
-            "skill_package concurrent overwrite detected skill_id=%s package_id=%s",
-            skill_id, package_id,
-        )
+    """乐观锁收尾：写盘后重读记录，确认 updated_at 仍是本次写入的值。"""
+    return _ensure_no_concurrent_overwrite_new(store, skill_id, package_id, written_updated_at)
 
 
 def _save_workflow_draft(store: JsonStore, draft: dict[str, Any]) -> None:
@@ -588,207 +610,22 @@ def _install_skill_package(
     artifact_store: ArtifactStore,
     request: SkillPackageUploadRequest,
 ) -> dict[str, Any]:
-    try:
-        raw = base64.b64decode(request.content_base64)
-    except Exception as exc:  # noqa: BLE001 - API 边界需要返回稳定错误。
-        raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包内容不是合法 base64。") from exc
-
-    # 解析 manifest 以获取 skill_id（在创建 package_id 之前）
-    package_id = f"pkg-{uuid4().hex[:12]}"
-    package_filename = _safe_skill_package_filename(request.filename)
-    package_dir = store.path("uploaded_skill_packages", package_id, "package")
-    package_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = store.path("uploaded_skill_packages", package_id, package_filename)
-    zip_path.write_bytes(raw)
-
-    try:
-        with zipfile.ZipFile(zip_path) as archive:
-            package_security = _safe_extract_zip(archive, package_dir)
-    except zipfile.BadZipFile as exc:
-        raise AegisQAError("SKILL_PACKAGE_INVALID", "插件包必须是合法 zip 文件。") from exc
-
-    warnings: list[dict[str, Any]] = list(package_security.get("warnings", []))
-
-    package_dir = _detect_package_content_root(package_dir)
-    manifest_path = _first_existing(package_dir, ["skill.yaml", "skill.yml", "skill.json"])
-    skill_md_path = package_dir / "SKILL.md"
-    handler_path = package_dir / "handler.py"
-    if not manifest_path:
-        if handler_path.exists() or (package_dir / "scripts").exists():
-            raise AegisQAError(
-                "SKILL_PACKAGE_MANIFEST_MISSING",
-                "纯参数或脚本型 Agent Skill 必须提供 skill.yaml 或 skill.json，用来声明输入、输出、配置和 runtime.entrypoint。",
-            )
-        if not skill_md_path.exists():
-            raise AegisQAError("SKILL_PACKAGE_MANIFEST_MISSING", "插件包缺少 skill.yaml、skill.json 或 SKILL.md。")
-        manifest = build_instruction_manifest_from_skill_md(package_dir)
-        runtime_payload: dict[str, Any] = {"mode": "instruction_model"}
-    else:
-        manifest_payload = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-        if not isinstance(manifest_payload, dict):
-            raise AegisQAError("SKILL_PACKAGE_MANIFEST_INVALID", "skill.yaml 或 skill.json 必须是对象。")
-        if "permissions" not in manifest_payload:
-            raise AegisQAError(
-                "SKILL_PACKAGE_PERMISSIONS_REQUIRED",
-                "脚本型或参数型 Agent Skill 必须在 manifest 中显式声明 permissions，空列表表示无需额外权限。",
-            )
-        # runtime 是平台执行声明，不属于 Workflow 组件合约；从 manifest 中剥离后再交给 SkillManifest。
-        runtime_payload = manifest_payload.pop("runtime", {}) or {}
-        if not isinstance(runtime_payload, dict):
-            raise AegisQAError("SKILL_PACKAGE_RUNTIME_INVALID", "runtime 必须是对象。")
-        dep_warnings = _reject_unsupported_skill_package_dependencies(package_dir, runtime_payload)
-        warnings.extend(dep_warnings)
-        manifest = SkillManifest(**manifest_payload)
-
-        # 检测 OpenAI Tool 格式，自动设置 entrypoint
-        if manifest_payload.get("openai_tool") or manifest_payload.get("tool_type") == "openai":
-            tool_name = manifest_payload.get("name", "")
-            if tool_name and not runtime_payload.get("entrypoint"):
-                runtime_payload["entrypoint"] = f"handler.py:{tool_name}"
-
-    manifest.enabled = False
-    manifest.status = "pending_review"
-
-    # 冲突检测：检查是否已存在同名 skill_id
-    conflict_strategy = request.conflict_strategy or "error"
-    existing_package = _find_skill_package(store, manifest.skill_id)
-    # replace 时需要「先标记为已替换」的旧记录，留到新记录写入成功后再落盘，
-    # 避免出现「旧已 replaced、新不存在」的悬挂中间态。
-    replaced_package: dict[str, Any] | None = None
-
-    if existing_package:
-        if conflict_strategy == "error":
-            # 清理已创建的临时目录，避免孤儿文件累积。
-            import shutil
-            package_root = store.path("uploaded_skill_packages", package_id)
-            shutil.rmtree(package_root, ignore_errors=True)
-            raise AegisQAError(
-                "SKILL_ALREADY_EXISTS",
-                f"已存在同名 Skill：{manifest.skill_id}。请选择「替换」或「创建新版本」。",
-                details={
-                    "existing_skill_id": manifest.skill_id,
-                    "existing_package_id": existing_package.get("package_id"),
-                    "existing_status": existing_package.get("status"),
-                    "conflict_strategy": conflict_strategy,
-                },
-            )
-        elif conflict_strategy == "replace":
-            # 替换模式：保留旧记录作为历史版本（标记为 replaced），新记录用新 package_id。
-            # 这里只先记录要替换的旧包，真正的「标记 replaced」放到新记录写入成功之后，
-            # 保证存储不会停留在「旧已废弃、新未落盘」的不一致状态。
-            replaced_package = existing_package
-        elif conflict_strategy == "new_version":
-            # 新版本模式：自动递增版本号
-            base_id = _skill_base_id(manifest.skill_id)
-            existing_versions = [
-                record for record in _list_records(store, "skill_packages")
-                if _skill_base_id(str(record.get("manifest", {}).get("skill_id", ""))) == base_id
-            ]
-            # 找到最大版本号并递增
-            max_version = _find_max_version(existing_versions)
-            new_version = _increment_version(max_version)
-            manifest.skill_id = f"{base_id}@{new_version}"
-            manifest.version = new_version
-        else:
-            raise AegisQAError(
-                "INVALID_CONFLICT_STRATEGY",
-                f"不支持的冲突处理策略：{conflict_strategy}。",
-                details={"supported_strategies": ["error", "replace", "new_version"]},
-            )
-
-    runtime_mode = _resolve_skill_package_runtime_mode(runtime_payload, package_dir)
-    entrypoint: str | None = None
-    handler_record_path: str | None = None
-    if runtime_mode == "script":
-        entrypoint_path, function_name, entrypoint = resolve_package_entrypoint(
-            package_dir,
-            str(runtime_payload.get("entrypoint") or "handler.py:run"),
-        )
-        if handler_path.exists() and entrypoint_path == handler_path.resolve():
-            handler_record_path = str(handler_path.resolve())
-        registry.register(SubprocessPackageSkill(manifest, entrypoint_path, package_root=package_dir, function_name=function_name))
-    elif runtime_mode == "instruction_model":
-        if not skill_md_path.exists():
-            raise AegisQAError("SKILL_PACKAGE_SKILL_MD_MISSING", "说明型 Agent Skill 包缺少 SKILL.md。")
-        registry.register(InstructionPackageSkill(manifest, package_dir, runtime_mode=runtime_mode))
-    else:
-        raise AegisQAError(
-            "SKILL_PACKAGE_RUNTIME_UNSUPPORTED",
-            f"不支持的 Skill 包运行模式：{runtime_mode}",
-            details={"supported": ["script", "instruction_model"]},
-        )
-    artifact = artifact_store.put_bytes(
-        "skill_packages",
-        f"packages/{package_id}/{package_filename}",
-        raw,
-        content_type="application/zip",
-        metadata={
-            "package_id": package_id,
-            "filename": package_filename,
-            "original_filename": request.filename,
-            "skill_id": manifest.skill_id,
-            "runtime_mode": runtime_mode,
-        },
+    """安装 Skill 包 — 委托给 package_manager 模块。"""
+    return _install_skill_package_new(
+        store=store,
+        registry=registry,
+        artifact_store=artifact_store,
+        filename=request.filename,
+        content_base64=request.content_base64,
+        conflict_strategy=request.conflict_strategy,
+        actor=request.actor,
+        role=request.role,
     )
-    record = {
-        "package_id": package_id,
-        "filename": package_filename,
-        "original_filename": request.filename,
-        "status": manifest.status,
-        "manifest": manifest.model_dump(mode="json"),
-        "package_dir": str(package_dir),
-        "handler_path": handler_record_path,
-        "skill_md_path": str(skill_md_path.resolve()) if skill_md_path.exists() else None,
-        "runtime_mode": runtime_mode,
-        "entrypoint": entrypoint,
-        "artifact": asdict(artifact),
-        # package_security 是 zip 扫描阶段产出的安全摘要；这里把 manifest 依赖声明扫描
-        # 产出的 warnings（runtime.dependencies / requirements.txt 等）合并进去，让前端
-        # 和测试能在同一处看到完整的安全告警，而不是只看到 zip 级别的告警。
-        "package_security": {**package_security, "warnings": warnings},
-        "base_skill_id": _skill_base_id(manifest.skill_id),
-        "skill_version": _skill_version_label(manifest),
-        "last_contract_ok": False,
-        "last_contract_result": None,
-        "last_contract_at": None,
-        "contract_history": [],
-        "approval_history": [],
-        "approved_by": None,
-        "approved_at": None,
-        "approval_note": None,
-        "created_at": _now(),
-        "updated_at": _now(),
-    }
-    _save_record(store, "skill_packages", "package_id", record)
-
-    # 新记录已落盘成功后，再把旧包标记为已替换。
-    # 这样即便在此处之前崩溃，旧记录仍是「pending_review/approved」的可用状态，
-    # 不会出现「旧已 replaced、新未写入」的悬挂中间态（这正是历史脏数据的成因）。
-    if replaced_package is not None:
-        replaced_package["status"] = "replaced"
-        replaced_package["replaced_at"] = _now()
-        replaced_package["replaced_by"] = record["package_id"]
-        _save_record(store, "skill_packages", "package_id", replaced_package)
-
-        # 清理被替换包的本地制品目录，避免孤儿文件随 replace 操作累积浪费磁盘。
-        replaced_package_id = replaced_package.get("package_id")
-        if replaced_package_id:
-            import shutil
-            replaced_package_root = store.path("uploaded_skill_packages", str(replaced_package_id))
-            shutil.rmtree(replaced_package_root, ignore_errors=True)
-
-    # 把 replace 上下文挂在 record 上，供调用方（如 skills.py）写审计日志时使用。
-    if replaced_package is not None:
-        record["_replaced_package_id"] = replaced_package.get("package_id")
-
-    return record
 
 
 def _safe_skill_package_filename(filename: str) -> str:
-    candidate = PurePosixPath(str(filename or "").replace("\\", "/")).name.strip()
-    if not candidate or candidate in {".", ".."}:
-        return "package.zip"
-    return candidate
+    """安全文件名 — 委托给 package_manager 模块。"""
+    return _safe_skill_package_filename_new(filename)
 
 
 def _load_skill_packages(store: JsonStore, registry: SkillRegistry) -> None:
@@ -809,77 +646,23 @@ def _load_skill_packages(store: JsonStore, registry: SkillRegistry) -> None:
 
 
 def _find_skill_package(store: JsonStore, skill_id: str) -> dict[str, Any] | None:
-    # 同一个 skill_id 在历史里可能存在多条 package 记录：被替换/被废弃的旧版本仍会保留在列表中。
-    # 合约测试、审批等治理动作要写到「真正生效」的那条记录上，否则前端展示的记录（最新未替换）
-    # 会和后端写入的记录错位，出现「合约测试通过但页面仍显示未通过」的假象。
-    #
-    # 性能：用 SkillPackageRepository 维护的 skill_id 内存索引缩小扫描范围，避免每次都
-    # `_list_records` 全量扫盘（upload/合约/审批/回滚链路会反复调用）。命中索引后只是
-    # 该 skill_id 下少数几条历史记录的过滤，行为与全量扫描完全一致。
-    repositories = _repositories_for_store(store)
-    skill_packages = repositories.skill_packages
-    candidates = skill_packages.find_by_skill_id(skill_id)
-    if not candidates:
-        return None
-    active = [record for record in candidates if record.get("status") != "replaced"]
-    pool = active if active else candidates
-    # list_json 已按 updated_at 倒序返回；这里再做一次稳健排序，避免不同存储后端排序差异。
-    pool.sort(key=lambda record: str(record.get("updated_at") or ""), reverse=True)
-    return pool[0]
+    """查找 Skill 包 — 委托给 package_manager 模块。"""
+    return _find_skill_package_new(store, skill_id)
 
 
 def _update_skill_package_status(store: JsonStore, manifest: SkillManifest) -> None:
-    package = _find_skill_package(store, manifest.skill_id)
-    if not package:
-        return
-    # 枚举校验：拒绝把 status 写成空串或未定义值，避免治理流程读不到合法状态。
-    package["status"] = _validate_skill_package_status(manifest.status)
-    package["manifest"] = manifest.model_dump(mode="json")
-    # 乐观锁：写盘后重读比对 updated_at，尽力检测并发覆盖。
-    package["updated_at"] = _now()
-    written_updated_at = str(package["updated_at"])
-    _save_record(store, "skill_packages", "package_id", package)
-    _ensure_no_concurrent_overwrite(store, manifest.skill_id, package.get("package_id"), written_updated_at)
+    """更新 Skill 包状态 — 委托给 package_manager 模块。"""
+    return _update_skill_package_status_new(store, manifest)
 
 
 def _mark_skill_package_approved(store: JsonStore, skill_id: str, approval_note: str, *, actor: str = "api", role: str | None = None) -> None:
-    package = _find_skill_package(store, skill_id)
-    if not package:
-        return
-    # 审批元数据写在插件包记录上，方便前端在市场和治理页同时展示生命周期证据。
-    package["approved_by"] = actor
-    if role:
-        package["approved_by_role"] = role
-    package["approved_at"] = _now()
-    package["approval_note"] = approval_note
-    _append_skill_package_lifecycle_event(package, action="approve", actor=actor, role=role, reason=approval_note)
-    package["updated_at"] = _now()
-    _save_record(store, "skill_packages", "package_id", package)
+    """标记 Skill 包已审批 — 委托给 package_manager 模块。"""
+    return _mark_skill_package_approved_new(store, skill_id, approval_note, actor=actor, role=role)
 
 
 def _record_skill_package_contract_result(store: JsonStore, skill_id: str, result: dict[str, Any], *, actor: str = "api") -> dict[str, Any] | None:
-    package = _find_skill_package(store, skill_id)
-    if not package:
-        return None
-    package["last_contract_ok"] = bool(result.get("ok"))
-    package["last_contract_result"] = result
-    package["last_contract_at"] = _now()
-    history = package.setdefault("contract_history", [])
-    if isinstance(history, list):
-        history.append(
-            {
-                "ok": bool(result.get("ok")),
-                "actor": actor,
-                "created_at": package["last_contract_at"],
-                "latency_ms": result.get("latency_ms"),
-                "error": result.get("error"),
-                "code": result.get("code"),
-                "message": result.get("message"),
-            }
-        )
-    package["updated_at"] = _now()
-    _save_record(store, "skill_packages", "package_id", package)
-    return package
+    """记录合约测试结果 — 委托给 package_manager 模块。"""
+    return _record_skill_package_contract_result_new(store, skill_id, result, actor=actor)
 
 
 def _record_skill_package_lifecycle_event(
@@ -892,13 +675,10 @@ def _record_skill_package_lifecycle_event(
     reason: str = "",
     target_skill_id: str | None = None,
 ) -> dict[str, Any] | None:
-    package = _find_skill_package(store, skill_id)
-    if not package:
-        return None
-    _append_skill_package_lifecycle_event(package, action=action, actor=actor, role=role, reason=reason, target_skill_id=target_skill_id)
-    package["updated_at"] = _now()
-    _save_record(store, "skill_packages", "package_id", package)
-    return package
+    """记录生命周期事件 — 委托给 package_manager 模块。"""
+    return _record_skill_package_lifecycle_event_new(
+        store, skill_id, action=action, actor=actor, role=role, reason=reason, target_skill_id=target_skill_id
+    )
 
 
 def _append_skill_package_lifecycle_event(
@@ -910,25 +690,19 @@ def _append_skill_package_lifecycle_event(
     reason: str = "",
     target_skill_id: str | None = None,
 ) -> None:
-    history = package.setdefault("approval_history", [])
-    if not isinstance(history, list):
-        package["approval_history"] = history = []
-    event = {"action": action, "actor": actor, "reason": reason, "created_at": _now()}
-    if role:
-        event["role"] = role
-    if target_skill_id:
-        event["target_skill_id"] = target_skill_id
-    history.append(event)
+    """追加生命周期事件 — 委托给 package_manager 模块。"""
+    from aegisqa.skills.package_manager import append_skill_package_lifecycle_event
+    append_skill_package_lifecycle_event(package, action=action, actor=actor, role=role, reason=reason, target_skill_id=target_skill_id)
 
 
 def _skill_base_id(skill_id: str) -> str:
-    return skill_id.rsplit("@", 1)[0] if "@" in skill_id else skill_id
+    """提取 Skill 基础 ID — 委托给 package_manager 模块。"""
+    return _skill_base_id_new(skill_id)
 
 
 def _skill_version_label(manifest: SkillManifest) -> str:
-    if manifest.version:
-        return manifest.version
-    return manifest.skill_id.rsplit("@", 1)[1] if "@" in manifest.skill_id else "unversioned"
+    """获取 Skill 版本标签 — 委托给 package_manager 模块。"""
+    return _skill_version_label_new(manifest)
 
 
 def _safe_extract_zip(archive: zipfile.ZipFile, destination: Path) -> dict[str, Any]:
@@ -1281,205 +1055,38 @@ def _ensure_task_can_create_attempt(task: dict[str, Any]) -> None:
 
 
 def _build_task_report_summary(task: dict[str, Any], run: RunRecord) -> dict[str, Any]:
-    return {
-        "task_id": task["task_id"],
-        "task_name": task["name"],
-        "run_id": run.run_id,
-        "status": task["status"],
-        "dataset_name": task.get("dataset_name"),
-        "workflow_name": task.get("workflow_name"),
-        "sample_count": run.total_items,
-        "current_attempt": task.get("current_attempt", 1),
-        "created_at": task.get("created_at"),
-        "updated_at": task.get("updated_at"),
-    }
+    """构建任务报告摘要 — 委托给 task_report_builder 模块。"""
+    return _build_task_report_summary_new(task, run)
 
 
 def _build_task_report_version_snapshot(task: dict[str, Any], run: RunRecord) -> dict[str, Any]:
-    return {
-        "dataset": {
-            "dataset_id": task["dataset_id"],
-            "version": task["dataset_version"],
-            "version_id": task.get("dataset_version_id") or f"{task['dataset_id']}:v{task['dataset_version']}",
-            "name": task.get("dataset_name"),
-        },
-        "workflow": {
-            "workflow_id": task["workflow_id"],
-            "version_id": task["workflow_version_id"],
-            "name": task.get("workflow_name"),
-            "step_count": len(run.workflow.steps),
-        },
-        "execution_config": task.get("execution_config", {}),
-    }
+    """构建版本快照 — 委托给 task_report_builder 模块。"""
+    return _build_task_report_version_snapshot_new(task, run)
 
 
 def _build_step_distribution(run: RunRecord) -> list[dict[str, Any]]:
-    by_step: dict[str, dict[str, Any]] = {}
-    for item in run.items:
-        for step in item.steps:
-            bucket = by_step.setdefault(
-                step.step_id,
-                {
-                    "step_id": step.step_id,
-                    "skill_ref": step.skill_ref,
-                    "total_calls": 0,
-                    "succeeded": 0,
-                    "failed": 0,
-                    "cache_hits": 0,
-                    "total_latency_ms": 0.0,
-                },
-            )
-            bucket["total_calls"] += 1
-            if step.status == "succeeded":
-                bucket["succeeded"] += 1
-            if step.status == "failed":
-                bucket["failed"] += 1
-            if step.cache_hit:
-                bucket["cache_hits"] += 1
-            bucket["total_latency_ms"] += step.latency_ms
-
-    result = []
-    for bucket in by_step.values():
-        total_calls = bucket["total_calls"] or 1
-        result.append(
-            {
-                **bucket,
-                "average_latency_ms": bucket["total_latency_ms"] / total_calls,
-            }
-        )
-    return sorted(result, key=lambda item: item["step_id"])
+    """构建步骤分布 — 委托给 task_report_builder 模块。"""
+    return _build_step_distribution_new(run)
 
 
 def _build_judge_score_distribution(run: RunRecord) -> list[dict[str, Any]]:
-    buckets = {"0-0.6": 0, "0.6-0.8": 0, "0.8-1.0": 0}
-    for item in run.items:
-        score = item.metrics.get("judge_score")
-        if not isinstance(score, (int, float)):
-            continue
-        if score < 0.6:
-            buckets["0-0.6"] += 1
-        elif score < 0.8:
-            buckets["0.6-0.8"] += 1
-        else:
-            buckets["0.8-1.0"] += 1
-    return [{"bucket": bucket, "count": count} for bucket, count in buckets.items()]
+    """构建评分分布 — 委托给 task_report_builder 模块。"""
+    return _build_judge_score_distribution_new(run)
 
 
 def _build_parameter_governance(task: dict[str, Any], run: RunRecord) -> dict[str, Any]:
-    """汇总一次任务里的 Skill/Prompt 版本和参数来源。
-
-    Task 是用户看到的一次评测，Run Step 是真实执行证据；这里把两者合并，
-    让报告能解释“这次到底用了哪个 prompt、哪个模型参数、哪些值来自任务覆盖”。
-    """
-
-    parameter_sources_by_step: dict[str, dict[str, Any]] = {}
-    for item in run.items:
-        for step in item.steps:
-            if step.parameter_trace:
-                parameter_sources_by_step.setdefault(step.step_id, step.parameter_trace)
-
-    prompt_skill_versions = [
-        {
-            "step_id": step.step_id,
-            "skill_ref": step.skill_ref,
-            "prompt_version": step.config.get("prompt_version") or step.config.get("prompt") or "inline-config",
-            "model": step.config.get("model"),
-            "model_params": {key: step.config.get(key) for key in ("temperature", "threshold", "top_p") if key in step.config},
-            "cacheable": step.cacheable,
-        }
-        for step in run.workflow.steps
-    ]
-    return {
-        "task_id": task.get("task_id"),
-        "run_id": run.run_id,
-        "workflow_version_id": run.workflow.version_id,
-        "execution_config": task.get("execution_config", {}),
-        "prompt_skill_versions": prompt_skill_versions,
-        "parameter_sources": [
-            {
-                "step_id": step.step_id,
-                "skill_ref": step.skill_ref,
-                "parameters": parameter_sources_by_step.get(step.step_id, {}),
-            }
-            for step in run.workflow.steps
-        ],
-        "secret_policy": {
-            "redacted": True,
-            "message": "Secret 参数只保留 secret_ref 与脱敏预览，不在报告或 Trace 中展示明文。",
-        },
-    }
+    """构建参数治理 — 委托给 task_report_builder 模块。"""
+    return _build_parameter_governance_new(task, run)
 
 
 def _build_quality_decision(task: dict[str, Any], run: RunRecord, report: RunReport, segments: list[Any]) -> dict[str, Any]:
-    """把报告指标转换成产品决策语言。
-
-    评测报告如果只给指标，用户还要自己判断能否发布；质量决策把通过率、错误率、
-    Badcase 和低分层合并成风险摘要，给出下一步动作。
-    """
-
-    weak_segments = [segment for segment in segments if segment.sample_count > 0 and segment.pass_rate < 0.8]
-    badcase_count = len(report.badcases)
-    status = "passed"
-    top_risks: list[dict[str, Any]] = []
-    next_actions: list[dict[str, str]] = []
-
-    if report.pass_rate < 0.6 or report.error_rate > 0.05:
-        status = "blocked"
-    elif report.pass_rate < 0.8 or badcase_count > 0 or weak_segments:
-        status = "warning"
-
-    if report.pass_rate < 0.8:
-        top_risks.append({"type": "low_pass_rate", "severity": "critical" if report.pass_rate < 0.6 else "warning", "message": f"任务通过率为 {round(report.pass_rate * 100)}%。"})
-        next_actions.append({"action": "create_ci_gate", "label": "为当前任务生成通过率门禁"})
-    if badcase_count:
-        top_risks.append({"type": "badcase_budget", "severity": "warning", "message": f"当前任务产生 {badcase_count} 条 Badcase。"})
-        next_actions.append({"action": "add_to_annotation_queue", "label": "将 Badcase 加入人工审核队列"})
-    if weak_segments:
-        weakest = sorted(weak_segments, key=lambda item: item.pass_rate)[0]
-        top_risks.append(
-            {
-                "type": "weak_segment",
-                "severity": "warning",
-                "message": f"{weakest.segment_key}={weakest.segment_value} 分组通过率为 {round(weakest.pass_rate * 100)}%。",
-                "segment_key": weakest.segment_key,
-                "segment_value": weakest.segment_value,
-            }
-        )
-        next_actions.append({"action": "create_golden_candidates", "label": "把低通过率分组沉淀为 Golden 候选"})
-    if not next_actions:
-        next_actions.append({"action": "snapshot_experiment", "label": "生成 Experiment 快照作为新的 baseline"})
-
-    return {
-        "status": status,
-        "task_id": task.get("task_id"),
-        "run_id": run.run_id,
-        "risk_summary": {
-            "pass_rate": report.pass_rate,
-            "error_rate": report.error_rate,
-            "badcase_count": badcase_count,
-            "weak_segment_count": len(weak_segments),
-        },
-        "top_risks": top_risks,
-        "next_actions": next_actions,
-    }
+    """构建质量决策 — 委托给 task_report_builder 模块。"""
+    return _build_quality_decision_new(task, run, report, segments)
 
 
 def _build_budget_status(task: dict[str, Any], report: RunReport) -> dict[str, Any]:
-    """把任务预算转成报告级状态。
-
-    预算只消费模型网关写入的 usage/cost 聚合结果；未返回价格时成本按 0
-    入账，并通过 cost_source 明确暴露来源，避免把 token 粗估伪装成真实账单。
-    """
-
-    execution_config = task.get("execution_config", {})
-    budget = execution_config.get("cost_budget") if isinstance(execution_config, dict) else None
-    cost_used = _estimate_report_cost(report)
-    cost_source = str(report.metrics.get("cost_source") or "provider_usage.missing")
-    prompt_tokens = _metric_number(report.metrics.get("prompt_tokens"))
-    completion_tokens = _metric_number(report.metrics.get("completion_tokens"))
-    total_tokens = _metric_number(report.metrics.get("total_tokens"))
-    cost_currency = report.metrics.get("cost_currency")
-    basis_label = _budget_cost_basis_label(cost_source)
+    """构建预算状态 — 委托给 task_report_builder 模块。"""
+    return _build_budget_status_new(task, report)
     if not isinstance(budget, (int, float)) or budget <= 0:
         return {
             "status": "not_set",
